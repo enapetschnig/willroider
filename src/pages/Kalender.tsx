@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -121,7 +122,91 @@ export default function Kalender() {
         </CardContent>
       </Card>
 
-      <Card>
+      {/* Mobile: cards */}
+      <div className="md:hidden space-y-2">
+        {rows.map((r) => (
+          <Card key={r.id}>
+            <CardContent className="p-3 space-y-2">
+              <div className="flex items-baseline justify-between">
+                <div className="font-bold text-lg">KW {r.kw}</div>
+                <div className="text-sm font-semibold tabular-nums">{Number(r.soll_stunden).toFixed(1)} h</div>
+              </div>
+              {isAdmin ? (
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <Label className="text-[10px]">Typ</Label>
+                    <Select
+                      value={r.wochentyp}
+                      onValueChange={(v) => updateRow(r.id, { wochentyp: v as Wochentyp })}
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(Object.keys(TYPE_LABEL) as Wochentyp[]).map((k) => (
+                          <SelectItem key={k} value={k}>{TYPE_LABEL[k]}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-[10px]">Soll-Stunden</Label>
+                    <Input
+                      type="number"
+                      step="0.5"
+                      defaultValue={r.soll_stunden}
+                      onBlur={(e) => updateRow(r.id, { soll_stunden: Number(e.target.value) })}
+                      className="h-8"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <Label className="text-[10px]">Feiertage</Label>
+                    <Input
+                      defaultValue={r.feiertage ?? ""}
+                      onBlur={(e) => updateRow(r.id, { feiertage: e.target.value || null })}
+                      className="h-8"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-[10px]">BU-Tage</Label>
+                    <Input
+                      type="number"
+                      defaultValue={r.bu_tage ?? 0}
+                      onBlur={(e) => updateRow(r.id, { bu_tage: Number(e.target.value) || 0 })}
+                      className="h-8"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-[10px]">Notiz</Label>
+                    <Input
+                      defaultValue={r.notizen ?? ""}
+                      onBlur={(e) => updateRow(r.id, { notizen: e.target.value || null })}
+                      className="h-8"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs space-y-0.5">
+                  <div><span className="text-muted-foreground">Typ: </span>{TYPE_LABEL[r.wochentyp]}</div>
+                  {r.feiertage && <div><span className="text-muted-foreground">Feiertage: </span>{r.feiertage}</div>}
+                  {!!r.bu_tage && <div><span className="text-muted-foreground">BU: </span>{r.bu_tage} Tage</div>}
+                  {r.notizen && <div className="text-muted-foreground italic">{r.notizen}</div>}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+        {rows.length === 0 && (
+          <Card>
+            <CardContent className="p-8 text-center text-sm text-muted-foreground">
+              Keine Wochen für {year}.
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* Desktop: table */}
+      <Card className="hidden md:block">
         <CardContent className="p-0 overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted/60 sticky top-0">

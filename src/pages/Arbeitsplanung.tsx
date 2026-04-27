@@ -54,6 +54,13 @@ const STATUS_COLOR: Record<BaustellenStatus, string> = {
   abgeschlossen: "bg-gray-400",
 };
 
+const STATUS_DOT: Record<BaustellenStatus, string> = {
+  aktiv: "#10b981",
+  geplant: "#3b82f6",
+  pausiert: "#f59e0b",
+  abgeschlossen: "#9ca3af",
+};
+
 const STATUS_LABEL: Record<BaustellenStatus, string> = {
   aktiv: "Aktiv",
   geplant: "Geplant",
@@ -291,23 +298,76 @@ export default function Arbeitsplanung() {
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden">
-        <div className="flex">
-          {/* Left fixed column */}
-          <div className="w-72 shrink-0 border-r bg-card">
+      {/* Mobile: simple list (Gantt only on >=md) */}
+      <div className="md:hidden space-y-2">
+        {grouped.map((g) => (
+          <div key={g.partie?.id ?? "ohne"}>
             <div
-              className="bg-muted/60 border-b font-medium text-xs px-3 sticky top-0 z-10"
-              style={{ height: 56, lineHeight: "56px" }}
+              className="px-3 py-1.5 rounded-t-md text-xs font-semibold flex items-center gap-2"
+              style={{
+                background: g.partie ? `${g.partie.farbcode}20` : "hsl(var(--muted))",
+                color: g.partie?.farbcode ?? undefined,
+              }}
             >
-              Bauvorhaben
+              <span
+                className="inline-block h-2.5 w-2.5 rounded-full"
+                style={{ background: g.partie?.farbcode ?? "#999" }}
+              />
+              {g.partie?.name ?? "Ohne Partie"}
+              <span className="ml-auto text-[10px] opacity-70">{g.rows.length}</span>
+            </div>
+            <div className="space-y-1.5 pt-1.5">
+              {g.rows.map((b) => (
+                <Link to={`/baustellen/${b.id}`} key={b.id}>
+                  <Card>
+                    <CardContent className="p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-sm truncate">{b.bvh_name}</div>
+                          <div className="text-[11px] text-muted-foreground truncate">
+                            {[b.kostenstelle, b.ort].filter(Boolean).join(" · ")}
+                          </div>
+                        </div>
+                        <Badge variant="outline" className="text-[10px] shrink-0">
+                          {STATUS_LABEL[b.status]}
+                        </Badge>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground mt-1">
+                        {b.start_datum && new Date(b.start_datum).toLocaleDateString("de-AT")} –{" "}
+                        {b.end_datum ? new Date(b.end_datum).toLocaleDateString("de-AT") : "offen"}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop: Gantt chart */}
+      <Card className="overflow-hidden hidden md:block">
+        <div className="flex">
+          {/* Left fixed multi-column area (Excel-style) */}
+          <div className="shrink-0 border-r bg-card" style={{ width: 460 }}>
+            {/* Two-row header to match timeline header height (28+28=56) */}
+            <div className="bg-muted/60 border-b sticky top-0 z-10" style={{ height: 56 }}>
+              <div className="grid h-full text-[10px] font-semibold uppercase tracking-wide" style={{ gridTemplateColumns: "1fr 90px 80px 80px 50px" }}>
+                <div className="px-2 py-1 border-r flex items-end">Bauvorhaben (BVH)</div>
+                <div className="px-2 py-1 border-r flex items-end">Kostenstelle</div>
+                <div className="px-2 py-1 border-r flex items-end">Start</div>
+                <div className="px-2 py-1 border-r flex items-end">Ende</div>
+                <div className="px-2 py-1 flex items-end">Status</div>
+              </div>
             </div>
             {grouped.map((g) => (
               <div key={g.partie?.id ?? "ohne"}>
                 <div
-                  className="px-3 py-2 text-xs font-semibold uppercase tracking-wide flex items-center gap-2 border-b"
+                  className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide flex items-center gap-2 border-b"
                   style={{
-                    background: g.partie ? `${g.partie.farbcode}20` : "hsl(var(--muted))",
+                    background: g.partie ? `${g.partie.farbcode}25` : "hsl(var(--muted))",
                     color: g.partie?.farbcode ?? undefined,
+                    height: 28,
                   }}
                 >
                   <span
@@ -315,28 +375,38 @@ export default function Arbeitsplanung() {
                     style={{ background: g.partie?.farbcode ?? "#999" }}
                   />
                   {g.partie?.name ?? "Ohne Partie"}
-                  <span className="ml-auto text-[11px] opacity-70">{g.rows.length}</span>
+                  <span className="ml-auto text-[10px] opacity-70">{g.rows.length} BVH</span>
                 </div>
                 {g.rows.map((b) => (
                   <Link
                     to={`/baustellen/${b.id}`}
                     key={b.id}
-                    className="flex items-start gap-2 px-3 border-b text-xs hover:bg-muted/50 cursor-pointer"
-                    style={{ minHeight: 36 }}
+                    className="grid border-b text-[11px] hover:bg-muted/50 cursor-pointer"
+                    style={{
+                      gridTemplateColumns: "1fr 90px 80px 80px 50px",
+                      height: 28,
+                    }}
                   >
-                    <Building2 className="h-3 w-3 mt-2 text-muted-foreground shrink-0" />
-                    <div className="py-1.5 min-w-0 flex-1">
-                      <div className="font-medium truncate">{b.bvh_name}</div>
-                      <div className="text-[10px] text-muted-foreground truncate">
-                        {[b.kostenstelle, b.ort].filter(Boolean).join(" · ")}
-                      </div>
+                    <div className="px-2 flex items-center gap-1.5 border-r min-w-0">
+                      <Building2 className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="font-medium truncate">{b.bvh_name}</span>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className="text-[9px] px-1.5 mt-1.5 shrink-0 capitalize"
-                    >
-                      {STATUS_LABEL[b.status]}
-                    </Badge>
+                    <div className="px-2 flex items-center border-r truncate text-muted-foreground">
+                      {b.kostenstelle ?? "—"}
+                    </div>
+                    <div className="px-2 flex items-center border-r text-muted-foreground tabular-nums">
+                      {b.start_datum ? new Date(b.start_datum).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}
+                    </div>
+                    <div className="px-2 flex items-center border-r text-muted-foreground tabular-nums">
+                      {b.end_datum ? new Date(b.end_datum).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}
+                    </div>
+                    <div className="px-1 flex items-center justify-center">
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{ background: STATUS_DOT[b.status] }}
+                        title={STATUS_LABEL[b.status]}
+                      />
+                    </div>
                   </Link>
                 ))}
               </div>
@@ -365,21 +435,26 @@ export default function Arbeitsplanung() {
                   ))}
                 </div>
                 <div className="flex border-b" style={{ height: 28 }}>
-                  {dayHeaders.map((d, i) => (
-                    <div
-                      key={i}
-                      className={`text-[10px] flex items-center justify-center border-r ${
-                        d.isToday
-                          ? "bg-primary/20 text-primary font-semibold"
-                          : d.date.getDay() === 0 || d.date.getDay() === 6
-                          ? "bg-muted/40 text-muted-foreground"
-                          : "text-muted-foreground"
-                      }`}
-                      style={{ width: dayWidth }}
-                    >
-                      {d.date.getDate()}
-                    </div>
-                  ))}
+                  {dayHeaders.map((d, i) => {
+                    const isWeekend = d.date.getDay() === 0 || d.date.getDay() === 6;
+                    const dow = ["S", "M", "D", "M", "D", "F", "S"][d.date.getDay()];
+                    return (
+                      <div
+                        key={i}
+                        className={`text-[9px] flex flex-col items-center justify-center border-r leading-tight ${
+                          d.isToday
+                            ? "bg-primary/20 text-primary font-semibold"
+                            : isWeekend
+                            ? "bg-muted/40 text-muted-foreground"
+                            : "text-muted-foreground"
+                        }`}
+                        style={{ width: dayWidth }}
+                      >
+                        <span className="opacity-70">{dow}</span>
+                        <span className="font-semibold tabular-nums">{d.date.getDate()}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -390,7 +465,10 @@ export default function Arbeitsplanung() {
                     {/* Group spacer matches left column */}
                     <div
                       className="border-b"
-                      style={{ height: 36, background: "hsl(var(--muted)/0.5)" }}
+                      style={{
+                        height: 28,
+                        background: g.partie ? `${g.partie.farbcode}25` : "hsl(var(--muted))",
+                      }}
                     />
                     {g.rows.map((b) => {
                       const pos = positionFor(b);
@@ -400,7 +478,7 @@ export default function Arbeitsplanung() {
                         <div
                           key={b.id}
                           className="border-b relative"
-                          style={{ height: 36 }}
+                          style={{ height: 28 }}
                         >
                           {/* Vertical day grid */}
                           <div className="absolute inset-0 flex pointer-events-none">
@@ -427,7 +505,7 @@ export default function Arbeitsplanung() {
                                 setEditing(b);
                                 setDialogOpen(true);
                               }}
-                              className="absolute top-1.5 bottom-1.5 rounded-sm shadow-sm flex items-center px-2 text-[10px] text-white font-medium cursor-pointer hover:brightness-110 truncate"
+                              className="absolute top-[3px] bottom-[3px] rounded-sm shadow-sm flex items-center px-1.5 text-[10px] text-white font-medium cursor-pointer hover:brightness-110 truncate"
                               style={{
                                 left: pos.left,
                                 width: Math.max(pos.width, dayWidth),

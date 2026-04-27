@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
+import { BaustelleDokumente } from "@/components/BaustelleDokumente";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,10 +13,8 @@ import {
   Building2,
   ArrowLeft,
   CalendarDays,
-  Users,
   Trash2,
   Plus,
-  Upload,
   FileText,
   Banknote,
   Clock,
@@ -92,43 +91,6 @@ export default function BaustelleDetail() {
       toast({ title: "Status aktualisiert" });
       load();
     }
-  };
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!b) return;
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const path = `${b.id}/${Date.now()}_${file.name}`;
-    const { error: upErr } = await supabase.storage.from("baustellen").upload(path, file);
-    if (upErr) {
-      toast({ variant: "destructive", title: "Upload-Fehler", description: upErr.message });
-      return;
-    }
-    const { data: userData } = await supabase.auth.getUser();
-    const { error } = await supabase.from("dokumente").insert({
-      baustelle_id: b.id,
-      dateiname: file.name,
-      storage_path: path,
-      mimetype: file.type,
-      groesse: file.size,
-      hochgeladen_von: userData.user?.id,
-    } as any);
-    if (error) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
-    } else {
-      toast({ title: "Datei hochgeladen" });
-      load();
-    }
-    e.target.value = "";
-  };
-
-  const downloadDoc = async (d: Dokument) => {
-    const { data, error } = await supabase.storage.from("baustellen").createSignedUrl(d.storage_path, 60);
-    if (error) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
-      return;
-    }
-    window.open(data.signedUrl, "_blank");
   };
 
   const submitTermin = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -327,42 +289,7 @@ export default function BaustelleDetail() {
         </TabsContent>
 
         <TabsContent value="dokumente">
-          <div className="flex justify-end mb-2">
-            <Label className="cursor-pointer">
-              <input type="file" className="hidden" onChange={handleUpload} />
-              <span className="inline-flex items-center px-3 h-9 rounded-md bg-primary text-primary-foreground text-sm">
-                <Upload className="h-4 w-4 mr-2" /> Datei hochladen
-              </span>
-            </Label>
-          </div>
-          <div className="space-y-2">
-            {dokumente.map((d) => (
-              <Card key={d.id}>
-                <CardContent className="p-3 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <FileText className="h-5 w-5 text-primary" />
-                    <div>
-                      <div className="font-medium text-sm">{d.dateiname}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {new Date(d.created_at).toLocaleDateString("de-AT")} ·{" "}
-                        {d.groesse ? `${(d.groesse / 1024).toFixed(0)} KB` : ""}
-                      </div>
-                    </div>
-                  </div>
-                  <Button variant="outline" size="sm" onClick={() => downloadDoc(d)}>
-                    Öffnen
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-            {dokumente.length === 0 && (
-              <Card>
-                <CardContent className="p-6 text-center text-sm text-muted-foreground">
-                  Noch keine Dokumente.
-                </CardContent>
-              </Card>
-            )}
-          </div>
+          <BaustelleDokumente baustelleId={b.id} />
         </TabsContent>
 
         <TabsContent value="kosten">
