@@ -81,16 +81,13 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-muted/30 flex">
       {/* Sidebar (desktop) */}
       <aside className="hidden lg:flex w-64 shrink-0 flex-col bg-card border-r">
-        <div className="bg-primary text-primary-foreground px-4 py-4 flex items-center gap-3">
-          <div className="bg-white rounded-md p-1 shadow-sm shrink-0">
-            <img src="/willroider-logo.jpg" alt="Holzbau Willroider" className="h-9 w-auto block" />
-          </div>
+        <div className="px-4 py-4 border-b flex items-center gap-3">
+          <img src="/willroider-logo.jpg" alt="Holzbau Willroider" className="h-9 w-auto shrink-0" />
           <div className="leading-tight min-w-0">
-            <div className="font-bold text-sm truncate">Holzbau Willroider</div>
-            <div className="text-[11px] opacity-90">Baustellenmanagement</div>
+            <div className="font-semibold text-sm truncate">Holzbau Willroider</div>
+            <div className="text-[11px] text-muted-foreground">Baustellenmanagement</div>
           </div>
         </div>
-        <div className="h-1 bg-secondary" />
         <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
           {visibleNav.map((item) => (
             <NavLink
@@ -101,8 +98,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 cn(
                   "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
                   isActive
-                    ? "bg-primary text-primary-foreground font-medium"
-                    : "text-foreground hover:bg-muted"
+                    ? "bg-primary/10 text-primary font-medium border-l-2 border-primary -ml-px"
+                    : "text-foreground hover:bg-muted border-l-2 border-transparent -ml-px"
                 )
               }
             >
@@ -131,10 +128,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
               </Button>
               <div className="lg:hidden flex items-center gap-2 min-w-0">
-                <div className="bg-primary rounded-md p-0.5 shadow-sm shrink-0">
-                  <img src="/willroider-logo.jpg" alt="Logo" className="h-7 w-auto block bg-white rounded-sm" />
-                </div>
-                <div className="text-sm font-bold truncate">Holzbau Willroider</div>
+                <img src="/willroider-logo.jpg" alt="Logo" className="h-7 w-auto shrink-0" />
+                <div className="text-sm font-semibold truncate">Holzbau Willroider</div>
               </div>
               <div className="hidden lg:block text-xs text-muted-foreground">
                 Angemeldet als <span className="font-medium text-foreground">{fullName}</span>
@@ -180,7 +175,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     cn(
                       "flex items-center gap-3 px-3 py-2 rounded-md text-sm",
                       isActive
-                        ? "bg-primary text-primary-foreground font-medium"
+                        ? "bg-primary/10 text-primary font-medium"
                         : "hover:bg-muted"
                     )
                   }

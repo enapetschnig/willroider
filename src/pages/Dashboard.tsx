@@ -140,20 +140,10 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-lg overflow-hidden border bg-gradient-to-r from-primary to-[hsl(354_53%_35%)] text-primary-foreground p-5 sm:p-6 flex items-center gap-4 shadow-sm">
-        <div className="bg-white rounded-md p-1.5 shrink-0 shadow">
-          <img src="/willroider-logo.jpg" alt="Holzbau Willroider" className="h-12 w-auto block" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-xs uppercase tracking-wider opacity-90">Holzbau Willroider GmbH</div>
-          <h1 className="text-xl sm:text-2xl font-bold truncate">
-            Hallo {fullName.split(" ")[0] || "willkommen"}!
-          </h1>
-          <p className="text-xs sm:text-sm opacity-90">
-            Übersicht über laufende Baustellen, Einteilungen und offene Aufgaben.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title={`Hallo ${fullName.split(" ")[0] || "willkommen"}!`}
+        description="Übersicht über laufende Baustellen, Einteilungen und offene Aufgaben."
+      />
 
       {/* Stat tiles */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
