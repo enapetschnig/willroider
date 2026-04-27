@@ -16,7 +16,17 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, Edit, Trash2, Clock } from "lucide-react";
+import {
+  Plus,
+  Edit,
+  Trash2,
+  Building2,
+  Minus,
+  ChevronLeft,
+  ChevronRight,
+  Calendar,
+  Send,
+} from "lucide-react";
 import type { Database, StundenStatus } from "@/integrations/supabase/types";
 
 type Stunde = Database["public"]["Tables"]["stundenbuchungen"]["Row"];
@@ -25,25 +35,24 @@ type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 const STATUS_LABEL: Record<StundenStatus, string> = {
   offen: "Offen",
   zm_freigabe: "ZM-Freigabe",
-  buero_freigabe: "Büro-Freigabe",
+  buero_freigabe: "Büro",
   exportiert: "Exportiert",
   abgelehnt: "Abgelehnt",
 };
-const STATUS_VARIANT: Record<StundenStatus, "default" | "outline" | "secondary" | "destructive"> = {
-  offen: "outline",
-  zm_freigabe: "secondary",
-  buero_freigabe: "default",
-  exportiert: "default",
-  abgelehnt: "destructive",
+const STATUS_COLOR: Record<StundenStatus, string> = {
+  offen: "bg-blue-500",
+  zm_freigabe: "bg-amber-500",
+  buero_freigabe: "bg-purple-500",
+  exportiert: "bg-emerald-600",
+  abgelehnt: "bg-destructive",
 };
 
 const FEHLZEITEN = [
-  { value: "", label: "—" },
-  { value: "U", label: "Urlaub" },
-  { value: "K", label: "Krankenstand" },
-  { value: "F", label: "Feiertag" },
-  { value: "SW", label: "Schlechtwetter" },
-  { value: "S", label: "Sozialstunden" },
+  { value: "U", label: "Urlaub", color: "#3b82f6" },
+  { value: "K", label: "Krank", color: "#ef4444" },
+  { value: "F", label: "Feiertag", color: "#8b5cf6" },
+  { value: "SW", label: "Schlechtwetter", color: "#f59e0b" },
+  { value: "S", label: "Sozialst.", color: "#10b981" },
 ];
 
 export default function Stunden() {
@@ -52,82 +61,134 @@ export default function Stunden() {
   const [rows, setRows] = useState<Stunde[]>([]);
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [editing, setEditing] = useState<Partial<Stunde> | null>(null);
-  const [month, setMonth] = useState<string>(() => new Date().toISOString().slice(0, 7));
+  const [extras, setExtras] = useState(false);
+
+  const todayIso = () => new Date().toISOString().slice(0, 10);
+
+  // Quick book form state
+  const [date, setDate] = useState<string>(todayIso);
+  const [hours, setHours] = useState<number>(8);
+  const [baustelleId, setBaustelleId] = useState<string>("");
+  const [taetigkeit, setTaetigkeit] = useState<string>("");
+  const [fehlzeitTyp, setFehlzeitTyp] = useState<string>("");
+  const [fahrstunden, setFahrstunden] = useState<number>(0);
+  const [taggeldKurz, setTaggeldKurz] = useState<number>(0);
+  const [taggeldLang, setTaggeldLang] = useState<number>(0);
+  const [km, setKm] = useState<number>(0);
+  const [notizen, setNotizen] = useState<string>("");
 
   const load = async () => {
     if (!user) return;
-    const monthStart = `${month}-01`;
-    const next = new Date(month + "-01");
-    next.setMonth(next.getMonth() + 1);
-    const monthEnd = next.toISOString().slice(0, 10);
+    const fromDate = new Date();
+    fromDate.setDate(fromDate.getDate() - 30);
 
     const [r, b] = await Promise.all([
       supabase
         .from("stundenbuchungen")
         .select("*")
         .eq("mitarbeiter_id", user.id)
-        .gte("datum", monthStart)
-        .lt("datum", monthEnd)
+        .gte("datum", fromDate.toISOString().slice(0, 10))
         .order("datum", { ascending: false }),
-      supabase.from("baustellen").select("*").in("status", ["aktiv", "geplant"]).order("bvh_name"),
+      profile?.partie_id
+        ? supabase
+            .from("baustellen")
+            .select("*")
+            .eq("partie_id", profile.partie_id)
+            .in("status", ["aktiv", "geplant"])
+            .order("bvh_name")
+        : supabase
+            .from("baustellen")
+            .select("*")
+            .in("status", ["aktiv", "geplant"])
+            .order("bvh_name"),
     ]);
     setRows((r.data as Stunde[]) ?? []);
     setBaustellen((b.data as Baustelle[]) ?? []);
+
+    // Default Baustelle: first active one of partie
+    if (!baustelleId && (b.data as Baustelle[])?.length === 1) {
+      setBaustelleId((b.data as Baustelle[])[0].id);
+    }
   };
 
   useEffect(() => {
     load();
-  }, [user, month]);
+  }, [user, profile]);
 
-  const totals = useMemo(() => {
+  const totalsThisMonth = useMemo(() => {
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
     let arbeit = 0,
       fahrt = 0,
-      taggeldKurz = 0,
-      taggeldLang = 0,
-      fehlzeit = 0;
+      fehl = 0;
     rows.forEach((r) => {
-      arbeit += Number(r.arbeitsstunden ?? 0);
-      fahrt += Number(r.fahrstunden ?? 0);
-      taggeldKurz += Number(r.taggeld_kurz ?? 0);
-      taggeldLang += Number(r.taggeld_lang ?? 0);
-      fehlzeit += Number(r.fehlzeit_stunden ?? 0);
+      if (new Date(r.datum) >= monthStart) {
+        arbeit += Number(r.arbeitsstunden ?? 0);
+        fahrt += Number(r.fahrstunden ?? 0);
+        fehl += Number(r.fehlzeit_stunden ?? 0);
+      }
     });
-    return { arbeit, fahrt, taggeldKurz, taggeldLang, fehlzeit };
+    return { arbeit, fahrt, fehl };
   }, [rows]);
 
-  const save = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!editing || !user) return;
-    const fd = new FormData(e.currentTarget);
+  const moveDate = (d: number) => {
+    const nd = new Date(date);
+    nd.setDate(nd.getDate() + d);
+    setDate(nd.toISOString().slice(0, 10));
+  };
+
+  const resetForm = () => {
+    setDate(todayIso());
+    setHours(8);
+    setTaetigkeit("");
+    setFehlzeitTyp("");
+    setFahrstunden(0);
+    setTaggeldKurz(0);
+    setTaggeldLang(0);
+    setKm(0);
+    setNotizen("");
+    setExtras(false);
+  };
+
+  const submit = async () => {
+    if (!user) return;
+    if (!fehlzeitTyp && !baustelleId) {
+      toast({
+        variant: "destructive",
+        title: "Baustelle fehlt",
+        description: "Wähle eine Baustelle oder einen Fehlzeit-Typ.",
+      });
+      return;
+    }
+
     const payload = {
       mitarbeiter_id: user.id,
-      datum: fd.get("datum") as string,
-      baustelle_id: (fd.get("baustelle_id") as string) || null,
-      arbeitsstunden: Number(fd.get("arbeitsstunden") ?? 0),
-      fahrstunden: Number(fd.get("fahrstunden") ?? 0),
-      taggeld_kurz: Number(fd.get("taggeld_kurz") ?? 0),
-      taggeld_lang: Number(fd.get("taggeld_lang") ?? 0),
-      km_gefahren: Number(fd.get("km_gefahren") ?? 0),
-      fehlzeit_typ: (fd.get("fehlzeit_typ") as string) || null,
-      fehlzeit_stunden: Number(fd.get("fehlzeit_stunden") ?? 0),
-      taetigkeit: (fd.get("taetigkeit") as string) || null,
-      notizen: (fd.get("notizen") as string) || null,
+      datum: date,
+      baustelle_id: fehlzeitTyp ? null : baustelleId || null,
+      arbeitsstunden: fehlzeitTyp ? 0 : hours,
+      fahrstunden: fahrstunden,
+      taggeld_kurz: taggeldKurz,
+      taggeld_lang: taggeldLang,
+      km_gefahren: km,
+      fehlzeit_typ: fehlzeitTyp || null,
+      fehlzeit_stunden: fehlzeitTyp ? hours : 0,
+      taetigkeit: taetigkeit || null,
+      notizen: notizen || null,
       status: "offen" as StundenStatus,
     };
-    const { error } = editing.id
-      ? await supabase.from("stundenbuchungen").update(payload).eq("id", editing.id)
-      : await supabase.from("stundenbuchungen").insert(payload as any);
+    const { error } = await supabase.from("stundenbuchungen").insert(payload as any);
     if (error) {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
       return;
     }
-    toast({ title: editing.id ? "Aktualisiert" : "Gebucht" });
-    setEditing(null);
+    toast({ title: "Stunden gebucht", description: `${hours}h für ${date}` });
+    resetForm();
     load();
   };
 
   const remove = async (id: string) => {
-    if (!confirm("Buchung wirklich löschen?")) return;
+    if (!confirm("Buchung löschen?")) return;
     await supabase.from("stundenbuchungen").delete().eq("id", id);
     load();
   };
@@ -138,232 +199,446 @@ export default function Stunden() {
     load();
   };
 
+  const submitAllOpen = async () => {
+    if (!user) return;
+    const open = rows.filter((r) => r.status === "offen");
+    if (open.length === 0) return;
+    await supabase
+      .from("stundenbuchungen")
+      .update({ status: "zm_freigabe" })
+      .eq("mitarbeiter_id", user.id)
+      .eq("status", "offen");
+    toast({ title: `${open.length} Buchungen eingereicht` });
+    load();
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 max-w-2xl mx-auto">
       <PageHeader
         title="Stundenerfassung"
-        description="Tägliche Erfassung von Arbeitsstunden, Fahrstunden, Taggeldern und Fehlzeiten."
-        actions={
-          <Button onClick={() => setEditing({ datum: new Date().toISOString().slice(0, 10) })}>
-            <Plus className="h-4 w-4 mr-2" /> Stunden buchen
-          </Button>
-        }
+        description="Erfasse deine Arbeitsstunden, Fahrtzeiten und Fehlzeiten."
       />
 
+      {/* Quick-Book Card */}
       <Card>
-        <CardContent className="p-3 flex flex-wrap items-center gap-2">
-          <Input
-            type="month"
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            className="w-40"
-          />
-          <div className="ml-auto flex flex-wrap gap-2 text-xs">
-            <Badge variant="outline">Arbeit: {totals.arbeit.toFixed(1)} h</Badge>
-            <Badge variant="outline">Fahrt: {totals.fahrt.toFixed(1)} h</Badge>
-            <Badge variant="outline">Taggeld kurz: {totals.taggeldKurz.toFixed(0)}</Badge>
-            <Badge variant="outline">Taggeld lang: {totals.taggeldLang.toFixed(0)}</Badge>
-            <Badge variant="outline">Fehlzeit: {totals.fehlzeit.toFixed(1)} h</Badge>
+        <CardContent className="p-4 space-y-4">
+          {/* Datum mit Pfeilen */}
+          <div>
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Datum</Label>
+            <div className="flex items-center gap-2 mt-1.5">
+              <Button variant="outline" size="icon" onClick={() => moveDate(-1)}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="text-center font-medium"
+              />
+              <Button variant="outline" size="icon" onClick={() => moveDate(1)}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex gap-1.5 mt-2">
+              <Button
+                size="sm"
+                variant={date === todayIso() ? "default" : "outline"}
+                className="flex-1"
+                onClick={() => setDate(todayIso())}
+              >
+                Heute
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-1"
+                onClick={() => {
+                  const d = new Date();
+                  d.setDate(d.getDate() - 1);
+                  setDate(d.toISOString().slice(0, 10));
+                }}
+              >
+                Gestern
+              </Button>
+            </div>
+            <div className="text-xs text-muted-foreground text-center mt-1.5">
+              {new Date(date).toLocaleDateString("de-AT", {
+                weekday: "long",
+                day: "2-digit",
+                month: "long",
+              })}
+            </div>
+          </div>
+
+          {/* Mode: Arbeit oder Fehlzeit */}
+          <div>
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+              {fehlzeitTyp ? "Fehlzeit" : "Baustelle"}
+            </Label>
+            <div className="flex flex-wrap gap-1.5 mt-1.5">
+              <button
+                onClick={() => setFehlzeitTyp("")}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${
+                  !fehlzeitTyp
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-background hover:bg-muted"
+                }`}
+              >
+                Arbeit
+              </button>
+              {FEHLZEITEN.map((f) => (
+                <button
+                  key={f.value}
+                  onClick={() => setFehlzeitTyp(f.value)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${
+                    fehlzeitTyp === f.value
+                      ? "text-white border-transparent"
+                      : "bg-background hover:bg-muted"
+                  }`}
+                  style={
+                    fehlzeitTyp === f.value
+                      ? { background: f.color }
+                      : undefined
+                  }
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            {!fehlzeitTyp && (
+              <div className="mt-2">
+                {baustellen.length === 0 ? (
+                  <div className="text-xs text-muted-foreground p-3 bg-muted/40 rounded">
+                    Aktuell keine aktiven Baustellen für deine Partie.
+                  </div>
+                ) : baustellen.length <= 4 ? (
+                  <div className="grid gap-1.5">
+                    {baustellen.map((b) => (
+                      <button
+                        key={b.id}
+                        onClick={() => setBaustelleId(b.id)}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-md border text-left text-sm transition ${
+                          baustelleId === b.id
+                            ? "bg-primary/10 border-primary"
+                            : "bg-background hover:bg-muted"
+                        }`}
+                      >
+                        <Building2
+                          className={`h-4 w-4 shrink-0 ${
+                            baustelleId === b.id ? "text-primary" : "text-muted-foreground"
+                          }`}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium truncate">{b.bvh_name}</div>
+                          {b.kostenstelle && (
+                            <div className="text-[11px] text-muted-foreground truncate">
+                              {b.kostenstelle}
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <select
+                    value={baustelleId}
+                    onChange={(e) => setBaustelleId(e.target.value)}
+                    className="w-full h-10 rounded-md border bg-background px-3 text-sm"
+                  >
+                    <option value="">— Baustelle wählen —</option>
+                    {baustellen.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.bvh_name} {b.kostenstelle ? `· ${b.kostenstelle}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Stunden Big Display */}
+          <div>
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+              {fehlzeitTyp ? "Fehlzeit-Stunden" : "Arbeitsstunden"}
+            </Label>
+            <div className="flex items-center gap-3 mt-1.5">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-12 w-12 shrink-0"
+                onClick={() => setHours(Math.max(0, hours - 0.5))}
+              >
+                <Minus className="h-5 w-5" />
+              </Button>
+              <div className="flex-1 text-center">
+                <div className="text-4xl font-bold tabular-nums">
+                  {hours.toFixed(1)} <span className="text-lg text-muted-foreground">h</span>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-12 w-12 shrink-0"
+                onClick={() => setHours(hours + 0.5)}
+              >
+                <Plus className="h-5 w-5" />
+              </Button>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5 mt-2">
+              {[4, 6, 8, 10].map((h) => (
+                <Button
+                  key={h}
+                  size="sm"
+                  variant={hours === h ? "default" : "outline"}
+                  onClick={() => setHours(h)}
+                >
+                  {h}h
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {/* Tätigkeit */}
+          {!fehlzeitTyp && (
+            <div>
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                Tätigkeit (optional)
+              </Label>
+              <Input
+                value={taetigkeit}
+                onChange={(e) => setTaetigkeit(e.target.value)}
+                placeholder="z.B. Wand-Elemente versetzen, Dachstuhl"
+                className="mt-1.5"
+              />
+            </div>
+          )}
+
+          {/* Erweitert */}
+          {!fehlzeitTyp && (
+            <button
+              onClick={() => setExtras(!extras)}
+              className="text-xs text-primary hover:underline"
+            >
+              {extras ? "Weniger anzeigen" : "+ Fahrtzeit / Taggeld / KM"}
+            </button>
+          )}
+
+          {extras && !fehlzeitTyp && (
+            <div className="grid grid-cols-2 gap-2 pt-2 border-t">
+              <div>
+                <Label className="text-xs">Fahrstunden</Label>
+                <Input
+                  type="number"
+                  step="0.25"
+                  value={fahrstunden}
+                  onChange={(e) => setFahrstunden(Number(e.target.value))}
+                  className="h-9"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">KM gefahren</Label>
+                <Input
+                  type="number"
+                  step="1"
+                  value={km}
+                  onChange={(e) => setKm(Number(e.target.value))}
+                  className="h-9"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Taggeld kurz</Label>
+                <Input
+                  type="number"
+                  step="1"
+                  value={taggeldKurz}
+                  onChange={(e) => setTaggeldKurz(Number(e.target.value))}
+                  className="h-9"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Taggeld lang</Label>
+                <Input
+                  type="number"
+                  step="1"
+                  value={taggeldLang}
+                  onChange={(e) => setTaggeldLang(Number(e.target.value))}
+                  className="h-9"
+                />
+              </div>
+              <div className="col-span-2">
+                <Label className="text-xs">Notizen</Label>
+                <Textarea
+                  value={notizen}
+                  onChange={(e) => setNotizen(e.target.value)}
+                  rows={2}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Submit */}
+          <Button onClick={submit} className="w-full h-12 text-base">
+            <Plus className="h-5 w-5 mr-2" /> Buchung speichern
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Monat-Summary */}
+      <Card>
+        <CardContent className="p-3 grid grid-cols-3 gap-2 text-center">
+          <div>
+            <div className="text-2xl font-bold tabular-nums">
+              {totalsThisMonth.arbeit.toFixed(1)}
+            </div>
+            <div className="text-[10px] text-muted-foreground uppercase">Arbeit</div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold tabular-nums">
+              {totalsThisMonth.fahrt.toFixed(1)}
+            </div>
+            <div className="text-[10px] text-muted-foreground uppercase">Fahrt</div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold tabular-nums">
+              {totalsThisMonth.fehl.toFixed(1)}
+            </div>
+            <div className="text-[10px] text-muted-foreground uppercase">Fehlzeit</div>
           </div>
         </CardContent>
       </Card>
 
-      <div className="space-y-2">
-        {rows.map((r) => {
-          const b = baustellen.find((x) => x.id === r.baustelle_id);
-          return (
-            <Card key={r.id}>
-              <CardContent className="p-3">
-                <div className="flex flex-wrap items-start justify-between gap-2">
+      {/* Letzte Buchungen */}
+      <div>
+        <div className="flex items-center justify-between mb-2 px-1">
+          <h2 className="text-sm font-semibold">Letzte Buchungen</h2>
+          {rows.some((r) => r.status === "offen") && (
+            <Button size="sm" variant="outline" onClick={submitAllOpen}>
+              <Send className="h-3.5 w-3.5 mr-1" /> Alle offenen einreichen
+            </Button>
+          )}
+        </div>
+        <div className="space-y-1.5">
+          {rows.map((r) => {
+            const b = baustellen.find((x) => x.id === r.baustelle_id);
+            return (
+              <Card key={r.id}>
+                <CardContent className="p-3 flex items-center gap-3">
+                  <div
+                    className={`h-9 w-9 rounded ${STATUS_COLOR[r.status]} flex items-center justify-center text-white shrink-0`}
+                  >
+                    <Calendar className="h-4 w-4" />
+                  </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-primary shrink-0" />
-                      <span className="font-medium">
+                    <div className="flex items-center gap-1.5 text-sm">
+                      <span className="font-semibold tabular-nums">
                         {new Date(r.datum).toLocaleDateString("de-AT", {
-                          weekday: "short",
                           day: "2-digit",
                           month: "2-digit",
                         })}
                       </span>
-                      <Badge variant={STATUS_VARIANT[r.status]} className="text-[10px]">
-                        {STATUS_LABEL[r.status]}
-                      </Badge>
+                      <span className="text-muted-foreground">·</span>
+                      <span className="font-bold tabular-nums">
+                        {Number(r.arbeitsstunden ?? r.fehlzeit_stunden ?? 0).toFixed(1)}h
+                      </span>
+                      {r.fehlzeit_typ && (
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                          {r.fehlzeit_typ}
+                        </Badge>
+                      )}
                     </div>
-                    <div className="text-sm">
-                      {b ? b.bvh_name : "Ohne Baustelle"}{" "}
-                      {b?.kostenstelle ? (
-                        <span className="text-muted-foreground">· {b.kostenstelle}</span>
-                      ) : null}
+                    <div className="text-xs text-muted-foreground truncate">
+                      {b?.bvh_name ?? (r.fehlzeit_typ ? "Fehlzeit" : "—")}
                     </div>
-                    {r.taetigkeit && (
-                      <div className="text-xs text-muted-foreground">{r.taetigkeit}</div>
-                    )}
                   </div>
-                  <div className="flex flex-wrap gap-1.5 items-center text-xs">
-                    <Badge variant="secondary">
-                      {Number(r.arbeitsstunden ?? 0).toFixed(1)}h Arbeit
-                    </Badge>
-                    {Number(r.fahrstunden ?? 0) > 0 && (
-                      <Badge variant="outline">
-                        {Number(r.fahrstunden).toFixed(1)}h Fahrt
-                      </Badge>
-                    )}
-                    {r.fehlzeit_typ && (
-                      <Badge variant="outline">
-                        {r.fehlzeit_typ} {Number(r.fehlzeit_stunden ?? 0).toFixed(1)}h
-                      </Badge>
-                    )}
-                    {r.status === "offen" && (
-                      <>
-                        <Button variant="ghost" size="icon" onClick={() => setEditing(r)}>
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => remove(r.id)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                        <Button size="sm" onClick={() => submitForApproval(r.id)}>
-                          Einreichen
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-                {r.status === "abgelehnt" && r.abgelehnt_grund && (
-                  <div className="mt-2 text-xs text-destructive">
-                    Abgelehnt: {r.abgelehnt_grund}
-                  </div>
-                )}
+                  <Badge variant="outline" className="text-[10px] shrink-0">
+                    {STATUS_LABEL[r.status]}
+                  </Badge>
+                  {r.status === "offen" && (
+                    <div className="flex shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => setEditing(r)}
+                        aria-label="Bearbeiten"
+                      >
+                        <Edit className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => remove(r.id)}
+                        aria-label="Löschen"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+          {rows.length === 0 && (
+            <Card>
+              <CardContent className="p-6 text-center text-sm text-muted-foreground">
+                Noch keine Buchungen. Trag deine ersten Stunden oben ein.
               </CardContent>
             </Card>
-          );
-        })}
-        {rows.length === 0 && (
-          <Card>
-            <CardContent className="p-8 text-center text-sm text-muted-foreground">
-              Keine Buchungen für {month}.
-            </CardContent>
-          </Card>
-        )}
+          )}
+        </div>
       </div>
 
+      {/* Edit dialog */}
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent className="max-w-xl">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editing?.id ? "Buchung bearbeiten" : "Stunden buchen"}</DialogTitle>
+            <DialogTitle>Buchung bearbeiten</DialogTitle>
           </DialogHeader>
           {editing && (
-            <form onSubmit={save} className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>Datum *</Label>
-                  <Input
-                    type="date"
-                    name="datum"
-                    required
-                    defaultValue={editing.datum ?? new Date().toISOString().slice(0, 10)}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Baustelle</Label>
-                  <select
-                    name="baustelle_id"
-                    defaultValue={editing.baustelle_id ?? ""}
-                    className="w-full h-10 rounded-md border bg-background px-3 text-sm"
-                  >
-                    <option value="">— wählen —</option>
-                    {baustellen.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.bvh_name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Arbeitsstunden</Label>
-                  <Input
-                    type="number"
-                    step="0.25"
-                    name="arbeitsstunden"
-                    defaultValue={editing.arbeitsstunden ?? 8}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Fahrstunden</Label>
-                  <Input
-                    type="number"
-                    step="0.25"
-                    name="fahrstunden"
-                    defaultValue={editing.fahrstunden ?? 0}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Taggeld kurz</Label>
-                  <Input
-                    type="number"
-                    step="1"
-                    name="taggeld_kurz"
-                    defaultValue={editing.taggeld_kurz ?? 0}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Taggeld lang</Label>
-                  <Input
-                    type="number"
-                    step="1"
-                    name="taggeld_lang"
-                    defaultValue={editing.taggeld_lang ?? 0}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>km gefahren</Label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    name="km_gefahren"
-                    defaultValue={editing.km_gefahren ?? 0}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Fehlzeit-Typ</Label>
-                  <select
-                    name="fehlzeit_typ"
-                    defaultValue={editing.fehlzeit_typ ?? ""}
-                    className="w-full h-10 rounded-md border bg-background px-3 text-sm"
-                  >
-                    {FEHLZEITEN.map((f) => (
-                      <option key={f.value} value={f.value}>
-                        {f.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Fehlzeit-Stunden</Label>
-                  <Input
-                    type="number"
-                    step="0.25"
-                    name="fehlzeit_stunden"
-                    defaultValue={editing.fehlzeit_stunden ?? 0}
-                  />
-                </div>
-                <div className="col-span-2 space-y-1.5">
-                  <Label>Tätigkeit</Label>
-                  <Input
-                    name="taetigkeit"
-                    defaultValue={editing.taetigkeit ?? ""}
-                    placeholder="Wand-Elemente versetzen, Dachstuhl..."
-                  />
-                </div>
-                <div className="col-span-2 space-y-1.5">
-                  <Label>Notizen</Label>
-                  <Textarea name="notizen" defaultValue={editing.notizen ?? ""} />
-                </div>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const fd = new FormData(e.currentTarget as HTMLFormElement);
+                await supabase
+                  .from("stundenbuchungen")
+                  .update({
+                    datum: fd.get("datum") as string,
+                    arbeitsstunden: Number(fd.get("h")),
+                    taetigkeit: (fd.get("t") as string) || null,
+                  })
+                  .eq("id", editing.id!);
+                toast({ title: "Aktualisiert" });
+                setEditing(null);
+                load();
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <Label>Datum</Label>
+                <Input type="date" name="datum" defaultValue={editing.datum} required />
+              </div>
+              <div>
+                <Label>Stunden</Label>
+                <Input
+                  type="number"
+                  step="0.25"
+                  name="h"
+                  defaultValue={editing.arbeitsstunden ?? 0}
+                  required
+                />
+              </div>
+              <div>
+                <Label>Tätigkeit</Label>
+                <Input name="t" defaultValue={editing.taetigkeit ?? ""} />
               </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setEditing(null)}>
                   Abbrechen
                 </Button>
-                <Button type="submit">{editing.id ? "Speichern" : "Buchen"}</Button>
+                <Button type="submit">Speichern</Button>
               </DialogFooter>
             </form>
           )}

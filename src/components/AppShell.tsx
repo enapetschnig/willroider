@@ -40,7 +40,6 @@ const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["all"] },
   { to: "/mein-tag", label: "Mein Tag", icon: ClipboardList, roles: ["all"] },
   { to: "/arbeitsplanung", label: "Arbeitsplanung", icon: CalendarDays, roles: ["admin"] },
-  { to: "/einteilung", label: "Einteilung", icon: ClipboardList, roles: ["admin"] },
   { to: "/baustellen", label: "Baustellen", icon: Building2, roles: ["all"] },
   { to: "/mitarbeiter", label: "Mitarbeiter", icon: Users, roles: ["admin"] },
   { to: "/fahrzeuge", label: "Fahrzeuge", icon: Truck, roles: ["admin"] },
@@ -188,9 +187,36 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
         </header>
 
-        <main className="flex-1 px-3 sm:px-4 lg:px-6 py-4 sm:py-6 max-w-full">
+        <main className="flex-1 px-3 sm:px-4 lg:px-6 py-3 sm:py-6 max-w-full pb-24 lg:pb-6">
           {children}
         </main>
+
+        {/* Mobile bottom nav */}
+        <nav className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-card border-t flex">
+          {[
+            { to: "/", label: "Start", icon: LayoutDashboard, end: true },
+            isAdmin
+              ? { to: "/arbeitsplanung", label: "Plan", icon: CalendarDays, end: false }
+              : { to: "/mein-tag", label: "Heute", icon: ClipboardList, end: false },
+            { to: "/stunden", label: "Stunden", icon: Clock, end: false },
+            { to: "/baustellen", label: "Baustellen", icon: Building2, end: false },
+          ].map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) =>
+                cn(
+                  "flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px]",
+                  isActive ? "text-primary" : "text-muted-foreground"
+                )
+              }
+            >
+              <item.icon className="h-5 w-5" />
+              <span>{item.label}</span>
+            </NavLink>
+          ))}
+        </nav>
       </div>
     </div>
   );

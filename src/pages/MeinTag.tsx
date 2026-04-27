@@ -6,253 +6,212 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { useToast } from "@/hooks/use-toast";
-import {
-  Building2,
-  Truck,
-  Users,
-  Clock as ClockIcon,
-  MapPin,
-  Navigation,
-  Eye,
-  CheckCircle2,
-} from "lucide-react";
+import { Building2, MapPin, Navigation, Clock as ClockIcon, Users } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
-type EM = Database["public"]["Tables"]["einteilung_mitarbeiter"]["Row"] & {
-  einteilungen: Database["public"]["Tables"]["einteilungen"]["Row"] & {
-    baustellen: Database["public"]["Tables"]["baustellen"]["Row"] | null;
-    fahrzeuge: Database["public"]["Tables"]["fahrzeuge"]["Row"] | null;
-  };
-};
+type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
+type Partie = Database["public"]["Tables"]["partien"]["Row"];
 
 export default function MeinTag() {
   const { user, profile } = useAuth();
-  const { toast } = useToast();
-  const [today, setToday] = useState<string>(() => new Date().toISOString().slice(0, 10));
-  const [tomorrow, setTomorrow] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().slice(0, 10);
-  });
-  const [todayRows, setTodayRows] = useState<EM[]>([]);
-  const [tomorrowRows, setTomorrowRows] = useState<EM[]>([]);
-
-  const fetchAssignments = async (date: string) => {
-    if (!user) return [];
-    const { data } = await supabase
-      .from("einteilung_mitarbeiter")
-      .select(
-        "*, einteilungen!inner(*, baustellen(*), fahrzeuge(*))"
-      )
-      .eq("mitarbeiter_id", user.id)
-      .eq("einteilungen.datum", date);
-    return (data as EM[]) ?? [];
-  };
+  const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
+  const [partie, setPartie] = useState<Partie | null>(null);
+  const [colleagues, setColleagues] = useState<{ id: string; vorname: string; nachname: string }[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const load = async () => {
-    const [t, n] = await Promise.all([fetchAssignments(today), fetchAssignments(tomorrow)]);
-    setTodayRows(t);
-    setTomorrowRows(n);
+    if (!user || !profile) return;
+    setLoading(true);
+
+    if (!profile.partie_id) {
+      setBaustellen([]);
+      setPartie(null);
+      setColleagues([]);
+      setLoading(false);
+      return;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    const [partieRes, bsRes, colleaguesRes] = await Promise.all([
+      supabase.from("partien").select("*").eq("id", profile.partie_id).maybeSingle(),
+      supabase
+        .from("baustellen")
+        .select("*")
+        .eq("partie_id", profile.partie_id)
+        .lte("start_datum", today)
+        .or(`end_datum.gte.${today},end_datum.is.null`)
+        .order("start_datum", { ascending: false }),
+      supabase
+        .from("profiles")
+        .select("id, vorname, nachname")
+        .eq("partie_id", profile.partie_id)
+        .neq("id", user.id),
+    ]);
+
+    setPartie((partieRes.data as Partie) ?? null);
+    setBaustellen((bsRes.data as Baustelle[]) ?? []);
+    setColleagues((colleaguesRes.data as any[]) ?? []);
+    setLoading(false);
   };
 
   useEffect(() => {
     load();
-
     const ch = supabase
       .channel("mein-tag")
-      .on("postgres_changes", { event: "*", schema: "public", table: "einteilungen" }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "einteilung_mitarbeiter" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "baustellen" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "partien" }, load)
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [user, today, tomorrow]);
+  }, [user, profile]);
 
-  const confirmRead = async (emId: string) => {
-    await supabase
-      .from("einteilung_mitarbeiter")
-      .update({ gelesen_am: new Date().toISOString(), bestaetigt_am: new Date().toISOString() })
-      .eq("id", emId);
-    toast({ title: "Bestätigt", description: "Du hast die Einteilung gelesen." });
-    load();
-  };
+  if (loading) {
+    return <div className="text-sm text-muted-foreground">Lädt…</div>;
+  }
 
-  const reportAbsent = async (emId: string) => {
-    const grund = prompt("Grund für Abwesenheit (Krank/Urlaub/...)?");
-    if (!grund) return;
-    await supabase
-      .from("einteilung_mitarbeiter")
-      .update({ abwesend: true, abwesenheitsgrund: grund })
-      .eq("id", emId);
-    toast({ title: "Abwesenheit gemeldet", description: "Bauleitung wurde informiert." });
-    load();
-  };
+  if (!profile?.partie_id) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Mein Tag" />
+        <Card>
+          <CardContent className="p-6 text-center space-y-2">
+            <Users className="h-10 w-10 mx-auto text-muted-foreground" />
+            <div className="text-sm">
+              Du bist noch keiner Partie zugeordnet. Bitte wende dich ans Büro.
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const today = new Date();
+  const fmtDate = today.toLocaleDateString("de-AT", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+  });
 
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Mein Tag"
-        description={
-          profile
-            ? `Hallo ${profile.vorname}, hier siehst du deine Einteilung.`
-            : "Heutige und morgige Einteilung."
-        }
+        title={`Hallo ${profile.vorname}!`}
+        description={fmtDate}
       />
 
-      <DaySection
-        label="Heute"
-        date={today}
-        rows={todayRows}
-        confirmRead={confirmRead}
-        reportAbsent={reportAbsent}
-      />
-      <DaySection
-        label="Morgen"
-        date={tomorrow}
-        rows={tomorrowRows}
-        confirmRead={confirmRead}
-        reportAbsent={reportAbsent}
-      />
-
-      <Card>
-        <CardContent className="p-3 text-center">
-          <Link to="/stunden">
-            <Button>
-              <ClockIcon className="h-4 w-4 mr-2" /> Stunden für heute erfassen
-            </Button>
-          </Link>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function DaySection({
-  label,
-  date,
-  rows,
-  confirmRead,
-  reportAbsent,
-}: {
-  label: string;
-  date: string;
-  rows: EM[];
-  confirmRead: (id: string) => void;
-  reportAbsent: (id: string) => void;
-}) {
-  return (
-    <div>
-      <div className="flex items-baseline justify-between mb-2">
-        <h2 className="text-lg font-semibold">{label}</h2>
-        <span className="text-sm text-muted-foreground">
-          {new Date(date).toLocaleDateString("de-AT", {
-            weekday: "long",
-            day: "2-digit",
-            month: "long",
-          })}
-        </span>
-      </div>
-      {rows.length === 0 && (
+      {/* Partie-Banner */}
+      {partie && (
         <Card>
-          <CardContent className="p-6 text-center text-sm text-muted-foreground">
-            Keine Einteilung für {label.toLowerCase()}.
+          <CardContent className="p-4 flex items-center gap-3">
+            <div
+              className="h-12 w-12 rounded-md flex items-center justify-center text-white font-bold shrink-0"
+              style={{ background: partie.farbcode }}
+            >
+              <Users className="h-6 w-6" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                Deine Partie
+              </div>
+              <div className="font-bold">{partie.name}</div>
+              {colleagues.length > 0 && (
+                <div className="text-xs text-muted-foreground truncate">
+                  mit {colleagues.map((c) => c.vorname).join(", ")}
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}
-      {rows.map((r) => {
-        const e = r.einteilungen;
-        const b = e.baustellen;
-        const f = e.fahrzeuge;
-        return (
-          <Card key={r.id} className="mb-2">
-            <CardContent className="p-4 space-y-3">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="text-xs text-muted-foreground">Baustelle</div>
-                  <div className="font-bold text-base flex items-center gap-2">
-                    <Building2 className="h-4 w-4 text-primary" />
-                    {b?.bvh_name ?? "—"}
-                  </div>
-                  {b?.kostenstelle && (
-                    <div className="text-xs text-muted-foreground">{b.kostenstelle}</div>
-                  )}
-                </div>
-                {r.abwesend ? (
-                  <Badge variant="destructive">Abwesend</Badge>
-                ) : r.bestaetigt_am ? (
-                  <Badge className="bg-emerald-600">
-                    <CheckCircle2 className="h-3 w-3 mr-1" /> Bestätigt
-                  </Badge>
-                ) : (
-                  <Badge variant="outline">Neu</Badge>
-                )}
-              </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                <Tile icon={ClockIcon} label="Abfahrt" value={e.abfahrtszeit?.slice(0, 5) ?? "—"} />
-                <Tile icon={MapPin} label="Treffpunkt" value={e.treffpunkt ?? "—"} />
-                <Tile icon={Truck} label="Fahrzeug" value={f?.kennzeichen ?? "—"} />
-                <Tile icon={Users} label="Rolle" value={r.rolle ?? "Mitarbeiter"} />
-              </div>
-
-              {b?.baustellen_adresse && (
-                <div className="text-xs flex items-center gap-2">
-                  <MapPin className="h-3 w-3" />
-                  <span>{[b.baustellen_adresse, b.plz, b.ort].filter(Boolean).join(", ")}</span>
-                  <a
-                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                      [b.baustellen_adresse, b.plz, b.ort].filter(Boolean).join(", ")
-                    )}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-primary text-xs hover:underline ml-auto inline-flex items-center gap-1"
-                  >
-                    <Navigation className="h-3 w-3" /> Navigieren
-                  </a>
-                </div>
-              )}
-
-              {(e.material_hinweise || e.sonderaufgaben) && (
-                <div className="border-t pt-2 space-y-1 text-xs">
-                  {e.material_hinweise && (
-                    <div>
-                      <strong>Material:</strong> {e.material_hinweise}
-                    </div>
-                  )}
-                  {e.sonderaufgaben && (
-                    <div>
-                      <strong>Sonderaufgaben:</strong> {e.sonderaufgaben}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {!r.bestaetigt_am && !r.abwesend && (
-                <div className="flex flex-wrap gap-2 pt-1">
-                  <Button size="sm" onClick={() => confirmRead(r.id)}>
-                    <Eye className="h-4 w-4 mr-1" /> Gelesen & bestätigt
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => reportAbsent(r.id)}>
-                    Abwesenheit melden
-                  </Button>
-                </div>
-              )}
+      {/* Aktuelle Baustellen der Partie */}
+      <div>
+        <h2 className="text-sm font-semibold mb-2 px-1">
+          Aktuelle Baustelle{baustellen.length === 1 ? "" : "n"}
+        </h2>
+        {baustellen.length === 0 ? (
+          <Card>
+            <CardContent className="p-6 text-center text-sm text-muted-foreground">
+              Aktuell keine Baustelle für deine Partie geplant.
             </CardContent>
           </Card>
-        );
-      })}
-    </div>
-  );
-}
+        ) : (
+          <div className="space-y-2">
+            {baustellen.map((b) => {
+              const adresse = [b.baustellen_adresse, b.plz, b.ort].filter(Boolean).join(", ");
+              const mapsUrl = adresse
+                ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(adresse)}`
+                : null;
+              return (
+                <Card key={b.id} className="overflow-hidden">
+                  <div
+                    className="h-1.5"
+                    style={{ background: partie?.farbcode ?? "#999" }}
+                  />
+                  <CardContent className="p-4 space-y-3">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                        Baustelle
+                      </div>
+                      <div className="font-bold text-lg flex items-start gap-2">
+                        <Building2 className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+                        <span>{b.bvh_name}</span>
+                      </div>
+                      {b.kostenstelle && (
+                        <div className="text-xs text-muted-foreground ml-7">
+                          {b.kostenstelle}
+                        </div>
+                      )}
+                    </div>
 
-function Tile({ icon: Icon, label, value }: { icon: typeof ClockIcon; label: string; value: any }) {
-  return (
-    <div className="border rounded-md p-2">
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
-        <Icon className="h-3 w-3" /> {label}
+                    {adresse && (
+                      <div className="flex items-center gap-2 text-sm bg-muted/40 rounded-md px-3 py-2">
+                        <MapPin className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="flex-1 truncate">{adresse}</span>
+                        {mapsUrl && (
+                          <a
+                            href={mapsUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary text-xs hover:underline inline-flex items-center gap-1 shrink-0"
+                          >
+                            <Navigation className="h-3.5 w-3.5" />
+                            Navigieren
+                          </a>
+                        )}
+                      </div>
+                    )}
+
+                    {b.start_datum && (
+                      <div className="text-xs text-muted-foreground">
+                        Zeitraum: {new Date(b.start_datum).toLocaleDateString("de-AT")} →{" "}
+                        {b.end_datum
+                          ? new Date(b.end_datum).toLocaleDateString("de-AT")
+                          : "offen"}
+                      </div>
+                    )}
+
+                    <div className="flex gap-2 pt-1">
+                      <Link to={`/baustellen/${b.id}`} className="flex-1">
+                        <Button variant="outline" className="w-full" size="sm">
+                          Baustellen-Details
+                        </Button>
+                      </Link>
+                      <Link to="/stunden" className="flex-1">
+                        <Button className="w-full" size="sm">
+                          <ClockIcon className="h-4 w-4 mr-1" /> Stunden buchen
+                        </Button>
+                      </Link>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
       </div>
-      <div className="font-semibold text-sm truncate">{value}</div>
     </div>
   );
 }

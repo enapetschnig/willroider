@@ -26,7 +26,7 @@ type Stats = {
   baustellenGeplant: number;
   mitarbeiterAktiv: number;
   stundenOffen: number;
-  einteilungHeute: number;
+  partienCount: number;
 };
 
 const STATUS_LABEL: Record<Baustelle["status"], string> = {
@@ -49,16 +49,14 @@ export default function Dashboard() {
     baustellenGeplant: 0,
     mitarbeiterAktiv: 0,
     stundenOffen: 0,
-    einteilungHeute: 0,
+    partienCount: 0,
   });
   const [aktiveBaustellen, setAktiveBaustellen] = useState<Baustelle[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
-      const today = new Date().toISOString().slice(0, 10);
-
-      const [bs, bsAktiv, ma, stundenOffen, einteilungHeute] = await Promise.all([
+      const [bs, bsAktiv, ma, stundenOffen, partien] = await Promise.all([
         supabase.from("baustellen").select("id", { count: "exact", head: true }).eq("status", "geplant"),
         supabase
           .from("baustellen")
@@ -68,7 +66,7 @@ export default function Dashboard() {
           .limit(8),
         supabase.from("profiles").select("id", { count: "exact", head: true }).eq("is_active", true),
         supabase.from("stundenbuchungen").select("id", { count: "exact", head: true }).in("status", ["offen", "zm_freigabe"]),
-        supabase.from("einteilungen").select("id", { count: "exact", head: true }).eq("datum", today),
+        supabase.from("partien").select("id", { count: "exact", head: true }),
       ]);
 
       setStats({
@@ -76,7 +74,7 @@ export default function Dashboard() {
         baustellenGeplant: bs.count ?? 0,
         mitarbeiterAktiv: ma.count ?? 0,
         stundenOffen: stundenOffen.count ?? 0,
-        einteilungHeute: einteilungHeute.count ?? 0,
+        partienCount: partien.count ?? 0,
       });
       setAktiveBaustellen((bsAktiv.data as Baustelle[]) ?? []);
       setLoading(false);
@@ -111,15 +109,8 @@ export default function Dashboard() {
     {
       to: "/arbeitsplanung",
       label: "Arbeitsplanung",
-      desc: "Gantt-Chart aller Baustellen",
+      desc: "Gantt-Chart & Einteilung",
       icon: CalendarDays,
-      show: isAdmin,
-    },
-    {
-      to: "/einteilung",
-      label: "Einteilung",
-      desc: "Tagesplanung erstellen",
-      icon: ClipboardList,
       show: isAdmin,
     },
     {
@@ -170,8 +161,8 @@ export default function Dashboard() {
         />
         <StatTile
           icon={ClipboardList}
-          label="Einteilungen heute"
-          value={stats.einteilungHeute}
+          label="Partien"
+          value={stats.partienCount}
           loading={loading}
           tone="primary"
         />

@@ -46,6 +46,7 @@ export default function Mitarbeiter() {
   const [roles, setRoles] = useState<Record<string, AppRole>>({});
   const [editing, setEditing] = useState<Profile | null>(null);
   const [editingPartie, setEditingPartie] = useState<Partial<Partie> | null>(null);
+  const [assignToPartie, setAssignToPartie] = useState<Partie | null>(null);
 
   const load = async () => {
     const [profRes, partRes, roleRes] = await Promise.all([
@@ -144,6 +145,35 @@ export default function Mitarbeiter() {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
     } else {
       toast({ title: "Partie gelöscht" });
+      load();
+    }
+  };
+
+  const assignMember = async (profileId: string, partieId: string | null) => {
+    const { error } = await supabase
+      .from("profiles")
+      .update({ partie_id: partieId })
+      .eq("id", profileId);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    } else {
+      load();
+    }
+  };
+
+  const setPartieleiter = async (partieId: string, profileId: string | null) => {
+    const { error } = await supabase
+      .from("partien")
+      .update({ partieleiter_id: profileId })
+      .eq("id", partieId);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    } else {
+      // mark/unmark profile as partieleiter
+      if (profileId) {
+        await supabase.from("profiles").update({ is_partieleiter: true }).eq("id", profileId);
+      }
+      toast({ title: "Partieleiter aktualisiert" });
       load();
     }
   };
@@ -341,53 +371,159 @@ export default function Mitarbeiter() {
               <Plus className="h-4 w-4 mr-2" /> Neue Partie
             </Button>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {partien.map((p) => {
               const leiter = profiles.find((x) => x.id === p.partieleiter_id);
               const members = profiles.filter((x) => x.partie_id === p.id);
               return (
                 <Card key={p.id}>
-                  <CardContent className="p-4 space-y-2">
-                    <div className="flex items-start gap-2">
+                  <CardContent className="p-4 space-y-3">
+                    {/* Header */}
+                    <div className="flex items-center gap-3">
                       <div
                         className="h-10 w-10 rounded-md shrink-0"
                         style={{ background: p.farbcode }}
                       />
                       <div className="flex-1 min-w-0">
-                        <div className="font-semibold truncate">{p.name}</div>
+                        <div className="font-semibold text-base truncate">{p.name}</div>
                         <div className="text-xs text-muted-foreground truncate">
-                          {p.beschreibung || "—"}
+                          {p.beschreibung || `${members.length} Mitglieder`}
                         </div>
                       </div>
-                      <Button variant="ghost" size="icon" onClick={() => setEditingPartie(p)}>
+                      <Button variant="ghost" size="icon" onClick={() => setEditingPartie(p)} aria-label="Bearbeiten">
                         <Edit className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => deletePartie(p.id)}>
+                      <Button variant="ghost" size="icon" onClick={() => deletePartie(p.id)} aria-label="Löschen">
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
-                    <div className="text-xs">
-                      <span className="text-muted-foreground">Partieleiter: </span>
-                      {leiter ? `${leiter.vorname} ${leiter.nachname}` : "—"}
-                    </div>
-                    <div className="text-xs">
-                      <span className="text-muted-foreground">Mitglieder: </span>
-                      {members.length}
-                    </div>
-                    {members.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
+
+                    {/* Partieleiter */}
+                    <div className="border-t pt-2">
+                      <Label className="text-[10px] uppercase tracking-wide">Partieleiter</Label>
+                      <select
+                        value={p.partieleiter_id ?? ""}
+                        onChange={(e) => setPartieleiter(p.id, e.target.value || null)}
+                        className="w-full h-9 rounded-md border bg-background px-2 text-sm mt-1"
+                      >
+                        <option value="">— keiner —</option>
                         {members.map((m) => (
-                          <Badge key={m.id} variant="outline" className="text-[10px]">
-                            {m.vorname} {m.nachname[0]}.
-                          </Badge>
+                          <option key={m.id} value={m.id}>
+                            {m.vorname} {m.nachname}
+                          </option>
                         ))}
+                      </select>
+                    </div>
+
+                    {/* Mitglieder-Liste */}
+                    <div className="border-t pt-2">
+                      <div className="flex items-center justify-between mb-2">
+                        <Label className="text-[10px] uppercase tracking-wide">
+                          Mitglieder ({members.length})
+                        </Label>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          onClick={() => setAssignToPartie(p)}
+                        >
+                          <Plus className="h-3 w-3 mr-1" /> Hinzufügen
+                        </Button>
                       </div>
-                    )}
+                      {members.length === 0 ? (
+                        <div className="text-xs text-muted-foreground italic">
+                          Keine Mitarbeiter zugeordnet
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          {members.map((m) => (
+                            <div
+                              key={m.id}
+                              className="flex items-center gap-2 px-2 py-1.5 rounded bg-muted/40 text-sm"
+                            >
+                              <div
+                                className="h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0"
+                                style={{ background: p.farbcode, color: "white" }}
+                              >
+                                {m.vorname[0]}
+                                {m.nachname[0]}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="truncate text-xs">
+                                  {m.vorname} {m.nachname}
+                                  {m.id === p.partieleiter_id && (
+                                    <Badge variant="outline" className="ml-1 text-[9px] px-1 py-0">
+                                      Leiter
+                                    </Badge>
+                                  )}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => assignMember(m.id, null)}
+                                className="text-muted-foreground hover:text-destructive p-1"
+                                aria-label="Aus Partie entfernen"
+                              >
+                                <XCircle className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
               );
             })}
           </div>
+
+          {/* Assign-Members Dialog */}
+          <Dialog open={!!assignToPartie} onOpenChange={(o) => !o && setAssignToPartie(null)}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Mitarbeiter zu „{assignToPartie?.name}" hinzufügen</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-1 max-h-96 overflow-y-auto">
+                {profiles
+                  .filter((p) => !p.partie_id || p.partie_id === assignToPartie?.id)
+                  .map((m) => {
+                    const inThis = m.partie_id === assignToPartie?.id;
+                    return (
+                      <label
+                        key={m.id}
+                        className="flex items-center gap-3 p-2.5 rounded hover:bg-muted/60 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={inThis}
+                          onChange={(e) => {
+                            if (e.target.checked) assignMember(m.id, assignToPartie!.id);
+                            else assignMember(m.id, null);
+                          }}
+                          className="h-5 w-5"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-sm">
+                            {m.vorname} {m.nachname}
+                          </div>
+                          <div className="text-xs text-muted-foreground truncate">
+                            {m.qualifikation ?? m.email}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                {profiles.filter((p) => !p.partie_id).length === 0 &&
+                  profiles.filter((p) => p.partie_id === assignToPartie?.id).length === 0 && (
+                    <div className="text-center text-sm text-muted-foreground p-6">
+                      Alle Mitarbeiter sind bereits anderen Partien zugeordnet.
+                    </div>
+                  )}
+              </div>
+              <DialogFooter>
+                <Button onClick={() => setAssignToPartie(null)}>Fertig</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
       </Tabs>
 

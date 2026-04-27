@@ -19,6 +19,7 @@ import {
   Banknote,
   Clock,
   ShieldCheck,
+  Users,
 } from "lucide-react";
 import {
   Dialog,
@@ -38,6 +39,8 @@ type Dokument = Database["public"]["Tables"]["dokumente"]["Row"];
 type Kosten = Database["public"]["Tables"]["kostenbuchungen"]["Row"];
 type Stunden = Database["public"]["Tables"]["stundenbuchungen"]["Row"];
 type Eval = Database["public"]["Tables"]["evaluierungen"]["Row"];
+type Profile = Database["public"]["Tables"]["profiles"]["Row"];
+type Partie = Database["public"]["Tables"]["partien"]["Row"];
 
 const STATUS_LABEL: Record<BaustellenStatus, string> = {
   geplant: "Geplant",
@@ -57,6 +60,8 @@ export default function BaustelleDetail() {
   const [kosten, setKosten] = useState<Kosten[]>([]);
   const [stunden, setStunden] = useState<Stunden[]>([]);
   const [evals, setEvals] = useState<Eval[]>([]);
+  const [partie, setPartie] = useState<Partie | null>(null);
+  const [team, setTeam] = useState<Profile[]>([]);
   const [terminDialog, setTerminDialog] = useState(false);
   const [kostenDialog, setKostenDialog] = useState(false);
 
@@ -70,12 +75,25 @@ export default function BaustelleDetail() {
       supabase.from("stundenbuchungen").select("*").eq("baustelle_id", id).order("datum", { ascending: false }).limit(100),
       supabase.from("evaluierungen").select("*").eq("baustelle_id", id).order("datum", { ascending: false }),
     ]);
-    setB((bs.data as Baustelle) ?? null);
+    const baustelle = (bs.data as Baustelle) ?? null;
+    setB(baustelle);
     setTermine((t.data as Termin[]) ?? []);
     setDokumente((d.data as Dokument[]) ?? []);
     setKosten((k.data as Kosten[]) ?? []);
     setStunden((s.data as Stunden[]) ?? []);
     setEvals((e.data as Eval[]) ?? []);
+
+    if (baustelle?.partie_id) {
+      const [pRes, mRes] = await Promise.all([
+        supabase.from("partien").select("*").eq("id", baustelle.partie_id).maybeSingle(),
+        supabase.from("profiles").select("*").eq("partie_id", baustelle.partie_id).order("nachname"),
+      ]);
+      setPartie((pRes.data as Partie) ?? null);
+      setTeam((mRes.data as Profile[]) ?? []);
+    } else {
+      setPartie(null);
+      setTeam([]);
+    }
   };
 
   useEffect(() => {
@@ -215,8 +233,9 @@ export default function BaustelleDetail() {
       <Tabs defaultValue="info">
         <TabsList className="flex flex-wrap h-auto">
           <TabsTrigger value="info"><Building2 className="h-4 w-4 mr-2" /> Stammdaten</TabsTrigger>
+          <TabsTrigger value="team"><Users className="h-4 w-4 mr-2" /> Team</TabsTrigger>
           <TabsTrigger value="termine"><CalendarDays className="h-4 w-4 mr-2" /> Termine ({termine.length})</TabsTrigger>
-          <TabsTrigger value="dokumente"><FileText className="h-4 w-4 mr-2" /> Dokumente ({dokumente.length})</TabsTrigger>
+          <TabsTrigger value="dokumente"><FileText className="h-4 w-4 mr-2" /> Dokumente</TabsTrigger>
           <TabsTrigger value="kosten"><Banknote className="h-4 w-4 mr-2" /> Kosten ({kosten.length})</TabsTrigger>
           <TabsTrigger value="stunden"><Clock className="h-4 w-4 mr-2" /> Stunden ({stunden.length})</TabsTrigger>
           <TabsTrigger value="eval"><ShieldCheck className="h-4 w-4 mr-2" /> Evaluierung ({evals.length})</TabsTrigger>
@@ -244,6 +263,93 @@ export default function BaustelleDetail() {
               <Info label="Notizen" value={b.notizen} className="md:col-span-2" />
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="team">
+          {!partie ? (
+            <Card>
+              <CardContent className="p-6 text-center space-y-2">
+                <Users className="h-8 w-8 mx-auto text-muted-foreground opacity-50" />
+                <div className="text-sm">
+                  Dieser Baustelle ist noch keine Partie zugeordnet.
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Partie in den Stammdaten setzen, um das Team zu sehen.
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              <Card>
+                <CardContent className="p-4 flex items-center gap-3">
+                  <div
+                    className="h-12 w-12 rounded-md flex items-center justify-center text-white shrink-0"
+                    style={{ background: partie.farbcode }}
+                  >
+                    <Users className="h-6 w-6" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                      Zugeordnete Partie
+                    </div>
+                    <div className="font-bold text-base">{partie.name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {team.length} Mitarbeiter
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="space-y-1.5">
+                {team.map((m) => (
+                  <Card key={m.id}>
+                    <CardContent className="p-3 flex items-center gap-3">
+                      <div
+                        className="h-9 w-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+                        style={{ background: partie.farbcode }}
+                      >
+                        {m.vorname[0]}
+                        {m.nachname[0]}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm">
+                          {m.vorname} {m.nachname}
+                          {m.id === partie.partieleiter_id && (
+                            <Badge variant="outline" className="ml-1.5 text-[10px]">
+                              Partieleiter
+                            </Badge>
+                          )}
+                          {m.kran_berechtigung && (
+                            <Badge variant="outline" className="ml-1 text-[10px]">
+                              Kran
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {[m.qualifikation, m.telefon].filter(Boolean).join(" · ")}
+                        </div>
+                      </div>
+                      {m.telefon && (
+                        <a
+                          href={`tel:${m.telefon}`}
+                          className="text-primary text-xs hover:underline shrink-0"
+                        >
+                          {m.telefon}
+                        </a>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+                {team.length === 0 && (
+                  <Card>
+                    <CardContent className="p-6 text-center text-sm text-muted-foreground">
+                      Diese Partie hat noch keine Mitarbeiter.
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="termine">

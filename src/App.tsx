@@ -8,7 +8,6 @@ import Auth from "@/pages/Auth";
 import NotFound from "@/pages/NotFound";
 import Dashboard from "@/pages/Dashboard";
 import Arbeitsplanung from "@/pages/Arbeitsplanung";
-import Einteilung from "@/pages/Einteilung";
 import Baustellen from "@/pages/Baustellen";
 import BaustelleDetail from "@/pages/BaustelleDetail";
 import Mitarbeiter from "@/pages/Mitarbeiter";
@@ -36,7 +35,6 @@ const App = () => (
             <Route element={<ProtectedRoute />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/arbeitsplanung" element={<Arbeitsplanung />} />
-              <Route path="/einteilung" element={<Einteilung />} />
               <Route path="/baustellen" element={<Baustellen />} />
               <Route path="/baustellen/:id" element={<BaustelleDetail />} />
               <Route path="/mitarbeiter" element={<Mitarbeiter />} />
