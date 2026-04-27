@@ -230,15 +230,15 @@ export default function BaustelleDetail() {
         </Card>
       </div>
 
-      <Tabs defaultValue="info">
+      <Tabs defaultValue="dokumente">
         <TabsList className="flex flex-wrap h-auto">
-          <TabsTrigger value="info"><Building2 className="h-4 w-4 mr-2" /> Stammdaten</TabsTrigger>
+          <TabsTrigger value="dokumente"><FileText className="h-4 w-4 mr-2" /> Dokumente</TabsTrigger>
           <TabsTrigger value="team"><Users className="h-4 w-4 mr-2" /> Team</TabsTrigger>
           <TabsTrigger value="termine"><CalendarDays className="h-4 w-4 mr-2" /> Termine ({termine.length})</TabsTrigger>
-          <TabsTrigger value="dokumente"><FileText className="h-4 w-4 mr-2" /> Dokumente</TabsTrigger>
-          <TabsTrigger value="kosten"><Banknote className="h-4 w-4 mr-2" /> Kosten ({kosten.length})</TabsTrigger>
           <TabsTrigger value="stunden"><Clock className="h-4 w-4 mr-2" /> Stunden ({stunden.length})</TabsTrigger>
+          <TabsTrigger value="kosten"><Banknote className="h-4 w-4 mr-2" /> Kosten ({kosten.length})</TabsTrigger>
           <TabsTrigger value="eval"><ShieldCheck className="h-4 w-4 mr-2" /> Evaluierung ({evals.length})</TabsTrigger>
+          <TabsTrigger value="info"><Building2 className="h-4 w-4 mr-2" /> Stammdaten</TabsTrigger>
         </TabsList>
 
         <TabsContent value="info">
