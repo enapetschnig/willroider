@@ -198,7 +198,7 @@ export default function BaustelleDetail() {
         }
       />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
         <Card>
           <CardContent className="p-3">
             <div className="text-xs text-muted-foreground">Zeitraum</div>
@@ -231,15 +231,17 @@ export default function BaustelleDetail() {
       </div>
 
       <Tabs defaultValue="dokumente">
-        <TabsList className="flex flex-wrap h-auto">
-          <TabsTrigger value="dokumente"><FileText className="h-4 w-4 mr-2" /> Dokumente</TabsTrigger>
-          <TabsTrigger value="team"><Users className="h-4 w-4 mr-2" /> Team</TabsTrigger>
-          <TabsTrigger value="termine"><CalendarDays className="h-4 w-4 mr-2" /> Termine ({termine.length})</TabsTrigger>
-          <TabsTrigger value="stunden"><Clock className="h-4 w-4 mr-2" /> Stunden ({stunden.length})</TabsTrigger>
-          <TabsTrigger value="kosten"><Banknote className="h-4 w-4 mr-2" /> Kosten ({kosten.length})</TabsTrigger>
-          <TabsTrigger value="eval"><ShieldCheck className="h-4 w-4 mr-2" /> Evaluierung ({evals.length})</TabsTrigger>
-          <TabsTrigger value="info"><Building2 className="h-4 w-4 mr-2" /> Stammdaten</TabsTrigger>
-        </TabsList>
+        <div className="-mx-3 sm:mx-0 px-3 sm:px-0 overflow-x-auto pb-1">
+          <TabsList className="inline-flex w-max">
+            <TabsTrigger value="dokumente" className="shrink-0"><FileText className="h-4 w-4 mr-2" /> Dokumente</TabsTrigger>
+            <TabsTrigger value="team" className="shrink-0"><Users className="h-4 w-4 mr-2" /> Team</TabsTrigger>
+            <TabsTrigger value="termine" className="shrink-0"><CalendarDays className="h-4 w-4 mr-2" /> Termine ({termine.length})</TabsTrigger>
+            <TabsTrigger value="stunden" className="shrink-0"><Clock className="h-4 w-4 mr-2" /> Stunden ({stunden.length})</TabsTrigger>
+            <TabsTrigger value="kosten" className="shrink-0"><Banknote className="h-4 w-4 mr-2" /> Kosten ({kosten.length})</TabsTrigger>
+            <TabsTrigger value="eval" className="shrink-0"><ShieldCheck className="h-4 w-4 mr-2" /> Evaluierung ({evals.length})</TabsTrigger>
+            <TabsTrigger value="info" className="shrink-0"><Building2 className="h-4 w-4 mr-2" /> Stammdaten</TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="info">
           <Card>

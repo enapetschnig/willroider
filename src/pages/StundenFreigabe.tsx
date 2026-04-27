@@ -194,13 +194,15 @@ export default function StundenFreigabe() {
       />
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="flex-wrap h-auto">
-          <TabsTrigger value="offen">Offen</TabsTrigger>
-          <TabsTrigger value="zm">ZM-Freigabe</TabsTrigger>
-          <TabsTrigger value="buero">Büro-Freigabe</TabsTrigger>
-          <TabsTrigger value="exportiert">Exportiert</TabsTrigger>
-          <TabsTrigger value="abgelehnt">Abgelehnt</TabsTrigger>
-        </TabsList>
+        <div className="-mx-3 sm:mx-0 px-3 sm:px-0 overflow-x-auto pb-1">
+          <TabsList className="inline-flex w-max">
+            <TabsTrigger value="offen" className="shrink-0">Offen</TabsTrigger>
+            <TabsTrigger value="zm" className="shrink-0">ZM-Freigabe</TabsTrigger>
+            <TabsTrigger value="buero" className="shrink-0">Büro-Freigabe</TabsTrigger>
+            <TabsTrigger value="exportiert" className="shrink-0">Exportiert</TabsTrigger>
+            <TabsTrigger value="abgelehnt" className="shrink-0">Abgelehnt</TabsTrigger>
+          </TabsList>
+        </div>
         <TabsContent value={tab}>
           <div className="space-y-2">
             {rows.map((r) => {
@@ -208,7 +210,7 @@ export default function StundenFreigabe() {
               const b = baustellen.find((x) => x.id === r.baustelle_id);
               return (
                 <Card key={r.id}>
-                  <CardContent className="p-3 flex flex-wrap items-start justify-between gap-2">
+                  <CardContent className="p-3 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <div className="font-semibold text-sm">
                         {p?.vorname} {p?.nachname}
@@ -247,7 +249,7 @@ export default function StundenFreigabe() {
                       )}
                       {tab === "zm" && isOfficeOrAdmin && !isZM && (
                         <Button size="sm" onClick={() => approveZM(r.id)}>
-                          ZM-Freigabe (Bauleitung)
+                          ZM-Freigabe
                         </Button>
                       )}
                       {tab === "buero" && isOfficeOrAdmin && (
@@ -277,14 +279,14 @@ export default function StundenFreigabe() {
       </Tabs>
 
       <Dialog open={!!reject} onOpenChange={(o) => !o && setReject(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-sm sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Buchung ablehnen</DialogTitle>
           </DialogHeader>
           <form onSubmit={submitReject} className="space-y-3">
             <div className="space-y-1.5">
               <Label>Grund *</Label>
-              <Textarea name="grund" required />
+              <Textarea name="grund" rows={4} required />
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setReject(null)}>

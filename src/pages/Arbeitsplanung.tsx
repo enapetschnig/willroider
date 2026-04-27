@@ -577,7 +577,7 @@ export default function Arbeitsplanung() {
             <DialogDescription>Stammdaten der Baustelle</DialogDescription>
           </DialogHeader>
           <form onSubmit={onSubmitBaustelle} className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="col-span-2 space-y-1.5">
                 <Label htmlFor="bvh_name">BVH (Bauvorhaben) *</Label>
                 <Input id="bvh_name" name="bvh_name" defaultValue={editing?.bvh_name ?? ""} required />

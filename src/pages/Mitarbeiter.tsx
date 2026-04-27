@@ -233,7 +233,7 @@ export default function Mitarbeiter() {
                       <select
                         value={roles[p.id] ?? "mitarbeiter"}
                         onChange={(e) => setRole(p.id, e.target.value as AppRole)}
-                        className="h-7 text-xs rounded-md border bg-background px-2 flex-1 min-w-0"
+                        className="h-9 text-xs rounded-md border bg-background px-2 flex-1 min-w-0"
                       >
                         {ROLES.map((r) => (
                           <option key={r.value} value={r.value}>
@@ -535,7 +535,7 @@ export default function Mitarbeiter() {
           </DialogHeader>
           {editing && (
             <form onSubmit={saveProfile} className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label>Vorname</Label>
                   <Input name="vorname" defaultValue={editing.vorname} required />

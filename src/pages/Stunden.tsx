@@ -226,17 +226,17 @@ export default function Stunden() {
           <div>
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">Datum</Label>
             <div className="flex items-center gap-2 mt-1.5">
-              <Button variant="outline" size="icon" onClick={() => moveDate(-1)}>
-                <ChevronLeft className="h-4 w-4" />
+              <Button variant="outline" size="icon" className="h-11 w-11 shrink-0" onClick={() => moveDate(-1)}>
+                <ChevronLeft className="h-5 w-5" />
               </Button>
               <Input
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="text-center font-medium"
+                className="text-center font-medium h-11"
               />
-              <Button variant="outline" size="icon" onClick={() => moveDate(1)}>
-                <ChevronRight className="h-4 w-4" />
+              <Button variant="outline" size="icon" className="h-11 w-11 shrink-0" onClick={() => moveDate(1)}>
+                <ChevronRight className="h-5 w-5" />
               </Button>
             </div>
             <div className="flex gap-1.5 mt-2">
@@ -390,7 +390,7 @@ export default function Stunden() {
               {[4, 6, 8, 10].map((h) => (
                 <Button
                   key={h}
-                  size="sm"
+                  className="h-10"
                   variant={hours === h ? "default" : "outline"}
                   onClick={() => setHours(h)}
                 >
@@ -430,6 +430,7 @@ export default function Stunden() {
               <div>
                 <Label className="text-xs">Fahrstunden</Label>
                 <Input
+                  inputMode="decimal"
                   type="number"
                   step="0.25"
                   value={fahrstunden}
@@ -440,6 +441,7 @@ export default function Stunden() {
               <div>
                 <Label className="text-xs">KM gefahren</Label>
                 <Input
+                  inputMode="numeric"
                   type="number"
                   step="1"
                   value={km}
@@ -450,6 +452,7 @@ export default function Stunden() {
               <div>
                 <Label className="text-xs">Taggeld kurz</Label>
                 <Input
+                  inputMode="numeric"
                   type="number"
                   step="1"
                   value={taggeldKurz}
@@ -460,6 +463,7 @@ export default function Stunden() {
               <div>
                 <Label className="text-xs">Taggeld lang</Label>
                 <Input
+                  inputMode="numeric"
                   type="number"
                   step="1"
                   value={taggeldLang}
@@ -560,20 +564,20 @@ export default function Stunden() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8"
+                        className="h-10 w-10"
                         onClick={() => setEditing(r)}
                         aria-label="Bearbeiten"
                       >
-                        <Edit className="h-3.5 w-3.5" />
+                        <Edit className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8"
+                        className="h-10 w-10"
                         onClick={() => remove(r.id)}
                         aria-label="Löschen"
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   )}
@@ -593,7 +597,7 @@ export default function Stunden() {
 
       {/* Edit dialog */}
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-sm sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Buchung bearbeiten</DialogTitle>
           </DialogHeader>
@@ -623,6 +627,7 @@ export default function Stunden() {
               <div>
                 <Label>Stunden</Label>
                 <Input
+                  inputMode="decimal"
                   type="number"
                   step="0.25"
                   name="h"

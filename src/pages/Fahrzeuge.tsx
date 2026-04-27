@@ -127,7 +127,7 @@ export default function Fahrzeuge() {
           </DialogHeader>
           {editing && (
             <form onSubmit={save} className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="col-span-2 space-y-1.5">
                   <Label>Kennzeichen *</Label>
                   <Input name="kennzeichen" required defaultValue={editing.kennzeichen ?? ""} />

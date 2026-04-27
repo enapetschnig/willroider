@@ -192,7 +192,7 @@ export default function Evaluierung() {
           </DialogHeader>
           {editing && (
             <form onSubmit={save} className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="col-span-2 space-y-1.5">
                   <Label>Baustelle *</Label>
                   <select

@@ -187,12 +187,15 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
         </header>
 
-        <main className="flex-1 px-3 sm:px-4 lg:px-6 py-3 sm:py-6 max-w-full pb-24 lg:pb-6">
+        <main className="flex-1 px-3 sm:px-4 lg:px-6 py-3 sm:py-6 max-w-full pb-28 lg:pb-6">
           {children}
         </main>
 
-        {/* Mobile bottom nav */}
-        <nav className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-card border-t flex">
+        {/* Mobile bottom nav with safe-area */}
+        <nav
+          className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-card border-t flex"
+          style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+        >
           {[
             { to: "/", label: "Start", icon: LayoutDashboard, end: true },
             isAdmin

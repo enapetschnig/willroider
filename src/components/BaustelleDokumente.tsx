@@ -180,25 +180,17 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         }}
       />
 
-      {/* Action Buttons */}
-      <div className="grid grid-cols-2 gap-2">
-        <Button
-          onClick={triggerCamera}
-          variant="default"
-          className="h-12"
-          size="lg"
-        >
+      {/* Action Buttons – stacken auf sehr schmalen Screens */}
+      <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 gap-2">
+        <Button onClick={triggerCamera} variant="default" className="h-12" size="lg">
           <Camera className="h-5 w-5 mr-2" />
           Foto aufnehmen
         </Button>
-        <Button
-          onClick={triggerUpload}
-          variant="outline"
-          className="h-12"
-          size="lg"
-        >
+        <Button onClick={triggerUpload} variant="outline" className="h-12" size="lg">
           <Upload className="h-5 w-5 mr-2" />
-          {activeFilter === "alle" ? "Hochladen" : `Hochladen → ${folderMeta(activeFilter).label}`}
+          <span className="truncate">
+            {activeFilter === "alle" ? "Hochladen" : `→ ${folderMeta(activeFilter).label}`}
+          </span>
         </Button>
       </div>
 
@@ -287,7 +279,7 @@ function FilterPill({
   return (
     <button
       onClick={onClick}
-      className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border transition flex items-center gap-1.5 ${
+      className={`shrink-0 px-3.5 py-2.5 rounded-full text-xs font-medium border transition flex items-center gap-1.5 min-h-[40px] ${
         active ? "text-white border-transparent" : "bg-background hover:bg-muted"
       }`}
       style={active ? { background: color } : { color: count > 0 ? color : undefined }}
@@ -337,7 +329,7 @@ function FileCard({
         {/* Visual */}
         <div className="aspect-square bg-muted relative">
           {isImg && thumb ? (
-            <img src={thumb} alt={d.dateiname} className="h-full w-full object-cover" />
+            <img src={thumb} alt={d.dateiname} loading="lazy" className="h-full w-full object-cover" />
           ) : (
             <div className="h-full w-full flex flex-col items-center justify-center gap-1 p-2">
               {isPdf(d.mimetype) ? (
@@ -370,10 +362,10 @@ function FileCard({
       {/* Delete */}
       <button
         onClick={onDelete}
-        className="absolute top-1.5 right-1.5 bg-background/90 hover:bg-destructive hover:text-white rounded p-1 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition shadow"
+        className="absolute top-1.5 right-1.5 bg-background/90 hover:bg-destructive hover:text-white rounded p-1.5 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition shadow"
         aria-label="Löschen"
       >
-        <Trash2 className="h-3 w-3" />
+        <Trash2 className="h-4 w-4" />
       </button>
     </div>
   );

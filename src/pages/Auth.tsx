@@ -148,21 +148,25 @@ export default function Auth() {
             </form>
           ) : (
             <div className="space-y-5">
-              <div className="grid grid-cols-2 gap-2">
-                <Button
+              <div className="flex bg-muted rounded-md p-1">
+                <button
                   type="button"
-                  variant={isLogin ? "default" : "outline"}
                   onClick={() => setIsLogin(true)}
+                  className={`flex-1 h-9 rounded text-sm font-medium transition ${
+                    isLogin ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"
+                  }`}
                 >
                   Anmelden
-                </Button>
-                <Button
+                </button>
+                <button
                   type="button"
-                  variant={!isLogin ? "default" : "outline"}
                   onClick={() => setIsLogin(false)}
+                  className={`flex-1 h-9 rounded text-sm font-medium transition ${
+                    !isLogin ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"
+                  }`}
                 >
                   Registrieren
-                </Button>
+                </button>
               </div>
 
               <form onSubmit={isLogin ? handleLogin : handleSignup} className="space-y-3">

@@ -122,18 +122,18 @@ export default function Baustellen() {
       />
 
       <Card>
-        <CardContent className="p-3 flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-          <div className="relative flex-1 max-w-sm">
+        <CardContent className="p-3 flex flex-col sm:flex-row gap-2 sm:gap-3 items-stretch sm:items-center">
+          <div className="relative flex-1 sm:max-w-sm">
             <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Suche nach BVH, Kostenstelle, Bauherr, Ort"
+              placeholder="Suche BVH, Kostenstelle, Bauherr, Ort"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
+              className="pl-9 h-11 sm:h-10"
             />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-44">
+            <SelectTrigger className="w-full sm:w-44 h-11 sm:h-10">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -223,7 +223,7 @@ export default function Baustellen() {
             <DialogTitle>Neue Baustelle anlegen</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="col-span-2 space-y-1.5">
                 <Label>BVH (Bauvorhaben) *</Label>
                 <Input name="bvh_name" required />
