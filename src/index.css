@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Holzbau Willroider design system.
+   Brand palette derived from logo:
+   - Yellow:   #F5D300
+   - Red/Burgundy: #B0353C
+   - Black:    #111111
+*/
+
+@layer base {
+  :root {
+    --background: 0 0% 99%;
+    --foreground: 0 0% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 10%;
+
+    /* Willroider Burgundy as primary */
+    --primary: 354 53% 45%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 50 100% 50%;
+    --secondary-foreground: 0 0% 10%;
+
+    --muted: 0 0% 95%;
+    --muted-foreground: 0 0% 40%;
+
+    --accent: 50 100% 50%;
+    --accent-foreground: 0 0% 10%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 89%;
+    --input: 0 0% 92%;
+    --ring: 354 53% 45%;
+
+    --radius: 0.6rem;
+
+    /* Brand */
+    --willroider-yellow: 50 100% 50%;
+    --willroider-red: 354 53% 45%;
+    --willroider-black: 0 0% 7%;
+
+    /* Status colors for Gantt */
+    --status-active: 142 70% 45%;
+    --status-planned: 210 80% 55%;
+    --status-done: 0 0% 60%;
+    --status-paused: 30 90% 55%;
+
+    --shadow-soft: 0 2px 8px hsl(0 0% 0% / 0.08);
+    --shadow-medium: 0 4px 16px hsl(0 0% 0% / 0.12);
+    --transition-smooth: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 0 0% 20%;
+    --sidebar-primary: 354 53% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 96%;
+    --sidebar-accent-foreground: 0 0% 10%;
+    --sidebar-border: 0 0% 90%;
+    --sidebar-ring: 354 53% 45%;
+  }
+
+  .dark {
+    --background: 0 0% 8%;
+    --foreground: 0 0% 95%;
+
+    --card: 0 0% 12%;
+    --card-foreground: 0 0% 95%;
+
+    --popover: 0 0% 12%;
+    --popover-foreground: 0 0% 95%;
+
+    --primary: 354 60% 55%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 50 90% 50%;
+    --secondary-foreground: 0 0% 8%;
+
+    --muted: 0 0% 18%;
+    --muted-foreground: 0 0% 65%;
+
+    --accent: 50 90% 50%;
+    --accent-foreground: 0 0% 8%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 22%;
+    --input: 0 0% 22%;
+    --ring: 354 60% 55%;
+    --sidebar-background: 0 0% 10%;
+    --sidebar-foreground: 0 0% 90%;
+    --sidebar-primary: 354 60% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 16%;
+    --sidebar-accent-foreground: 0 0% 95%;
+    --sidebar-border: 0 0% 20%;
+    --sidebar-ring: 354 60% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Gantt chart styles */
+.gantt-grid {
+  background-image:
+    linear-gradient(to right, hsl(var(--border)) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(var(--border)) 1px, transparent 1px);
+}
+
+.gantt-bar {
+  @apply rounded-sm shadow-sm;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
