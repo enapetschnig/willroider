@@ -110,21 +110,17 @@ export default function Auth() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-primary via-primary to-[hsl(354_53%_30%)]">
-      <Card className="w-full max-w-md shadow-2xl border-0 overflow-hidden">
-        <div className="bg-primary text-primary-foreground px-6 py-8 text-center">
-          <div className="bg-white inline-block p-3 rounded-lg shadow-lg mb-4">
-            <img
-              src="/willroider-logo.jpg"
-              alt="Holzbau Willroider"
-              className="h-16 w-auto block"
-            />
-          </div>
-          <h1 className="text-2xl font-bold">Holzbau Willroider</h1>
-          <p className="text-sm opacity-90 mt-1">Baustellenmanagement &amp; Zeiterfassung</p>
-        </div>
-        <div className="h-1.5 bg-secondary" />
-        <CardHeader className="pb-2 pt-5"></CardHeader>
+    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
+      <Card className="w-full max-w-md shadow-sm border">
+        <CardHeader className="text-center pb-4 pt-8">
+          <img
+            src="/willroider-logo.jpg"
+            alt="Holzbau Willroider"
+            className="h-14 w-auto mx-auto mb-4"
+          />
+          <CardTitle className="text-xl font-semibold">Holzbau Willroider</CardTitle>
+          <CardDescription className="text-xs">Baustellenmanagement</CardDescription>
+        </CardHeader>
         <CardContent>
           {showPasswordReset ? (
             <form onSubmit={handlePasswordReset} className="space-y-4">
