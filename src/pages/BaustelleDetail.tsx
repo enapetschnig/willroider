@@ -62,6 +62,7 @@ export default function BaustelleDetail() {
   const [evals, setEvals] = useState<Eval[]>([]);
   const [partie, setPartie] = useState<Partie | null>(null);
   const [team, setTeam] = useState<Profile[]>([]);
+  const [allPartien, setAllPartien] = useState<Partie[]>([]);
   const [terminDialog, setTerminDialog] = useState(false);
   const [kostenDialog, setKostenDialog] = useState(false);
 
@@ -83,17 +84,89 @@ export default function BaustelleDetail() {
     setStunden((s.data as Stunden[]) ?? []);
     setEvals((e.data as Eval[]) ?? []);
 
+    const { data: allP } = await supabase.from("partien").select("*").order("name");
+    setAllPartien((allP as Partie[]) ?? []);
+
     if (baustelle?.partie_id) {
-      const [pRes, mRes] = await Promise.all([
-        supabase.from("partien").select("*").eq("id", baustelle.partie_id).maybeSingle(),
-        supabase.from("profiles").select("*").eq("partie_id", baustelle.partie_id).order("nachname"),
-      ]);
-      setPartie((pRes.data as Partie) ?? null);
-      setTeam((mRes.data as Profile[]) ?? []);
+      const partieRow = (allP as Partie[] | null)?.find((p) => p.id === baustelle.partie_id) ?? null;
+      const { data: members } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("partie_id", baustelle.partie_id)
+        .order("nachname");
+      setPartie(partieRow);
+      setTeam((members as Profile[]) ?? []);
     } else {
       setPartie(null);
       setTeam([]);
     }
+  };
+
+  const assignPartie = async (partieId: string | null) => {
+    if (!b) return;
+    const { error } = await supabase
+      .from("baustellen")
+      .update({ partie_id: partieId })
+      .eq("id", b.id);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    } else {
+      toast({ title: partieId ? "Partie zugeordnet" : "Partie entfernt" });
+      load();
+    }
+  };
+
+  const setPflichtUnterweisung = async (typ: "" | "werkstatt" | "baustelle" | "fertigteilmontage") => {
+    if (!b) return;
+    if (!b.partie_id) {
+      toast({
+        variant: "destructive",
+        title: "Erst Partie zuordnen",
+        description: "Die Pflicht-Unterweisung gilt für die Mitarbeiter der zugeordneten Partie.",
+      });
+      return;
+    }
+    if (!typ) {
+      toast({ title: "Pflicht-Unterweisung wird nur entfernt, wenn keine angelegt ist." });
+      return;
+    }
+    const { data: members } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("partie_id", b.partie_id)
+      .eq("is_active", true);
+
+    const { data: evalData, error: evalErr } = await supabase
+      .from("evaluierungen")
+      .insert({
+        baustelle_id: b.id,
+        datum: b.start_datum ?? new Date().toISOString().slice(0, 10),
+        typ,
+        checkliste: {},
+        abgeschlossen: false,
+      } as any)
+      .select()
+      .single();
+    if (evalErr) {
+      toast({ variant: "destructive", title: "Fehler", description: evalErr.message });
+      return;
+    }
+    if (members && members.length > 0) {
+      const rows = members.map((m: any) => ({
+        evaluierung_id: evalData.id,
+        mitarbeiter_id: m.id,
+      }));
+      await supabase.from("evaluierung_unterschriften").insert(rows as any);
+    }
+    await supabase
+      .from("baustellen")
+      .update({ pflicht_evaluierung_id: evalData.id })
+      .eq("id", b.id);
+    toast({
+      title: "Pflicht-Unterweisung angelegt",
+      description: `${members?.length ?? 0} Mitarbeiter müssen unterschreiben.`,
+    });
+    load();
   };
 
   useEffect(() => {
@@ -268,20 +341,96 @@ export default function BaustelleDetail() {
         </TabsContent>
 
         <TabsContent value="team">
-          {!partie ? (
-            <Card>
-              <CardContent className="p-6 text-center space-y-2">
-                <Users className="h-8 w-8 mx-auto text-muted-foreground opacity-50" />
-                <div className="text-sm">
-                  Dieser Baustelle ist noch keine Partie zugeordnet.
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  Partie in den Stammdaten setzen, um das Team zu sehen.
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-3">
+          <div className="space-y-3">
+            {/* Partie-Zuordnung (Admin-only) */}
+            {isAdmin && (
+              <Card>
+                <CardContent className="p-3 space-y-2">
+                  <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
+                    Partie-Zuordnung
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      onClick={() => assignPartie(null)}
+                      className={`px-2.5 py-1.5 rounded-full text-xs font-medium border ${
+                        !b.partie_id ? "bg-muted" : "bg-background hover:bg-muted"
+                      }`}
+                    >
+                      — keine —
+                    </button>
+                    {allPartien.map((p) => {
+                      const active = p.id === b.partie_id;
+                      return (
+                        <button
+                          key={p.id}
+                          onClick={() => assignPartie(p.id)}
+                          className={`px-2.5 py-1.5 rounded-full text-xs font-medium border flex items-center gap-1.5 ${
+                            active ? "text-white border-transparent" : "bg-background hover:bg-muted"
+                          }`}
+                          style={active ? { background: p.farbcode } : undefined}
+                        >
+                          <span
+                            className="h-2.5 w-2.5 rounded-full"
+                            style={{ background: p.farbcode }}
+                          />
+                          {p.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Pflicht-Unterweisung (Admin-only) */}
+            {isAdmin && b.partie_id && (
+              <Card>
+                <CardContent className="p-3 space-y-2">
+                  <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
+                    Pflicht-Unterweisung für die zugeordneten Mitarbeiter
+                  </div>
+                  {b.pflicht_evaluierung_id ? (
+                    <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-2">
+                      Pflicht-Unterweisung bereits angelegt. Mitarbeiter erhalten beim
+                      App-Öffnen den Sign-Gate.
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        onClick={() => setPflichtUnterweisung("werkstatt")}
+                        className="px-2.5 py-1.5 rounded-full text-xs font-medium border bg-background hover:bg-muted"
+                      >
+                        Werkstatt
+                      </button>
+                      <button
+                        onClick={() => setPflichtUnterweisung("baustelle")}
+                        className="px-2.5 py-1.5 rounded-full text-xs font-medium border bg-background hover:bg-muted"
+                      >
+                        Baustelle
+                      </button>
+                      <button
+                        onClick={() => setPflichtUnterweisung("fertigteilmontage")}
+                        className="px-2.5 py-1.5 rounded-full text-xs font-medium border bg-background hover:bg-muted"
+                      >
+                        Fertigteilmontage
+                      </button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {!partie ? (
+              <Card>
+                <CardContent className="p-6 text-center space-y-2">
+                  <Users className="h-8 w-8 mx-auto text-muted-foreground opacity-50" />
+                  <div className="text-sm">
+                    Dieser Baustelle ist noch keine Partie zugeordnet.
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
               <Card>
                 <CardContent className="p-4 flex items-center gap-3">
                   <div
@@ -350,8 +499,9 @@ export default function BaustelleDetail() {
                   </Card>
                 )}
               </div>
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </TabsContent>
 
         <TabsContent value="termine">

@@ -15,7 +15,6 @@ import {
   FileText,
   Image as ImageIcon,
   Trash2,
-  Download,
   Layers,
   FolderOpen,
   File as FileIcon,
@@ -25,7 +24,7 @@ import type { Database } from "@/integrations/supabase/types";
 type Dokument = Database["public"]["Tables"]["dokumente"]["Row"];
 
 const FOLDERS = [
-  { key: "baustellenmeldung", label: "Baustellenmeldung", icon: FileText, color: "#dc2626" },
+  { key: "baustellenanlage", label: "Baustellenanlage", icon: FileText, color: "#dc2626" },
   { key: "fotos", label: "Fotos", icon: ImageIcon, color: "#3b82f6" },
   { key: "plaene", label: "Pläne", icon: FileText, color: "#8b5cf6" },
   { key: "berichte", label: "Berichte", icon: FileText, color: "#10b981" },

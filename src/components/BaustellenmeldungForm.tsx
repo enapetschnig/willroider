@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -9,13 +8,11 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { generateBaustellenmeldungPdf } from "@/lib/baustellenmeldungPdf";
-import { UNTERWEISUNG_OPTIONS } from "@/lib/unterweisungen";
-import { ShieldCheck, Save } from "lucide-react";
-import type { Database, BaustellenStatus, EvaluierungTyp } from "@/integrations/supabase/types";
+import { Save } from "lucide-react";
+import type { Database } from "@/integrations/supabase/types";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
-type Partie = Database["public"]["Tables"]["partien"]["Row"];
 
 interface Props {
   initial?: Partial<Baustelle> | null;
@@ -23,11 +20,15 @@ interface Props {
   onCancel?: () => void;
 }
 
+/**
+ * Erfasst die Baustelle exakt nach der Vorlage „1.1 Baustellenanlage.docx".
+ * Nur die 13 Originalfelder. Partie / Pflicht-Unterweisung etc. werden
+ * danach in der BaustelleDetail-Seite (Team-Tab) zugeordnet.
+ */
 export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
   const { user } = useAuth();
   const { toast } = useToast();
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [partien, setPartien] = useState<Partie[]>([]);
   const [saving, setSaving] = useState(false);
 
   const [bvhName, setBvhName] = useState(initial?.bvh_name ?? "");
@@ -54,19 +55,13 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
     initial?.anzahl_mitarbeiter != null ? String(initial.anzahl_mitarbeiter) : ""
   );
   const [bautraeger, setBautraeger] = useState<boolean>(initial?.bautraeger === true);
-  const [partieId, setPartieId] = useState<string>(initial?.partie_id ?? "");
-  const [status, setStatus] = useState<BaustellenStatus>(initial?.status ?? "geplant");
-  const [pflichtEval, setPflichtEval] = useState<"" | EvaluierungTyp>("");
-  const [notizen, setNotizen] = useState(initial?.notizen ?? "");
 
   useEffect(() => {
-    Promise.all([
-      supabase.from("profiles").select("*").order("nachname"),
-      supabase.from("partien").select("*").order("name"),
-    ]).then(([p, pt]) => {
-      setProfiles((p.data as Profile[]) ?? []);
-      setPartien((pt.data as Partie[]) ?? []);
-    });
+    supabase
+      .from("profiles")
+      .select("*")
+      .order("nachname")
+      .then(({ data }) => setProfiles((data as Profile[]) ?? []));
   }, []);
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -94,10 +89,8 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
       auftragssumme: auftragssumme ? Number(auftragssumme) : null,
       anzahl_mitarbeiter: anzahlMitarbeiter ? Number(anzahlMitarbeiter) : null,
       bautraeger,
-      partie_id: partieId || null,
-      status,
-      notizen: notizen || null,
       created_by: user?.id ?? null,
+      ...(initial?.id ? {} : { status: "geplant" }),
     };
 
     let id = initial?.id;
@@ -130,45 +123,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
       id = savedRow.id;
     }
 
-    // Pflicht-Evaluierung anlegen, falls gewählt UND Partie zugewiesen
-    if (pflichtEval && partieId && !savedRow.pflicht_evaluierung_id) {
-      const { data: members } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("partie_id", partieId)
-        .eq("is_active", true);
-
-      const { data: evalData, error: evalErr } = await supabase
-        .from("evaluierungen")
-        .insert({
-          baustelle_id: id!,
-          datum: startDatum || new Date().toISOString().slice(0, 10),
-          typ: pflichtEval,
-          vortragender_id: bauleiterId || user?.id || null,
-          checkliste: {},
-          abgeschlossen: false,
-        } as any)
-        .select()
-        .single();
-
-      if (!evalErr && evalData && members && members.length > 0) {
-        const rows = members.map((m: any) => ({
-          evaluierung_id: evalData.id,
-          mitarbeiter_id: m.id,
-        }));
-        await supabase.from("evaluierung_unterschriften").insert(rows as any);
-        await supabase
-          .from("baustellen")
-          .update({ pflicht_evaluierung_id: evalData.id })
-          .eq("id", id!);
-        toast({
-          title: "Pflicht-Evaluierung angelegt",
-          description: `${members.length} Mitarbeiter müssen unterschreiben.`,
-        });
-      }
-    }
-
-    // PDF generieren und hochladen
+    // PDF 1:1 nach Vorlage erzeugen und ablegen
     const bauleiterName = bauleiterId
       ? (() => {
           const p = profiles.find((x) => x.id === bauleiterId);
@@ -177,7 +132,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
       : "";
     const pdfBlob = generateBaustellenmeldungPdf({ ...savedRow, ...payload }, bauleiterName);
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    const path = `${id}/baustellenmeldung/baustellenmeldung_${dateStr}.pdf`;
+    const path = `${id}/baustellenanlage/baustellenanlage_${dateStr}.pdf`;
     const { error: upErr } = await supabase.storage
       .from("baustellen")
       .upload(path, pdfBlob, { contentType: "application/pdf", upsert: true });
@@ -185,8 +140,8 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
     if (!upErr) {
       await supabase.from("dokumente").insert({
         baustelle_id: id!,
-        ordner: "baustellenmeldung",
-        dateiname: `Baustellenmeldung ${bvhName} ${dateStr}.pdf`,
+        ordner: "baustellenanlage",
+        dateiname: `Baustellenanlage ${bvhName} ${dateStr}.pdf`,
         storage_path: path,
         mimetype: "application/pdf",
         groesse: pdfBlob.size,
@@ -196,7 +151,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
 
     toast({
       title: initial?.id ? "Baustelle aktualisiert" : "Baustelle angelegt",
-      description: "PDF im Ordner Baustellenmeldung abgelegt.",
+      description: "PDF im Ordner Baustellenanlage abgelegt.",
     });
     setSaving(false);
     onSaved?.(id!);
@@ -204,7 +159,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      {/* Empfänger-Header */}
+      {/* Empfänger-Header (wie Vorlage oben) */}
       <Card className="border-2">
         <CardContent className="p-3 sm:p-4">
           <div className="grid grid-cols-3 gap-2 mb-3">
@@ -223,7 +178,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
         </CardContent>
       </Card>
 
-      {/* Stamm-Felder im Stil der docx */}
+      {/* Felder exakt in der Reihenfolge der Vorlage */}
       <div className="space-y-3">
         <Field label="Bauvorhaben *">
           <Input value={bvhName} onChange={(e) => setBvhName(e.target.value)} required autoFocus />
@@ -267,28 +222,17 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
           </Field>
         </div>
         <Field label="Wohnanschrift Bauherr">
-          <Input
-            value={bauherrAdresse}
-            onChange={(e) => setBauherrAdresse(e.target.value)}
-          />
+          <Input value={bauherrAdresse} onChange={(e) => setBauherrAdresse(e.target.value)} />
         </Field>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Baubeginn">
-            <Input
-              type="date"
-              value={startDatum}
-              onChange={(e) => setStartDatum(e.target.value)}
-            />
+            <Input type="date" value={startDatum} onChange={(e) => setStartDatum(e.target.value)} />
           </Field>
           <Field label="Vorraussichtl. Ende">
-            <Input
-              type="date"
-              value={endDatum}
-              onChange={(e) => setEndDatum(e.target.value)}
-            />
+            <Input type="date" value={endDatum} onChange={(e) => setEndDatum(e.target.value)} />
           </Field>
         </div>
-        <Field label="Verantwortlicher Bauleiter / § 9 VStG-Beauftragter">
+        <Field label="Verantwortlicher Bauleiter und Beauftragter im Sinne des § 9 VStG">
           <select
             value={bauleiterId}
             onChange={(e) => setBauleiterId(e.target.value)}
@@ -302,24 +246,22 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
             ))}
           </select>
         </Field>
+        <Field label="Erfasst unter">
+          <Input
+            value={kostenstelle}
+            onChange={(e) => setKostenstelle(e.target.value)}
+            placeholder="z.B. KS-2026-001"
+          />
+        </Field>
+        <Field label="Art der Bauarbeiten">
+          <Input
+            value={artBauarbeiten}
+            onChange={(e) => setArtBauarbeiten(e.target.value)}
+            placeholder="Holzfertighaus, Dachstuhl…"
+          />
+        </Field>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Erfasst unter (Kostenstelle)">
-            <Input
-              value={kostenstelle}
-              onChange={(e) => setKostenstelle(e.target.value)}
-              placeholder="z.B. KS-2026-001"
-            />
-          </Field>
-          <Field label="Art der Bauarbeiten">
-            <Input
-              value={artBauarbeiten}
-              onChange={(e) => setArtBauarbeiten(e.target.value)}
-              placeholder="Holzfertighaus, Dachstuhl..."
-            />
-          </Field>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Auftragssumme ca. (EUR)">
+          <Field label="Auftragssumme, ca. (EUR)">
             <Input
               type="number"
               inputMode="decimal"
@@ -345,80 +287,10 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
         </div>
       </div>
 
-      {/* Partie + Pflicht-Evaluierung */}
-      <Card className="border-primary/30">
-        <CardContent className="p-3 sm:p-4 space-y-3">
-          <div className="text-sm font-semibold flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-primary" /> Zuordnung &amp; Sicherheit
-          </div>
-          <Field label="Partie (Polier)">
-            <select
-              value={partieId}
-              onChange={(e) => setPartieId(e.target.value)}
-              className="w-full h-10 rounded-md border bg-background px-3 text-sm"
-            >
-              <option value="">— ohne Partie —</option>
-              {partien.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Pflicht-Unterweisung für die zugeordneten Mitarbeiter">
-            <select
-              value={pflichtEval}
-              onChange={(e) => setPflichtEval(e.target.value as any)}
-              className="w-full h-10 rounded-md border bg-background px-3 text-sm"
-              disabled={!partieId || !!initial?.pflicht_evaluierung_id}
-            >
-              <option value="">Keine</option>
-              {UNTERWEISUNG_OPTIONS.map((u) => (
-                <option key={u.value} value={u.value}>
-                  {u.label}
-                </option>
-              ))}
-            </select>
-            {pflichtEval && (
-              <div className="text-[11px] text-muted-foreground mt-1">
-                {UNTERWEISUNG_OPTIONS.find((u) => u.value === pflichtEval)?.description}
-              </div>
-            )}
-            {pflichtEval && partieId && !initial?.pflicht_evaluierung_id && (
-              <div className="text-[11px] text-primary mt-1">
-                → Mitarbeiter dieser Partie müssen die Unterweisung beim nächsten App-Öffnen
-                lesen und unterschreiben.
-              </div>
-            )}
-            {initial?.pflicht_evaluierung_id && (
-              <div className="text-[11px] text-emerald-600 mt-1">
-                Pflicht-Unterweisung bereits angelegt.
-              </div>
-            )}
-          </Field>
-          <Field label="Status">
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as BaustellenStatus)}
-              className="w-full h-10 rounded-md border bg-background px-3 text-sm"
-            >
-              <option value="geplant">Geplant</option>
-              <option value="aktiv">Aktiv</option>
-              <option value="pausiert">Pausiert</option>
-              <option value="abgeschlossen">Abgeschlossen</option>
-            </select>
-          </Field>
-          <Field label="Notizen">
-            <Textarea
-              value={notizen}
-              onChange={(e) => setNotizen(e.target.value)}
-              rows={2}
-            />
-          </Field>
-        </CardContent>
-      </Card>
-
-      <div className="flex flex-col sm:flex-row gap-2 sticky bottom-0 bg-background pt-2">
+      <div
+        className="flex flex-col sm:flex-row gap-2 sticky bottom-0 bg-background pt-2 -mx-1 px-1"
+        style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 4px)" }}
+      >
         {onCancel && (
           <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
             Abbrechen

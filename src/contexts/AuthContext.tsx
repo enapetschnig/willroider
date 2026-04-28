@@ -21,8 +21,10 @@ type AuthContextValue = {
   role: AppRole | null;
   loading: boolean;
   isAdmin: boolean;
+  isPolier: boolean;
   canPlan: boolean;
   canReview: boolean;
+  canCreateBaustelle: boolean;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
 };
@@ -92,12 +94,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const isAdmin = role === "geschaeftsfuehrung" || role === "buero" || role === "bauleiter";
+  const isPolier = !!profile?.is_partieleiter;
   const canPlan = isAdmin;
   const canReview = isAdmin || role === "zimmermeister";
+  const canCreateBaustelle = isAdmin || isPolier;
 
   return (
     <AuthContext.Provider
-      value={{ session, user, profile, role, loading, isAdmin, canPlan, canReview, signOut, refresh }}
+      value={{
+        session,
+        user,
+        profile,
+        role,
+        loading,
+        isAdmin,
+        isPolier,
+        canPlan,
+        canReview,
+        canCreateBaustelle,
+        signOut,
+        refresh,
+      }}
     >
       {children}
     </AuthContext.Provider>

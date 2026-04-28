@@ -65,7 +65,7 @@ const STATUS_LABEL: Record<BaustellenStatus, string> = {
 };
 
 export default function Arbeitsplanung() {
-  const { isAdmin } = useAuth();
+  const { canCreateBaustelle } = useAuth();
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
   const [termine, setTermine] = useState<Termin[]>([]);
@@ -212,7 +212,7 @@ export default function Arbeitsplanung() {
         title="Arbeitsplanung"
         description="Gantt-Chart aller Baustellen über Kalenderwochen, gruppiert nach Partien."
         actions={
-          isAdmin ? (
+          canCreateBaustelle ? (
             <Button
               onClick={() => {
                 setEditing({});

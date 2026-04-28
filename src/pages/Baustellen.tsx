@@ -35,7 +35,7 @@ const STATUS_LABEL: Record<BaustellenStatus, string> = {
 };
 
 export default function Baustellen() {
-  const { isAdmin } = useAuth();
+  const { canCreateBaustelle } = useAuth();
   const [data, setData] = useState<Baustelle[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
   const [search, setSearch] = useState("");
@@ -77,7 +77,7 @@ export default function Baustellen() {
         title="Baustellen"
         description="Alle Baustellen mit Stammdaten, Status und Zuordnungen."
         actions={
-          isAdmin ? (
+          canCreateBaustelle ? (
             <Button onClick={() => setDialogOpen(true)}>
               <Plus className="h-4 w-4 mr-2" /> Neue Baustelle
             </Button>
