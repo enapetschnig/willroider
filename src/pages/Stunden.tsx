@@ -182,6 +182,10 @@ export default function Stunden() {
   const [taetigkeit, setTaetigkeit] = useState<string>("");
   const [fehlzeitTyp, setFehlzeitTyp] = useState<string>("");
   const [inFirma, setInFirma] = useState<boolean>(false); // Arbeit in der Firma → keine Diäten
+  const [continuationOf, setContinuationOf] = useState<{
+    bvhName: string | null;
+    endZeit: string;
+  } | null>(null); // gesetzt wenn nach +Weitere Baustelle
   const [fahrstunden, setFahrstunden] = useState<number>(0);
   const [taggeldKurz, setTaggeldKurz] = useState<number>(0);
   const [taggeldLang, setTaggeldLang] = useState<number>(0);
@@ -335,6 +339,27 @@ export default function Stunden() {
     0
   );
 
+  // Pause: pro Tag nur einmal (vom Lohn her). Wenn der primäre User heute
+  // irgendwo eine Buchung mit pause_von/bis hat, wird der Pause-Toggle gesperrt.
+  const pauseAlreadyBookedToday = useMemo(() => {
+    const blockWithPause = todayBlocks.find((r) => r.pause_von && r.pause_bis);
+    if (!blockWithPause) return null;
+    return {
+      von: fmtTime(blockWithPause.pause_von),
+      bis: fmtTime(blockWithPause.pause_bis),
+    };
+  }, [todayBlocks]);
+
+  // Pause-Toggle automatisch ausschalten, wenn am Tag schon eine gebucht wurde
+  useEffect(() => {
+    if (pauseAlreadyBookedToday && hasPause) setHasPause(false);
+  }, [pauseAlreadyBookedToday]);
+
+  // Continuation-State zurücksetzen, wenn Datum oder primärer User wechselt
+  useEffect(() => {
+    setContinuationOf(null);
+  }, [date, primaryUserId]);
+
   // ─── Konflikt-Warnung: gleicher Mitarbeiter + Zeitfenster überschneidet sich ───
   // (Mehrere Buchungen pro Tag sind erlaubt — auch auf gleicher Baustelle —
   //  solange sie sich nicht zeitlich überschneiden.)
@@ -378,9 +403,10 @@ export default function Stunden() {
     setKm(0);
     setNotizen("");
     setExtras(false);
+    setContinuationOf(null);
   };
 
-  const partialResetForNextBaustelle = (lastBlock?: Stunde) => {
+  const partialResetForNextBaustelle = (lastBlock?: Stunde, lastBaustelleName?: string | null) => {
     setBaustelleId("");
     setTaetigkeit("");
     setInFirma(false);
@@ -391,14 +417,18 @@ export default function Stunden() {
     setNotizen("");
     setExtras(false);
     if (lastBlock?.end_zeit) {
-      // Nahtloser Anschluss: Start = vorheriges Ende
       const newStart = fmtTime(lastBlock.end_zeit) || DEFAULT_START;
       setStartZeit(newStart);
-      // Standard-Fenster (4 h) — ist eh sofort anpassbar
+      // Default-Ende: Anschluss + 4h, lässt sich sofort anpassen
       setEndZeit(shiftTime(newStart, 4 * 60));
       setHasPause(false); // Pause war ja schon im ersten Block
+      setContinuationOf({
+        bvhName: lastBaustelleName ?? null,
+        endZeit: newStart,
+      });
     } else {
       resetTimeFields();
+      setContinuationOf(null);
     }
   };
 
@@ -541,7 +571,9 @@ export default function Stunden() {
     });
 
     if (continueFlag && !isFehlzeit && lastInserted) {
-      partialResetForNextBaustelle(lastInserted);
+      const bName =
+        baustellen.find((b) => b.id === lastInserted!.baustelle_id)?.bvh_name ?? null;
+      partialResetForNextBaustelle(lastInserted, bName);
     } else {
       fullReset();
     }
@@ -837,23 +869,72 @@ export default function Stunden() {
               {/* Arbeit-Mode: Time-Range */}
               {!fehlzeitTyp && (
                 <div className="space-y-3 border-t pt-3">
+                  {/* Anschluss-Banner: zeigt nahtlosen Übergang vom letzten Block */}
+                  {continuationOf && (
+                    <div className="rounded-md border-2 border-primary/40 bg-primary/5 p-2.5 flex items-start gap-2 text-xs">
+                      <span className="h-5 w-5 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-bold shrink-0">
+                        2.
+                      </span>
+                      <div className="flex-1">
+                        <div className="font-semibold text-foreground">
+                          Anschluss-Buchung ab {continuationOf.endZeit}
+                        </div>
+                        <div className="text-muted-foreground mt-0.5">
+                          {continuationOf.bvhName
+                            ? `Direkt nach „${continuationOf.bvhName}" — Pause war im ersten Block.`
+                            : "Direkt nach dem vorigen Block — Pause war schon dort."}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-2 gap-2">
                     <TimeStepper label="Startzeit" value={startZeit} onChange={setStartZeit} big />
                     <TimeStepper label="Endzeit" value={endZeit} onChange={setEndZeit} big />
                   </div>
 
-                  <div className="flex items-center gap-2 pt-1">
-                    <Switch checked={hasPause} onCheckedChange={setHasPause} id="has_pause" />
-                    <Label htmlFor="has_pause" className="text-sm cursor-pointer">
-                      Pause angeben
-                    </Label>
-                  </div>
-
-                  {hasPause && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <TimeStepper label="Pause von" value={pauseVon} onChange={setPauseVon} />
-                      <TimeStepper label="Pause bis" value={pauseBis} onChange={setPauseBis} />
+                  {/* Pause-Sektion: gesperrt wenn am Tag schon eine gebucht ist */}
+                  {pauseAlreadyBookedToday ? (
+                    <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2.5 flex items-start gap-2 text-xs">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <div className="font-semibold text-emerald-900">
+                          Pause heute schon gebucht
+                        </div>
+                        <div className="text-emerald-800 mt-0.5">
+                          {pauseAlreadyBookedToday.von}–{pauseAlreadyBookedToday.bis} im vorherigen
+                          Block — keine zweite Pause nötig.
+                        </div>
+                      </div>
                     </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 pt-1">
+                        <Switch
+                          checked={hasPause}
+                          onCheckedChange={setHasPause}
+                          id="has_pause"
+                        />
+                        <Label htmlFor="has_pause" className="text-sm cursor-pointer">
+                          Pause angeben
+                        </Label>
+                      </div>
+
+                      {hasPause && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <TimeStepper
+                            label="Pause von"
+                            value={pauseVon}
+                            onChange={setPauseVon}
+                          />
+                          <TimeStepper
+                            label="Pause bis"
+                            value={pauseBis}
+                            onChange={setPauseBis}
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
 
                   {/* Live-Arbeitszeit */}
@@ -1016,18 +1097,25 @@ export default function Stunden() {
               {/* Submit-Buttons */}
               <div className="flex flex-col sm:flex-row gap-2">
                 <Button onClick={() => submit(false)} className="flex-1 h-12 text-base">
-                  <Plus className="h-5 w-5 mr-2" /> Speichern
+                  <Plus className="h-5 w-5 mr-2" />
+                  {continuationOf ? "Fertig — Speichern" : "Speichern"}
                 </Button>
                 {!fehlzeitTyp && (
                   <Button
                     onClick={() => submit(true)}
                     variant="outline"
                     className="flex-1 h-12"
+                    title="Speichern und direkt im Anschluss eine weitere Baustelle buchen"
                   >
                     + weitere Baustelle
                   </Button>
                 )}
               </div>
+              {!fehlzeitTyp && !continuationOf && (
+                <div className="text-[11px] text-muted-foreground text-center -mt-1">
+                  Bei Wechsel auf eine andere Baustelle am selben Tag → „+ weitere Baustelle"
+                </div>
+              )}
             </CardContent>
           </Card>
 
