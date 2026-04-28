@@ -62,18 +62,21 @@ const FEHLZEITEN = [
 const initials = (p: { vorname: string; nachname: string }) =>
   `${p.vorname[0] ?? ""}${p.nachname[0] ?? ""}`.toUpperCase();
 
+type Mode = "self" | "polier" | "admin";
+
 export default function Stunden() {
-  const { user, profile } = useAuth();
+  const { user, profile, isAdmin } = useAuth();
   const { toast } = useToast();
   const [rows, setRows] = useState<Stunde[]>([]);
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [editing, setEditing] = useState<Partial<Stunde> | null>(null);
   const [extras, setExtras] = useState(false);
 
-  // Polier-Mode
   const [polierPartie, setPolierPartie] = useState<Partie | null>(null);
-  const [partieMembers, setPartieMembers] = useState<Profile[]>([]);
+  const [allMembers, setAllMembers] = useState<Profile[]>([]);
+  const [allPartien, setAllPartien] = useState<Partie[]>([]);
   const [forUserId, setForUserId] = useState<string>("");
+  const [memberSearch, setMemberSearch] = useState<string>("");
 
   const todayIso = () => new Date().toISOString().slice(0, 10);
 
@@ -88,36 +91,54 @@ export default function Stunden() {
   const [km, setKm] = useState<number>(0);
   const [notizen, setNotizen] = useState<string>("");
 
-  const isPolier = !!polierPartie;
+  const mode: Mode = isAdmin ? "admin" : polierPartie ? "polier" : "self";
+  const hasPicker = mode !== "self";
 
-  // ─── Polier-Detektion (genau wenn dieser User Partieleiter einer Partie ist) ───
+  // ─── Detektion + Laden Mitglieder/Partien je nach Modus ───
   useEffect(() => {
     if (!user) return;
-    supabase
-      .from("partien")
-      .select("*")
-      .eq("partieleiter_id", user.id)
-      .maybeSingle()
-      .then(async ({ data: p }) => {
-        if (!p) {
-          setPolierPartie(null);
-          setPartieMembers([]);
-          setForUserId(user.id);
-          return;
-        }
-        setPolierPartie(p as Partie);
-        const { data: members } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("partie_id", p.id)
-          .eq("is_active", true)
-          .order("nachname");
-        setPartieMembers((members as Profile[]) ?? []);
+    (async () => {
+      if (isAdmin) {
+        const [{ data: members }, { data: partien }] = await Promise.all([
+          supabase
+            .from("profiles")
+            .select("*")
+            .eq("is_active", true)
+            .order("nachname"),
+          supabase.from("partien").select("*").order("name"),
+        ]);
+        setAllMembers((members as Profile[]) ?? []);
+        setAllPartien((partien as Partie[]) ?? []);
+        setPolierPartie(null);
         setForUserId(user.id);
-      });
-  }, [user]);
+        return;
+      }
+      // Polier-Detektion
+      const { data: p } = await supabase
+        .from("partien")
+        .select("*")
+        .eq("partieleiter_id", user.id)
+        .maybeSingle();
+      if (!p) {
+        setPolierPartie(null);
+        setAllMembers([]);
+        setForUserId(user.id);
+        return;
+      }
+      setPolierPartie(p as Partie);
+      setAllPartien([p as Partie]);
+      const { data: members } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("partie_id", p.id)
+        .eq("is_active", true)
+        .order("nachname");
+      setAllMembers((members as Profile[]) ?? []);
+      setForUserId(user.id);
+    })();
+  }, [user, isAdmin]);
 
-  // ─── Daten laden: Buchungen (eigene + falls Polier auch der Partie) + Baustellen ───
+  // ─── Daten laden: Buchungen + Baustellen ───
   const load = async () => {
     if (!user) return;
     const fromDate = new Date();
@@ -128,24 +149,36 @@ export default function Stunden() {
       .from("stundenbuchungen")
       .select("*")
       .gte("datum", fromIso)
-      .order("datum", { ascending: false });
+      .order("datum", { ascending: false })
+      .limit(500);
 
-    if (isPolier && partieMembers.length > 0) {
-      const ids = [user.id, ...partieMembers.map((m) => m.id)];
+    if (mode === "admin") {
+      // alle Buchungen
+    } else if (mode === "polier" && allMembers.length > 0) {
+      const ids = [user.id, ...allMembers.map((m) => m.id)];
       stundenQuery = stundenQuery.in("mitarbeiter_id", Array.from(new Set(ids)));
     } else {
       stundenQuery = stundenQuery.eq("mitarbeiter_id", user.id);
     }
 
-    const partieIdForBaustellen = polierPartie?.id ?? profile?.partie_id;
+    // Baustellen-Filter:
+    // - admin: alle aktiven
+    // - polier: nur eigene Partie
+    // - self: eigene Partie (falls vorhanden) sonst alle
+    const partieFilter =
+      mode === "admin"
+        ? null
+        : mode === "polier"
+        ? polierPartie?.id ?? null
+        : profile?.partie_id ?? null;
 
     const [r, b] = await Promise.all([
       stundenQuery,
-      partieIdForBaustellen
+      partieFilter
         ? supabase
             .from("baustellen")
             .select("*")
-            .eq("partie_id", partieIdForBaustellen)
+            .eq("partie_id", partieFilter)
             .in("status", ["aktiv", "geplant"])
             .order("bvh_name")
         : supabase
@@ -164,7 +197,7 @@ export default function Stunden() {
 
   useEffect(() => {
     load();
-  }, [user, profile, polierPartie, partieMembers]);
+  }, [user, profile, polierPartie, allMembers]);
 
   // ─── Tagesstatus pro Person für gewähltes Datum ───
   const statusForDate = useMemo(() => {
@@ -242,7 +275,7 @@ export default function Stunden() {
       const personLabel =
         forUserId === user.id
           ? "dich"
-          : partieMembers.find((m) => m.id === forUserId)?.vorname ?? "diese Person";
+          : allMembers.find((m) => m.id === forUserId)?.vorname ?? "diese Person";
       const ok = window.confirm(
         `Für ${personLabel} ist am ${new Date(date).toLocaleDateString("de-AT")} schon ` +
           `${Number(existingForCurrent.arbeitsstunden ?? existingForCurrent.fehlzeit_stunden ?? 0).toFixed(1)}h ` +
@@ -278,8 +311,8 @@ export default function Stunden() {
     const personLabel =
       forUserId === user.id
         ? "dich"
-        : partieMembers.find((m) => m.id === forUserId)
-        ? `${partieMembers.find((m) => m.id === forUserId)!.vorname} ${partieMembers.find((m) => m.id === forUserId)!.nachname}`
+        : allMembers.find((m) => m.id === forUserId)
+        ? `${allMembers.find((m) => m.id === forUserId)!.vorname} ${allMembers.find((m) => m.id === forUserId)!.nachname}`
         : "Mitarbeiter";
     toast({ title: "Stunden gebucht", description: `${hours}h für ${personLabel}` });
     resetForm();
@@ -305,7 +338,7 @@ export default function Stunden() {
   // ─── Hilfslogik: Wem gehört die Buchung in der Liste? ───
   const personById = useMemo(() => {
     const map = new Map<string, Profile>();
-    partieMembers.forEach((m) => map.set(m.id, m));
+    allMembers.forEach((m) => map.set(m.id, m));
     if (profile && user) {
       map.set(user.id, {
         ...(profile as any),
@@ -313,7 +346,7 @@ export default function Stunden() {
       });
     }
     return map;
-  }, [partieMembers, profile, user]);
+  }, [allMembers, profile, user]);
 
   const focusPerson = (uid: string) => {
     setForUserId(uid);
@@ -324,99 +357,22 @@ export default function Stunden() {
     <div className="space-y-4 max-w-2xl mx-auto">
       <PageHeader title="Stundenerfassung" />
 
-      {/* Polier-Personenwahl */}
-      {isPolier && (
-        <Card className="border-primary/30">
-          <CardContent className="p-3 space-y-2">
-            <div className="flex items-center gap-2 text-xs">
-              <Users className="h-4 w-4 text-primary" />
-              <span className="font-semibold uppercase tracking-wide">
-                Polier · {polierPartie?.name}
-              </span>
-              <span className="ml-auto text-muted-foreground">
-                Du buchst für{" "}
-                <strong>
-                  {forUserId === user?.id
-                    ? "dich"
-                    : (() => {
-                        const p = partieMembers.find((m) => m.id === forUserId);
-                        return p ? `${p.vorname} ${p.nachname}` : "?";
-                      })()}
-                </strong>
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {/* Mich */}
-              <button
-                onClick={() => focusPerson(user!.id)}
-                className={`px-2.5 py-1.5 rounded-full text-xs font-medium border transition flex items-center gap-1.5 ${
-                  forUserId === user?.id
-                    ? "bg-primary text-primary-foreground border-primary"
-                    : "bg-background hover:bg-muted"
-                }`}
-              >
-                <span
-                  className="h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
-                  style={{ background: polierPartie?.farbcode ?? "#999" }}
-                >
-                  {profile ? initials(profile as any) : ""}
-                </span>
-                Mich
-                {(() => {
-                  const s = statusForDate.get(user!.id);
-                  if (!s) return null;
-                  return (
-                    <span className="text-[10px] opacity-70 tabular-nums">{s.hours.toFixed(1)}h</span>
-                  );
-                })()}
-              </button>
-
-              {partieMembers
-                .filter((m) => m.id !== user?.id)
-                .map((m) => {
-                  const s = statusForDate.get(m.id);
-                  const active = forUserId === m.id;
-                  return (
-                    <button
-                      key={m.id}
-                      onClick={() => focusPerson(m.id)}
-                      className={`px-2.5 py-1.5 rounded-full text-xs font-medium border transition flex items-center gap-1.5 ${
-                        active
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-background hover:bg-muted"
-                      }`}
-                    >
-                      <span
-                        className="h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
-                        style={{ background: polierPartie?.farbcode ?? "#999" }}
-                      >
-                        {initials(m)}
-                      </span>
-                      <span className="truncate max-w-[80px]">
-                        {m.vorname} {m.nachname[0]}.
-                      </span>
-                      {s ? (
-                        <span
-                          className={`text-[10px] tabular-nums ${
-                            active ? "opacity-90" : "text-emerald-600 font-semibold"
-                          }`}
-                          title={`${s.hours.toFixed(1)}h gebucht`}
-                        >
-                          {s.hours.toFixed(1)}h
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-muted-foreground">—</span>
-                      )}
-                    </button>
-                  );
-                })}
-            </div>
-            <div className="text-[11px] text-muted-foreground">
-              Tippe einen Mitarbeiter an, um seine Stunden für{" "}
-              {new Date(date).toLocaleDateString("de-AT")} einzugeben.
-            </div>
-          </CardContent>
-        </Card>
+      {/* Personenwahl (Polier oder Admin) */}
+      {hasPicker && (
+        <PersonPicker
+          mode={mode}
+          partie={polierPartie}
+          partien={allPartien}
+          members={allMembers}
+          forUserId={forUserId}
+          onPick={focusPerson}
+          ownUserId={user!.id}
+          ownProfile={profile as any}
+          statusForDate={statusForDate}
+          search={memberSearch}
+          onSearchChange={setMemberSearch}
+          date={date}
+        />
       )}
 
       {/* Doppel-Buchung-Warnung */}
@@ -718,7 +674,7 @@ export default function Stunden() {
               {totalsThisMonth.arbeit.toFixed(1)}
             </div>
             <div className="text-[10px] text-muted-foreground uppercase">
-              Arbeit{isPolier && " · ich"}
+              Arbeit{hasPicker && " · ich"}
             </div>
           </div>
           <div>
@@ -736,7 +692,11 @@ export default function Stunden() {
       <div>
         <div className="flex items-center justify-between mb-2 px-1">
           <h2 className="text-sm font-semibold">
-            {isPolier ? "Buchungen meiner Partie" : "Meine Buchungen"}
+            {mode === "admin"
+              ? "Alle Buchungen (Admin)"
+              : mode === "polier"
+              ? "Buchungen meiner Partie"
+              : "Meine Buchungen"}
           </h2>
           {rows.some((r) => r.status === "offen") && (
             <Button size="sm" variant="outline" onClick={submitAllOpen}>
@@ -749,7 +709,7 @@ export default function Stunden() {
             const b = baustellen.find((x) => x.id === r.baustelle_id);
             const p = personById.get(r.mitarbeiter_id);
             const ownEntry = r.mitarbeiter_id === user?.id;
-            const canEdit = r.status === "offen" && (ownEntry || isPolier);
+            const canEdit = r.status === "offen" && (ownEntry || hasPicker);
             return (
               <Card key={r.id}>
                 <CardContent className="p-3 flex items-center gap-3">
@@ -775,7 +735,7 @@ export default function Stunden() {
                           {r.fehlzeit_typ}
                         </Badge>
                       )}
-                      {isPolier && p && (
+                      {hasPicker && p && (
                         <Badge
                           variant="outline"
                           className="text-[10px] px-1.5 py-0"
@@ -887,5 +847,203 @@ export default function Stunden() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function PersonPicker({
+  mode,
+  partie,
+  partien,
+  members,
+  forUserId,
+  onPick,
+  ownUserId,
+  ownProfile,
+  statusForDate,
+  search,
+  onSearchChange,
+  date,
+}: {
+  mode: Mode;
+  partie: Partie | null;
+  partien: Partie[];
+  members: Profile[];
+  forUserId: string;
+  onPick: (id: string) => void;
+  ownUserId: string;
+  ownProfile: Profile | null;
+  statusForDate: Map<string, { hours: number }>;
+  search: string;
+  onSearchChange: (s: string) => void;
+  date: string;
+}) {
+  const isAdmin = mode === "admin";
+
+  const filteredMembers = members.filter((m) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      m.vorname.toLowerCase().includes(q) ||
+      m.nachname.toLowerCase().includes(q) ||
+      (m.pers_nr ?? "").toLowerCase().includes(q)
+    );
+  });
+
+  // Gruppieren nach Partie (für Admin)
+  const grouped = (() => {
+    if (!isAdmin) return null;
+    const map = new Map<string | "ohne", { partie: Partie | null; rows: Profile[] }>();
+    filteredMembers.forEach((m) => {
+      const key = m.partie_id ?? "ohne";
+      if (!map.has(key)) {
+        map.set(key, {
+          partie: m.partie_id ? partien.find((p) => p.id === m.partie_id) ?? null : null,
+          rows: [],
+        });
+      }
+      map.get(key)!.rows.push(m);
+    });
+    return [...map.values()].sort((a, b) =>
+      (a.partie?.name ?? "ZZ").localeCompare(b.partie?.name ?? "ZZ")
+    );
+  })();
+
+  const focused = forUserId === ownUserId
+    ? "dich"
+    : (() => {
+        const m = members.find((x) => x.id === forUserId);
+        return m ? `${m.vorname} ${m.nachname}` : "?";
+      })();
+
+  const renderPill = (m: Profile, color: string) => {
+    const s = statusForDate.get(m.id);
+    const active = forUserId === m.id;
+    return (
+      <button
+        key={m.id}
+        onClick={() => onPick(m.id)}
+        className={`px-2.5 py-1.5 rounded-full text-xs font-medium border transition flex items-center gap-1.5 shrink-0 ${
+          active ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted"
+        }`}
+      >
+        <span
+          className="h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
+          style={{ background: color }}
+        >
+          {initials(m)}
+        </span>
+        <span className="truncate max-w-[100px]">
+          {m.vorname} {m.nachname[0]}.
+        </span>
+        {s ? (
+          <span
+            className={`text-[10px] tabular-nums ${
+              active ? "opacity-90" : "text-emerald-600 font-semibold"
+            }`}
+          >
+            {s.hours.toFixed(1)}h
+          </span>
+        ) : (
+          <span className="text-[10px] text-muted-foreground">—</span>
+        )}
+      </button>
+    );
+  };
+
+  return (
+    <Card className="border-primary/30">
+      <CardContent className="p-3 space-y-2">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <Users className="h-4 w-4 text-primary shrink-0" />
+          <span className="font-semibold uppercase tracking-wide">
+            {isAdmin ? "Admin" : `Polier · ${partie?.name ?? ""}`}
+          </span>
+          <span className="ml-auto text-muted-foreground">
+            Buche für <strong className="text-foreground">{focused}</strong>
+          </span>
+        </div>
+
+        {isAdmin && members.length > 6 && (
+          <Input
+            placeholder="Mitarbeiter suchen…"
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            className="h-9"
+          />
+        )}
+
+        {/* Mich-Pill immer ganz oben */}
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            onClick={() => onPick(ownUserId)}
+            className={`px-2.5 py-1.5 rounded-full text-xs font-medium border transition flex items-center gap-1.5 ${
+              forUserId === ownUserId
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background hover:bg-muted"
+            }`}
+          >
+            <span
+              className="h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white bg-primary"
+            >
+              {ownProfile ? initials(ownProfile) : "ME"}
+            </span>
+            Mich
+            {(() => {
+              const s = statusForDate.get(ownUserId);
+              if (!s) return null;
+              return <span className="text-[10px] opacity-70 tabular-nums">{s.hours.toFixed(1)}h</span>;
+            })()}
+          </button>
+        </div>
+
+        {/* Polier-Mode: flache Liste */}
+        {!isAdmin && (
+          <div className="flex flex-wrap gap-1.5">
+            {filteredMembers
+              .filter((m) => m.id !== ownUserId)
+              .map((m) => renderPill(m, partie?.farbcode ?? "#999"))}
+          </div>
+        )}
+
+        {/* Admin-Mode: gruppiert nach Partie */}
+        {isAdmin && grouped && (
+          <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+            {grouped.map((g) => {
+              const rows = g.rows.filter((m) => m.id !== ownUserId);
+              if (rows.length === 0) return null;
+              const color = g.partie?.farbcode ?? "#999";
+              return (
+                <div key={g.partie?.id ?? "ohne"}>
+                  <div
+                    className="text-[10px] uppercase tracking-wide font-semibold mb-1 flex items-center gap-1.5"
+                    style={{ color }}
+                  >
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ background: color }}
+                    />
+                    {g.partie?.name ?? "Ohne Partie"}
+                    <span className="opacity-60 font-normal">({rows.length})</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {rows.map((m) => renderPill(m, color))}
+                  </div>
+                </div>
+              );
+            })}
+            {grouped.every((g) => g.rows.filter((m) => m.id !== ownUserId).length === 0) && (
+              <div className="text-xs text-muted-foreground italic">
+                {search ? "Niemand passt zur Suche." : "Keine aktiven Mitarbeiter."}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="text-[11px] text-muted-foreground">
+          Tippe eine Person an, um ihre Stunden für{" "}
+          {new Date(date).toLocaleDateString("de-AT")} einzugeben.
+        </div>
+      </CardContent>
+    </Card>
   );
 }
