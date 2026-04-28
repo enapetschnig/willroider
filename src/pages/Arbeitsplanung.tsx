@@ -232,7 +232,7 @@ export default function Arbeitsplanung() {
   const polierName = (partie: Partie | null) => {
     if (!partie?.partieleiter_id) return null;
     const p = profilesById[partie.partieleiter_id];
-    return p ? `${p.nachname}` : null;
+    return p ? `${p.vorname} ${p.nachname}`.trim() : null;
   };
   const bauleiterShort = (id: string | null) => {
     if (!id) return "—";
@@ -1143,16 +1143,16 @@ function PolierHeader({
           } rounded-full shrink-0`}
           style={{ background: farbe }}
         />
-        <div className={`${isMobile ? "" : "text-xs"} font-bold uppercase truncate flex-1 min-w-0`}>
+        <div className={`${isMobile ? "" : "text-xs"} font-bold uppercase flex-1 min-w-0 leading-tight`}>
           {polier ? (
-            <>
+            <span className="flex flex-wrap items-baseline gap-x-1.5">
               <span className="text-base sm:text-sm">{polier}</span>
               {partie && (
-                <span className="ml-1.5 text-[10px] font-normal opacity-70 normal-case">
+                <span className="text-[10px] font-normal opacity-70 normal-case">
                   · {partie.name}
                 </span>
               )}
-            </>
+            </span>
           ) : (
             partie?.name ?? "Ohne Partie"
           )}
@@ -1414,9 +1414,18 @@ function CellPopover({
     onSavedEinteilung();
   };
   const [w] = [320]; // popover width — breit genug für volle Baustellen-Namen
-  // Position: clamp innerhalb viewport
+  // Position: clamp innerhalb viewport, mit margin oben + unten
+  const margin = 12;
+  const maxH = Math.min(window.innerHeight - 2 * margin, 600);
   const x = Math.min(Math.max(8, anchor.x - w / 2), window.innerWidth - w - 8);
-  const y = Math.min(anchor.y + 12, window.innerHeight - 320);
+  // y so platzieren, dass das Popover komplett sichtbar ist; bevorzugt unter dem
+  // Klick, sonst über dem Klick, sonst am unteren Rand verankert.
+  let y = anchor.y + margin;
+  if (y + maxH > window.innerHeight - margin) {
+    // passt nicht drunter — versuch's drüber
+    const yAbove = anchor.y - maxH - margin;
+    y = yAbove >= margin ? yAbove : window.innerHeight - maxH - margin;
+  }
 
   const dateLabels = (() => {
     if (cells.length === 0) return "";
@@ -1441,8 +1450,8 @@ function CellPopover({
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
       <div
-        className="fixed z-50 bg-card border-2 border-primary/30 rounded-lg shadow-xl p-3"
-        style={{ left: x, top: y, width: w }}
+        className="fixed z-50 bg-card border-2 border-primary/30 rounded-lg shadow-xl p-3 overflow-y-auto overscroll-contain"
+        style={{ left: x, top: y, width: w, maxHeight: maxH }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-xs font-semibold mb-2">{dateLabels}</div>
