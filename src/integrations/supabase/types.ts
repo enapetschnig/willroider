@@ -195,6 +195,7 @@ export type Database = {
           fehlzeit_stunden: number | null;
           taetigkeit: string | null;
           notizen: string | null;
+          in_firma: boolean;
           status: StundenStatus;
           freigegeben_zm_id: string | null;
           freigegeben_zm_am: string | null;

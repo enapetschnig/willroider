@@ -7,7 +7,15 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { ChevronDown, ChevronUp, Download, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Download,
+  ChevronLeft,
+  ChevronRight,
+  Factory,
+  MapPin,
+} from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
 type Stunde = Database["public"]["Tables"]["stundenbuchungen"]["Row"];
@@ -119,6 +127,7 @@ export default function Stundenauswertung() {
       "Mitarbeiter",
       "PersNr",
       "Partie",
+      "Arbeitsort",
       "Baustelle",
       "Kostenstelle",
       "Start",
@@ -146,6 +155,7 @@ export default function Stundenauswertung() {
           p ? `${p.nachname} ${p.vorname}` : r.mitarbeiter_id,
           p?.pers_nr ?? "",
           partie?.name ?? "",
+          r.fehlzeit_typ ? "" : r.in_firma ? "Firma" : "Baustelle",
           b?.bvh_name ?? "",
           b?.kostenstelle ?? "",
           fmtTime(r.start_zeit),
@@ -258,7 +268,8 @@ function PersonenAuswertung({
       string,
       {
         person: Profile;
-        arbeit: number;
+        baustelle: number; // Arbeit auf Baustelle (mit Diäten)
+        firma: number; // Arbeit in der Firma (ohne Diäten)
         fahrt: number;
         fehl: number;
         rows: Stunde[];
@@ -269,12 +280,15 @@ function PersonenAuswertung({
       if (!p) return;
       const cur = byPerson.get(r.mitarbeiter_id) ?? {
         person: p,
-        arbeit: 0,
+        baustelle: 0,
+        firma: 0,
         fahrt: 0,
         fehl: 0,
         rows: [],
       };
-      cur.arbeit += Number(r.arbeitsstunden ?? 0);
+      const a = Number(r.arbeitsstunden ?? 0);
+      if (r.in_firma) cur.firma += a;
+      else cur.baustelle += a;
       cur.fahrt += Number(r.fahrstunden ?? 0);
       cur.fehl += Number(r.fehlzeit_stunden ?? 0);
       cur.rows.push(r);
@@ -297,11 +311,12 @@ function PersonenAuswertung({
 
   const total = grouped.reduce(
     (s, g) => ({
-      arbeit: s.arbeit + g.arbeit,
+      baustelle: s.baustelle + g.baustelle,
+      firma: s.firma + g.firma,
       fahrt: s.fahrt + g.fahrt,
       fehl: s.fehl + g.fehl,
     }),
-    { arbeit: 0, fahrt: 0, fehl: 0 }
+    { baustelle: 0, firma: 0, fahrt: 0, fehl: 0 }
   );
 
   const toggle = (id: string) => {
@@ -315,18 +330,30 @@ function PersonenAuswertung({
     <div className="space-y-2">
       {(mode === "admin" || mode === "polier") && grouped.length > 1 && (
         <Card>
-          <CardContent className="p-3 grid grid-cols-3 gap-2 text-center text-xs">
+          <CardContent className="p-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
             <div>
-              <div className="text-2xl font-bold tabular-nums">{total.arbeit.toFixed(1)}</div>
-              <div className="text-[10px] uppercase text-muted-foreground">Arbeit gesamt</div>
+              <div className="text-2xl font-bold tabular-nums text-primary">
+                {total.baustelle.toFixed(1)}
+              </div>
+              <div className="text-[10px] uppercase text-muted-foreground flex items-center justify-center gap-1">
+                <MapPin className="h-3 w-3" />
+                Baustelle
+              </div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold tabular-nums">{total.firma.toFixed(1)}</div>
+              <div className="text-[10px] uppercase text-muted-foreground flex items-center justify-center gap-1">
+                <Factory className="h-3 w-3" />
+                Firma
+              </div>
             </div>
             <div>
               <div className="text-2xl font-bold tabular-nums">{total.fahrt.toFixed(1)}</div>
-              <div className="text-[10px] uppercase text-muted-foreground">Fahrt gesamt</div>
+              <div className="text-[10px] uppercase text-muted-foreground">Fahrt</div>
             </div>
             <div>
               <div className="text-2xl font-bold tabular-nums">{total.fehl.toFixed(1)}</div>
-              <div className="text-[10px] uppercase text-muted-foreground">Fehlzeit gesamt</div>
+              <div className="text-[10px] uppercase text-muted-foreground">Fehlzeit</div>
             </div>
           </CardContent>
         </Card>
@@ -335,7 +362,8 @@ function PersonenAuswertung({
       {grouped.map((g) => {
         const isOpen = expanded.has(g.person.id);
         const partie = partien.find((p) => p.id === g.person.partie_id);
-        const sigma = g.arbeit + g.fahrt + g.fehl;
+        const arbeitTotal = g.baustelle + g.firma;
+        const sigma = arbeitTotal + g.fahrt + g.fehl;
         return (
           <Card key={g.person.id}>
             <button
@@ -361,10 +389,14 @@ function PersonenAuswertung({
                   {[g.person.pers_nr, partie?.name].filter(Boolean).join(" · ")}
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-3 text-center text-xs shrink-0 mr-1">
-                <div>
-                  <div className="font-bold tabular-nums">{g.arbeit.toFixed(1)}</div>
-                  <div className="text-[9px] text-muted-foreground uppercase">Arbeit</div>
+              <div className="grid grid-cols-4 gap-2 text-center text-xs shrink-0 mr-1">
+                <div title="Baustelle (mit Diäten)">
+                  <div className="font-bold tabular-nums">{g.baustelle.toFixed(1)}</div>
+                  <div className="text-[9px] text-muted-foreground uppercase">BVH</div>
+                </div>
+                <div title="Firma (ohne Diäten)">
+                  <div className="font-bold tabular-nums">{g.firma.toFixed(1)}</div>
+                  <div className="text-[9px] text-muted-foreground uppercase">Firma</div>
                 </div>
                 <div>
                   <div className="font-bold tabular-nums">{g.fehl.toFixed(1)}</div>
@@ -401,10 +433,19 @@ function PersonenAuswertung({
                           {fmtTime(r.start_zeit)}–{fmtTime(r.end_zeit)}
                         </span>
                       )}
+                      {r.in_firma && !r.fehlzeit_typ && (
+                        <Badge
+                          variant="secondary"
+                          className="text-[9px] px-1 py-0 shrink-0 h-4"
+                        >
+                          <Factory className="h-2.5 w-2.5 mr-0.5" />
+                          Firma
+                        </Badge>
+                      )}
                       <span className="truncate flex-1">
                         {r.fehlzeit_typ
                           ? `Fehlzeit ${r.fehlzeit_typ}`
-                          : b?.bvh_name ?? "—"}
+                          : b?.bvh_name ?? (r.in_firma ? "Allgemein" : "—")}
                       </span>
                       <span className="font-bold tabular-nums shrink-0">
                         {Number(r.arbeitsstunden ?? r.fehlzeit_stunden ?? 0).toFixed(2)}h

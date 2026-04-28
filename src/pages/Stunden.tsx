@@ -43,6 +43,8 @@ import {
   ChevronDown,
   ChevronUp,
   Check,
+  Factory,
+  MapPin,
 } from "lucide-react";
 import type { Database, StundenStatus } from "@/integrations/supabase/types";
 
@@ -113,6 +115,36 @@ function calcArbeitsstunden(
 const fmtTime = (t: string | null | undefined) => (t ? t.slice(0, 5) : "");
 const fmtH = (n: number) => `${n.toFixed(2).replace(".", ",")} h`;
 
+// Auf nächste 15 Min runden
+function snap15(t: string): string {
+  if (!t) return t;
+  const [h, m] = t.split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return t;
+  const total = h * 60 + m;
+  const rounded = Math.round(total / 15) * 15;
+  const clamped = Math.max(0, Math.min(23 * 60 + 45, rounded));
+  return minToTime(clamped);
+}
+function shiftTime(t: string, deltaMin: number): string {
+  const cur = timeToMin(t);
+  const next = Math.max(0, Math.min(23 * 60 + 45, cur + deltaMin));
+  return minToTime(next);
+}
+// Überlappung in Minuten (für Konflikt-Erkennung)
+function overlapMin(
+  aS: string | null | undefined,
+  aE: string | null | undefined,
+  bS: string | null | undefined,
+  bE: string | null | undefined
+): number {
+  if (!aS || !aE || !bS || !bE) return 0;
+  const aSm = timeToMin(aS),
+    aEm = timeToMin(aE),
+    bSm = timeToMin(bS),
+    bEm = timeToMin(bE);
+  return Math.max(0, Math.min(aEm, bEm) - Math.max(aSm, bSm));
+}
+
 const DEFAULT_START = "07:00";
 const DEFAULT_END = "15:30";
 const DEFAULT_PAUSE_VON = "12:00";
@@ -149,6 +181,7 @@ export default function Stunden() {
   const [baustelleId, setBaustelleId] = useState<string>("");
   const [taetigkeit, setTaetigkeit] = useState<string>("");
   const [fehlzeitTyp, setFehlzeitTyp] = useState<string>("");
+  const [inFirma, setInFirma] = useState<boolean>(false); // Arbeit in der Firma → keine Diäten
   const [fahrstunden, setFahrstunden] = useState<number>(0);
   const [taggeldKurz, setTaggeldKurz] = useState<number>(0);
   const [taggeldLang, setTaggeldLang] = useState<number>(0);
@@ -296,11 +329,21 @@ export default function Stunden() {
     0
   );
 
-  // ─── Doppel-Buchung-Warnung (nur Arbeit + gleiche Baustelle, primary user) ───
-  const existingForCurrent = useMemo(() => {
-    if (fehlzeitTyp || !baustelleId || forUserIds.size > 1) return null;
-    return todayBlocks.find((r) => r.baustelle_id === baustelleId);
-  }, [todayBlocks, baustelleId, fehlzeitTyp]);
+  // ─── Konflikt-Warnung: gleicher Mitarbeiter + Zeitfenster überschneidet sich ───
+  // (Mehrere Buchungen pro Tag sind erlaubt — auch auf gleicher Baustelle —
+  //  solange sie sich nicht zeitlich überschneiden.)
+  const overlappingBlock = useMemo(() => {
+    if (fehlzeitTyp) return null;
+    if (forUserIds.size > 1) return null; // Multi-Mode: pro User checken wir im Submit
+    const minutes = (s: string, e: string) => Math.max(0, timeToMin(e) - timeToMin(s));
+    if (minutes(startZeit, endZeit) <= 0) return null;
+    return todayBlocks.find(
+      (r) =>
+        r.start_zeit &&
+        r.end_zeit &&
+        overlapMin(startZeit, endZeit, fmtTime(r.start_zeit), fmtTime(r.end_zeit)) > 0
+    );
+  }, [todayBlocks, fehlzeitTyp, startZeit, endZeit, forUserIds]);
 
   const moveDate = (d: number) => {
     const nd = new Date(date);
@@ -322,6 +365,7 @@ export default function Stunden() {
     setBaustelleId("");
     setTaetigkeit("");
     setFehlzeitTyp("");
+    setInFirma(false);
     setFahrstunden(0);
     setTaggeldKurz(0);
     setTaggeldLang(0);
@@ -333,6 +377,7 @@ export default function Stunden() {
   const partialResetForNextBaustelle = (lastBlock?: Stunde) => {
     setBaustelleId("");
     setTaetigkeit("");
+    setInFirma(false);
     setFahrstunden(0);
     setTaggeldKurz(0);
     setTaggeldLang(0);
@@ -341,10 +386,10 @@ export default function Stunden() {
     setExtras(false);
     if (lastBlock?.end_zeit) {
       // Nahtloser Anschluss: Start = vorheriges Ende
-      setStartZeit(fmtTime(lastBlock.end_zeit) || DEFAULT_START);
-      // Standard: 8.5h Fenster
-      const startMin = timeToMin(fmtTime(lastBlock.end_zeit));
-      setEndZeit(minToTime(startMin + 8 * 60 + 30));
+      const newStart = fmtTime(lastBlock.end_zeit) || DEFAULT_START;
+      setStartZeit(newStart);
+      // Standard-Fenster (4 h) — ist eh sofort anpassbar
+      setEndZeit(shiftTime(newStart, 4 * 60));
       setHasPause(false); // Pause war ja schon im ersten Block
     } else {
       resetTimeFields();
@@ -363,73 +408,93 @@ export default function Stunden() {
 
     const isFehlzeit = !!fehlzeitTyp;
 
-    if (!isFehlzeit && !baustelleId) {
+    // Bei Arbeit: entweder Baustelle ODER Firma-Mode (mit/ohne Bezugs-Baustelle)
+    if (!isFehlzeit && !baustelleId && !inFirma) {
       toast({
         variant: "destructive",
-        title: "Baustelle fehlt",
-        description: "Wähle eine Baustelle oder einen Fehlzeit-Typ.",
+        title: "Arbeitsort fehlt",
+        description: 'Wähle eine Baustelle, „In der Firma" oder einen Fehlzeit-Typ.',
       });
       return;
     }
 
+    // 15-Min-Snap final vor Save
+    const sStart = isFehlzeit ? null : snap15(startZeit);
+    const sEnd = isFehlzeit ? null : snap15(endZeit);
+    const sPauseVon = !isFehlzeit && hasPause ? snap15(pauseVon) : null;
+    const sPauseBis = !isFehlzeit && hasPause ? snap15(pauseBis) : null;
+
     let arbeit = 0;
     if (!isFehlzeit) {
-      if (timeToMin(endZeit) <= timeToMin(startZeit)) {
+      if (timeToMin(sEnd!) <= timeToMin(sStart!)) {
         toast({ variant: "destructive", title: "Endzeit muss nach Startzeit liegen." });
         return;
       }
       if (hasPause) {
-        const pv = timeToMin(pauseVon);
-        const pb = timeToMin(pauseBis);
+        const pv = timeToMin(sPauseVon!);
+        const pb = timeToMin(sPauseBis!);
         if (pb <= pv) {
           toast({ variant: "destructive", title: "Pause-Ende muss nach Pause-Beginn liegen." });
           return;
         }
       }
-      arbeit = calcArbeitsstunden(
-        startZeit,
-        endZeit,
-        hasPause ? pauseVon : null,
-        hasPause ? pauseBis : null
-      );
+      arbeit = calcArbeitsstunden(sStart, sEnd, sPauseVon, sPauseBis);
       if (arbeit <= 0) {
         toast({ variant: "destructive", title: "Arbeitszeit ist 0 — bitte prüfen." });
         return;
       }
     }
 
-    if (existingForCurrent) {
-      const personLabel =
-        primaryUserId === user.id
-          ? "dich"
-          : allMembers.find((m) => m.id === primaryUserId)?.vorname ?? "diese Person";
-      const ok = window.confirm(
-        `Für ${personLabel} ist auf dieser Baustelle am ${new Date(date).toLocaleDateString(
-          "de-AT"
-        )} bereits ${Number(existingForCurrent.arbeitsstunden ?? 0).toFixed(
-          2
-        )}h gebucht. Trotzdem zusätzliche Buchung anlegen?`
-      );
-      if (!ok) return;
+    // Konflikt-Check pro Mitarbeiter (Zeitfenster-Überlappung)
+    if (!isFehlzeit && !continueFlag) {
+      const conflicts: { uid: string; minutes: number }[] = [];
+      for (const uid of forUserIds) {
+        const userBlocks = rows.filter((r) => r.mitarbeiter_id === uid && r.datum === date);
+        for (const r of userBlocks) {
+          const m = overlapMin(sStart, sEnd, fmtTime(r.start_zeit), fmtTime(r.end_zeit));
+          if (m > 0) {
+            conflicts.push({ uid, minutes: m });
+            break;
+          }
+        }
+      }
+      if (conflicts.length > 0) {
+        const names = conflicts
+          .map((c) => {
+            if (c.uid === user.id) return "dich";
+            const m = allMembers.find((p) => p.id === c.uid);
+            return m ? `${m.vorname} ${m.nachname}` : "?";
+          })
+          .join(", ");
+        const ok = window.confirm(
+          `Für ${names} überschneidet sich diese Zeit (${fmtTime(sStart)}–${fmtTime(
+            sEnd
+          )}) mit einer bereits vorhandenen Buchung am ${new Date(date).toLocaleDateString(
+            "de-AT"
+          )}. Trotzdem speichern?`
+        );
+        if (!ok) return;
+      }
     }
 
     const ids = Array.from(forUserIds);
-    const commonPayload = {
+    const commonPayload: any = {
       datum: date,
       baustelle_id: isFehlzeit ? null : baustelleId || null,
-      start_zeit: isFehlzeit ? null : startZeit,
-      end_zeit: isFehlzeit ? null : endZeit,
-      pause_von: !isFehlzeit && hasPause ? pauseVon : null,
-      pause_bis: !isFehlzeit && hasPause ? pauseBis : null,
+      start_zeit: sStart,
+      end_zeit: sEnd,
+      pause_von: sPauseVon,
+      pause_bis: sPauseBis,
       arbeitsstunden: isFehlzeit ? 0 : arbeit,
       fahrstunden,
-      taggeld_kurz: taggeldKurz,
-      taggeld_lang: taggeldLang,
+      taggeld_kurz: !isFehlzeit && inFirma ? 0 : taggeldKurz,
+      taggeld_lang: !isFehlzeit && inFirma ? 0 : taggeldLang,
       km_gefahren: km,
       fehlzeit_typ: fehlzeitTyp || null,
       fehlzeit_stunden: isFehlzeit ? fehlzeitHours : 0,
       taetigkeit: taetigkeit || null,
       notizen: notizen || null,
+      in_firma: !isFehlzeit && inFirma,
       status: "offen" as StundenStatus,
     };
     let lastInserted: Stunde | null = null;
@@ -626,6 +691,10 @@ export default function Stunden() {
                           <span className="truncate flex-1">
                             {r.fehlzeit_typ
                               ? `Fehlzeit ${r.fehlzeit_typ}`
+                              : r.in_firma
+                              ? b?.bvh_name
+                                ? `Firma · ${b.bvh_name}`
+                                : "Firma"
                               : b?.bvh_name ?? "—"}
                           </span>
                           {r.status === "offen" && (
@@ -646,15 +715,16 @@ export default function Stunden() {
             </CardContent>
           </Card>
 
-          {/* Doppel-Buchung-Warnung */}
-          {existingForCurrent && (
+          {/* Konflikt-Warnung: Zeitfenster überlappt mit existierender Buchung */}
+          {overlappingBlock && (
             <Card className="border-amber-400 bg-amber-50">
               <CardContent className="p-3 flex items-start gap-2 text-xs">
                 <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
                 <div className="flex-1">
-                  <strong>Diese Baustelle hat heute schon eine Buchung</strong> (
-                  {Number(existingForCurrent.arbeitsstunden ?? 0).toFixed(2)}h). Eine zusätzliche
-                  Buchung wird beim Speichern nochmal abgefragt.
+                  <strong>Zeitüberschneidung:</strong> Du hast heute bereits{" "}
+                  {fmtTime(overlappingBlock.start_zeit)}–{fmtTime(overlappingBlock.end_zeit)}{" "}
+                  gebucht. Mehrere Buchungen pro Tag sind erlaubt — solange sie sich nicht zeitlich
+                  überschneiden.
                 </div>
               </CardContent>
             </Card>
@@ -666,7 +736,7 @@ export default function Stunden() {
               {/* Mode: Arbeit / Fehlzeit */}
               <div>
                 <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                  {fehlzeitTyp ? "Fehlzeit" : "Baustelle"}
+                  {fehlzeitTyp ? "Fehlzeit" : "Was wurde gemacht"}
                 </Label>
                 <div className="flex flex-wrap gap-1.5 mt-1.5">
                   <button
@@ -695,15 +765,55 @@ export default function Stunden() {
                   ))}
                 </div>
 
-                {/* Baustellen-Auswahl: durchsuchbares Combobox */}
                 {!fehlzeitTyp && (
-                  <div className="mt-2">
-                    <BaustelleCombobox
-                      baustellen={baustellen}
-                      value={baustelleId}
-                      onChange={setBaustelleId}
-                    />
-                  </div>
+                  <>
+                    {/* Arbeitsort-Toggle: Baustelle vs. Firma */}
+                    <div className="mt-3 grid grid-cols-2 gap-1.5">
+                      <button
+                        onClick={() => setInFirma(false)}
+                        className={`flex items-center justify-center gap-1.5 h-11 rounded-md border text-sm font-medium transition ${
+                          !inFirma
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "bg-background hover:bg-muted"
+                        }`}
+                      >
+                        <MapPin className="h-4 w-4" />
+                        Auf Baustelle
+                      </button>
+                      <button
+                        onClick={() => setInFirma(true)}
+                        className={`flex items-center justify-center gap-1.5 h-11 rounded-md border text-sm font-medium transition ${
+                          inFirma
+                            ? "bg-foreground text-background border-foreground"
+                            : "bg-background hover:bg-muted"
+                        }`}
+                      >
+                        <Factory className="h-4 w-4" />
+                        In der Firma
+                      </button>
+                    </div>
+                    {inFirma && (
+                      <div className="mt-1.5 text-[11px] text-muted-foreground italic">
+                        In der Firma → keine Diäten. Baustelle ist optional, falls für eine
+                        bestimmte Baustelle vorbereitet wurde.
+                      </div>
+                    )}
+
+                    {/* Baustellen-Combobox: required wenn nicht inFirma, sonst optional */}
+                    <div className="mt-2">
+                      <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Baustelle {inFirma ? "(optional)" : ""}
+                      </Label>
+                      <div className="mt-1">
+                        <BaustelleCombobox
+                          baustellen={baustellen}
+                          value={baustelleId}
+                          onChange={setBaustelleId}
+                          allowClear={inFirma}
+                        />
+                      </div>
+                    </div>
+                  </>
                 )}
               </div>
 
@@ -711,28 +821,8 @@ export default function Stunden() {
               {!fehlzeitTyp && (
                 <div className="space-y-3 border-t pt-3">
                   <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Startzeit
-                      </Label>
-                      <Input
-                        type="time"
-                        value={startZeit}
-                        onChange={(e) => setStartZeit(e.target.value)}
-                        className="h-11 text-center font-semibold"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Endzeit
-                      </Label>
-                      <Input
-                        type="time"
-                        value={endZeit}
-                        onChange={(e) => setEndZeit(e.target.value)}
-                        className="h-11 text-center font-semibold"
-                      />
-                    </div>
+                    <TimeStepper label="Startzeit" value={startZeit} onChange={setStartZeit} big />
+                    <TimeStepper label="Endzeit" value={endZeit} onChange={setEndZeit} big />
                   </div>
 
                   <div className="flex items-center gap-2 pt-1">
@@ -744,28 +834,8 @@ export default function Stunden() {
 
                   {hasPause && (
                     <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                          Pause von
-                        </Label>
-                        <Input
-                          type="time"
-                          value={pauseVon}
-                          onChange={(e) => setPauseVon(e.target.value)}
-                          className="h-10 text-center"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                          Pause bis
-                        </Label>
-                        <Input
-                          type="time"
-                          value={pauseBis}
-                          onChange={(e) => setPauseBis(e.target.value)}
-                          className="h-10 text-center"
-                        />
-                      </div>
+                      <TimeStepper label="Pause von" value={pauseVon} onChange={setPauseVon} />
+                      <TimeStepper label="Pause bis" value={pauseBis} onChange={setPauseBis} />
                     </div>
                   )}
 
@@ -888,23 +958,29 @@ export default function Stunden() {
                     />
                   </div>
                   <div>
-                    <Label className="text-xs">Taggeld kurz</Label>
+                    <Label className="text-xs">
+                      Taggeld kurz {inFirma && <span className="opacity-60">(Firma → 0)</span>}
+                    </Label>
                     <Input
                       inputMode="numeric"
                       type="number"
                       step="1"
-                      value={taggeldKurz}
+                      value={inFirma ? 0 : taggeldKurz}
+                      disabled={inFirma}
                       onChange={(e) => setTaggeldKurz(Number(e.target.value))}
                       className="h-9"
                     />
                   </div>
                   <div>
-                    <Label className="text-xs">Taggeld lang</Label>
+                    <Label className="text-xs">
+                      Taggeld lang {inFirma && <span className="opacity-60">(Firma → 0)</span>}
+                    </Label>
                     <Input
                       inputMode="numeric"
                       type="number"
                       step="1"
-                      value={taggeldLang}
+                      value={inFirma ? 0 : taggeldLang}
+                      disabled={inFirma}
                       onChange={(e) => setTaggeldLang(Number(e.target.value))}
                       className="h-9"
                     />
@@ -1058,9 +1134,17 @@ function BuchungCard({
               </Badge>
             )}
           </div>
-          <div className="text-xs text-muted-foreground truncate">
-            {baustelle?.bvh_name ?? (r.fehlzeit_typ ? "Fehlzeit" : "—")}
-            {r.taetigkeit && ` · ${r.taetigkeit}`}
+          <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
+            {r.in_firma && (
+              <Badge variant="secondary" className="text-[9px] px-1 py-0 shrink-0">
+                <Factory className="h-2.5 w-2.5 mr-0.5" />
+                Firma
+              </Badge>
+            )}
+            <span className="truncate">
+              {baustelle?.bvh_name ?? (r.fehlzeit_typ ? "Fehlzeit" : r.in_firma ? "Allgemein" : "—")}
+              {r.taetigkeit && ` · ${r.taetigkeit}`}
+            </span>
           </div>
         </div>
         <Badge variant="outline" className="text-xs shrink-0">
@@ -1123,17 +1207,15 @@ function EditForm({
     if (row.fehlzeit_typ) {
       update.fehlzeit_stunden = hours;
     } else if (hasTimes || (startZeit && endZeit)) {
-      const arbeit = calcArbeitsstunden(
-        startZeit,
-        endZeit,
-        hasPause ? pauseVon : null,
-        hasPause ? pauseBis : null
-      );
-      update.start_zeit = startZeit;
-      update.end_zeit = endZeit;
-      update.pause_von = hasPause ? pauseVon : null;
-      update.pause_bis = hasPause ? pauseBis : null;
-      update.arbeitsstunden = arbeit;
+      const sStart = snap15(startZeit);
+      const sEnd = snap15(endZeit);
+      const sPV = hasPause ? snap15(pauseVon) : null;
+      const sPB = hasPause ? snap15(pauseBis) : null;
+      update.start_zeit = sStart;
+      update.end_zeit = sEnd;
+      update.pause_von = sPV;
+      update.pause_bis = sPB;
+      update.arbeitsstunden = calcArbeitsstunden(sStart, sEnd, sPV, sPB);
     } else {
       update.arbeitsstunden = hours;
     }
@@ -1170,22 +1252,8 @@ function EditForm({
       ) : (
         <>
           <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label>Start</Label>
-              <Input
-                type="time"
-                value={startZeit}
-                onChange={(e) => setStartZeit(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label>Ende</Label>
-              <Input
-                type="time"
-                value={endZeit}
-                onChange={(e) => setEndZeit(e.target.value)}
-              />
-            </div>
+            <TimeStepper label="Start" value={startZeit} onChange={setStartZeit} />
+            <TimeStepper label="Ende" value={endZeit} onChange={setEndZeit} />
           </div>
           <div className="flex items-center gap-2">
             <Switch checked={hasPause} onCheckedChange={setHasPause} />
@@ -1193,22 +1261,8 @@ function EditForm({
           </div>
           {hasPause && (
             <div className="grid grid-cols-2 gap-2">
-              <div>
-                <Label className="text-xs">Pause von</Label>
-                <Input
-                  type="time"
-                  value={pauseVon}
-                  onChange={(e) => setPauseVon(e.target.value)}
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Pause bis</Label>
-                <Input
-                  type="time"
-                  value={pauseBis}
-                  onChange={(e) => setPauseBis(e.target.value)}
-                />
-              </div>
+              <TimeStepper label="Pause von" value={pauseVon} onChange={setPauseVon} />
+              <TimeStepper label="Pause bis" value={pauseBis} onChange={setPauseBis} />
             </div>
           )}
           <div className="text-xs text-muted-foreground">
@@ -1446,10 +1500,12 @@ function BaustelleCombobox({
   baustellen,
   value,
   onChange,
+  allowClear = false,
 }: {
   baustellen: Baustelle[];
   value: string;
   onChange: (id: string) => void;
+  allowClear?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const selected = baustellen.find((b) => b.id === value);
@@ -1502,6 +1558,19 @@ function BaustelleCombobox({
           <CommandList>
             <CommandEmpty>Keine Baustelle gefunden.</CommandEmpty>
             <CommandGroup>
+              {allowClear && (
+                <CommandItem
+                  value="--keine--"
+                  onSelect={() => {
+                    onChange("");
+                    setOpen(false);
+                  }}
+                  className="cursor-pointer text-muted-foreground italic"
+                >
+                  <Check className={`mr-2 h-4 w-4 ${!value ? "opacity-100" : "opacity-0"}`} />
+                  Keine Baustelle (allgemein in Firma)
+                </CommandItem>
+              )}
               {baustellen.map((b) => {
                 const isSel = b.id === value;
                 return (
@@ -1531,5 +1600,54 @@ function BaustelleCombobox({
         </Command>
       </PopoverContent>
     </Popover>
+  );
+}
+
+// ─── TimeStepper: 15-min-Schritte mit ± Buttons, Mobile-tauglich ───
+function TimeStepper({
+  label,
+  value,
+  onChange,
+  big = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  big?: boolean;
+}) {
+  const inputH = big ? "h-12" : "h-10";
+  const btnH = big ? "h-12 w-9" : "h-10 w-8";
+  return (
+    <div>
+      <Label className="text-xs uppercase tracking-wide text-muted-foreground">{label}</Label>
+      <div className="flex items-stretch gap-1 mt-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          className={`${btnH} shrink-0 px-0`}
+          onClick={() => onChange(shiftTime(value, -15))}
+          aria-label={`${label} −15 min`}
+        >
+          <Minus className="h-4 w-4" />
+        </Button>
+        <Input
+          type="time"
+          step={900}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={(e) => onChange(snap15(e.target.value))}
+          className={`${inputH} text-center font-semibold tabular-nums px-1`}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          className={`${btnH} shrink-0 px-0`}
+          onClick={() => onChange(shiftTime(value, 15))}
+          aria-label={`${label} +15 min`}
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
   );
 }
