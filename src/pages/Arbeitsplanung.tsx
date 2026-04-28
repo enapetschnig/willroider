@@ -23,6 +23,7 @@ type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
 type Termin = Database["public"]["Tables"]["baustellen_termine"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
+type Fahrzeug = Database["public"]["Tables"]["fahrzeuge"]["Row"];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -101,6 +102,7 @@ export default function Arbeitsplanung() {
   const [partien, setPartien] = useState<Partie[]>([]);
   const [termine, setTermine] = useState<Termin[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [fahrzeuge, setFahrzeuge] = useState<Fahrzeug[]>([]);
   const [filterPartie, setFilterPartie] = useState<string>("alle");
   const [weeksVisible, setWeeksVisible] = useState(20);
   const [anchorWeek, setAnchorWeek] = useState<Date>(() => {
@@ -129,16 +131,18 @@ export default function Arbeitsplanung() {
   const dayWidth = 22; // px
 
   const load = async () => {
-    const [bs, p, t, pr] = await Promise.all([
+    const [bs, p, t, pr, fz] = await Promise.all([
       supabase.from("baustellen").select("*").order("start_datum", { ascending: true }),
       supabase.from("partien").select("*").order("name"),
       supabase.from("baustellen_termine").select("*"),
       supabase.from("profiles").select("*"),
+      supabase.from("fahrzeuge").select("*").eq("aktiv", true).order("kennzeichen"),
     ]);
     setBaustellen((bs.data as Baustelle[]) ?? []);
     setPartien((p.data as Partie[]) ?? []);
     setTermine((t.data as Termin[]) ?? []);
     setProfiles((pr.data as Profile[]) ?? []);
+    setFahrzeuge((fz.data as Fahrzeug[]) ?? []);
   };
 
   const loadAssignments = async () => {
@@ -945,6 +949,7 @@ export default function Arbeitsplanung() {
           cells={popover.cells}
           baustellen={activeBaustellen}
           partien={partien}
+          fahrzeuge={fahrzeuge}
           assignments={assignments}
           onAssignBaustelle={(bId) => {
             assignBaustelle(popover.cells, bId);
@@ -956,6 +961,11 @@ export default function Arbeitsplanung() {
           }}
           onClear={() => {
             clearCells(popover.cells);
+            closePopover();
+          }}
+          onSavedEinteilung={() => {
+            loadAssignments();
+            toast({ title: "Einteilung aktualisiert" });
             closePopover();
           }}
           onClose={closePopover}
@@ -1292,23 +1302,90 @@ function CellPopover({
   cells,
   baustellen,
   partien,
+  fahrzeuge,
   assignments,
   onAssignBaustelle,
   onSetFehlzeit,
   onClear,
+  onSavedEinteilung,
   onClose,
 }: {
   anchor: { x: number; y: number };
   cells: { workerId: string; iso: string }[];
   baustellen: Baustelle[];
   partien: Partie[];
+  fahrzeuge: Fahrzeug[];
   assignments: Map<string, AssignmentCell>;
   onAssignBaustelle: (baustelleId: string) => void;
   onSetFehlzeit: (typ: string) => void;
   onClear: () => void;
+  onSavedEinteilung: () => void;
   onClose: () => void;
 }) {
   const hasExisting = cells.some((c) => assignments.get(cellKey(c.workerId, c.iso)));
+  // Wenn alle ausgewählten Cells zur gleichen Einteilung gehören, zeigen wir den
+  // Tätigkeit + Fahrzeug-Editor inline.
+  const singleEinteilungId = useMemo(() => {
+    const ids = new Set<string>();
+    cells.forEach((c) => {
+      const a = assignments.get(cellKey(c.workerId, c.iso));
+      if (a?.source === "einteilung" && a.einteilungId) ids.add(a.einteilungId);
+    });
+    return ids.size === 1 ? Array.from(ids)[0] : null;
+  }, [cells, assignments]);
+  const [taetigkeit, setTaetigkeit] = useState("");
+  const [selectedFahrzeuge, setSelectedFahrzeuge] = useState<Set<string>>(new Set());
+  const [savingDetails, setSavingDetails] = useState(false);
+  // Existierende Werte laden
+  useEffect(() => {
+    if (!singleEinteilungId) {
+      setTaetigkeit("");
+      setSelectedFahrzeuge(new Set());
+      return;
+    }
+    (async () => {
+      const [{ data: e }, { data: ef }] = await Promise.all([
+        supabase
+          .from("einteilungen")
+          .select("taetigkeit")
+          .eq("id", singleEinteilungId)
+          .maybeSingle(),
+        supabase
+          .from("einteilung_fahrzeuge")
+          .select("fahrzeug_id")
+          .eq("einteilung_id", singleEinteilungId),
+      ]);
+      setTaetigkeit((e?.taetigkeit as string) ?? "");
+      setSelectedFahrzeuge(new Set((ef ?? []).map((r: any) => r.fahrzeug_id as string)));
+    })();
+  }, [singleEinteilungId]);
+
+  const saveDetails = async () => {
+    if (!singleEinteilungId) return;
+    setSavingDetails(true);
+    // 1) Tätigkeit aktualisieren
+    await supabase
+      .from("einteilungen")
+      .update({ taetigkeit: taetigkeit.trim() || null })
+      .eq("id", singleEinteilungId);
+    // 2) Fahrzeug-Set ersetzen (delete-all + insert)
+    await supabase
+      .from("einteilung_fahrzeuge")
+      .delete()
+      .eq("einteilung_id", singleEinteilungId);
+    if (selectedFahrzeuge.size > 0) {
+      await supabase
+        .from("einteilung_fahrzeuge")
+        .insert(
+          Array.from(selectedFahrzeuge).map((fid) => ({
+            einteilung_id: singleEinteilungId,
+            fahrzeug_id: fid,
+          })) as any
+        );
+    }
+    setSavingDetails(false);
+    onSavedEinteilung();
+  };
   const [w] = [320]; // popover width — breit genug für volle Baustellen-Namen
   // Position: clamp innerhalb viewport
   const x = Math.min(Math.max(8, anchor.x - w / 2), window.innerWidth - w - 8);
@@ -1393,6 +1470,68 @@ function CellPopover({
             </button>
           ))}
         </div>
+
+        {/* Tätigkeit + Fahrzeuge — nur wenn alle markierten Cells zur gleichen
+            Einteilung gehören (gleiche Baustelle + gleicher Tag) */}
+        {singleEinteilungId && (
+          <div className="border-t pt-2 mb-2 space-y-2">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              Tätigkeit & Fahrzeuge
+            </div>
+            <input
+              type="text"
+              value={taetigkeit}
+              onChange={(e) => setTaetigkeit(e.target.value)}
+              placeholder="z.B. Montage, Abbund, Streichen"
+              className="w-full h-9 rounded-md border bg-background px-2 text-xs"
+            />
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground mt-1.5">
+              Fahrzeuge ({selectedFahrzeuge.size})
+            </div>
+            {fahrzeuge.length === 0 ? (
+              <div className="text-[11px] text-muted-foreground italic">
+                Keine aktiven Fahrzeuge — anlegen unter „Fahrzeuge".
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-1 max-h-32 overflow-y-auto">
+                {fahrzeuge.map((f) => {
+                  const sel = selectedFahrzeuge.has(f.id);
+                  return (
+                    <button
+                      key={f.id}
+                      onClick={() => {
+                        const next = new Set(selectedFahrzeuge);
+                        if (sel) next.delete(f.id);
+                        else next.add(f.id);
+                        setSelectedFahrzeuge(next);
+                      }}
+                      className={`text-[11px] px-2 py-1.5 rounded border text-left transition truncate ${
+                        sel
+                          ? "border-primary bg-primary/10 text-primary font-semibold"
+                          : "border-border hover:bg-muted"
+                      }`}
+                      title={`${f.kennzeichen}${f.bezeichnung ? ` · ${f.bezeichnung}` : ""}`}
+                    >
+                      {f.kennzeichen}
+                      {f.bezeichnung && (
+                        <span className="block text-[9px] opacity-70 truncate">
+                          {f.bezeichnung}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <button
+              onClick={saveDetails}
+              disabled={savingDetails}
+              className="w-full text-xs px-2 py-2 rounded bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50"
+            >
+              {savingDetails ? "Speichert…" : "Tätigkeit & Fahrzeuge speichern"}
+            </button>
+          </div>
+        )}
 
         {hasExisting && (
           <button

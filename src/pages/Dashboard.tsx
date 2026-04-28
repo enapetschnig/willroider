@@ -15,6 +15,7 @@ import {
   ArrowRight,
   CheckCircle2,
   UserPlus,
+  Truck,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -60,7 +61,10 @@ type HeuteEintrag = {
   kostenstelle: string | null;
   ort: string | null;
   partieFarbe: string | null;
-  bereitsGebucht: number; // Stunden, die heute schon auf diese Baustelle gebucht sind
+  taetigkeit: string | null;
+  fahrzeuge: string[]; // kennzeichen + bezeichnung formatiert
+  kollegen: string[]; // weitere Mitarbeiter auf der gleichen Einteilung
+  bereitsGebucht: number;
 };
 
 export default function Dashboard() {
@@ -91,7 +95,7 @@ export default function Dashboard() {
       const { data: emRows } = await supabase
         .from("einteilung_mitarbeiter")
         .select(
-          "id, einteilungen!inner(id, datum, baustelle_id, baustellen(id, bvh_name, kostenstelle, ort, partie_id, partien(farbcode)))"
+          "id, einteilungen!inner(id, datum, baustelle_id, taetigkeit, baustellen(id, bvh_name, kostenstelle, ort, partie_id, partien(farbcode)))"
         )
         .eq("mitarbeiter_id", user.id)
         .eq("einteilungen.datum", today);
@@ -105,8 +109,45 @@ export default function Dashboard() {
           kostenstelle: r.einteilungen.baustellen.kostenstelle ?? null,
           ort: r.einteilungen.baustellen.ort ?? null,
           partieFarbe: r.einteilungen.baustellen.partien?.farbcode ?? null,
+          taetigkeit: (r.einteilungen.taetigkeit as string | null) ?? null,
+          fahrzeuge: [],
+          kollegen: [],
           bereitsGebucht: 0,
         }));
+
+      const einteilungIds = eintraege.map((e) => e.einteilungId);
+
+      // 2) Fahrzeuge pro Einteilung
+      if (einteilungIds.length > 0) {
+        const { data: efRows } = await supabase
+          .from("einteilung_fahrzeuge")
+          .select("einteilung_id, fahrzeuge(kennzeichen, bezeichnung)")
+          .in("einteilung_id", einteilungIds);
+        for (const e of eintraege) {
+          e.fahrzeuge = (efRows ?? [])
+            .filter((r: any) => r.einteilung_id === e.einteilungId)
+            .map((r: any) => {
+              const kz = r.fahrzeuge?.kennzeichen ?? "";
+              const bez = r.fahrzeuge?.bezeichnung;
+              return bez ? `${kz} (${bez})` : kz;
+            })
+            .filter(Boolean);
+        }
+
+        // 3) Kollegen auf der gleichen Einteilung
+        const { data: emCo } = await supabase
+          .from("einteilung_mitarbeiter")
+          .select("einteilung_id, mitarbeiter_id, profiles(vorname, nachname)")
+          .in("einteilung_id", einteilungIds)
+          .neq("mitarbeiter_id", user.id);
+        for (const e of eintraege) {
+          e.kollegen = (emCo ?? [])
+            .filter((r: any) => r.einteilung_id === e.einteilungId)
+            .map((r: any) =>
+              r.profiles ? `${r.profiles.vorname} ${r.profiles.nachname}` : "?"
+            );
+        }
+      }
 
       // 2) Schon gebuchte Stunden heute pro Baustelle dazuholen
       if (eintraege.length > 0) {
@@ -148,6 +189,11 @@ export default function Dashboard() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "einteilungen" },
+        loadHeute
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "einteilung_fahrzeuge" },
         loadHeute
       )
       .on(
@@ -346,39 +392,81 @@ export default function Dashboard() {
                 {heuteEinteilungen.map((e) => (
                   <div
                     key={e.einteilungId}
-                    className="flex items-center gap-3 rounded-md border bg-card p-3"
+                    className="rounded-md border bg-card p-3 space-y-2"
                   >
-                    <div
-                      className="h-10 w-10 rounded-md flex items-center justify-center shrink-0"
-                      style={{
-                        background: e.partieFarbe ? `${e.partieFarbe}25` : "hsl(var(--primary)/0.1)",
-                        color: e.partieFarbe ?? "hsl(var(--primary))",
-                      }}
-                    >
-                      <Building2 className="h-5 w-5" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-sm sm:text-base leading-tight">
-                        {e.bvhName}
+                    <div className="flex items-start gap-3">
+                      <div
+                        className="h-10 w-10 rounded-md flex items-center justify-center shrink-0"
+                        style={{
+                          background: e.partieFarbe ? `${e.partieFarbe}25` : "hsl(var(--primary)/0.1)",
+                          color: e.partieFarbe ?? "hsl(var(--primary))",
+                        }}
+                      >
+                        <Building2 className="h-5 w-5" />
                       </div>
-                      <div className="text-[11px] text-muted-foreground truncate">
-                        {[e.kostenstelle, e.ort].filter(Boolean).join(" · ")}
-                      </div>
-                      {e.bereitsGebucht > 0 && (
-                        <div className="text-[11px] text-emerald-700 font-medium mt-0.5">
-                          ✓ {e.bereitsGebucht.toFixed(2).replace(".", ",")}h schon gebucht
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm sm:text-base leading-tight">
+                          {e.bvhName}
                         </div>
-                      )}
+                        <div className="text-[11px] text-muted-foreground truncate">
+                          {[e.kostenstelle, e.ort].filter(Boolean).join(" · ")}
+                        </div>
+                        {e.taetigkeit && (
+                          <div className="text-xs italic text-foreground mt-0.5">
+                            → {e.taetigkeit}
+                          </div>
+                        )}
+                        {e.bereitsGebucht > 0 && (
+                          <div className="text-[11px] text-emerald-700 font-medium mt-0.5">
+                            ✓ {e.bereitsGebucht.toFixed(2).replace(".", ",")}h schon gebucht
+                          </div>
+                        )}
+                      </div>
+                      <Link
+                        to={`/stunden?baustelle=${e.baustelleId}`}
+                        className="shrink-0"
+                      >
+                        <Button size="sm" className="h-10">
+                          <Clock className="h-4 w-4 mr-1.5" />
+                          <span className="hidden sm:inline">
+                            {e.bereitsGebucht > 0 ? "Nachbuchen" : "Stunden buchen"}
+                          </span>
+                          <span className="sm:hidden">
+                            {e.bereitsGebucht > 0 ? "Nach" : "Buchen"}
+                          </span>
+                        </Button>
+                      </Link>
                     </div>
-                    <Link
-                      to={`/stunden?baustelle=${e.baustelleId}`}
-                      className="shrink-0"
-                    >
-                      <Button size="sm" className="h-10">
-                        <Clock className="h-4 w-4 mr-1.5" />
-                        {e.bereitsGebucht > 0 ? "Nachbuchen" : "Stunden buchen"}
-                      </Button>
-                    </Link>
+                    {(e.fahrzeuge.length > 0 || e.kollegen.length > 0) && (
+                      <div className="grid sm:grid-cols-2 gap-2 pt-2 border-t text-xs">
+                        {e.fahrzeuge.length > 0 && (
+                          <div className="flex items-start gap-1.5">
+                            <Truck className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                Fahrzeug
+                              </div>
+                              <div className="font-medium tabular-nums">
+                                {e.fahrzeuge.join(" · ")}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {e.kollegen.length > 0 && (
+                          <div className="flex items-start gap-1.5">
+                            <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                Mit dir dabei
+                              </div>
+                              <div className="font-medium">
+                                {e.kollegen.join(", ")}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

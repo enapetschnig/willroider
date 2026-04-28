@@ -148,6 +148,7 @@ export type Database = {
           hat_anhaenger: boolean | null;
           kranfahrer_id: string | null;
           notizen: string | null;
+          taetigkeit: string | null;
           versendet_am: string | null;
           created_by: string | null;
           created_at: string;
@@ -155,6 +156,20 @@ export type Database = {
         };
         Insert: Partial<Database['public']['Tables']['einteilungen']['Row']> & { datum: string };
         Update: Partial<Database['public']['Tables']['einteilungen']['Row']>;
+        Relationships: [];
+      };
+      einteilung_fahrzeuge: {
+        Row: {
+          id: string;
+          einteilung_id: string;
+          fahrzeug_id: string;
+          created_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['einteilung_fahrzeuge']['Row']> & {
+          einteilung_id: string;
+          fahrzeug_id: string;
+        };
+        Update: Partial<Database['public']['Tables']['einteilung_fahrzeuge']['Row']>;
         Relationships: [];
       };
       einteilung_mitarbeiter: {
