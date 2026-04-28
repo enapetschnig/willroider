@@ -195,13 +195,13 @@ export default function MeinTag() {
 
                     <div className="flex gap-2 pt-1">
                       <Link to={`/baustellen/${b.id}`} className="flex-1">
-                        <Button variant="outline" className="w-full" size="sm">
+                        <Button variant="outline" className="w-full h-12 text-sm">
                           Baustellen-Details
                         </Button>
                       </Link>
                       <Link to="/stunden" className="flex-1">
-                        <Button className="w-full" size="sm">
-                          <ClockIcon className="h-4 w-4 mr-1" /> Stunden buchen
+                        <Button className="w-full h-12 text-sm">
+                          <ClockIcon className="h-4 w-4 mr-1.5" /> Stunden buchen
                         </Button>
                       </Link>
                     </div>

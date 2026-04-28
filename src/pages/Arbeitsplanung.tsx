@@ -621,6 +621,34 @@ export default function Arbeitsplanung() {
 
       {/* Mobile: kompakter Worker-Plan pro Tag */}
       <div className="md:hidden space-y-3">
+        {/* Sticky Mobile-Legende */}
+        <div className="md:hidden sticky top-14 z-20 bg-background/95 backdrop-blur border rounded-md px-2 py-1.5 -mx-1">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]">
+            <span className="font-semibold uppercase tracking-wide text-muted-foreground">
+              Codes:
+            </span>
+            {Object.entries(FEHLZEIT_LABEL).map(([k, l]) => (
+              <span key={k} className="flex items-center gap-1">
+                <span
+                  className="h-3 w-3 rounded-sm shrink-0"
+                  style={{ background: FEHLZEIT_COLOR[k] }}
+                />
+                <strong className="font-mono">{k}</strong>
+                <span className="text-muted-foreground">{l}</span>
+              </span>
+            ))}
+            <span className="flex items-center gap-1 ml-auto">
+              <span className="h-3 w-3 rounded-sm shrink-0 bg-primary/70" />
+              <span className="text-muted-foreground">Baustelle</span>
+            </span>
+          </div>
+          {isAdmin && (
+            <div className="text-[9px] text-muted-foreground italic mt-0.5 leading-tight">
+              Tippen für Aktion · Streichen wählt Bereich aus
+            </div>
+          )}
+        </div>
+
         <MobileWorkerPlan
           workerGroups={workerGroups}
           dayHeaders={dayHeaders}
@@ -1303,6 +1331,20 @@ function MobileWorkerPlan({
                       }
                     }
                     const sel = selection.has(cellKey(m.id, iso));
+                    const tooltipText = a
+                      ? a.source === "fehlzeit"
+                        ? `${FEHLZEIT_LABEL[a.fehlzeitTyp ?? ""] ?? a.fehlzeitTyp ?? ""} · ${new Date(
+                            iso
+                          ).toLocaleDateString("de-AT")}${
+                            a.isReadOnly ? " (eingereicht)" : ""
+                          }`
+                        : `${a.baustelleName ?? "Baustelle"} · ${new Date(
+                            iso
+                          ).toLocaleDateString("de-AT")}${
+                            a.isReadOnly ? " (eingereicht)" : ""
+                          }`
+                      : new Date(iso).toLocaleDateString("de-AT");
+                    const ariaLbl = `${m.vorname} ${m.nachname} – ${tooltipText}`;
                     return (
                       <button
                         key={i}
@@ -1311,6 +1353,8 @@ function MobileWorkerPlan({
                         data-iso={iso}
                         onPointerDown={(e) => onCellPointerDown(e, m.id, iso)}
                         disabled={!isAdmin}
+                        title={tooltipText}
+                        aria-label={ariaLbl}
                         className={`text-[9px] truncate font-medium ${
                           d.isToday ? "ring-1 ring-primary/40 ring-inset" : ""
                         } ${sel ? "ring-2 ring-primary ring-inset z-10" : ""}`}

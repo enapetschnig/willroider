@@ -738,31 +738,42 @@ export default function Stunden() {
                 <Label className="text-xs uppercase tracking-wide text-muted-foreground">
                   {fehlzeitTyp ? "Fehlzeit" : "Was wurde gemacht"}
                 </Label>
-                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5 mt-1.5">
                   <button
                     onClick={() => setFehlzeitTyp("")}
-                    className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${
+                    className={`h-11 rounded-md text-sm font-semibold border-2 transition ${
                       !fehlzeitTyp
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-background hover:bg-muted"
+                        ? "bg-primary text-primary-foreground border-primary shadow-sm ring-2 ring-primary/30"
+                        : "bg-background border-border hover:bg-muted text-muted-foreground"
                     }`}
                   >
                     Arbeit
                   </button>
-                  {FEHLZEITEN.map((f) => (
-                    <button
-                      key={f.value}
-                      onClick={() => setFehlzeitTyp(f.value)}
-                      className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${
-                        fehlzeitTyp === f.value
-                          ? "text-white border-transparent"
-                          : "bg-background hover:bg-muted"
-                      }`}
-                      style={fehlzeitTyp === f.value ? { background: f.color } : undefined}
-                    >
-                      {f.label}
-                    </button>
-                  ))}
+                  {FEHLZEITEN.map((f) => {
+                    const active = fehlzeitTyp === f.value;
+                    return (
+                      <button
+                        key={f.value}
+                        onClick={() => setFehlzeitTyp(f.value)}
+                        className={`h-11 rounded-md text-sm font-semibold border-2 transition ${
+                          active
+                            ? "text-white shadow-sm"
+                            : "bg-background border-border hover:bg-muted text-muted-foreground"
+                        }`}
+                        style={
+                          active
+                            ? {
+                                background: f.color,
+                                borderColor: f.color,
+                                boxShadow: `0 0 0 2px ${f.color}40`,
+                              }
+                            : undefined
+                        }
+                      >
+                        {f.label}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 {!fehlzeitTyp && (
@@ -1615,8 +1626,8 @@ function TimeStepper({
   onChange: (v: string) => void;
   big?: boolean;
 }) {
-  const inputH = big ? "h-12" : "h-10";
-  const btnH = big ? "h-12 w-9" : "h-10 w-8";
+  const inputH = big ? "h-12" : "h-11";
+  const btnH = big ? "h-12 w-12" : "h-11 w-11";
   return (
     <div>
       <Label className="text-xs uppercase tracking-wide text-muted-foreground">{label}</Label>

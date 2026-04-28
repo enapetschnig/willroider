@@ -193,7 +193,22 @@ export default function StundenFreigabe() {
       />
 
       <Tabs value={tab} onValueChange={setTab}>
-        <div className="-mx-3 sm:mx-0 px-3 sm:px-0 overflow-x-auto pb-1">
+        {/* Mobile: Dropdown-Select, Desktop: Tabs */}
+        <div className="sm:hidden">
+          <select
+            value={tab}
+            onChange={(e) => setTab(e.target.value)}
+            className="w-full h-11 rounded-md border bg-background px-3 text-sm font-medium"
+            aria-label="Status auswählen"
+          >
+            <option value="offen">Offen</option>
+            <option value="zm">ZM-Freigabe</option>
+            <option value="buero">Büro-Freigabe</option>
+            <option value="exportiert">Exportiert</option>
+            <option value="abgelehnt">Abgelehnt</option>
+          </select>
+        </div>
+        <div className="hidden sm:block overflow-x-auto pb-1">
           <TabsList className="inline-flex w-max">
             <TabsTrigger value="offen" className="shrink-0">Offen</TabsTrigger>
             <TabsTrigger value="zm" className="shrink-0">ZM-Freigabe</TabsTrigger>
