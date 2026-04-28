@@ -12,6 +12,7 @@ import Baustellen from "@/pages/Baustellen";
 import BaustelleDetail from "@/pages/BaustelleDetail";
 import Mitarbeiter from "@/pages/Mitarbeiter";
 import Stunden from "@/pages/Stunden";
+import Stundenauswertung from "@/pages/Stundenauswertung";
 import StundenFreigabe from "@/pages/StundenFreigabe";
 import Kalender from "@/pages/Kalender";
 import Evaluierung from "@/pages/Evaluierung";
@@ -40,6 +41,7 @@ const App = () => (
               <Route path="/mitarbeiter" element={<Mitarbeiter />} />
               <Route path="/fahrzeuge" element={<Fahrzeuge />} />
               <Route path="/stunden" element={<Stunden />} />
+              <Route path="/stunden/auswertung" element={<Stundenauswertung />} />
               <Route path="/stunden/freigabe" element={<StundenFreigabe />} />
               <Route path="/kalender" element={<Kalender />} />
               <Route path="/evaluierung" element={<Evaluierung />} />

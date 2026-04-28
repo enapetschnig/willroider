@@ -7,12 +7,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
-import {
   Dialog,
   DialogContent,
   DialogFooter,
@@ -129,7 +123,6 @@ export default function Stunden() {
   const [memberSearch, setMemberSearch] = useState<string>("");
 
   const todayIso = () => new Date().toISOString().slice(0, 10);
-  const currentMonth = () => new Date().toISOString().slice(0, 7);
 
   const [date, setDate] = useState<string>(todayIso);
 
@@ -151,11 +144,6 @@ export default function Stunden() {
   const [taggeldLang, setTaggeldLang] = useState<number>(0);
   const [km, setKm] = useState<number>(0);
   const [notizen, setNotizen] = useState<string>("");
-
-  // Auswertung
-  const [auswertungMonat, setAuswertungMonat] = useState<string>(currentMonth);
-  const [auswertungRows, setAuswertungRows] = useState<Stunde[]>([]);
-  const [tab, setTab] = useState<"erfassen" | "auswertung">("erfassen");
 
   const mode: Mode = isAdmin ? "admin" : polierPartie ? "polier" : "self";
   const hasPicker = mode !== "self";
@@ -267,36 +255,6 @@ export default function Stunden() {
   useEffect(() => {
     load();
   }, [user, profile, polierPartie, allMembers]);
-
-  // ─── Auswertung laden (für Monat) ───
-  const loadAuswertung = async () => {
-    if (!user) return;
-    const monthStart = `${auswertungMonat}-01`;
-    const next = new Date(monthStart);
-    next.setMonth(next.getMonth() + 1);
-    const monthEnd = next.toISOString().slice(0, 10);
-
-    let q = supabase
-      .from("stundenbuchungen")
-      .select("*")
-      .gte("datum", monthStart)
-      .lt("datum", monthEnd)
-      .order("datum", { ascending: false });
-    if (mode === "admin") {
-      // alle
-    } else if (mode === "polier" && allMembers.length > 0) {
-      const ids = [user.id, ...allMembers.map((m) => m.id)];
-      q = q.in("mitarbeiter_id", Array.from(new Set(ids)));
-    } else {
-      q = q.eq("mitarbeiter_id", user.id);
-    }
-    const { data } = await q;
-    setAuswertungRows((data as Stunde[]) ?? []);
-  };
-
-  useEffect(() => {
-    if (tab === "auswertung") loadAuswertung();
-  }, [tab, auswertungMonat, mode, allMembers]);
 
   // ─── Tagesstatus pro Person für aktuelles Datum ───
   const statusForDate = useMemo(() => {
@@ -478,7 +436,6 @@ export default function Stunden() {
     if (!confirm("Buchung löschen?")) return;
     await supabase.from("stundenbuchungen").delete().eq("id", id);
     load();
-    if (tab === "auswertung") loadAuswertung();
   };
 
   const submitAllOpen = async () => {
@@ -510,14 +467,7 @@ export default function Stunden() {
     <div className="space-y-4 max-w-2xl mx-auto">
       <PageHeader title="Stundenerfassung" />
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
-        <TabsList className="grid grid-cols-2 w-full">
-          <TabsTrigger value="erfassen">Erfassen</TabsTrigger>
-          <TabsTrigger value="auswertung">Auswertung</TabsTrigger>
-        </TabsList>
-
-        {/* ════════════════════════════ ERFASSEN ════════════════════════════ */}
-        <TabsContent value="erfassen" className="space-y-4 mt-4">
+      <div className="space-y-4">
           {hasPicker && (
             <PersonPicker
               mode={mode}
@@ -1020,36 +970,7 @@ export default function Stunden() {
               )}
             </div>
           </div>
-        </TabsContent>
-
-        {/* ════════════════════════════ AUSWERTUNG ════════════════════════════ */}
-        <TabsContent value="auswertung" className="space-y-3 mt-4">
-          <Card>
-            <CardContent className="p-3 flex items-center gap-2">
-              <Label className="text-xs whitespace-nowrap">Monat:</Label>
-              <Input
-                type="month"
-                value={auswertungMonat}
-                onChange={(e) => setAuswertungMonat(e.target.value)}
-                className="h-10 max-w-[180px]"
-              />
-              <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-                {auswertungRows.length} Buchungen
-              </span>
-            </CardContent>
-          </Card>
-
-          <AuswertungList
-            rows={auswertungRows}
-            baustellen={baustellen}
-            members={allMembers}
-            partien={allPartien}
-            ownUserId={user!.id}
-            ownProfile={profile as any}
-            mode={mode}
-          />
-        </TabsContent>
-      </Tabs>
+      </div>
 
       {/* Edit dialog */}
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
@@ -1057,7 +978,7 @@ export default function Stunden() {
           <DialogHeader>
             <DialogTitle>Buchung bearbeiten</DialogTitle>
           </DialogHeader>
-          {editing && <EditForm row={editing as Stunde} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); if (tab === "auswertung") loadAuswertung(); }} />}
+          {editing && <EditForm row={editing as Stunde} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
         </DialogContent>
       </Dialog>
     </div>
@@ -1164,201 +1085,6 @@ function BuchungCard({
   );
 }
 
-// ─── Auswertung-Liste ───
-function AuswertungList({
-  rows,
-  baustellen,
-  members,
-  partien,
-  ownUserId,
-  ownProfile,
-  mode,
-}: {
-  rows: Stunde[];
-  baustellen: Baustelle[];
-  members: Profile[];
-  partien: Partie[];
-  ownUserId: string;
-  ownProfile: Profile | null;
-  mode: Mode;
-}) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-
-  const allPersons = useMemo(() => {
-    const map = new Map<string, Profile>();
-    members.forEach((m) => map.set(m.id, m));
-    if (ownProfile) map.set(ownUserId, { ...(ownProfile as any), id: ownUserId });
-    return map;
-  }, [members, ownProfile, ownUserId]);
-
-  const grouped = useMemo(() => {
-    const byPerson = new Map<
-      string,
-      {
-        person: Profile;
-        arbeit: number;
-        fahrt: number;
-        fehl: number;
-        rows: Stunde[];
-      }
-    >();
-    rows.forEach((r) => {
-      const p = allPersons.get(r.mitarbeiter_id);
-      if (!p) return;
-      const cur = byPerson.get(r.mitarbeiter_id) ?? {
-        person: p,
-        arbeit: 0,
-        fahrt: 0,
-        fehl: 0,
-        rows: [],
-      };
-      cur.arbeit += Number(r.arbeitsstunden ?? 0);
-      cur.fahrt += Number(r.fahrstunden ?? 0);
-      cur.fehl += Number(r.fehlzeit_stunden ?? 0);
-      cur.rows.push(r);
-      byPerson.set(r.mitarbeiter_id, cur);
-    });
-    return [...byPerson.values()].sort((a, b) =>
-      a.person.nachname.localeCompare(b.person.nachname)
-    );
-  }, [rows, allPersons]);
-
-  const toggle = (id: string) => {
-    const next = new Set(expanded);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setExpanded(next);
-  };
-
-  if (grouped.length === 0) {
-    return (
-      <Card>
-        <CardContent className="p-8 text-center text-sm text-muted-foreground">
-          Keine Buchungen in diesem Monat.
-        </CardContent>
-      </Card>
-    );
-  }
-
-  // Total über alle Personen
-  const total = grouped.reduce(
-    (s, g) => ({
-      arbeit: s.arbeit + g.arbeit,
-      fahrt: s.fahrt + g.fahrt,
-      fehl: s.fehl + g.fehl,
-    }),
-    { arbeit: 0, fahrt: 0, fehl: 0 }
-  );
-
-  return (
-    <div className="space-y-2">
-      {(mode === "admin" || mode === "polier") && grouped.length > 1 && (
-        <Card>
-          <CardContent className="p-3 grid grid-cols-3 gap-2 text-center text-xs">
-            <div>
-              <div className="text-2xl font-bold tabular-nums">{total.arbeit.toFixed(1)}</div>
-              <div className="text-[10px] uppercase text-muted-foreground">Arbeit gesamt</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold tabular-nums">{total.fahrt.toFixed(1)}</div>
-              <div className="text-[10px] uppercase text-muted-foreground">Fahrt gesamt</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold tabular-nums">{total.fehl.toFixed(1)}</div>
-              <div className="text-[10px] uppercase text-muted-foreground">Fehlzeit gesamt</div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {grouped.map((g) => {
-        const isOpen = expanded.has(g.person.id);
-        const partie = partien.find((p) => p.id === g.person.partie_id);
-        const sigma = g.arbeit + g.fahrt + g.fehl;
-        return (
-          <Card key={g.person.id}>
-            <button
-              onClick={() => toggle(g.person.id)}
-              className="w-full p-3 flex items-center gap-3 text-left hover:bg-muted/40 transition"
-            >
-              <div
-                className="h-10 w-10 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
-                style={{ background: partie?.farbcode ?? "#999" }}
-              >
-                {initials(g.person)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="font-semibold text-sm">
-                  {g.person.vorname} {g.person.nachname}
-                  {g.person.id === ownUserId && (
-                    <Badge variant="outline" className="ml-1.5 text-[9px]">
-                      Ich
-                    </Badge>
-                  )}
-                </div>
-                <div className="text-[11px] text-muted-foreground truncate">
-                  {[g.person.pers_nr, partie?.name].filter(Boolean).join(" · ")}
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-3 text-center text-xs shrink-0 mr-1">
-                <div>
-                  <div className="font-bold tabular-nums">{g.arbeit.toFixed(1)}</div>
-                  <div className="text-[9px] text-muted-foreground uppercase">Arbeit</div>
-                </div>
-                <div>
-                  <div className="font-bold tabular-nums">{g.fehl.toFixed(1)}</div>
-                  <div className="text-[9px] text-muted-foreground uppercase">Fehlz.</div>
-                </div>
-                <div>
-                  <div className="font-bold tabular-nums text-primary">{sigma.toFixed(1)}</div>
-                  <div className="text-[9px] text-muted-foreground uppercase">Σ</div>
-                </div>
-              </div>
-              {isOpen ? (
-                <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
-              ) : (
-                <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
-              )}
-            </button>
-            {isOpen && (
-              <div className="border-t bg-muted/20">
-                {g.rows.map((r) => {
-                  const b = baustellen.find((x) => x.id === r.baustelle_id);
-                  return (
-                    <div
-                      key={r.id}
-                      className="px-3 py-2 border-b last:border-0 flex items-center gap-2 text-xs"
-                    >
-                      <span className="font-medium tabular-nums shrink-0">
-                        {new Date(r.datum).toLocaleDateString("de-AT", {
-                          day: "2-digit",
-                          month: "2-digit",
-                        })}
-                      </span>
-                      {r.start_zeit && r.end_zeit && (
-                        <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
-                          {fmtTime(r.start_zeit)}–{fmtTime(r.end_zeit)}
-                        </span>
-                      )}
-                      <span className="truncate flex-1">
-                        {r.fehlzeit_typ
-                          ? `Fehlzeit ${r.fehlzeit_typ}`
-                          : b?.bvh_name ?? "—"}
-                      </span>
-                      <span className="font-bold tabular-nums shrink-0">
-                        {Number(r.arbeitsstunden ?? r.fehlzeit_stunden ?? 0).toFixed(2)}h
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
-        );
-      })}
-    </div>
-  );
-}
 
 // ─── Edit-Form ───
 function EditForm({
