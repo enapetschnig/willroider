@@ -65,6 +65,7 @@ export default function BaustelleDetail() {
   const [allPartien, setAllPartien] = useState<Partie[]>([]);
   const [terminDialog, setTerminDialog] = useState(false);
   const [kostenDialog, setKostenDialog] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>("dokumente");
 
   const load = async () => {
     if (!id) return;
@@ -303,18 +304,61 @@ export default function BaustelleDetail() {
         </Card>
       </div>
 
-      <Tabs defaultValue="dokumente">
-        <div className="-mx-3 sm:mx-0 px-3 sm:px-0 overflow-x-auto pb-1">
-          <TabsList className="inline-flex w-max">
-            <TabsTrigger value="dokumente" className="shrink-0"><FileText className="h-4 w-4 mr-2" /> Dokumente</TabsTrigger>
-            <TabsTrigger value="team" className="shrink-0"><Users className="h-4 w-4 mr-2" /> Team</TabsTrigger>
-            <TabsTrigger value="termine" className="shrink-0"><CalendarDays className="h-4 w-4 mr-2" /> Termine ({termine.length})</TabsTrigger>
-            <TabsTrigger value="stunden" className="shrink-0"><Clock className="h-4 w-4 mr-2" /> Stunden ({stunden.length})</TabsTrigger>
-            <TabsTrigger value="kosten" className="shrink-0"><Banknote className="h-4 w-4 mr-2" /> Kosten ({kosten.length})</TabsTrigger>
-            <TabsTrigger value="eval" className="shrink-0"><ShieldCheck className="h-4 w-4 mr-2" /> Evaluierung ({evals.length})</TabsTrigger>
-            <TabsTrigger value="info" className="shrink-0"><Building2 className="h-4 w-4 mr-2" /> Stammdaten</TabsTrigger>
-          </TabsList>
-        </div>
+      {/* Section-Cards (mobile-optimiert): große Touch-Ziele statt Tab-Pills */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
+        {[
+          { value: "dokumente", label: "Dokumente", icon: FileText, count: null, color: "#dc2626" },
+          { value: "team", label: "Team", icon: Users, count: team.length, color: partie?.farbcode ?? "#3b82f6" },
+          { value: "termine", label: "Termine", icon: CalendarDays, count: termine.length, color: "#f59e0b" },
+          { value: "stunden", label: "Stunden", icon: Clock, count: stunden.length, color: "#10b981" },
+          { value: "kosten", label: "Kosten", icon: Banknote, count: kosten.length, color: "#8b5cf6" },
+          { value: "eval", label: "Unterweisung", icon: ShieldCheck, count: evals.length, color: "#84cc16" },
+          { value: "info", label: "Stammdaten", icon: Building2, count: null, color: "#6b7280" },
+        ].map((s) => {
+          const active = activeTab === s.value;
+          return (
+            <button
+              key={s.value}
+              onClick={() => setActiveTab(s.value)}
+              className={`text-left rounded-lg border-2 p-3 sm:p-4 transition-all ${
+                active
+                  ? "border-primary bg-primary/5 shadow-sm"
+                  : "border-border bg-card hover:border-primary/40 hover:shadow-sm"
+              }`}
+            >
+              <div className="flex items-start gap-2">
+                <div
+                  className="h-9 w-9 sm:h-10 sm:w-10 rounded-md flex items-center justify-center shrink-0"
+                  style={{ background: `${s.color}1a`, color: s.color }}
+                >
+                  <s.icon className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-sm sm:text-base leading-tight">
+                    {s.label}
+                  </div>
+                  {s.count != null && (
+                    <div className="text-[11px] text-muted-foreground tabular-nums">
+                      {s.count} Eintrag{s.count === 1 ? "" : "e"}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="hidden">
+          <TabsTrigger value="dokumente" />
+          <TabsTrigger value="team" />
+          <TabsTrigger value="termine" />
+          <TabsTrigger value="stunden" />
+          <TabsTrigger value="kosten" />
+          <TabsTrigger value="eval" />
+          <TabsTrigger value="info" />
+        </TabsList>
 
         <TabsContent value="info">
           <Card>

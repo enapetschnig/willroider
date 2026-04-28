@@ -7,7 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { generateBaustellenmeldungPdf } from "@/lib/baustellenmeldungPdf";
+import { generateBaustellenanlageDocx, DOCX_MIME } from "@/lib/baustellenanlageDocx";
 import { Save } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -123,35 +123,45 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
       id = savedRow.id;
     }
 
-    // PDF 1:1 nach Vorlage erzeugen und ablegen
+    // DOCX 1:1 aus dem Original-Template erzeugen und ablegen
     const bauleiterName = bauleiterId
       ? (() => {
           const p = profiles.find((x) => x.id === bauleiterId);
           return p ? `${p.vorname} ${p.nachname}` : "";
         })()
       : "";
-    const pdfBlob = generateBaustellenmeldungPdf({ ...savedRow, ...payload }, bauleiterName);
-    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    const path = `${id}/baustellenanlage/baustellenanlage_${dateStr}.pdf`;
-    const { error: upErr } = await supabase.storage
-      .from("baustellen")
-      .upload(path, pdfBlob, { contentType: "application/pdf", upsert: true });
-
-    if (!upErr) {
-      await supabase.from("dokumente").insert({
-        baustelle_id: id!,
-        ordner: "baustellenanlage",
-        dateiname: `Baustellenanlage ${bvhName} ${dateStr}.pdf`,
-        storage_path: path,
-        mimetype: "application/pdf",
-        groesse: pdfBlob.size,
-        hochgeladen_von: user?.id ?? null,
-      } as any);
+    try {
+      const docxBlob = await generateBaustellenanlageDocx(
+        { ...savedRow, ...payload },
+        bauleiterName
+      );
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const path = `${id}/baustellenanlage/baustellenanlage_${dateStr}.docx`;
+      const { error: upErr } = await supabase.storage
+        .from("baustellen")
+        .upload(path, docxBlob, { contentType: DOCX_MIME, upsert: true });
+      if (!upErr) {
+        await supabase.from("dokumente").insert({
+          baustelle_id: id!,
+          ordner: "baustellenanlage",
+          dateiname: `Baustellenanlage ${bvhName} ${dateStr}.docx`,
+          storage_path: path,
+          mimetype: DOCX_MIME,
+          groesse: docxBlob.size,
+          hochgeladen_von: user?.id ?? null,
+        } as any);
+      }
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "DOCX-Erstellung fehlgeschlagen",
+        description: err?.message ?? String(err),
+      });
     }
 
     toast({
       title: initial?.id ? "Baustelle aktualisiert" : "Baustelle angelegt",
-      description: "PDF im Ordner Baustellenanlage abgelegt.",
+      description: "Baustellenmeldung als DOCX im Ordner Baustellenanlage abgelegt.",
     });
     setSaving(false);
     onSaved?.(id!);
@@ -298,7 +308,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
         )}
         <Button type="submit" disabled={saving} className="flex-1 h-11">
           <Save className="h-4 w-4 mr-2" />
-          {saving ? "Speichert…" : initial?.id ? "Speichern + PDF aktualisieren" : "Baustelle anlegen + PDF erstellen"}
+          {saving ? "Speichert…" : initial?.id ? "Speichern + DOCX aktualisieren" : "Baustelle anlegen + DOCX erstellen"}
         </Button>
       </div>
     </form>
