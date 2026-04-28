@@ -7,12 +7,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import {
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -29,6 +36,9 @@ import {
   Users,
   AlertTriangle,
   CheckCircle2,
+  Clock,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import type { Database, StundenStatus } from "@/integrations/supabase/types";
 
@@ -64,6 +74,46 @@ const initials = (p: { vorname: string; nachname: string }) =>
 
 type Mode = "self" | "polier" | "admin";
 
+// ─── Time helpers ───
+function timeToMin(t: string | null | undefined): number {
+  if (!t) return 0;
+  const [h, m] = t.split(":").map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+function minToTime(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+function calcArbeitsstunden(
+  start: string | null | undefined,
+  end: string | null | undefined,
+  pauseVon: string | null | undefined,
+  pauseBis: string | null | undefined
+): number {
+  if (!start || !end) return 0;
+  const s = timeToMin(start);
+  const e = timeToMin(end);
+  if (e <= s) return 0;
+  let total = e - s;
+  if (pauseVon && pauseBis) {
+    const pv = timeToMin(pauseVon);
+    const pb = timeToMin(pauseBis);
+    if (pb > pv) {
+      const overlap = Math.max(0, Math.min(e, pb) - Math.max(s, pv));
+      total -= overlap;
+    }
+  }
+  return Math.max(0, total) / 60;
+}
+const fmtTime = (t: string | null | undefined) => (t ? t.slice(0, 5) : "");
+const fmtH = (n: number) => `${n.toFixed(2).replace(".", ",")} h`;
+
+const DEFAULT_START = "07:00";
+const DEFAULT_END = "15:30";
+const DEFAULT_PAUSE_VON = "12:00";
+const DEFAULT_PAUSE_BIS = "12:30";
+
 export default function Stunden() {
   const { user, profile, isAdmin } = useAuth();
   const { toast } = useToast();
@@ -79,9 +129,20 @@ export default function Stunden() {
   const [memberSearch, setMemberSearch] = useState<string>("");
 
   const todayIso = () => new Date().toISOString().slice(0, 10);
+  const currentMonth = () => new Date().toISOString().slice(0, 7);
 
   const [date, setDate] = useState<string>(todayIso);
-  const [hours, setHours] = useState<number>(8);
+
+  // Time-Range State (Arbeit-Mode)
+  const [startZeit, setStartZeit] = useState<string>(DEFAULT_START);
+  const [endZeit, setEndZeit] = useState<string>(DEFAULT_END);
+  const [hasPause, setHasPause] = useState<boolean>(true);
+  const [pauseVon, setPauseVon] = useState<string>(DEFAULT_PAUSE_VON);
+  const [pauseBis, setPauseBis] = useState<string>(DEFAULT_PAUSE_BIS);
+
+  // Fehlzeit-Mode hours
+  const [fehlzeitHours, setFehlzeitHours] = useState<number>(8);
+
   const [baustelleId, setBaustelleId] = useState<string>("");
   const [taetigkeit, setTaetigkeit] = useState<string>("");
   const [fehlzeitTyp, setFehlzeitTyp] = useState<string>("");
@@ -91,20 +152,32 @@ export default function Stunden() {
   const [km, setKm] = useState<number>(0);
   const [notizen, setNotizen] = useState<string>("");
 
+  // Auswertung
+  const [auswertungMonat, setAuswertungMonat] = useState<string>(currentMonth);
+  const [auswertungRows, setAuswertungRows] = useState<Stunde[]>([]);
+  const [tab, setTab] = useState<"erfassen" | "auswertung">("erfassen");
+
   const mode: Mode = isAdmin ? "admin" : polierPartie ? "polier" : "self";
   const hasPicker = mode !== "self";
 
-  // ─── Detektion + Laden Mitglieder/Partien je nach Modus ───
+  const arbeitstundenLive = useMemo(
+    () =>
+      calcArbeitsstunden(
+        startZeit,
+        endZeit,
+        hasPause ? pauseVon : null,
+        hasPause ? pauseBis : null
+      ),
+    [startZeit, endZeit, hasPause, pauseVon, pauseBis]
+  );
+
+  // ─── Detektion Modus ───
   useEffect(() => {
     if (!user) return;
     (async () => {
       if (isAdmin) {
         const [{ data: members }, { data: partien }] = await Promise.all([
-          supabase
-            .from("profiles")
-            .select("*")
-            .eq("is_active", true)
-            .order("nachname"),
+          supabase.from("profiles").select("*").eq("is_active", true).order("nachname"),
           supabase.from("partien").select("*").order("name"),
         ]);
         setAllMembers((members as Profile[]) ?? []);
@@ -113,7 +186,6 @@ export default function Stunden() {
         setForUserId(user.id);
         return;
       }
-      // Polier-Detektion
       const { data: p } = await supabase
         .from("partien")
         .select("*")
@@ -150,6 +222,7 @@ export default function Stunden() {
       .select("*")
       .gte("datum", fromIso)
       .order("datum", { ascending: false })
+      .order("start_zeit", { ascending: true })
       .limit(500);
 
     if (mode === "admin") {
@@ -161,10 +234,6 @@ export default function Stunden() {
       stundenQuery = stundenQuery.eq("mitarbeiter_id", user.id);
     }
 
-    // Baustellen-Filter:
-    // - admin: alle aktiven
-    // - polier: nur eigene Partie
-    // - self: eigene Partie (falls vorhanden) sonst alle
     const partieFilter =
       mode === "admin"
         ? null
@@ -199,7 +268,37 @@ export default function Stunden() {
     load();
   }, [user, profile, polierPartie, allMembers]);
 
-  // ─── Tagesstatus pro Person für gewähltes Datum ───
+  // ─── Auswertung laden (für Monat) ───
+  const loadAuswertung = async () => {
+    if (!user) return;
+    const monthStart = `${auswertungMonat}-01`;
+    const next = new Date(monthStart);
+    next.setMonth(next.getMonth() + 1);
+    const monthEnd = next.toISOString().slice(0, 10);
+
+    let q = supabase
+      .from("stundenbuchungen")
+      .select("*")
+      .gte("datum", monthStart)
+      .lt("datum", monthEnd)
+      .order("datum", { ascending: false });
+    if (mode === "admin") {
+      // alle
+    } else if (mode === "polier" && allMembers.length > 0) {
+      const ids = [user.id, ...allMembers.map((m) => m.id)];
+      q = q.in("mitarbeiter_id", Array.from(new Set(ids)));
+    } else {
+      q = q.eq("mitarbeiter_id", user.id);
+    }
+    const { data } = await q;
+    setAuswertungRows((data as Stunde[]) ?? []);
+  };
+
+  useEffect(() => {
+    if (tab === "auswertung") loadAuswertung();
+  }, [tab, auswertungMonat, mode, allMembers]);
+
+  // ─── Tagesstatus pro Person für aktuelles Datum ───
   const statusForDate = useMemo(() => {
     const map = new Map<string, { hours: number; rows: Stunde[] }>();
     rows
@@ -213,34 +312,20 @@ export default function Stunden() {
     return map;
   }, [rows, date]);
 
-  // ─── Doppel-Buchung-Warnung ───
-  const existingForCurrent = useMemo(() => {
-    return rows.find(
-      (r) =>
-        r.mitarbeiter_id === forUserId &&
-        r.datum === date &&
-        (fehlzeitTyp ? !!r.fehlzeit_typ : r.baustelle_id === baustelleId)
-    );
-  }, [rows, forUserId, date, baustelleId, fehlzeitTyp]);
+  const todayBlocks = useMemo(() => {
+    return rows.filter((r) => r.mitarbeiter_id === forUserId && r.datum === date);
+  }, [rows, forUserId, date]);
 
-  const totalsThisMonth = useMemo(() => {
-    const monthStart = new Date();
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
-    let arbeit = 0,
-      fahrt = 0,
-      fehl = 0;
-    rows
-      .filter((r) => r.mitarbeiter_id === user?.id)
-      .forEach((r) => {
-        if (new Date(r.datum) >= monthStart) {
-          arbeit += Number(r.arbeitsstunden ?? 0);
-          fahrt += Number(r.fahrstunden ?? 0);
-          fehl += Number(r.fehlzeit_stunden ?? 0);
-        }
-      });
-    return { arbeit, fahrt, fehl };
-  }, [rows, user]);
+  const todayTotalH = todayBlocks.reduce(
+    (s, r) => s + Number(r.arbeitsstunden ?? r.fehlzeit_stunden ?? 0),
+    0
+  );
+
+  // ─── Doppel-Buchung-Warnung (nur Arbeit + gleiche Baustelle) ───
+  const existingForCurrent = useMemo(() => {
+    if (fehlzeitTyp || !baustelleId) return null;
+    return todayBlocks.find((r) => r.baustelle_id === baustelleId);
+  }, [todayBlocks, baustelleId, fehlzeitTyp]);
 
   const moveDate = (d: number) => {
     const nd = new Date(date);
@@ -248,8 +333,18 @@ export default function Stunden() {
     setDate(nd.toISOString().slice(0, 10));
   };
 
-  const resetForm = () => {
-    setHours(8);
+  const resetTimeFields = () => {
+    setStartZeit(DEFAULT_START);
+    setEndZeit(DEFAULT_END);
+    setHasPause(true);
+    setPauseVon(DEFAULT_PAUSE_VON);
+    setPauseBis(DEFAULT_PAUSE_BIS);
+  };
+
+  const fullReset = () => {
+    resetTimeFields();
+    setFehlzeitHours(8);
+    setBaustelleId("");
     setTaetigkeit("");
     setFehlzeitTyp("");
     setFahrstunden(0);
@@ -260,9 +355,33 @@ export default function Stunden() {
     setExtras(false);
   };
 
-  const submit = async () => {
+  const partialResetForNextBaustelle = (lastBlock?: Stunde) => {
+    setBaustelleId("");
+    setTaetigkeit("");
+    setFahrstunden(0);
+    setTaggeldKurz(0);
+    setTaggeldLang(0);
+    setKm(0);
+    setNotizen("");
+    setExtras(false);
+    if (lastBlock?.end_zeit) {
+      // Nahtloser Anschluss: Start = vorheriges Ende
+      setStartZeit(fmtTime(lastBlock.end_zeit) || DEFAULT_START);
+      // Standard: 8.5h Fenster
+      const startMin = timeToMin(fmtTime(lastBlock.end_zeit));
+      setEndZeit(minToTime(startMin + 8 * 60 + 30));
+      setHasPause(false); // Pause war ja schon im ersten Block
+    } else {
+      resetTimeFields();
+    }
+  };
+
+  const submit = async (continueFlag: boolean) => {
     if (!user || !forUserId) return;
-    if (!fehlzeitTyp && !baustelleId) {
+
+    const isFehlzeit = !!fehlzeitTyp;
+
+    if (!isFehlzeit && !baustelleId) {
       toast({
         variant: "destructive",
         title: "Baustelle fehlt",
@@ -271,51 +390,87 @@ export default function Stunden() {
       return;
     }
 
+    let arbeit = 0;
+    if (!isFehlzeit) {
+      if (timeToMin(endZeit) <= timeToMin(startZeit)) {
+        toast({ variant: "destructive", title: "Endzeit muss nach Startzeit liegen." });
+        return;
+      }
+      if (hasPause) {
+        const pv = timeToMin(pauseVon);
+        const pb = timeToMin(pauseBis);
+        if (pb <= pv) {
+          toast({ variant: "destructive", title: "Pause-Ende muss nach Pause-Beginn liegen." });
+          return;
+        }
+      }
+      arbeit = calcArbeitsstunden(
+        startZeit,
+        endZeit,
+        hasPause ? pauseVon : null,
+        hasPause ? pauseBis : null
+      );
+      if (arbeit <= 0) {
+        toast({ variant: "destructive", title: "Arbeitszeit ist 0 — bitte prüfen." });
+        return;
+      }
+    }
+
     if (existingForCurrent) {
       const personLabel =
         forUserId === user.id
           ? "dich"
           : allMembers.find((m) => m.id === forUserId)?.vorname ?? "diese Person";
       const ok = window.confirm(
-        `Für ${personLabel} ist am ${new Date(date).toLocaleDateString("de-AT")} schon ` +
-          `${Number(existingForCurrent.arbeitsstunden ?? existingForCurrent.fehlzeit_stunden ?? 0).toFixed(1)}h ` +
-          `auf ${
-            existingForCurrent.baustelle_id
-              ? baustellen.find((b) => b.id === existingForCurrent.baustelle_id)?.bvh_name ?? "Baustelle"
-              : `Fehlzeit (${existingForCurrent.fehlzeit_typ})`
-          } gebucht. Trotzdem zusätzliche Buchung anlegen?`
+        `Für ${personLabel} ist auf dieser Baustelle am ${new Date(date).toLocaleDateString(
+          "de-AT"
+        )} bereits ${Number(existingForCurrent.arbeitsstunden ?? 0).toFixed(
+          2
+        )}h gebucht. Trotzdem zusätzliche Buchung anlegen?`
       );
       if (!ok) return;
     }
 
-    const payload = {
+    const payload: any = {
       mitarbeiter_id: forUserId,
       datum: date,
-      baustelle_id: fehlzeitTyp ? null : baustelleId || null,
-      arbeitsstunden: fehlzeitTyp ? 0 : hours,
-      fahrstunden: fahrstunden,
+      baustelle_id: isFehlzeit ? null : baustelleId || null,
+      start_zeit: isFehlzeit ? null : startZeit,
+      end_zeit: isFehlzeit ? null : endZeit,
+      pause_von: !isFehlzeit && hasPause ? pauseVon : null,
+      pause_bis: !isFehlzeit && hasPause ? pauseBis : null,
+      arbeitsstunden: isFehlzeit ? 0 : arbeit,
+      fahrstunden,
       taggeld_kurz: taggeldKurz,
       taggeld_lang: taggeldLang,
       km_gefahren: km,
       fehlzeit_typ: fehlzeitTyp || null,
-      fehlzeit_stunden: fehlzeitTyp ? hours : 0,
+      fehlzeit_stunden: isFehlzeit ? fehlzeitHours : 0,
       taetigkeit: taetigkeit || null,
       notizen: notizen || null,
       status: "offen" as StundenStatus,
     };
-    const { error } = await supabase.from("stundenbuchungen").insert(payload as any);
+    const { data: inserted, error } = await supabase
+      .from("stundenbuchungen")
+      .insert(payload)
+      .select()
+      .single();
     if (error) {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
       return;
     }
-    const personLabel =
-      forUserId === user.id
-        ? "dich"
-        : allMembers.find((m) => m.id === forUserId)
-        ? `${allMembers.find((m) => m.id === forUserId)!.vorname} ${allMembers.find((m) => m.id === forUserId)!.nachname}`
-        : "Mitarbeiter";
-    toast({ title: "Stunden gebucht", description: `${hours}h für ${personLabel}` });
-    resetForm();
+    toast({
+      title: continueFlag ? "Block gespeichert – nächste Baustelle" : "Buchung gespeichert",
+      description: isFehlzeit
+        ? `${fehlzeitHours}h ${fehlzeitTyp}`
+        : `${arbeit.toFixed(2)}h · ${fmtTime(startZeit)}–${fmtTime(endZeit)}`,
+    });
+
+    if (continueFlag && !isFehlzeit) {
+      partialResetForNextBaustelle(inserted as Stunde);
+    } else {
+      fullReset();
+    }
     load();
   };
 
@@ -323,6 +478,7 @@ export default function Stunden() {
     if (!confirm("Buchung löschen?")) return;
     await supabase.from("stundenbuchungen").delete().eq("id", id);
     load();
+    if (tab === "auswertung") loadAuswertung();
   };
 
   const submitAllOpen = async () => {
@@ -335,521 +491,1022 @@ export default function Stunden() {
     load();
   };
 
-  // ─── Hilfslogik: Wem gehört die Buchung in der Liste? ───
+  // ─── Personen-Lookup für Listen ───
   const personById = useMemo(() => {
     const map = new Map<string, Profile>();
     allMembers.forEach((m) => map.set(m.id, m));
     if (profile && user) {
-      map.set(user.id, {
-        ...(profile as any),
-        id: user.id,
-      });
+      map.set(user.id, { ...(profile as any), id: user.id });
     }
     return map;
   }, [allMembers, profile, user]);
 
   const focusPerson = (uid: string) => {
     setForUserId(uid);
-    resetForm();
+    fullReset();
   };
 
   return (
     <div className="space-y-4 max-w-2xl mx-auto">
       <PageHeader title="Stundenerfassung" />
 
-      {/* Personenwahl (Polier oder Admin) */}
-      {hasPicker && (
-        <PersonPicker
-          mode={mode}
-          partie={polierPartie}
-          partien={allPartien}
-          members={allMembers}
-          forUserId={forUserId}
-          onPick={focusPerson}
-          ownUserId={user!.id}
-          ownProfile={profile as any}
-          statusForDate={statusForDate}
-          search={memberSearch}
-          onSearchChange={setMemberSearch}
-          date={date}
-        />
-      )}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
+        <TabsList className="grid grid-cols-2 w-full">
+          <TabsTrigger value="erfassen">Erfassen</TabsTrigger>
+          <TabsTrigger value="auswertung">Auswertung</TabsTrigger>
+        </TabsList>
 
-      {/* Doppel-Buchung-Warnung */}
-      {existingForCurrent && (
-        <Card className="border-amber-400 bg-amber-50">
-          <CardContent className="p-3 flex items-start gap-2 text-xs">
-            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <strong>Schon gebucht:</strong>{" "}
-              {Number(
-                existingForCurrent.arbeitsstunden ?? existingForCurrent.fehlzeit_stunden ?? 0
-              ).toFixed(1)}
-              h am {new Date(existingForCurrent.datum).toLocaleDateString("de-AT")}
-              {existingForCurrent.baustelle_id
-                ? ` auf ${baustellen.find((b) => b.id === existingForCurrent.baustelle_id)?.bvh_name ?? "Baustelle"}`
-                : ` (${existingForCurrent.fehlzeit_typ})`}
-              . Eine weitere Buchung wäre möglich (Tag-Splitting), du wirst beim Speichern aber
-              nochmal gefragt.
-            </div>
-          </CardContent>
-        </Card>
-      )}
+        {/* ════════════════════════════ ERFASSEN ════════════════════════════ */}
+        <TabsContent value="erfassen" className="space-y-4 mt-4">
+          {hasPicker && (
+            <PersonPicker
+              mode={mode}
+              partie={polierPartie}
+              partien={allPartien}
+              members={allMembers}
+              forUserId={forUserId}
+              onPick={focusPerson}
+              ownUserId={user!.id}
+              ownProfile={profile as any}
+              statusForDate={statusForDate}
+              search={memberSearch}
+              onSearchChange={setMemberSearch}
+              date={date}
+            />
+          )}
 
-      {/* Quick-Book Card */}
-      <Card>
-        <CardContent className="p-4 space-y-4">
-          <div>
-            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Datum</Label>
-            <div className="flex items-center gap-2 mt-1.5">
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-11 w-11 shrink-0"
-                onClick={() => moveDate(-1)}
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </Button>
-              <Input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="text-center font-medium h-11"
-              />
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-11 w-11 shrink-0"
-                onClick={() => moveDate(1)}
-              >
-                <ChevronRight className="h-5 w-5" />
-              </Button>
-            </div>
-            <div className="flex gap-1.5 mt-2">
-              <Button
-                size="sm"
-                variant={date === todayIso() ? "default" : "outline"}
-                className="flex-1"
-                onClick={() => setDate(todayIso())}
-              >
-                Heute
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="flex-1"
-                onClick={() => {
-                  const d = new Date();
-                  d.setDate(d.getDate() - 1);
-                  setDate(d.toISOString().slice(0, 10));
-                }}
-              >
-                Gestern
-              </Button>
-            </div>
-            <div className="text-xs text-muted-foreground text-center mt-1.5">
-              {new Date(date).toLocaleDateString("de-AT", {
-                weekday: "long",
-                day: "2-digit",
-                month: "long",
-              })}
-            </div>
-          </div>
-
-          <div>
-            <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-              {fehlzeitTyp ? "Fehlzeit" : "Baustelle"}
-            </Label>
-            <div className="flex flex-wrap gap-1.5 mt-1.5">
-              <button
-                onClick={() => setFehlzeitTyp("")}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${
-                  !fehlzeitTyp
-                    ? "bg-primary text-primary-foreground border-primary"
-                    : "bg-background hover:bg-muted"
-                }`}
-              >
-                Arbeit
-              </button>
-              {FEHLZEITEN.map((f) => (
-                <button
-                  key={f.value}
-                  onClick={() => setFehlzeitTyp(f.value)}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${
-                    fehlzeitTyp === f.value
-                      ? "text-white border-transparent"
-                      : "bg-background hover:bg-muted"
-                  }`}
-                  style={fehlzeitTyp === f.value ? { background: f.color } : undefined}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-
-            {!fehlzeitTyp && (
-              <div className="mt-2">
-                {baustellen.length === 0 ? (
-                  <div className="text-xs text-muted-foreground p-3 bg-muted/40 rounded">
-                    Aktuell keine aktiven Baustellen für deine Partie.
-                  </div>
-                ) : baustellen.length <= 4 ? (
-                  <div className="grid gap-1.5">
-                    {baustellen.map((b) => (
-                      <button
-                        key={b.id}
-                        onClick={() => setBaustelleId(b.id)}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-md border text-left text-sm transition ${
-                          baustelleId === b.id
-                            ? "bg-primary/10 border-primary"
-                            : "bg-background hover:bg-muted"
-                        }`}
-                      >
-                        <Building2
-                          className={`h-4 w-4 shrink-0 ${
-                            baustelleId === b.id ? "text-primary" : "text-muted-foreground"
-                          }`}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="font-medium truncate">{b.bvh_name}</div>
-                          {b.kostenstelle && (
-                            <div className="text-[11px] text-muted-foreground truncate">
-                              {b.kostenstelle}
-                            </div>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <select
-                    value={baustelleId}
-                    onChange={(e) => setBaustelleId(e.target.value)}
-                    className="w-full h-10 rounded-md border bg-background px-3 text-sm"
+          {/* Datum + Tagesliste oben */}
+          <Card>
+            <CardContent className="p-4 space-y-3">
+              <div>
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Datum
+                </Label>
+                <div className="flex items-center gap-2 mt-1.5">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-11 w-11 shrink-0"
+                    onClick={() => moveDate(-1)}
                   >
-                    <option value="">— Baustelle wählen —</option>
-                    {baustellen.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.bvh_name} {b.kostenstelle ? `· ${b.kostenstelle}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-              {fehlzeitTyp ? "Fehlzeit-Stunden" : "Arbeitsstunden"}
-            </Label>
-            <div className="flex items-center gap-3 mt-1.5">
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-12 w-12 shrink-0"
-                onClick={() => setHours(Math.max(0, hours - 0.5))}
-              >
-                <Minus className="h-5 w-5" />
-              </Button>
-              <div className="flex-1 text-center">
-                <div className="text-4xl font-bold tabular-nums">
-                  {hours.toFixed(1)} <span className="text-lg text-muted-foreground">h</span>
+                    <ChevronLeft className="h-5 w-5" />
+                  </Button>
+                  <Input
+                    type="date"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    className="text-center font-medium h-11"
+                  />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-11 w-11 shrink-0"
+                    onClick={() => moveDate(1)}
+                  >
+                    <ChevronRight className="h-5 w-5" />
+                  </Button>
+                </div>
+                <div className="flex gap-1.5 mt-2">
+                  <Button
+                    size="sm"
+                    variant={date === todayIso() ? "default" : "outline"}
+                    className="flex-1"
+                    onClick={() => setDate(todayIso())}
+                  >
+                    Heute
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() - 1);
+                      setDate(d.toISOString().slice(0, 10));
+                    }}
+                  >
+                    Gestern
+                  </Button>
+                </div>
+                <div className="text-xs text-muted-foreground text-center mt-1.5">
+                  {new Date(date).toLocaleDateString("de-AT", {
+                    weekday: "long",
+                    day: "2-digit",
+                    month: "long",
+                  })}
                 </div>
               </div>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-12 w-12 shrink-0"
-                onClick={() => setHours(hours + 0.5)}
-              >
-                <Plus className="h-5 w-5" />
-              </Button>
-            </div>
-            <div className="grid grid-cols-4 gap-1.5 mt-2">
-              {[4, 6, 8, 10].map((h) => (
-                <Button
-                  key={h}
-                  className="h-10"
-                  variant={hours === h ? "default" : "outline"}
-                  onClick={() => setHours(h)}
-                >
-                  {h}h
-                </Button>
-              ))}
-            </div>
-          </div>
 
-          {!fehlzeitTyp && (
-            <div>
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                Tätigkeit (optional)
-              </Label>
-              <Input
-                value={taetigkeit}
-                onChange={(e) => setTaetigkeit(e.target.value)}
-                placeholder="z.B. Wand-Elemente versetzen, Dachstuhl"
-                className="mt-1.5"
-              />
-            </div>
-          )}
-
-          {!fehlzeitTyp && (
-            <button
-              onClick={() => setExtras(!extras)}
-              className="text-xs text-primary hover:underline"
-            >
-              {extras ? "Weniger anzeigen" : "+ Fahrtzeit / Taggeld / KM"}
-            </button>
-          )}
-
-          {extras && !fehlzeitTyp && (
-            <div className="grid grid-cols-2 gap-2 pt-2 border-t">
-              <div>
-                <Label className="text-xs">Fahrstunden</Label>
-                <Input
-                  inputMode="decimal"
-                  type="number"
-                  step="0.25"
-                  value={fahrstunden}
-                  onChange={(e) => setFahrstunden(Number(e.target.value))}
-                  className="h-9"
-                />
-              </div>
-              <div>
-                <Label className="text-xs">KM gefahren</Label>
-                <Input
-                  inputMode="numeric"
-                  type="number"
-                  step="1"
-                  value={km}
-                  onChange={(e) => setKm(Number(e.target.value))}
-                  className="h-9"
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Taggeld kurz</Label>
-                <Input
-                  inputMode="numeric"
-                  type="number"
-                  step="1"
-                  value={taggeldKurz}
-                  onChange={(e) => setTaggeldKurz(Number(e.target.value))}
-                  className="h-9"
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Taggeld lang</Label>
-                <Input
-                  inputMode="numeric"
-                  type="number"
-                  step="1"
-                  value={taggeldLang}
-                  onChange={(e) => setTaggeldLang(Number(e.target.value))}
-                  className="h-9"
-                />
-              </div>
-              <div className="col-span-2">
-                <Label className="text-xs">Notizen</Label>
-                <Textarea
-                  value={notizen}
-                  onChange={(e) => setNotizen(e.target.value)}
-                  rows={2}
-                />
-              </div>
-            </div>
-          )}
-
-          <Button onClick={submit} className="w-full h-12 text-base">
-            <Plus className="h-5 w-5 mr-2" /> Buchung speichern
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* Monat-Summary (eigene) */}
-      <Card>
-        <CardContent className="p-3 grid grid-cols-3 gap-2 text-center">
-          <div>
-            <div className="text-2xl font-bold tabular-nums">
-              {totalsThisMonth.arbeit.toFixed(1)}
-            </div>
-            <div className="text-[10px] text-muted-foreground uppercase">
-              Arbeit{hasPicker && " · ich"}
-            </div>
-          </div>
-          <div>
-            <div className="text-2xl font-bold tabular-nums">{totalsThisMonth.fahrt.toFixed(1)}</div>
-            <div className="text-[10px] text-muted-foreground uppercase">Fahrt</div>
-          </div>
-          <div>
-            <div className="text-2xl font-bold tabular-nums">{totalsThisMonth.fehl.toFixed(1)}</div>
-            <div className="text-[10px] text-muted-foreground uppercase">Fehlzeit</div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Letzte Buchungen */}
-      <div>
-        <div className="flex items-center justify-between mb-2 px-1">
-          <h2 className="text-sm font-semibold">
-            {mode === "admin"
-              ? "Alle Buchungen (Admin)"
-              : mode === "polier"
-              ? "Buchungen meiner Partie"
-              : "Meine Buchungen"}
-          </h2>
-          {rows.some((r) => r.status === "offen") && (
-            <Button size="sm" variant="outline" onClick={submitAllOpen}>
-              <Send className="h-3.5 w-3.5 mr-1" /> Alle offenen einreichen
-            </Button>
-          )}
-        </div>
-        <div className="space-y-1.5">
-          {rows.map((r) => {
-            const b = baustellen.find((x) => x.id === r.baustelle_id);
-            const p = personById.get(r.mitarbeiter_id);
-            const ownEntry = r.mitarbeiter_id === user?.id;
-            const canEdit = r.status === "offen" && (ownEntry || hasPicker);
-            return (
-              <Card key={r.id}>
-                <CardContent className="p-3 flex items-center gap-3">
-                  <div
-                    className={`h-9 w-9 rounded ${STATUS_COLOR[r.status]} flex items-center justify-center text-white shrink-0`}
-                  >
-                    <Calendar className="h-4 w-4" />
+              {/* Bereits gebucht heute */}
+              {todayBlocks.length > 0 && (
+                <div className="border-t pt-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Schon gebucht
+                    </Label>
+                    <span className="text-xs font-bold tabular-nums">Σ {fmtH(todayTotalH)}</span>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 text-sm flex-wrap">
-                      <span className="font-semibold tabular-nums">
-                        {new Date(r.datum).toLocaleDateString("de-AT", {
-                          day: "2-digit",
-                          month: "2-digit",
-                        })}
-                      </span>
-                      <span className="text-muted-foreground">·</span>
-                      <span className="font-bold tabular-nums">
-                        {Number(r.arbeitsstunden ?? r.fehlzeit_stunden ?? 0).toFixed(1)}h
-                      </span>
-                      {r.fehlzeit_typ && (
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                          {r.fehlzeit_typ}
-                        </Badge>
-                      )}
-                      {hasPicker && p && (
-                        <Badge
-                          variant="outline"
-                          className="text-[10px] px-1.5 py-0"
-                          style={{
-                            borderColor: polierPartie?.farbcode,
-                            color: polierPartie?.farbcode,
-                          }}
+                  <div className="space-y-1">
+                    {todayBlocks.map((r) => {
+                      const b = baustellen.find((x) => x.id === r.baustelle_id);
+                      return (
+                        <div
+                          key={r.id}
+                          className="flex items-center gap-2 text-xs bg-muted/40 rounded px-2 py-1.5"
                         >
-                          {ownEntry ? "Ich" : `${p.vorname} ${p.nachname[0]}.`}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      {b?.bvh_name ?? (r.fehlzeit_typ ? "Fehlzeit" : "—")}
-                      {r.taetigkeit && ` · ${r.taetigkeit}`}
-                    </div>
+                          <span className="font-bold tabular-nums shrink-0">
+                            {Number(r.arbeitsstunden ?? r.fehlzeit_stunden ?? 0)
+                              .toFixed(2)
+                              .replace(".", ",")}h
+                          </span>
+                          {r.start_zeit && r.end_zeit && (
+                            <span className="text-muted-foreground tabular-nums shrink-0">
+                              {fmtTime(r.start_zeit)}–{fmtTime(r.end_zeit)}
+                            </span>
+                          )}
+                          <span className="truncate flex-1">
+                            {r.fehlzeit_typ
+                              ? `Fehlzeit ${r.fehlzeit_typ}`
+                              : b?.bvh_name ?? "—"}
+                          </span>
+                          {r.status === "offen" && (
+                            <button
+                              onClick={() => remove(r.id)}
+                              className="text-muted-foreground hover:text-destructive shrink-0"
+                              aria-label="Löschen"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                  <Badge variant="outline" className="text-xs shrink-0">
-                    {STATUS_LABEL[r.status]}
-                  </Badge>
-                  {canEdit && (
-                    <div className="flex shrink-0">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-10 w-10"
-                        onClick={() => setEditing(r)}
-                        aria-label="Bearbeiten"
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-10 w-10"
-                        onClick={() => remove(r.id)}
-                        aria-label="Löschen"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-          {rows.length === 0 && (
-            <Card>
-              <CardContent className="p-6 text-center text-sm text-muted-foreground">
-                <CheckCircle2 className="h-6 w-6 mx-auto mb-2 opacity-50" />
-                Noch keine Buchungen. Trag deine ersten Stunden oben ein.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Doppel-Buchung-Warnung */}
+          {existingForCurrent && (
+            <Card className="border-amber-400 bg-amber-50">
+              <CardContent className="p-3 flex items-start gap-2 text-xs">
+                <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <strong>Diese Baustelle hat heute schon eine Buchung</strong> (
+                  {Number(existingForCurrent.arbeitsstunden ?? 0).toFixed(2)}h). Eine zusätzliche
+                  Buchung wird beim Speichern nochmal abgefragt.
+                </div>
               </CardContent>
             </Card>
           )}
-        </div>
-      </div>
 
+          {/* Quick-Book Card */}
+          <Card>
+            <CardContent className="p-4 space-y-4">
+              {/* Mode: Arbeit / Fehlzeit */}
+              <div>
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                  {fehlzeitTyp ? "Fehlzeit" : "Baustelle"}
+                </Label>
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  <button
+                    onClick={() => setFehlzeitTyp("")}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${
+                      !fehlzeitTyp
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background hover:bg-muted"
+                    }`}
+                  >
+                    Arbeit
+                  </button>
+                  {FEHLZEITEN.map((f) => (
+                    <button
+                      key={f.value}
+                      onClick={() => setFehlzeitTyp(f.value)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${
+                        fehlzeitTyp === f.value
+                          ? "text-white border-transparent"
+                          : "bg-background hover:bg-muted"
+                      }`}
+                      style={fehlzeitTyp === f.value ? { background: f.color } : undefined}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Baustellen-Auswahl */}
+                {!fehlzeitTyp && (
+                  <div className="mt-2">
+                    {baustellen.length === 0 ? (
+                      <div className="text-xs text-muted-foreground p-3 bg-muted/40 rounded">
+                        Aktuell keine aktiven Baustellen für deine Partie.
+                      </div>
+                    ) : baustellen.length <= 4 ? (
+                      <div className="grid gap-1.5">
+                        {baustellen.map((b) => (
+                          <button
+                            key={b.id}
+                            onClick={() => setBaustelleId(b.id)}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-md border text-left text-sm transition ${
+                              baustelleId === b.id
+                                ? "bg-primary/10 border-primary"
+                                : "bg-background hover:bg-muted"
+                            }`}
+                          >
+                            <Building2
+                              className={`h-4 w-4 shrink-0 ${
+                                baustelleId === b.id ? "text-primary" : "text-muted-foreground"
+                              }`}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="font-medium truncate">{b.bvh_name}</div>
+                              {b.kostenstelle && (
+                                <div className="text-[11px] text-muted-foreground truncate">
+                                  {b.kostenstelle}
+                                </div>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <select
+                        value={baustelleId}
+                        onChange={(e) => setBaustelleId(e.target.value)}
+                        className="w-full h-10 rounded-md border bg-background px-3 text-sm"
+                      >
+                        <option value="">— Baustelle wählen —</option>
+                        {baustellen.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.bvh_name} {b.kostenstelle ? `· ${b.kostenstelle}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Arbeit-Mode: Time-Range */}
+              {!fehlzeitTyp && (
+                <div className="space-y-3 border-t pt-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Startzeit
+                      </Label>
+                      <Input
+                        type="time"
+                        value={startZeit}
+                        onChange={(e) => setStartZeit(e.target.value)}
+                        className="h-11 text-center font-semibold"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Endzeit
+                      </Label>
+                      <Input
+                        type="time"
+                        value={endZeit}
+                        onChange={(e) => setEndZeit(e.target.value)}
+                        className="h-11 text-center font-semibold"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <Switch checked={hasPause} onCheckedChange={setHasPause} id="has_pause" />
+                    <Label htmlFor="has_pause" className="text-sm cursor-pointer">
+                      Pause angeben
+                    </Label>
+                  </div>
+
+                  {hasPause && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                          Pause von
+                        </Label>
+                        <Input
+                          type="time"
+                          value={pauseVon}
+                          onChange={(e) => setPauseVon(e.target.value)}
+                          className="h-10 text-center"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                          Pause bis
+                        </Label>
+                        <Input
+                          type="time"
+                          value={pauseBis}
+                          onChange={(e) => setPauseBis(e.target.value)}
+                          className="h-10 text-center"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Live-Arbeitszeit */}
+                  <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 flex items-center gap-3">
+                    <Clock className="h-5 w-5 text-primary" />
+                    <div className="flex-1">
+                      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                        Arbeitszeit
+                      </div>
+                      <div className="text-2xl font-bold tabular-nums text-primary">
+                        {fmtH(arbeitstundenLive)}
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-muted-foreground text-right">
+                      {fmtTime(startZeit)}–{fmtTime(endZeit)}
+                      {hasPause && (
+                        <>
+                          <br />
+                          Pause {fmtTime(pauseVon)}–{fmtTime(pauseBis)}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Fehlzeit-Mode: Stunden-Picker */}
+              {fehlzeitTyp && (
+                <div className="border-t pt-3">
+                  <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Fehlzeit-Stunden
+                  </Label>
+                  <div className="flex items-center gap-3 mt-1.5">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-12 w-12 shrink-0"
+                      onClick={() => setFehlzeitHours(Math.max(0, fehlzeitHours - 0.5))}
+                    >
+                      <Minus className="h-5 w-5" />
+                    </Button>
+                    <div className="flex-1 text-center">
+                      <div className="text-4xl font-bold tabular-nums">
+                        {fehlzeitHours.toFixed(1)}{" "}
+                        <span className="text-lg text-muted-foreground">h</span>
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-12 w-12 shrink-0"
+                      onClick={() => setFehlzeitHours(fehlzeitHours + 0.5)}
+                    >
+                      <Plus className="h-5 w-5" />
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5 mt-2">
+                    {[4, 6, 8, 10].map((h) => (
+                      <Button
+                        key={h}
+                        className="h-10"
+                        variant={fehlzeitHours === h ? "default" : "outline"}
+                        onClick={() => setFehlzeitHours(h)}
+                      >
+                        {h}h
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Tätigkeit */}
+              {!fehlzeitTyp && (
+                <div>
+                  <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Tätigkeit (optional)
+                  </Label>
+                  <Input
+                    value={taetigkeit}
+                    onChange={(e) => setTaetigkeit(e.target.value)}
+                    placeholder="z.B. Wand-Elemente versetzen"
+                    className="mt-1.5"
+                  />
+                </div>
+              )}
+
+              {/* Erweitert */}
+              {!fehlzeitTyp && (
+                <button
+                  onClick={() => setExtras(!extras)}
+                  className="text-xs text-primary hover:underline"
+                >
+                  {extras ? "Weniger anzeigen" : "+ Fahrtzeit / Taggeld / KM"}
+                </button>
+              )}
+
+              {extras && !fehlzeitTyp && (
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t">
+                  <div>
+                    <Label className="text-xs">Fahrstunden</Label>
+                    <Input
+                      inputMode="decimal"
+                      type="number"
+                      step="0.25"
+                      value={fahrstunden}
+                      onChange={(e) => setFahrstunden(Number(e.target.value))}
+                      className="h-9"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">KM gefahren</Label>
+                    <Input
+                      inputMode="numeric"
+                      type="number"
+                      step="1"
+                      value={km}
+                      onChange={(e) => setKm(Number(e.target.value))}
+                      className="h-9"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Taggeld kurz</Label>
+                    <Input
+                      inputMode="numeric"
+                      type="number"
+                      step="1"
+                      value={taggeldKurz}
+                      onChange={(e) => setTaggeldKurz(Number(e.target.value))}
+                      className="h-9"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Taggeld lang</Label>
+                    <Input
+                      inputMode="numeric"
+                      type="number"
+                      step="1"
+                      value={taggeldLang}
+                      onChange={(e) => setTaggeldLang(Number(e.target.value))}
+                      className="h-9"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <Label className="text-xs">Notizen</Label>
+                    <Textarea
+                      value={notizen}
+                      onChange={(e) => setNotizen(e.target.value)}
+                      rows={2}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Submit-Buttons */}
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button onClick={() => submit(false)} className="flex-1 h-12 text-base">
+                  <Plus className="h-5 w-5 mr-2" /> Speichern
+                </Button>
+                {!fehlzeitTyp && (
+                  <Button
+                    onClick={() => submit(true)}
+                    variant="outline"
+                    className="flex-1 h-12"
+                  >
+                    + weitere Baustelle
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Letzte Buchungen */}
+          <div>
+            <div className="flex items-center justify-between mb-2 px-1">
+              <h2 className="text-sm font-semibold">
+                {mode === "admin"
+                  ? "Alle Buchungen (letzte 30 Tage)"
+                  : mode === "polier"
+                  ? "Buchungen meiner Partie"
+                  : "Meine Buchungen"}
+              </h2>
+              {rows.some((r) => r.status === "offen" && r.mitarbeiter_id === user?.id) && (
+                <Button size="sm" variant="outline" onClick={submitAllOpen}>
+                  <Send className="h-3.5 w-3.5 mr-1" /> Alle offenen einreichen
+                </Button>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              {rows.map((r) => (
+                <BuchungCard
+                  key={r.id}
+                  r={r}
+                  baustelle={baustellen.find((x) => x.id === r.baustelle_id)}
+                  person={personById.get(r.mitarbeiter_id)}
+                  ownUserId={user!.id}
+                  hasPicker={hasPicker}
+                  partieFarbe={polierPartie?.farbcode}
+                  onEdit={() => setEditing(r)}
+                  onDelete={() => remove(r.id)}
+                />
+              ))}
+              {rows.length === 0 && (
+                <Card>
+                  <CardContent className="p-6 text-center text-sm text-muted-foreground">
+                    <CheckCircle2 className="h-6 w-6 mx-auto mb-2 opacity-50" />
+                    Noch keine Buchungen. Trag deine ersten Stunden oben ein.
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* ════════════════════════════ AUSWERTUNG ════════════════════════════ */}
+        <TabsContent value="auswertung" className="space-y-3 mt-4">
+          <Card>
+            <CardContent className="p-3 flex items-center gap-2">
+              <Label className="text-xs whitespace-nowrap">Monat:</Label>
+              <Input
+                type="month"
+                value={auswertungMonat}
+                onChange={(e) => setAuswertungMonat(e.target.value)}
+                className="h-10 max-w-[180px]"
+              />
+              <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                {auswertungRows.length} Buchungen
+              </span>
+            </CardContent>
+          </Card>
+
+          <AuswertungList
+            rows={auswertungRows}
+            baustellen={baustellen}
+            members={allMembers}
+            partien={allPartien}
+            ownUserId={user!.id}
+            ownProfile={profile as any}
+            mode={mode}
+          />
+        </TabsContent>
+      </Tabs>
+
+      {/* Edit dialog */}
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="max-w-sm sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Buchung bearbeiten</DialogTitle>
           </DialogHeader>
-          {editing && (
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                const fd = new FormData(e.currentTarget as HTMLFormElement);
-                await supabase
-                  .from("stundenbuchungen")
-                  .update({
-                    datum: fd.get("datum") as string,
-                    arbeitsstunden: Number(fd.get("h")),
-                    taetigkeit: (fd.get("t") as string) || null,
-                  })
-                  .eq("id", editing.id!);
-                toast({ title: "Aktualisiert" });
-                setEditing(null);
-                load();
-              }}
-              className="space-y-3"
-            >
-              <div>
-                <Label>Datum</Label>
-                <Input type="date" name="datum" defaultValue={editing.datum} required />
-              </div>
-              <div>
-                <Label>Stunden</Label>
-                <Input
-                  inputMode="decimal"
-                  type="number"
-                  step="0.25"
-                  name="h"
-                  defaultValue={editing.arbeitsstunden ?? 0}
-                  required
-                />
-              </div>
-              <div>
-                <Label>Tätigkeit</Label>
-                <Input name="t" defaultValue={editing.taetigkeit ?? ""} />
-              </div>
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setEditing(null)}>
-                  Abbrechen
-                </Button>
-                <Button type="submit">Speichern</Button>
-              </DialogFooter>
-            </form>
-          )}
+          {editing && <EditForm row={editing as Stunde} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); if (tab === "auswertung") loadAuswertung(); }} />}
         </DialogContent>
       </Dialog>
     </div>
   );
 }
 
+// ════════════════════════════ Sub-Components ════════════════════════════
+
+function BuchungCard({
+  r,
+  baustelle,
+  person,
+  ownUserId,
+  hasPicker,
+  partieFarbe,
+  onEdit,
+  onDelete,
+}: {
+  r: Stunde;
+  baustelle?: Baustelle;
+  person?: Profile;
+  ownUserId: string;
+  hasPicker: boolean;
+  partieFarbe?: string;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const ownEntry = r.mitarbeiter_id === ownUserId;
+  const canEdit = r.status === "offen" && (ownEntry || hasPicker);
+  return (
+    <Card>
+      <CardContent className="p-3 flex items-center gap-3">
+        <div
+          className={`h-9 w-9 rounded ${STATUS_COLOR[r.status]} flex items-center justify-center text-white shrink-0`}
+        >
+          <Calendar className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 text-sm flex-wrap">
+            <span className="font-semibold tabular-nums">
+              {new Date(r.datum).toLocaleDateString("de-AT", {
+                day: "2-digit",
+                month: "2-digit",
+              })}
+            </span>
+            <span className="text-muted-foreground">·</span>
+            <span className="font-bold tabular-nums">
+              {Number(r.arbeitsstunden ?? r.fehlzeit_stunden ?? 0)
+                .toFixed(2)
+                .replace(".", ",")}h
+            </span>
+            {r.start_zeit && r.end_zeit && (
+              <span className="text-[10px] text-muted-foreground tabular-nums">
+                {fmtTime(r.start_zeit)}–{fmtTime(r.end_zeit)}
+              </span>
+            )}
+            {r.fehlzeit_typ && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                {r.fehlzeit_typ}
+              </Badge>
+            )}
+            {hasPicker && person && (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 py-0"
+                style={partieFarbe ? { borderColor: partieFarbe, color: partieFarbe } : undefined}
+              >
+                {ownEntry ? "Ich" : `${person.vorname} ${person.nachname[0]}.`}
+              </Badge>
+            )}
+          </div>
+          <div className="text-xs text-muted-foreground truncate">
+            {baustelle?.bvh_name ?? (r.fehlzeit_typ ? "Fehlzeit" : "—")}
+            {r.taetigkeit && ` · ${r.taetigkeit}`}
+          </div>
+        </div>
+        <Badge variant="outline" className="text-xs shrink-0">
+          {STATUS_LABEL[r.status]}
+        </Badge>
+        {canEdit && (
+          <div className="flex shrink-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-10 w-10"
+              onClick={onEdit}
+              aria-label="Bearbeiten"
+            >
+              <Edit className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-10 w-10"
+              onClick={onDelete}
+              aria-label="Löschen"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Auswertung-Liste ───
+function AuswertungList({
+  rows,
+  baustellen,
+  members,
+  partien,
+  ownUserId,
+  ownProfile,
+  mode,
+}: {
+  rows: Stunde[];
+  baustellen: Baustelle[];
+  members: Profile[];
+  partien: Partie[];
+  ownUserId: string;
+  ownProfile: Profile | null;
+  mode: Mode;
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const allPersons = useMemo(() => {
+    const map = new Map<string, Profile>();
+    members.forEach((m) => map.set(m.id, m));
+    if (ownProfile) map.set(ownUserId, { ...(ownProfile as any), id: ownUserId });
+    return map;
+  }, [members, ownProfile, ownUserId]);
+
+  const grouped = useMemo(() => {
+    const byPerson = new Map<
+      string,
+      {
+        person: Profile;
+        arbeit: number;
+        fahrt: number;
+        fehl: number;
+        rows: Stunde[];
+      }
+    >();
+    rows.forEach((r) => {
+      const p = allPersons.get(r.mitarbeiter_id);
+      if (!p) return;
+      const cur = byPerson.get(r.mitarbeiter_id) ?? {
+        person: p,
+        arbeit: 0,
+        fahrt: 0,
+        fehl: 0,
+        rows: [],
+      };
+      cur.arbeit += Number(r.arbeitsstunden ?? 0);
+      cur.fahrt += Number(r.fahrstunden ?? 0);
+      cur.fehl += Number(r.fehlzeit_stunden ?? 0);
+      cur.rows.push(r);
+      byPerson.set(r.mitarbeiter_id, cur);
+    });
+    return [...byPerson.values()].sort((a, b) =>
+      a.person.nachname.localeCompare(b.person.nachname)
+    );
+  }, [rows, allPersons]);
+
+  const toggle = (id: string) => {
+    const next = new Set(expanded);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setExpanded(next);
+  };
+
+  if (grouped.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-8 text-center text-sm text-muted-foreground">
+          Keine Buchungen in diesem Monat.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Total über alle Personen
+  const total = grouped.reduce(
+    (s, g) => ({
+      arbeit: s.arbeit + g.arbeit,
+      fahrt: s.fahrt + g.fahrt,
+      fehl: s.fehl + g.fehl,
+    }),
+    { arbeit: 0, fahrt: 0, fehl: 0 }
+  );
+
+  return (
+    <div className="space-y-2">
+      {(mode === "admin" || mode === "polier") && grouped.length > 1 && (
+        <Card>
+          <CardContent className="p-3 grid grid-cols-3 gap-2 text-center text-xs">
+            <div>
+              <div className="text-2xl font-bold tabular-nums">{total.arbeit.toFixed(1)}</div>
+              <div className="text-[10px] uppercase text-muted-foreground">Arbeit gesamt</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold tabular-nums">{total.fahrt.toFixed(1)}</div>
+              <div className="text-[10px] uppercase text-muted-foreground">Fahrt gesamt</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold tabular-nums">{total.fehl.toFixed(1)}</div>
+              <div className="text-[10px] uppercase text-muted-foreground">Fehlzeit gesamt</div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {grouped.map((g) => {
+        const isOpen = expanded.has(g.person.id);
+        const partie = partien.find((p) => p.id === g.person.partie_id);
+        const sigma = g.arbeit + g.fahrt + g.fehl;
+        return (
+          <Card key={g.person.id}>
+            <button
+              onClick={() => toggle(g.person.id)}
+              className="w-full p-3 flex items-center gap-3 text-left hover:bg-muted/40 transition"
+            >
+              <div
+                className="h-10 w-10 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+                style={{ background: partie?.farbcode ?? "#999" }}
+              >
+                {initials(g.person)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm">
+                  {g.person.vorname} {g.person.nachname}
+                  {g.person.id === ownUserId && (
+                    <Badge variant="outline" className="ml-1.5 text-[9px]">
+                      Ich
+                    </Badge>
+                  )}
+                </div>
+                <div className="text-[11px] text-muted-foreground truncate">
+                  {[g.person.pers_nr, partie?.name].filter(Boolean).join(" · ")}
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-3 text-center text-xs shrink-0 mr-1">
+                <div>
+                  <div className="font-bold tabular-nums">{g.arbeit.toFixed(1)}</div>
+                  <div className="text-[9px] text-muted-foreground uppercase">Arbeit</div>
+                </div>
+                <div>
+                  <div className="font-bold tabular-nums">{g.fehl.toFixed(1)}</div>
+                  <div className="text-[9px] text-muted-foreground uppercase">Fehlz.</div>
+                </div>
+                <div>
+                  <div className="font-bold tabular-nums text-primary">{sigma.toFixed(1)}</div>
+                  <div className="text-[9px] text-muted-foreground uppercase">Σ</div>
+                </div>
+              </div>
+              {isOpen ? (
+                <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+              )}
+            </button>
+            {isOpen && (
+              <div className="border-t bg-muted/20">
+                {g.rows.map((r) => {
+                  const b = baustellen.find((x) => x.id === r.baustelle_id);
+                  return (
+                    <div
+                      key={r.id}
+                      className="px-3 py-2 border-b last:border-0 flex items-center gap-2 text-xs"
+                    >
+                      <span className="font-medium tabular-nums shrink-0">
+                        {new Date(r.datum).toLocaleDateString("de-AT", {
+                          day: "2-digit",
+                          month: "2-digit",
+                        })}
+                      </span>
+                      {r.start_zeit && r.end_zeit && (
+                        <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
+                          {fmtTime(r.start_zeit)}–{fmtTime(r.end_zeit)}
+                        </span>
+                      )}
+                      <span className="truncate flex-1">
+                        {r.fehlzeit_typ
+                          ? `Fehlzeit ${r.fehlzeit_typ}`
+                          : b?.bvh_name ?? "—"}
+                      </span>
+                      <span className="font-bold tabular-nums shrink-0">
+                        {Number(r.arbeitsstunden ?? r.fehlzeit_stunden ?? 0).toFixed(2)}h
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Edit-Form ───
+function EditForm({
+  row,
+  onClose,
+  onSaved,
+}: {
+  row: Stunde;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const hasTimes = !!row.start_zeit && !!row.end_zeit;
+  const [datum, setDatum] = useState<string>(row.datum);
+  const [startZeit, setStartZeit] = useState<string>(fmtTime(row.start_zeit) || DEFAULT_START);
+  const [endZeit, setEndZeit] = useState<string>(fmtTime(row.end_zeit) || DEFAULT_END);
+  const [hasPause, setHasPause] = useState<boolean>(!!row.pause_von && !!row.pause_bis);
+  const [pauseVon, setPauseVon] = useState<string>(fmtTime(row.pause_von) || DEFAULT_PAUSE_VON);
+  const [pauseBis, setPauseBis] = useState<string>(fmtTime(row.pause_bis) || DEFAULT_PAUSE_BIS);
+  const [hours, setHours] = useState<number>(
+    Number(row.arbeitsstunden ?? row.fehlzeit_stunden ?? 0)
+  );
+  const [taetigkeit, setTaetigkeit] = useState<string>(row.taetigkeit ?? "");
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const update: any = { datum, taetigkeit: taetigkeit || null };
+    if (row.fehlzeit_typ) {
+      update.fehlzeit_stunden = hours;
+    } else if (hasTimes || (startZeit && endZeit)) {
+      const arbeit = calcArbeitsstunden(
+        startZeit,
+        endZeit,
+        hasPause ? pauseVon : null,
+        hasPause ? pauseBis : null
+      );
+      update.start_zeit = startZeit;
+      update.end_zeit = endZeit;
+      update.pause_von = hasPause ? pauseVon : null;
+      update.pause_bis = hasPause ? pauseBis : null;
+      update.arbeitsstunden = arbeit;
+    } else {
+      update.arbeitsstunden = hours;
+    }
+    const { error } = await supabase
+      .from("stundenbuchungen")
+      .update(update)
+      .eq("id", row.id!);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    toast({ title: "Aktualisiert" });
+    onSaved();
+  };
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-3">
+      <div>
+        <Label>Datum</Label>
+        <Input type="date" value={datum} onChange={(e) => setDatum(e.target.value)} required />
+      </div>
+      {row.fehlzeit_typ ? (
+        <div>
+          <Label>Stunden ({row.fehlzeit_typ})</Label>
+          <Input
+            inputMode="decimal"
+            type="number"
+            step="0.25"
+            value={hours}
+            onChange={(e) => setHours(Number(e.target.value))}
+            required
+          />
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>Start</Label>
+              <Input
+                type="time"
+                value={startZeit}
+                onChange={(e) => setStartZeit(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label>Ende</Label>
+              <Input
+                type="time"
+                value={endZeit}
+                onChange={(e) => setEndZeit(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch checked={hasPause} onCheckedChange={setHasPause} />
+            <Label>Pause</Label>
+          </div>
+          {hasPause && (
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs">Pause von</Label>
+                <Input
+                  type="time"
+                  value={pauseVon}
+                  onChange={(e) => setPauseVon(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Pause bis</Label>
+                <Input
+                  type="time"
+                  value={pauseBis}
+                  onChange={(e) => setPauseBis(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+          <div className="text-xs text-muted-foreground">
+            Berechnete Arbeitszeit:{" "}
+            <strong>
+              {fmtH(
+                calcArbeitsstunden(
+                  startZeit,
+                  endZeit,
+                  hasPause ? pauseVon : null,
+                  hasPause ? pauseBis : null
+                )
+              )}
+            </strong>
+          </div>
+        </>
+      )}
+      <div>
+        <Label>Tätigkeit</Label>
+        <Input value={taetigkeit} onChange={(e) => setTaetigkeit(e.target.value)} />
+      </div>
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onClose}>
+          Abbrechen
+        </Button>
+        <Button type="submit">Speichern</Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+// ─── PersonPicker ───
 function PersonPicker({
   mode,
   partie,
@@ -889,7 +1546,6 @@ function PersonPicker({
     );
   });
 
-  // Gruppieren nach Partie (für Admin)
   const grouped = (() => {
     if (!isAdmin) return null;
     const map = new Map<string | "ohne", { partie: Partie | null; rows: Profile[] }>();
@@ -908,12 +1564,13 @@ function PersonPicker({
     );
   })();
 
-  const focused = forUserId === ownUserId
-    ? "dich"
-    : (() => {
-        const m = members.find((x) => x.id === forUserId);
-        return m ? `${m.vorname} ${m.nachname}` : "?";
-      })();
+  const focused =
+    forUserId === ownUserId
+      ? "dich"
+      : (() => {
+          const m = members.find((x) => x.id === forUserId);
+          return m ? `${m.vorname} ${m.nachname}` : "?";
+        })();
 
   const renderPill = (m: Profile, color: string) => {
     const s = statusForDate.get(m.id);
@@ -923,7 +1580,9 @@ function PersonPicker({
         key={m.id}
         onClick={() => onPick(m.id)}
         className={`px-2.5 py-1.5 rounded-full text-xs font-medium border transition flex items-center gap-1.5 shrink-0 ${
-          active ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted"
+          active
+            ? "bg-primary text-primary-foreground border-primary"
+            : "bg-background hover:bg-muted"
         }`}
       >
         <span
@@ -972,7 +1631,6 @@ function PersonPicker({
           />
         )}
 
-        {/* Mich-Pill immer ganz oben */}
         <div className="flex flex-wrap gap-1.5">
           <button
             onClick={() => onPick(ownUserId)}
@@ -982,21 +1640,20 @@ function PersonPicker({
                 : "bg-background hover:bg-muted"
             }`}
           >
-            <span
-              className="h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white bg-primary"
-            >
+            <span className="h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white bg-primary">
               {ownProfile ? initials(ownProfile) : "ME"}
             </span>
             Mich
             {(() => {
               const s = statusForDate.get(ownUserId);
               if (!s) return null;
-              return <span className="text-[10px] opacity-70 tabular-nums">{s.hours.toFixed(1)}h</span>;
+              return (
+                <span className="text-[10px] opacity-70 tabular-nums">{s.hours.toFixed(1)}h</span>
+              );
             })()}
           </button>
         </div>
 
-        {/* Polier-Mode: flache Liste */}
         {!isAdmin && (
           <div className="flex flex-wrap gap-1.5">
             {filteredMembers
@@ -1005,7 +1662,6 @@ function PersonPicker({
           </div>
         )}
 
-        {/* Admin-Mode: gruppiert nach Partie */}
         {isAdmin && grouped && (
           <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
             {grouped.map((g) => {
@@ -1018,10 +1674,7 @@ function PersonPicker({
                     className="text-[10px] uppercase tracking-wide font-semibold mb-1 flex items-center gap-1.5"
                     style={{ color }}
                   >
-                    <span
-                      className="h-2 w-2 rounded-full"
-                      style={{ background: color }}
-                    />
+                    <span className="h-2 w-2 rounded-full" style={{ background: color }} />
                     {g.partie?.name ?? "Ohne Partie"}
                     <span className="opacity-60 font-normal">({rows.length})</span>
                   </div>
