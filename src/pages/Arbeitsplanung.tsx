@@ -977,6 +977,7 @@ export default function Arbeitsplanung() {
           baustellen={activeBaustellen}
           partien={partien}
           fahrzeuge={fahrzeuge}
+          profilesById={profilesById}
           assignments={assignments}
           onAssignBaustelle={(bId) => {
             assignBaustelle(popover.cells, bId);
@@ -1330,6 +1331,7 @@ function CellPopover({
   baustellen,
   partien,
   fahrzeuge,
+  profilesById,
   assignments,
   onAssignBaustelle,
   onSetFehlzeit,
@@ -1342,6 +1344,7 @@ function CellPopover({
   baustellen: Baustelle[];
   partien: Partie[];
   fahrzeuge: Fahrzeug[];
+  profilesById: Record<string, Profile>;
   assignments: Map<string, AssignmentCell>;
   onAssignBaustelle: (baustelleId: string) => void;
   onSetFehlzeit: (typ: string) => void;
@@ -1427,23 +1430,44 @@ function CellPopover({
     y = yAbove >= margin ? yAbove : window.innerHeight - maxH - margin;
   }
 
-  const dateLabels = (() => {
-    if (cells.length === 0) return "";
-    const uniqueDates = Array.from(new Set(cells.map((c) => c.iso))).sort();
-    const uniqueWorkers = new Set(cells.map((c) => c.workerId));
-    const dayPart =
-      uniqueDates.length === 1
-        ? new Date(uniqueDates[0]).toLocaleDateString("de-AT")
-        : `${new Date(uniqueDates[0]).toLocaleDateString("de-AT", {
-            day: "2-digit",
-            month: "2-digit",
-          })} – ${new Date(uniqueDates[uniqueDates.length - 1]).toLocaleDateString("de-AT", {
-            day: "2-digit",
-            month: "2-digit",
-          })} (${uniqueDates.length} Tage)`;
-    const workerPart =
-      uniqueWorkers.size > 1 ? ` · ${uniqueWorkers.size} Mitarbeiter` : "";
-    return dayPart + workerPart;
+  const uniqueDates = useMemo(
+    () => Array.from(new Set(cells.map((c) => c.iso))).sort(),
+    [cells]
+  );
+  const uniqueWorkerIds = useMemo(
+    () => Array.from(new Set(cells.map((c) => c.workerId))),
+    [cells]
+  );
+  const dayPart =
+    uniqueDates.length === 0
+      ? ""
+      : uniqueDates.length === 1
+      ? new Date(uniqueDates[0]).toLocaleDateString("de-AT", {
+          weekday: "short",
+          day: "2-digit",
+          month: "2-digit",
+        })
+      : `${new Date(uniqueDates[0]).toLocaleDateString("de-AT", {
+          day: "2-digit",
+          month: "2-digit",
+        })} – ${new Date(uniqueDates[uniqueDates.length - 1]).toLocaleDateString("de-AT", {
+          day: "2-digit",
+          month: "2-digit",
+        })} (${uniqueDates.length} Tage)`;
+  const workerPart = (() => {
+    if (uniqueWorkerIds.length === 0) return "";
+    if (uniqueWorkerIds.length === 1) {
+      const p = profilesById[uniqueWorkerIds[0]];
+      return p ? `${p.vorname} ${p.nachname}` : "";
+    }
+    return `${uniqueWorkerIds.length} Mitarbeiter`;
+  })();
+  // Aktuelle Einteilung der Selektion (nur wenn alle Cells vorhanden + gleicher
+  // Baustelle zugehörig)
+  const currentBaustelleName = (() => {
+    if (!singleEinteilungId) return null;
+    const a = cells.map((c) => assignments.get(cellKey(c.workerId, c.iso))).find(Boolean);
+    return a?.baustelleName ?? null;
   })();
 
   return (
@@ -1454,10 +1478,22 @@ function CellPopover({
         style={{ left: x, top: y, width: w, maxHeight: maxH }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="text-xs font-semibold mb-2">{dateLabels}</div>
+        {/* Kontext-Header: Wer + Wann + (falls vorhanden) aktuelle Baustelle */}
+        <div className="mb-2 pb-2 border-b">
+          {workerPart && (
+            <div className="text-sm font-bold leading-tight">{workerPart}</div>
+          )}
+          <div className="text-[11px] text-muted-foreground">{dayPart}</div>
+          {currentBaustelleName && (
+            <div className="text-[11px] mt-1 inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5">
+              <span className="opacity-70">aktuell:</span>
+              <strong className="truncate max-w-[240px]">{currentBaustelleName}</strong>
+            </div>
+          )}
+        </div>
 
         <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
-          Auf Baustelle einteilen
+          {hasExisting ? "Auf andere Baustelle verschieben" : "Auf Baustelle einteilen"}
         </div>
         <div className="space-y-1 max-h-44 overflow-y-auto mb-2">
           {baustellen.length === 0 ? (
@@ -1575,7 +1611,21 @@ function CellPopover({
             className="w-full text-xs px-2 py-2.5 rounded border border-destructive/40 text-destructive font-semibold hover:bg-destructive hover:text-destructive-foreground flex items-center justify-center gap-1.5 mb-1 transition"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            Markierte Einteilung entfernen
+            {(() => {
+              if (uniqueWorkerIds.length === 1 && uniqueDates.length === 1) {
+                const p = profilesById[uniqueWorkerIds[0]];
+                return p
+                  ? `${p.vorname} aus dieser Einteilung nehmen`
+                  : "Aus Einteilung nehmen";
+              }
+              if (uniqueWorkerIds.length === 1 && uniqueDates.length > 1) {
+                return `${uniqueDates.length} Tage entfernen`;
+              }
+              if (uniqueWorkerIds.length > 1 && uniqueDates.length === 1) {
+                return `${uniqueWorkerIds.length} Mitarbeiter aus dieser Einteilung nehmen`;
+              }
+              return `${cells.length} Einteilungen entfernen`;
+            })()}
           </button>
         )}
         <button
