@@ -41,7 +41,7 @@ const NAV: NavItem[] = [
   { to: "/mein-tag", label: "Mein Tag", icon: ClipboardList, roles: ["all"] },
   { to: "/arbeitsplanung", label: "Arbeitsplanung", icon: CalendarDays, roles: ["admin"] },
   { to: "/baustellen", label: "Baustellen", icon: Building2, roles: ["all"] },
-  { to: "/mitarbeiter", label: "Mitarbeiter", icon: Users, roles: ["admin"] },
+  { to: "/mitarbeiter", label: "Mitarbeiter & Partien", icon: Users, roles: ["admin"] },
   { to: "/fahrzeuge", label: "Fahrzeuge", icon: Truck, roles: ["admin"] },
   { to: "/stunden", label: "Stunden", icon: Clock, roles: ["all"] },
   { to: "/stunden/freigabe", label: "Freigaben", icon: CheckCircle2, roles: ["review"] },

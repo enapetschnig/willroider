@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, ChevronLeft, ChevronRight, Filter, Building2, UserPlus, X } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, Filter, Building2, UserPlus, X, Users } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -234,17 +234,27 @@ export default function Arbeitsplanung() {
         title="Arbeitsplanung"
         description="Gantt-Chart aller Baustellen über Kalenderwochen, gruppiert nach Partien."
         actions={
-          canCreateBaustelle ? (
-            <Button
-              onClick={() => {
-                setEditing({});
-                setDialogOpen(true);
-              }}
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Neue Baustelle
-            </Button>
-          ) : undefined
+          <div className="flex flex-wrap gap-2">
+            {isAdmin && (
+              <Button asChild variant="outline" size="sm">
+                <Link to="/mitarbeiter?tab=partien">
+                  <Users className="h-4 w-4 mr-2" />
+                  Partien verwalten
+                </Link>
+              </Button>
+            )}
+            {canCreateBaustelle && (
+              <Button
+                onClick={() => {
+                  setEditing({});
+                  setDialogOpen(true);
+                }}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Neue Baustelle
+              </Button>
+            )}
+          </div>
         }
       />
 

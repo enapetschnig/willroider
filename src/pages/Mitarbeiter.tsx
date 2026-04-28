@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -40,7 +41,17 @@ const ROLES: { value: AppRole; label: string }[] = [
 
 export default function Mitarbeiter() {
   const { toast } = useToast();
-  const [tab, setTab] = useState("mitarbeiter");
+  const [params, setParams] = useSearchParams();
+  const initialTab = params.get("tab") === "partien" ? "partien" : "mitarbeiter";
+  const [tab, setTab] = useState(initialTab);
+
+  const onTabChange = (v: string) => {
+    setTab(v);
+    const next = new URLSearchParams(params);
+    if (v === "partien") next.set("tab", "partien");
+    else next.delete("tab");
+    setParams(next, { replace: true });
+  };
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
   const [roles, setRoles] = useState<Record<string, AppRole>>({});
@@ -185,7 +196,7 @@ export default function Mitarbeiter() {
         description="Verwalten Sie Mitarbeiter, Rollen und Partien (Teams)."
       />
 
-      <Tabs value={tab} onValueChange={setTab}>
+      <Tabs value={tab} onValueChange={onTabChange}>
         <TabsList>
           <TabsTrigger value="mitarbeiter">Mitarbeiter ({profiles.length})</TabsTrigger>
           <TabsTrigger value="partien">Partien ({partien.length})</TabsTrigger>
