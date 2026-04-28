@@ -176,7 +176,6 @@ export default function StundenFreigabe() {
     toast({ title: "CSV exportiert" });
   };
 
-  const isZM = role === "zimmermeister";
   const isOfficeOrAdmin = role === "buero" || role === "geschaeftsfuehrung" || role === "bauleiter";
 
   return (
@@ -237,20 +236,15 @@ export default function StundenFreigabe() {
                           {r.fehlzeit_typ} {Number(r.fehlzeit_stunden ?? 0).toFixed(1)}h
                         </Badge>
                       )}
-                      {tab === "zm" && isZM && (
+                      {tab === "zm" && isOfficeOrAdmin && (
                         <>
                           <Button size="sm" onClick={() => approveZM(r.id)}>
-                            <CheckCircle2 className="h-4 w-4 mr-1" /> ZM-Freigabe
+                            <CheckCircle2 className="h-4 w-4 mr-1" /> Vor-Freigabe
                           </Button>
                           <Button size="sm" variant="outline" onClick={() => setReject(r)}>
                             <XCircle className="h-4 w-4 mr-1" /> Ablehnen
                           </Button>
                         </>
-                      )}
-                      {tab === "zm" && isOfficeOrAdmin && !isZM && (
-                        <Button size="sm" onClick={() => approveZM(r.id)}>
-                          ZM-Freigabe
-                        </Button>
                       )}
                       {tab === "buero" && isOfficeOrAdmin && (
                         <>

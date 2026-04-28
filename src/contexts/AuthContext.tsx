@@ -96,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAdmin = role === "geschaeftsfuehrung" || role === "buero" || role === "bauleiter";
   const isPolier = !!profile?.is_partieleiter;
   const canPlan = isAdmin;
-  const canReview = isAdmin || role === "zimmermeister";
+  const canReview = isAdmin;
   const canCreateBaustelle = isAdmin || isPolier;
 
   return (

@@ -94,7 +94,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const roleLabel: Record<string, string> = {
     geschaeftsfuehrung: "Geschäftsführung",
-    bauleiter: "Bauleiter",
+    bauleiter: "Vorarbeiter",
     zimmermeister: "Zimmermeister",
     buero: "Büro",
     mitarbeiter: "Mitarbeiter",

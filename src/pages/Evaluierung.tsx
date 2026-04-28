@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,15 +17,15 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, ShieldCheck, ShieldAlert, CheckCircle2 } from "lucide-react";
+import { Plus, ShieldCheck, ShieldAlert, CheckCircle2, Clock, ChevronDown, ChevronUp } from "lucide-react";
 import type { Database, EvaluierungTyp, Json } from "@/integrations/supabase/types";
 import { UNTERWEISUNG_OPTIONS, getUnterweisung, unterweisungLabel } from "@/lib/unterweisungen";
 
 type Eval = Database["public"]["Tables"]["evaluierungen"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
+type Unterschrift = Database["public"]["Tables"]["evaluierung_unterschriften"]["Row"];
 
-// Sammelt alle checkbaren Items (kind: "checklist" oder "arbeitsmittel") aus allen Sektionen
 function getCheckItems(typ: EvaluierungTyp) {
   const u = getUnterweisung(typ);
   if (!u) return [] as { key: string; label: string; section: string }[];
@@ -38,17 +38,44 @@ function getCheckItems(typ: EvaluierungTyp) {
   return items;
 }
 
+function relTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "gerade eben";
+  if (min < 60) return `vor ${min} Min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `vor ${h} Std`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `vor ${d} Tag${d === 1 ? "" : "en"}`;
+  return new Date(iso).toLocaleDateString("de-AT");
+}
+
 export default function Evaluierung() {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, isPolier } = useAuth();
   const { toast } = useToast();
   const [params] = useSearchParams();
   const [rows, setRows] = useState<Eval[]>([]);
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [signatures, setSignatures] = useState<Unterschrift[]>([]);
   const [editing, setEditing] = useState<Partial<Eval> | null>(null);
   const [checklist, setChecklist] = useState<Record<string, string>>({});
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const baustelleParam = params.get("baustelle");
+  const canCreate = isAdmin || isPolier;
+
+  // Polier sieht nur eigene Partie-Baustellen, Admin alle
+  const baustellenForCreate = useMemo(() => {
+    if (isAdmin) return baustellen;
+    if (isPolier) {
+      // Eigene Partie ermitteln (über profiles)
+      const me = profiles.find((p) => p.id === user?.id);
+      if (!me?.partie_id) return [];
+      return baustellen.filter((b) => b.partie_id === me.partie_id);
+    }
+    return [];
+  }, [baustellen, profiles, user, isAdmin, isPolier]);
 
   const load = async () => {
     const [e, b, p] = await Promise.all([
@@ -56,9 +83,20 @@ export default function Evaluierung() {
       supabase.from("baustellen").select("*").order("bvh_name"),
       supabase.from("profiles").select("*"),
     ]);
-    setRows((e.data as Eval[]) ?? []);
+    const evals = (e.data as Eval[]) ?? [];
+    setRows(evals);
     setBaustellen((b.data as Baustelle[]) ?? []);
     setProfiles((p.data as Profile[]) ?? []);
+
+    if (evals.length > 0) {
+      const { data: sigs } = await supabase
+        .from("evaluierung_unterschriften")
+        .select("*")
+        .in("evaluierung_id", evals.map((x) => x.id));
+      setSignatures((sigs as Unterschrift[]) ?? []);
+    } else {
+      setSignatures([]);
+    }
   };
 
   useEffect(() => {
@@ -78,12 +116,46 @@ export default function Evaluierung() {
     setChecklist((e.checkliste as Record<string, string>) || {});
   };
 
+  // Verteilung an Partie-Mitglieder: lege evaluierung_unterschriften pro Mitglied an,
+  // ohne Duplikate
+  const distributeToPartieMembers = async (evaluierungId: string, baustelleId: string) => {
+    const baustelle = baustellen.find((b) => b.id === baustelleId);
+    if (!baustelle?.partie_id) return 0;
+    const { data: members } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("partie_id", baustelle.partie_id)
+      .eq("is_active", true);
+    if (!members || members.length === 0) return 0;
+    // Bereits existierende Einträge filtern
+    const { data: existing } = await supabase
+      .from("evaluierung_unterschriften")
+      .select("mitarbeiter_id")
+      .eq("evaluierung_id", evaluierungId);
+    const have = new Set((existing ?? []).map((r: any) => r.mitarbeiter_id));
+    const toInsert = (members as { id: string }[])
+      .filter((m) => !have.has(m.id))
+      .map((m) => ({ evaluierung_id: evaluierungId, mitarbeiter_id: m.id }));
+    if (toInsert.length === 0) return 0;
+    const { error } = await supabase.from("evaluierung_unterschriften").insert(toInsert as any);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler bei Verteilung", description: error.message });
+      return 0;
+    }
+    return toInsert.length;
+  };
+
   const save = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!editing) return;
     const fd = new FormData(e.currentTarget);
+    const baustelleId = fd.get("baustelle_id") as string;
+    if (!baustelleId) {
+      toast({ variant: "destructive", title: "Baustelle wählen" });
+      return;
+    }
     const payload = {
-      baustelle_id: fd.get("baustelle_id") as string,
+      baustelle_id: baustelleId,
       datum: fd.get("datum") as string,
       typ: (fd.get("typ") as EvaluierungTyp) || "baustelle",
       vortragender_id: user?.id ?? null,
@@ -91,14 +163,34 @@ export default function Evaluierung() {
       notizen: (fd.get("notizen") as string) || null,
       abgeschlossen: false,
     };
-    const { error } = editing.id
-      ? await supabase.from("evaluierungen").update(payload).eq("id", editing.id)
-      : await supabase.from("evaluierungen").insert(payload as any);
-    if (error) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
-      return;
+
+    let evalId = editing.id;
+    if (evalId) {
+      const { error } = await supabase.from("evaluierungen").update(payload).eq("id", evalId);
+      if (error) {
+        toast({ variant: "destructive", title: "Fehler", description: error.message });
+        return;
+      }
+    } else {
+      const { data, error } = await supabase
+        .from("evaluierungen")
+        .insert(payload as any)
+        .select()
+        .single();
+      if (error) {
+        toast({ variant: "destructive", title: "Fehler", description: error.message });
+        return;
+      }
+      evalId = data!.id;
     }
-    toast({ title: editing.id ? "Aktualisiert" : "Evaluierung angelegt" });
+
+    // Verteilung an Partie-Mitglieder
+    const distributed = await distributeToPartieMembers(evalId!, baustelleId);
+
+    toast({
+      title: editing.id ? "Aktualisiert" : "Evaluierung angelegt",
+      description: distributed > 0 ? `An ${distributed} Mitarbeiter zur Unterschrift verteilt` : undefined,
+    });
     setEditing(null);
     load();
   };
@@ -109,13 +201,40 @@ export default function Evaluierung() {
     load();
   };
 
+  const toggleExpand = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Pro Evaluierung: Liste der Partie-Mitglieder + ihren Unterschriften-Status
+  const getMembersForEval = (e: Eval) => {
+    const b = baustellen.find((x) => x.id === e.baustelle_id);
+    if (!b?.partie_id) return [];
+    const members = profiles.filter((p) => p.partie_id === b.partie_id && p.is_active !== false);
+    const sigsForEval = signatures.filter((s) => s.evaluierung_id === e.id);
+    return members.map((m) => {
+      const sig = sigsForEval.find((s) => s.mitarbeiter_id === m.id);
+      return { profile: m, signature: sig };
+    });
+  };
+
+  const getSignatureStats = (e: Eval) => {
+    const items = getMembersForEval(e);
+    const signed = items.filter((x) => x.signature?.unterschrift_data).length;
+    return { signed, total: items.length };
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader
         title="Unterweisungen"
         description="Werkstatt · Baustelle · Fertigteilmontage – digitale Checklisten gemäß ASchG."
         actions={
-          isAdmin && (
+          canCreate && (
             <Button onClick={openNew}>
               <Plus className="h-4 w-4 mr-2" /> Neue Evaluierung
             </Button>
@@ -127,44 +246,121 @@ export default function Evaluierung() {
         {rows.map((e) => {
           const b = baustellen.find((x) => x.id === e.baustelle_id);
           const v = profiles.find((p) => p.id === e.vortragender_id);
+          const stats = getSignatureStats(e);
+          const isOpen = expanded.has(e.id);
           return (
             <Card key={e.id}>
-              <CardContent className="p-3 flex items-start justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    {e.abgeschlossen ? (
-                      <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                    ) : (
-                      <ShieldAlert className="h-4 w-4 text-amber-500" />
+              <CardContent className="p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {e.abgeschlossen ? (
+                        <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+                      ) : (
+                        <ShieldAlert className="h-4 w-4 text-amber-500 shrink-0" />
+                      )}
+                      <div className="font-medium truncate">{b?.bvh_name ?? "—"}</div>
+                      <Badge variant="outline" className="text-[10px]">
+                        {unterweisungLabel(e.typ)}
+                      </Badge>
+                      {stats.total > 0 && (
+                        <Badge
+                          variant={stats.signed === stats.total ? "default" : "outline"}
+                          className={`text-[10px] ${
+                            stats.signed === stats.total
+                              ? "bg-emerald-600"
+                              : stats.signed > 0
+                              ? "border-amber-500 text-amber-700"
+                              : ""
+                          }`}
+                        >
+                          {stats.signed} / {stats.total} unterschrieben
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {new Date(e.datum).toLocaleDateString("de-AT")}
+                      {v ? ` · Vortragender: ${v.vorname} ${v.nachname}` : ""}
+                    </div>
+                    {e.notizen && (
+                      <div className="text-xs mt-1 line-clamp-2">{e.notizen}</div>
                     )}
-                    <div className="font-medium">{b?.bvh_name ?? "—"}</div>
-                    <Badge variant="outline" className="text-[10px]">
-                      {unterweisungLabel(e.typ)}
+                  </div>
+                  <div className="flex flex-col gap-1 items-end shrink-0">
+                    <Badge variant={e.abgeschlossen ? "default" : "outline"} className="text-[10px]">
+                      {e.abgeschlossen ? "Abgeschlossen" : "Offen"}
                     </Badge>
+                    <div className="flex gap-1">
+                      {canCreate && (
+                        <Button size="sm" variant="outline" onClick={() => openEdit(e)}>
+                          Öffnen
+                        </Button>
+                      )}
+                      {!e.abgeschlossen && canCreate && (
+                        <Button size="sm" onClick={() => finalize(e)}>
+                          <CheckCircle2 className="h-4 w-4 mr-1" />
+                          <span className="hidden sm:inline">Abschließen</span>
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    {new Date(e.datum).toLocaleDateString("de-AT")}
-                    {v ? ` · Vortragender: ${v.vorname} ${v.nachname}` : ""}
-                  </div>
-                  {e.notizen && (
-                    <div className="text-xs mt-1 line-clamp-2">{e.notizen}</div>
-                  )}
                 </div>
-                <div className="flex flex-col gap-1 items-end">
-                  <Badge variant={e.abgeschlossen ? "default" : "outline"}>
-                    {e.abgeschlossen ? "Abgeschlossen" : "Offen"}
-                  </Badge>
-                  <div className="flex gap-1">
-                    <Button size="sm" variant="outline" onClick={() => openEdit(e)}>
-                      Öffnen
-                    </Button>
-                    {!e.abgeschlossen && isAdmin && (
-                      <Button size="sm" onClick={() => finalize(e)}>
-                        <CheckCircle2 className="h-4 w-4 mr-1" /> Abschließen
-                      </Button>
+
+                {/* Status-Aufklapper */}
+                {stats.total > 0 && (
+                  <button
+                    onClick={() => toggleExpand(e.id)}
+                    className="mt-2 w-full flex items-center justify-between text-xs text-muted-foreground hover:text-foreground border-t pt-2"
+                  >
+                    <span>{isOpen ? "Status verbergen" : "Wer hat unterschrieben?"}</span>
+                    {isOpen ? (
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    ) : (
+                      <ChevronDown className="h-3.5 w-3.5" />
                     )}
+                  </button>
+                )}
+                {isOpen && (
+                  <div className="mt-2 space-y-1">
+                    {getMembersForEval(e).map(({ profile, signature }) => {
+                      const signed = !!signature?.unterschrift_data;
+                      return (
+                        <div
+                          key={profile.id}
+                          className="flex items-center gap-2 text-xs border rounded px-2 py-1.5"
+                        >
+                          <div
+                            className={`h-6 w-6 rounded-full flex items-center justify-center text-white text-[9px] font-bold shrink-0 ${
+                              signed ? "bg-emerald-600" : "bg-muted-foreground"
+                            }`}
+                          >
+                            {profile.vorname[0]}
+                            {profile.nachname[0]}
+                          </div>
+                          <span className="font-medium flex-1 truncate">
+                            {profile.vorname} {profile.nachname}
+                          </span>
+                          {signed ? (
+                            <span className="flex items-center gap-1 text-emerald-700">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              <span className="hidden sm:inline">
+                                {signature?.unterschrieben_am
+                                  ? relTime(signature.unterschrieben_am)
+                                  : "unterschrieben"}
+                              </span>
+                              <span className="sm:hidden">✓</span>
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1 text-amber-700">
+                              <Clock className="h-3.5 w-3.5" />
+                              <span className="hidden sm:inline">offen</span>
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                </div>
+                )}
               </CardContent>
             </Card>
           );
@@ -173,6 +369,13 @@ export default function Evaluierung() {
           <Card>
             <CardContent className="p-8 text-center text-sm text-muted-foreground">
               Noch keine Evaluierungen.
+              {canCreate && (
+                <div className="mt-2">
+                  <Button onClick={openNew} size="sm">
+                    <Plus className="h-4 w-4 mr-2" /> Erste Evaluierung anlegen
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -195,12 +398,19 @@ export default function Evaluierung() {
                     className="w-full h-10 rounded-md border bg-background px-3 text-sm"
                   >
                     <option value="">— wählen —</option>
-                    {baustellen.map((b) => (
+                    {baustellenForCreate.map((b) => (
                       <option key={b.id} value={b.id}>
                         {b.bvh_name}
+                        {b.kostenstelle ? ` · ${b.kostenstelle}` : ""}
                       </option>
                     ))}
                   </select>
+                  {!isAdmin && isPolier && (
+                    <div className="text-[11px] text-muted-foreground">
+                      Du siehst nur Baustellen deiner Partie. Die Unterweisung wird automatisch an
+                      alle deine Partie-Mitglieder verteilt.
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   <Label>Datum *</Label>
@@ -235,7 +445,6 @@ export default function Evaluierung() {
                     </div>
                   );
                 }
-                // Group by section
                 const bySection: Record<string, typeof items> = {};
                 items.forEach((it) => {
                   (bySection[it.section] = bySection[it.section] || []).push(it);
@@ -291,7 +500,9 @@ export default function Evaluierung() {
                 <Button type="button" variant="outline" onClick={() => setEditing(null)}>
                   Abbrechen
                 </Button>
-                <Button type="submit">{editing.id ? "Speichern" : "Anlegen"}</Button>
+                <Button type="submit">
+                  {editing.id ? "Speichern" : "Anlegen + an Partie verteilen"}
+                </Button>
               </DialogFooter>
             </form>
           )}
@@ -300,3 +511,4 @@ export default function Evaluierung() {
     </div>
   );
 }
+

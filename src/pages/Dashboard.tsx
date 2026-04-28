@@ -97,11 +97,19 @@ export default function Dashboard() {
 
   const fullName = profile ? `${profile.vorname} ${profile.nachname}`.trim() : "";
 
-  const cards: { to: string; label: string; desc: string; icon: typeof Clock; show: boolean }[] = [
+  const cards: {
+    to: string;
+    label: string;
+    desc: string;
+    cta: string;
+    icon: typeof Clock;
+    show: boolean;
+  }[] = [
     {
       to: "/mein-tag",
       label: "Mein Tag",
       desc: "Heutige Einteilung & Baustelle",
+      cta: "Heute öffnen",
       icon: ClipboardList,
       show: true,
     },
@@ -109,6 +117,7 @@ export default function Dashboard() {
       to: "/stunden",
       label: "Stunden erfassen",
       desc: "Tägliche Stundenbuchung",
+      cta: "Stunden erfassen",
       icon: Clock,
       show: true,
     },
@@ -116,6 +125,7 @@ export default function Dashboard() {
       to: "/baustellen",
       label: "Baustellen",
       desc: "Übersicht aller Baustellen",
+      cta: "Baustellen öffnen",
       icon: Building2,
       show: true,
     },
@@ -123,6 +133,7 @@ export default function Dashboard() {
       to: "/arbeitsplanung",
       label: "Arbeitsplanung",
       desc: "Gantt-Chart & Einteilung",
+      cta: "Planung öffnen",
       icon: CalendarDays,
       show: isAdmin,
     },
@@ -130,6 +141,7 @@ export default function Dashboard() {
       to: "/mitarbeiter",
       label: "Mitarbeiter",
       desc: "Partien & Mitarbeiter verwalten",
+      cta: "Verwalten",
       icon: Users,
       show: isAdmin,
     },
@@ -137,6 +149,7 @@ export default function Dashboard() {
       to: "/stunden/freigabe",
       label: "Freigaben",
       desc: "Stunden prüfen & freigeben",
+      cta: "Stunden prüfen",
       icon: CheckCircle2,
       show: canReview,
     },
@@ -196,22 +209,22 @@ export default function Dashboard() {
       {/* Schnellzugriff */}
       <div>
         <h2 className="text-lg font-semibold mb-3">Schnellzugriff</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {cards
             .filter((c) => c.show)
             .map((c) => (
-              <Link key={c.to} to={c.to}>
-                <Card className="hover:shadow-md hover:border-primary/40 transition-all h-full">
-                  <CardHeader className="pb-3">
-                    <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center mb-2">
-                      <c.icon className="h-5 w-5 text-primary" />
+              <Link key={c.to} to={c.to} className="group">
+                <Card className="cursor-pointer hover:shadow-lg hover:border-primary/50 transition-all h-full flex flex-col">
+                  <CardHeader className="space-y-2 pb-3">
+                    <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <c.icon className="h-6 w-6 text-primary" />
                     </div>
-                    <CardTitle className="text-base">{c.label}</CardTitle>
-                    <CardDescription className="text-xs">{c.desc}</CardDescription>
+                    <CardTitle className="text-lg sm:text-xl">{c.label}</CardTitle>
+                    <CardDescription className="text-sm">{c.desc}</CardDescription>
                   </CardHeader>
-                  <CardContent>
-                    <Button variant="ghost" size="sm" className="px-0 text-primary">
-                      Öffnen <ArrowRight className="h-4 w-4 ml-1" />
+                  <CardContent className="mt-auto pt-0">
+                    <Button className="w-full" size="sm">
+                      {c.cta}
                     </Button>
                   </CardContent>
                 </Card>

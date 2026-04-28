@@ -13,6 +13,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -33,6 +42,7 @@ import {
   Clock,
   ChevronDown,
   ChevronUp,
+  Check,
 } from "lucide-react";
 import type { Database, StundenStatus } from "@/integrations/supabase/types";
 
@@ -119,7 +129,7 @@ export default function Stunden() {
   const [polierPartie, setPolierPartie] = useState<Partie | null>(null);
   const [allMembers, setAllMembers] = useState<Profile[]>([]);
   const [allPartien, setAllPartien] = useState<Partie[]>([]);
-  const [forUserId, setForUserId] = useState<string>("");
+  const [forUserIds, setForUserIds] = useState<Set<string>>(new Set());
   const [memberSearch, setMemberSearch] = useState<string>("");
 
   const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -171,7 +181,7 @@ export default function Stunden() {
         setAllMembers((members as Profile[]) ?? []);
         setAllPartien((partien as Partie[]) ?? []);
         setPolierPartie(null);
-        setForUserId(user.id);
+        setForUserIds(new Set([user.id]));
         return;
       }
       const { data: p } = await supabase
@@ -182,7 +192,7 @@ export default function Stunden() {
       if (!p) {
         setPolierPartie(null);
         setAllMembers([]);
-        setForUserId(user.id);
+        setForUserIds(new Set([user.id]));
         return;
       }
       setPolierPartie(p as Partie);
@@ -194,7 +204,7 @@ export default function Stunden() {
         .eq("is_active", true)
         .order("nachname");
       setAllMembers((members as Profile[]) ?? []);
-      setForUserId(user.id);
+      setForUserIds(new Set([user.id]));
     })();
   }, [user, isAdmin]);
 
@@ -257,6 +267,13 @@ export default function Stunden() {
   }, [user, profile, polierPartie, allMembers]);
 
   // ─── Tagesstatus pro Person für aktuelles Datum ───
+  // Primärer User für Status-Anzeigen (eigener User wenn dabei, sonst erster)
+  const primaryUserId = useMemo(() => {
+    if (!user) return "";
+    if (forUserIds.has(user.id)) return user.id;
+    return Array.from(forUserIds)[0] ?? user.id;
+  }, [forUserIds, user]);
+
   const statusForDate = useMemo(() => {
     const map = new Map<string, { hours: number; rows: Stunde[] }>();
     rows
@@ -271,17 +288,17 @@ export default function Stunden() {
   }, [rows, date]);
 
   const todayBlocks = useMemo(() => {
-    return rows.filter((r) => r.mitarbeiter_id === forUserId && r.datum === date);
-  }, [rows, forUserId, date]);
+    return rows.filter((r) => r.mitarbeiter_id === primaryUserId && r.datum === date);
+  }, [rows, primaryUserId, date]);
 
   const todayTotalH = todayBlocks.reduce(
     (s, r) => s + Number(r.arbeitsstunden ?? r.fehlzeit_stunden ?? 0),
     0
   );
 
-  // ─── Doppel-Buchung-Warnung (nur Arbeit + gleiche Baustelle) ───
+  // ─── Doppel-Buchung-Warnung (nur Arbeit + gleiche Baustelle, primary user) ───
   const existingForCurrent = useMemo(() => {
-    if (fehlzeitTyp || !baustelleId) return null;
+    if (fehlzeitTyp || !baustelleId || forUserIds.size > 1) return null;
     return todayBlocks.find((r) => r.baustelle_id === baustelleId);
   }, [todayBlocks, baustelleId, fehlzeitTyp]);
 
@@ -335,7 +352,14 @@ export default function Stunden() {
   };
 
   const submit = async (continueFlag: boolean) => {
-    if (!user || !forUserId) return;
+    if (!user || forUserIds.size === 0) {
+      toast({
+        variant: "destructive",
+        title: "Niemand ausgewählt",
+        description: "Wähle mindestens einen Mitarbeiter.",
+      });
+      return;
+    }
 
     const isFehlzeit = !!fehlzeitTyp;
 
@@ -376,9 +400,9 @@ export default function Stunden() {
 
     if (existingForCurrent) {
       const personLabel =
-        forUserId === user.id
+        primaryUserId === user.id
           ? "dich"
-          : allMembers.find((m) => m.id === forUserId)?.vorname ?? "diese Person";
+          : allMembers.find((m) => m.id === primaryUserId)?.vorname ?? "diese Person";
       const ok = window.confirm(
         `Für ${personLabel} ist auf dieser Baustelle am ${new Date(date).toLocaleDateString(
           "de-AT"
@@ -389,8 +413,8 @@ export default function Stunden() {
       if (!ok) return;
     }
 
-    const payload: any = {
-      mitarbeiter_id: forUserId,
+    const ids = Array.from(forUserIds);
+    const commonPayload = {
       datum: date,
       baustelle_id: isFehlzeit ? null : baustelleId || null,
       start_zeit: isFehlzeit ? null : startZeit,
@@ -408,24 +432,45 @@ export default function Stunden() {
       notizen: notizen || null,
       status: "offen" as StundenStatus,
     };
-    const { data: inserted, error } = await supabase
-      .from("stundenbuchungen")
-      .insert(payload)
-      .select()
-      .single();
-    if (error) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
-      return;
+    let lastInserted: Stunde | null = null;
+    let success = 0;
+    for (const uid of ids) {
+      const payload: any = { ...commonPayload, mitarbeiter_id: uid };
+      const { data, error } = await supabase
+        .from("stundenbuchungen")
+        .insert(payload)
+        .select()
+        .single();
+      if (error) {
+        const p = allMembers.find((m) => m.id === uid);
+        toast({
+          variant: "destructive",
+          title: `Fehler bei ${p ? `${p.vorname} ${p.nachname}` : uid}`,
+          description: error.message,
+        });
+        continue;
+      }
+      lastInserted = data as Stunde;
+      success++;
     }
+    if (success === 0) return;
+
     toast({
-      title: continueFlag ? "Block gespeichert – nächste Baustelle" : "Buchung gespeichert",
+      title:
+        ids.length > 1
+          ? `${success} Buchungen gespeichert`
+          : continueFlag
+          ? "Block gespeichert – nächste Baustelle"
+          : "Buchung gespeichert",
       description: isFehlzeit
-        ? `${fehlzeitHours}h ${fehlzeitTyp}`
-        : `${arbeit.toFixed(2)}h · ${fmtTime(startZeit)}–${fmtTime(endZeit)}`,
+        ? `${fehlzeitHours}h ${fehlzeitTyp} · ${success} Mitarbeiter`
+        : `${arbeit.toFixed(2)}h · ${fmtTime(startZeit)}–${fmtTime(endZeit)}${
+            ids.length > 1 ? ` · ${success} Mitarbeiter` : ""
+          }`,
     });
 
-    if (continueFlag && !isFehlzeit) {
-      partialResetForNextBaustelle(inserted as Stunde);
+    if (continueFlag && !isFehlzeit && lastInserted) {
+      partialResetForNextBaustelle(lastInserted);
     } else {
       fullReset();
     }
@@ -458,9 +503,13 @@ export default function Stunden() {
     return map;
   }, [allMembers, profile, user]);
 
-  const focusPerson = (uid: string) => {
-    setForUserId(uid);
-    fullReset();
+  const togglePerson = (uid: string) => {
+    setForUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
+      return next;
+    });
   };
 
   return (
@@ -474,8 +523,8 @@ export default function Stunden() {
               partie={polierPartie}
               partien={allPartien}
               members={allMembers}
-              forUserId={forUserId}
-              onPick={focusPerson}
+              selectedIds={forUserIds}
+              onToggle={togglePerson}
               ownUserId={user!.id}
               ownProfile={profile as any}
               statusForDate={statusForDate}
@@ -646,55 +695,14 @@ export default function Stunden() {
                   ))}
                 </div>
 
-                {/* Baustellen-Auswahl */}
+                {/* Baustellen-Auswahl: durchsuchbares Combobox */}
                 {!fehlzeitTyp && (
                   <div className="mt-2">
-                    {baustellen.length === 0 ? (
-                      <div className="text-xs text-muted-foreground p-3 bg-muted/40 rounded">
-                        Aktuell keine aktiven Baustellen für deine Partie.
-                      </div>
-                    ) : baustellen.length <= 4 ? (
-                      <div className="grid gap-1.5">
-                        {baustellen.map((b) => (
-                          <button
-                            key={b.id}
-                            onClick={() => setBaustelleId(b.id)}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-md border text-left text-sm transition ${
-                              baustelleId === b.id
-                                ? "bg-primary/10 border-primary"
-                                : "bg-background hover:bg-muted"
-                            }`}
-                          >
-                            <Building2
-                              className={`h-4 w-4 shrink-0 ${
-                                baustelleId === b.id ? "text-primary" : "text-muted-foreground"
-                              }`}
-                            />
-                            <div className="min-w-0 flex-1">
-                              <div className="font-medium truncate">{b.bvh_name}</div>
-                              {b.kostenstelle && (
-                                <div className="text-[11px] text-muted-foreground truncate">
-                                  {b.kostenstelle}
-                                </div>
-                              )}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <select
-                        value={baustelleId}
-                        onChange={(e) => setBaustelleId(e.target.value)}
-                        className="w-full h-10 rounded-md border bg-background px-3 text-sm"
-                      >
-                        <option value="">— Baustelle wählen —</option>
-                        {baustellen.map((b) => (
-                          <option key={b.id} value={b.id}>
-                            {b.bvh_name} {b.kostenstelle ? `· ${b.kostenstelle}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    )}
+                    <BaustelleCombobox
+                      baustellen={baustellen}
+                      value={baustelleId}
+                      onChange={setBaustelleId}
+                    />
                   </div>
                 )}
               </div>
@@ -1238,8 +1246,8 @@ function PersonPicker({
   partie,
   partien,
   members,
-  forUserId,
-  onPick,
+  selectedIds,
+  onToggle,
   ownUserId,
   ownProfile,
   statusForDate,
@@ -1251,8 +1259,8 @@ function PersonPicker({
   partie: Partie | null;
   partien: Partie[];
   members: Profile[];
-  forUserId: string;
-  onPick: (id: string) => void;
+  selectedIds: Set<string>;
+  onToggle: (id: string) => void;
   ownUserId: string;
   ownProfile: Profile | null;
   statusForDate: Map<string, { hours: number }>;
@@ -1290,21 +1298,24 @@ function PersonPicker({
     );
   })();
 
-  const focused =
-    forUserId === ownUserId
-      ? "dich"
-      : (() => {
-          const m = members.find((x) => x.id === forUserId);
-          return m ? `${m.vorname} ${m.nachname}` : "?";
-        })();
+  const focused = (() => {
+    if (selectedIds.size === 0) return "niemanden";
+    if (selectedIds.size === 1) {
+      const id = Array.from(selectedIds)[0];
+      if (id === ownUserId) return "dich";
+      const m = members.find((x) => x.id === id);
+      return m ? `${m.vorname} ${m.nachname}` : "?";
+    }
+    return `${selectedIds.size} Mitarbeiter`;
+  })();
 
   const renderPill = (m: Profile, color: string) => {
     const s = statusForDate.get(m.id);
-    const active = forUserId === m.id;
+    const active = selectedIds.has(m.id);
     return (
       <button
         key={m.id}
-        onClick={() => onPick(m.id)}
+        onClick={() => onToggle(m.id)}
         className={`px-2.5 py-1.5 rounded-full text-xs font-medium border transition flex items-center gap-1.5 shrink-0 ${
           active
             ? "bg-primary text-primary-foreground border-primary"
@@ -1347,6 +1358,9 @@ function PersonPicker({
             Buche für <strong className="text-foreground">{focused}</strong>
           </span>
         </div>
+        <div className="text-[10px] text-muted-foreground italic">
+          Tipp: mehrere Pills antippen, um für mehrere Mitarbeiter gleichzeitig zu buchen.
+        </div>
 
         {isAdmin && members.length > 6 && (
           <Input
@@ -1359,9 +1373,9 @@ function PersonPicker({
 
         <div className="flex flex-wrap gap-1.5">
           <button
-            onClick={() => onPick(ownUserId)}
+            onClick={() => onToggle(ownUserId)}
             className={`px-2.5 py-1.5 rounded-full text-xs font-medium border transition flex items-center gap-1.5 ${
-              forUserId === ownUserId
+              selectedIds.has(ownUserId)
                 ? "bg-primary text-primary-foreground border-primary"
                 : "bg-background hover:bg-muted"
             }`}
@@ -1424,5 +1438,98 @@ function PersonPicker({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ─── Baustellen-Combobox (durchsuchbar) ───
+function BaustelleCombobox({
+  baustellen,
+  value,
+  onChange,
+}: {
+  baustellen: Baustelle[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = baustellen.find((b) => b.id === value);
+
+  if (baustellen.length === 0) {
+    return (
+      <div className="text-xs text-muted-foreground p-3 bg-muted/40 rounded">
+        Aktuell keine aktiven Baustellen für deine Partie.
+      </div>
+    );
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="w-full justify-between h-12 text-left font-normal"
+        >
+          {selected ? (
+            <span className="flex items-center gap-2 min-w-0 flex-1">
+              <Building2 className="h-4 w-4 text-primary shrink-0" />
+              <span className="min-w-0 flex-1 truncate">
+                <span className="font-medium">{selected.bvh_name}</span>
+                {selected.kostenstelle && (
+                  <span className="text-xs text-muted-foreground ml-1.5">
+                    · {selected.kostenstelle}
+                  </span>
+                )}
+              </span>
+            </span>
+          ) : (
+            <span className="flex items-center gap-2 text-muted-foreground">
+              <Building2 className="h-4 w-4 shrink-0" />
+              Baustelle wählen…
+            </span>
+          )}
+          <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="p-0 w-[var(--radix-popover-trigger-width)] max-h-[60vh]"
+        align="start"
+      >
+        <Command>
+          <CommandInput placeholder="Baustelle suchen…" className="h-11" />
+          <CommandList>
+            <CommandEmpty>Keine Baustelle gefunden.</CommandEmpty>
+            <CommandGroup>
+              {baustellen.map((b) => {
+                const isSel = b.id === value;
+                return (
+                  <CommandItem
+                    key={b.id}
+                    value={`${b.bvh_name} ${b.kostenstelle ?? ""} ${b.bauherr ?? ""} ${b.ort ?? ""}`}
+                    onSelect={() => {
+                      onChange(b.id);
+                      setOpen(false);
+                    }}
+                    className="cursor-pointer"
+                  >
+                    <Check
+                      className={`mr-2 h-4 w-4 ${isSel ? "opacity-100" : "opacity-0"}`}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium text-sm truncate">{b.bvh_name}</div>
+                      <div className="text-[11px] text-muted-foreground truncate">
+                        {[b.kostenstelle, b.ort, b.bauherr].filter(Boolean).join(" · ")}
+                      </div>
+                    </div>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
