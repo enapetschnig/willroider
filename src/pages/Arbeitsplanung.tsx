@@ -7,14 +7,16 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, ChevronLeft, ChevronRight, Filter, Building2 } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, Filter, Building2, UserPlus, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
+import { useToast } from "@/hooks/use-toast";
 import type { Database, BaustellenStatus } from "@/integrations/supabase/types";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -65,7 +67,8 @@ const STATUS_LABEL: Record<BaustellenStatus, string> = {
 };
 
 export default function Arbeitsplanung() {
-  const { canCreateBaustelle } = useAuth();
+  const { canCreateBaustelle, isAdmin } = useAuth();
+  const { toast } = useToast();
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
   const [termine, setTermine] = useState<Termin[]>([]);
@@ -133,6 +136,25 @@ export default function Arbeitsplanung() {
     if (!id) return "—";
     const p = profilesById[id];
     return p ? p.nachname : "—";
+  };
+
+  const unassignedMembers = useMemo(
+    () => profiles.filter((p) => !p.partie_id && p.is_active),
+    [profiles]
+  );
+
+  const assignMemberToPartie = async (memberId: string, newPartieId: string | null) => {
+    if (!isAdmin) return;
+    const { error } = await supabase
+      .from("profiles")
+      .update({ partie_id: newPartieId })
+      .eq("id", memberId);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    } else {
+      toast({ title: newPartieId ? "Partie gewechselt" : "Aus Partie entfernt" });
+      load();
+    }
   };
 
   const grouped = useMemo(() => {
@@ -292,44 +314,17 @@ export default function Arbeitsplanung() {
           const members = g.partie ? membersByPartie[g.partie.id] ?? [] : [];
           return (
           <div key={g.partie?.id ?? "ohne"}>
-            <div
-              className="px-3 py-2 rounded-t-md text-xs"
-              style={{
-                background: g.partie ? `${g.partie.farbcode}25` : "hsl(var(--muted))",
-                color: g.partie?.farbcode ?? undefined,
-              }}
-            >
-              <div className="flex items-center gap-2">
-                <span
-                  className="inline-block h-2.5 w-2.5 rounded-full shrink-0"
-                  style={{ background: g.partie?.farbcode ?? "#999" }}
-                />
-                <div className="font-bold uppercase flex-1 min-w-0 truncate">
-                  {polier ? `Polier ${polier}` : g.partie?.name ?? "Ohne Partie"}
-                </div>
-                <span className="text-[10px] opacity-70 shrink-0">{g.rows.length} BVH</span>
-              </div>
-              {members.length > 0 && (
-                <div className="flex gap-1 mt-1.5 overflow-x-auto whitespace-nowrap">
-                  {members.map((m) => (
-                    <span
-                      key={m.id}
-                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-white/60 text-[10px] font-medium shrink-0"
-                      style={{ color: g.partie?.farbcode }}
-                    >
-                      <span
-                        className="h-3.5 w-3.5 rounded-full text-white text-[7px] font-bold flex items-center justify-center"
-                        style={{ background: g.partie?.farbcode ?? "#999" }}
-                      >
-                        {m.vorname[0]}
-                        {m.nachname[0]}
-                      </span>
-                      {m.vorname} {m.nachname[0]}.
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
+            <PolierHeader
+              partie={g.partie}
+              polier={polier}
+              bvhCount={g.rows.length}
+              members={members}
+              allPartien={partien}
+              unassignedMembers={unassignedMembers}
+              onAssign={assignMemberToPartie}
+              isAdmin={isAdmin}
+              variant="mobile"
+            />
             <div className="space-y-1.5 pt-1.5">
               {g.rows.map((b) => (
                 <Link to={`/baustellen/${b.id}`} key={b.id}>
@@ -384,52 +379,16 @@ export default function Arbeitsplanung() {
               const members = g.partie ? membersByPartie[g.partie.id] ?? [] : [];
               return (
                 <div key={g.partie?.id ?? "ohne"}>
-                  {/* Polier-Header (fixed height, members in single horizontal scroll row) */}
-                  <div
-                    className="border-b flex flex-col justify-center px-3 py-1.5"
-                    style={{
-                      background: g.partie ? `${g.partie.farbcode}25` : "hsl(var(--muted))",
-                      color: g.partie?.farbcode ?? undefined,
-                      height: members.length > 0 ? 56 : 36,
-                    }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="inline-block h-3 w-3 rounded-full shrink-0"
-                        style={{ background: g.partie?.farbcode ?? "#999" }}
-                      />
-                      <div className="font-bold text-xs uppercase truncate flex-1 min-w-0">
-                        {polier ? `Polier ${polier}` : g.partie?.name ?? "Ohne Partie"}
-                        {polier && g.partie && (
-                          <span className="ml-1.5 text-[10px] font-normal opacity-70">
-                            ({g.partie.name})
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-[10px] opacity-70 shrink-0">{g.rows.length} BVH</span>
-                    </div>
-                    {members.length > 0 && (
-                      <div className="flex gap-1 mt-1 overflow-x-auto whitespace-nowrap pb-0.5">
-                        {members.map((m) => (
-                          <span
-                            key={m.id}
-                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-white/60 text-[10px] font-medium shrink-0"
-                            style={{ color: g.partie?.farbcode }}
-                            title={`${m.vorname} ${m.nachname}`}
-                          >
-                            <span
-                              className="h-3.5 w-3.5 rounded-full text-white text-[7px] font-bold flex items-center justify-center"
-                              style={{ background: g.partie?.farbcode ?? "#999" }}
-                            >
-                              {m.vorname[0]}
-                              {m.nachname[0]}
-                            </span>
-                            {m.vorname} {m.nachname[0]}.
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  <PolierHeader
+                    partie={g.partie}
+                    polier={polier}
+                    bvhCount={g.rows.length}
+                    members={members}
+                    allPartien={partien}
+                    unassignedMembers={unassignedMembers}
+                    onAssign={assignMemberToPartie}
+                    isAdmin={isAdmin}
+                  />
                   {g.rows.map((b) => (
                     <Link
                       to={`/baustellen/${b.id}`}
@@ -661,5 +620,217 @@ export default function Arbeitsplanung() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ─── Polier-Header (interaktiv) ───
+function PolierHeader({
+  partie,
+  polier,
+  bvhCount,
+  members,
+  allPartien,
+  unassignedMembers,
+  onAssign,
+  isAdmin,
+  variant = "desktop",
+}: {
+  partie: Partie | null;
+  polier: string | null;
+  bvhCount: number;
+  members: Profile[];
+  allPartien: Partie[];
+  unassignedMembers: Profile[];
+  onAssign: (memberId: string, newPartieId: string | null) => void;
+  isAdmin: boolean;
+  variant?: "desktop" | "mobile";
+}) {
+  const isMobile = variant === "mobile";
+  const farbe = partie?.farbcode ?? "#999";
+
+  return (
+    <div
+      className={`${
+        isMobile ? "rounded-t-md py-2 text-xs" : "border-b py-1.5"
+      } px-3 flex flex-col justify-center`}
+      style={{
+        background: partie ? `${partie.farbcode}25` : "hsl(var(--muted))",
+        color: partie?.farbcode ?? undefined,
+        height: isMobile ? undefined : members.length > 0 ? 56 : 36,
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className={`inline-block ${
+            isMobile ? "h-2.5 w-2.5" : "h-3 w-3"
+          } rounded-full shrink-0`}
+          style={{ background: farbe }}
+        />
+        <div className={`${isMobile ? "" : "text-xs"} font-bold uppercase truncate flex-1 min-w-0`}>
+          {polier ? (
+            <>
+              <span className="text-base sm:text-sm">{polier}</span>
+              {partie && (
+                <span className="ml-1.5 text-[10px] font-normal opacity-70 normal-case">
+                  · {partie.name}
+                </span>
+              )}
+            </>
+          ) : (
+            partie?.name ?? "Ohne Partie"
+          )}
+        </div>
+        <span className="text-[10px] opacity-70 shrink-0">{bvhCount} BVH</span>
+        {isAdmin && partie && (
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                className="h-6 w-6 rounded-full bg-white/70 hover:bg-white border flex items-center justify-center shrink-0"
+                style={{ color: farbe }}
+                title="Mitarbeiter hinzufügen"
+              >
+                <UserPlus className="h-3.5 w-3.5" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-64 p-2 max-h-72 overflow-y-auto">
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground px-2 pb-1">
+                Mitarbeiter zu {partie.name} hinzufügen
+              </div>
+              {unassignedMembers.length === 0 ? (
+                <div className="text-xs text-muted-foreground px-2 py-1.5 italic">
+                  Alle Mitarbeiter sind bereits einer Partie zugeordnet.
+                </div>
+              ) : (
+                <div className="space-y-0.5">
+                  {unassignedMembers.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => onAssign(m.id, partie.id)}
+                      className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted flex items-center gap-2"
+                    >
+                      <span
+                        className="h-5 w-5 rounded-full text-white text-[9px] font-bold flex items-center justify-center shrink-0"
+                        style={{ background: farbe }}
+                      >
+                        {m.vorname[0]}
+                        {m.nachname[0]}
+                      </span>
+                      {m.vorname} {m.nachname}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </PopoverContent>
+          </Popover>
+        )}
+      </div>
+      {members.length > 0 && (
+        <div
+          className={`flex gap-1 ${
+            isMobile ? "mt-1.5" : "mt-1"
+          } overflow-x-auto whitespace-nowrap pb-0.5`}
+        >
+          {members.map((m) => (
+            <MemberPill
+              key={m.id}
+              member={m}
+              partie={partie}
+              allPartien={allPartien}
+              onAssign={onAssign}
+              isAdmin={isAdmin}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Mitarbeiter-Pill mit Popover für Re-Assignment ───
+function MemberPill({
+  member,
+  partie,
+  allPartien,
+  onAssign,
+  isAdmin,
+}: {
+  member: Profile;
+  partie: Partie | null;
+  allPartien: Partie[];
+  onAssign: (memberId: string, newPartieId: string | null) => void;
+  isAdmin: boolean;
+}) {
+  const farbe = partie?.farbcode ?? "#999";
+
+  if (!isAdmin) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-white/60 text-[10px] font-medium shrink-0"
+        style={{ color: farbe }}
+        title={`${member.vorname} ${member.nachname}`}
+      >
+        <span
+          className="h-3.5 w-3.5 rounded-full text-white text-[7px] font-bold flex items-center justify-center"
+          style={{ background: farbe }}
+        >
+          {member.vorname[0]}
+          {member.nachname[0]}
+        </span>
+        {member.vorname} {member.nachname[0]}.
+      </span>
+    );
+  }
+
+  const otherPartien = allPartien.filter((p) => p.id !== partie?.id);
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-white/70 hover:bg-white text-[10px] font-medium shrink-0 cursor-pointer transition"
+          style={{ color: farbe }}
+          title="Klick zum Verschieben"
+        >
+          <span
+            className="h-3.5 w-3.5 rounded-full text-white text-[7px] font-bold flex items-center justify-center"
+            style={{ background: farbe }}
+          >
+            {member.vorname[0]}
+            {member.nachname[0]}
+          </span>
+          {member.vorname} {member.nachname[0]}.
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-56 p-2">
+        <div className="text-xs font-semibold mb-2 px-1">
+          {member.vorname} {member.nachname}
+        </div>
+        <div className="text-[10px] uppercase tracking-wide text-muted-foreground px-1 pb-1">
+          Verschieben nach
+        </div>
+        <div className="space-y-0.5">
+          {otherPartien.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => onAssign(member.id, p.id)}
+              className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted flex items-center gap-2"
+            >
+              <span
+                className="h-2.5 w-2.5 rounded-full shrink-0"
+                style={{ background: p.farbcode }}
+              />
+              {p.name}
+            </button>
+          ))}
+          <button
+            onClick={() => onAssign(member.id, null)}
+            className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted flex items-center gap-2 border-t mt-1 pt-2 text-muted-foreground"
+          >
+            <X className="h-3 w-3" />
+            Aus Partie entfernen
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
