@@ -97,8 +97,8 @@ export default function Dashboard() {
 
   const fullName = profile ? `${profile.vorname} ${profile.nachname}`.trim() : "";
 
-  // Alle Cards einheitlich Willroider-rot
-  const WILLROIDER_RED = "#dc2626";
+  // Alle Cards einheitlich im Willroider-Rot aus dem Design-Token (--primary)
+  const WILLROIDER_RED = "hsl(var(--primary))";
   const cards: {
     to: string;
     label: string;
@@ -237,16 +237,10 @@ export default function Dashboard() {
             .filter((c) => c.show)
             .map((c) => (
               <Link key={c.to} to={c.to} className="group block">
-                <Card
-                  className="cursor-pointer hover:shadow-lg transition-all h-full flex flex-col overflow-hidden border-2 hover:-translate-y-0.5"
-                  style={{ borderColor: `${c.color}33` }}
-                >
-                  <div className="h-1.5 w-full" style={{ background: c.color }} />
+                <Card className="cursor-pointer hover:shadow-lg transition-all h-full flex flex-col overflow-hidden border-2 border-primary/20 hover:-translate-y-0.5">
+                  <div className="h-1.5 w-full bg-primary" />
                   <CardHeader className="space-y-2 pb-3">
-                    <div
-                      className="h-14 w-14 rounded-xl flex items-center justify-center shadow-sm"
-                      style={{ background: `${c.color}1a`, color: c.color }}
-                    >
+                    <div className="h-14 w-14 rounded-xl flex items-center justify-center shadow-sm bg-primary/10 text-primary">
                       <c.icon className="h-7 w-7" />
                     </div>
                     <CardTitle className="text-lg sm:text-xl">{c.label}</CardTitle>
@@ -254,9 +248,8 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent className="mt-auto pt-0">
                     <Button
-                      className="w-full text-white shadow-sm group-hover:brightness-110 transition"
+                      className="w-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm"
                       size="sm"
-                      style={{ background: c.color }}
                     >
                       {c.cta}
                       <ArrowRight className="h-4 w-4 ml-1" />

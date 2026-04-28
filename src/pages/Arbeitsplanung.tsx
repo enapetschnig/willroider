@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, ChevronLeft, ChevronRight, Filter, Building2, UserPlus, X, Users } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, Filter, Building2, UserPlus, X, Users, Trash2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -256,17 +256,42 @@ export default function Arbeitsplanung() {
     [baustellen]
   );
 
+  // Flache Mitarbeiter-Reihenfolge aus den workerGroups — nötig für Cross-Row-Selection
+  const flatWorkerIds = useMemo(
+    () => workerGroups.flatMap((g) => g.members.map((m) => m.id)),
+    [workerGroups]
+  );
+  const workerIdx = useMemo(() => {
+    const m = new Map<string, number>();
+    flatWorkerIds.forEach((id, i) => m.set(id, i));
+    return m;
+  }, [flatWorkerIds]);
+
+  // Liefert das Cartesian-Produkt zwischen zwei Zellen — über mehrere Mitarbeiter UND Tage
   const makeRange = (
     a: { workerId: string; iso: string },
     b: { workerId: string; iso: string }
   ): { workerId: string; iso: string }[] => {
-    if (a.workerId !== b.workerId) return [a];
+    const aIdx = workerIdx.get(a.workerId);
+    const bIdx = workerIdx.get(b.workerId);
+    let workerSlice: string[];
+    if (aIdx == null || bIdx == null) {
+      // Fallback: nur Anker-Mitarbeiter
+      workerSlice = [a.workerId];
+    } else {
+      const [from, to] = aIdx <= bIdx ? [aIdx, bIdx] : [bIdx, aIdx];
+      workerSlice = flatWorkerIds.slice(from, to + 1);
+    }
     const aT = new Date(a.iso).getTime();
     const bT = new Date(b.iso).getTime();
     const [s, e] = aT <= bT ? [aT, bT] : [bT, aT];
+    const dates: string[] = [];
+    for (let t = s; t <= e; t += DAY_MS) dates.push(isoDate(new Date(t)));
     const cells: { workerId: string; iso: string }[] = [];
-    for (let t = s; t <= e; t += DAY_MS) {
-      cells.push({ workerId: a.workerId, iso: isoDate(new Date(t)) });
+    for (const wid of workerSlice) {
+      for (const iso of dates) {
+        cells.push({ workerId: wid, iso });
+      }
     }
     return cells;
   };
@@ -275,8 +300,8 @@ export default function Arbeitsplanung() {
     if (!isAdmin) return;
     e.preventDefault();
 
-    // Shift+Click → instant range from previous anchor
-    if (e.shiftKey && selectionAnchor && selectionAnchor.workerId === workerId) {
+    // Shift+Click → instant range from previous anchor (auch über mehrere Zeilen)
+    if (e.shiftKey && selectionAnchor) {
       const cells = makeRange(selectionAnchor, { workerId, iso });
       setSelection(new Set(cells.map((c) => cellKey(c.workerId, c.iso))));
       setPopover({
@@ -312,8 +337,9 @@ export default function Arbeitsplanung() {
     const onMove = (e: PointerEvent) => {
       if (!dragAnchor) return;
       const c = findCellAtPoint(e.clientX, e.clientY);
-      if (c && c.workerId === dragAnchor.workerId && c.iso) {
-        if (!dragHover || dragHover.iso !== c.iso) {
+      // Auch über andere Mitarbeiter-Zeilen erlaubt → cross-row selection
+      if (c && c.iso) {
+        if (!dragHover || dragHover.iso !== c.iso || dragHover.workerId !== c.workerId) {
           setDragHover({ workerId: c.workerId, iso: c.iso });
           const cells = makeRange(dragAnchor, c);
           setSelection(new Set(cells.map((x) => cellKey(x.workerId, x.iso))));
@@ -852,7 +878,7 @@ export default function Arbeitsplanung() {
         ))}
         {isAdmin && (
           <div className="ml-auto text-[11px] italic">
-            Klick = Aktion · Ziehen = Bereich auswählen · Shift+Klick = bis hier markieren
+            Klick = Aktion · Ziehen über Tage/Mitarbeiter = Bereich · Shift+Klick = bis hier · Klick auf Eintrag → „entfernen"
           </div>
         )}
       </div>
@@ -1146,15 +1172,22 @@ function CellPopover({
   const y = Math.min(anchor.y + 12, window.innerHeight - 320);
 
   const dateLabels = (() => {
-    if (cells.length === 1) return new Date(cells[0].iso).toLocaleDateString("de-AT");
-    const sorted = [...cells].sort((a, b) => a.iso.localeCompare(b.iso));
-    return `${new Date(sorted[0].iso).toLocaleDateString("de-AT", {
-      day: "2-digit",
-      month: "2-digit",
-    })} – ${new Date(sorted[sorted.length - 1].iso).toLocaleDateString("de-AT", {
-      day: "2-digit",
-      month: "2-digit",
-    })} (${cells.length} Tage)`;
+    if (cells.length === 0) return "";
+    const uniqueDates = Array.from(new Set(cells.map((c) => c.iso))).sort();
+    const uniqueWorkers = new Set(cells.map((c) => c.workerId));
+    const dayPart =
+      uniqueDates.length === 1
+        ? new Date(uniqueDates[0]).toLocaleDateString("de-AT")
+        : `${new Date(uniqueDates[0]).toLocaleDateString("de-AT", {
+            day: "2-digit",
+            month: "2-digit",
+          })} – ${new Date(uniqueDates[uniqueDates.length - 1]).toLocaleDateString("de-AT", {
+            day: "2-digit",
+            month: "2-digit",
+          })} (${uniqueDates.length} Tage)`;
+    const workerPart =
+      uniqueWorkers.size > 1 ? ` · ${uniqueWorkers.size} Mitarbeiter` : "";
+    return dayPart + workerPart;
   })();
 
   return (
@@ -1219,10 +1252,10 @@ function CellPopover({
         {hasExisting && (
           <button
             onClick={onClear}
-            className="w-full text-xs px-2 py-2 rounded border border-destructive/40 text-destructive hover:bg-destructive/10 flex items-center justify-center gap-1.5 mb-1"
+            className="w-full text-xs px-2 py-2.5 rounded border border-destructive/40 text-destructive font-semibold hover:bg-destructive hover:text-destructive-foreground flex items-center justify-center gap-1.5 mb-1 transition"
           >
-            <Trash2 className="h-3 w-3" />
-            Eintrag entfernen
+            <Trash2 className="h-3.5 w-3.5" />
+            Markierte Einteilung entfernen
           </button>
         )}
         <button
