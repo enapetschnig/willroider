@@ -97,6 +97,8 @@ export default function Dashboard() {
 
   const fullName = profile ? `${profile.vorname} ${profile.nachname}`.trim() : "";
 
+  // Alle Cards einheitlich Willroider-rot
+  const WILLROIDER_RED = "#dc2626";
   const cards: {
     to: string;
     label: string;
@@ -113,7 +115,7 @@ export default function Dashboard() {
       cta: "Heute öffnen",
       icon: ClipboardList,
       show: true,
-      color: "#0ea5e9", // sky
+      color: WILLROIDER_RED,
     },
     {
       to: "/stunden",
@@ -122,7 +124,7 @@ export default function Dashboard() {
       cta: "Stunden erfassen",
       icon: Clock,
       show: true,
-      color: "#10b981", // emerald
+      color: WILLROIDER_RED,
     },
     {
       to: "/baustellen",
@@ -131,7 +133,7 @@ export default function Dashboard() {
       cta: "Baustellen öffnen",
       icon: Building2,
       show: true,
-      color: "#dc2626", // red (Willroider)
+      color: WILLROIDER_RED,
     },
     {
       to: "/arbeitsplanung",
@@ -140,7 +142,7 @@ export default function Dashboard() {
       cta: "Planung öffnen",
       icon: CalendarDays,
       show: isAdmin,
-      color: "#f59e0b", // amber
+      color: WILLROIDER_RED,
     },
     {
       to: "/mitarbeiter",
@@ -149,7 +151,7 @@ export default function Dashboard() {
       cta: "Verwalten",
       icon: Users,
       show: isAdmin,
-      color: "#8b5cf6", // violet
+      color: WILLROIDER_RED,
     },
     {
       to: "/stunden/freigabe",
@@ -158,7 +160,7 @@ export default function Dashboard() {
       cta: "Stunden prüfen",
       icon: CheckCircle2,
       show: canReview,
-      color: "#84cc16", // lime
+      color: WILLROIDER_RED,
     },
   ];
 
