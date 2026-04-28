@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { AppShell } from "./AppShell";
+import { EvaluierungSignatureGate } from "./EvaluierungSignatureGate";
 
 export function ProtectedRoute() {
   const { loading, user, profile } = useAuth();
@@ -39,8 +40,10 @@ export function ProtectedRoute() {
   }
 
   return (
-    <AppShell>
-      <Outlet />
-    </AppShell>
+    <EvaluierungSignatureGate>
+      <AppShell>
+        <Outlet />
+      </AppShell>
+    </EvaluierungSignatureGate>
   );
 }

@@ -11,20 +11,16 @@ import { Plus, ChevronLeft, ChevronRight, Filter, Building2 } from "lucide-react
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { useToast } from "@/hooks/use-toast";
+import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
 import type { Database, BaustellenStatus } from "@/integrations/supabase/types";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
 type Termin = Database["public"]["Tables"]["baustellen_termine"]["Row"];
+type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -70,10 +66,10 @@ const STATUS_LABEL: Record<BaustellenStatus, string> = {
 
 export default function Arbeitsplanung() {
   const { isAdmin } = useAuth();
-  const { toast } = useToast();
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
   const [termine, setTermine] = useState<Termin[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [filterPartie, setFilterPartie] = useState<string>("alle");
   const [weeksVisible, setWeeksVisible] = useState(20);
   const [anchorWeek, setAnchorWeek] = useState<Date>(() => {
@@ -86,14 +82,16 @@ export default function Arbeitsplanung() {
   const dayWidth = 18; // px
 
   const load = async () => {
-    const [bs, p, t] = await Promise.all([
+    const [bs, p, t, pr] = await Promise.all([
       supabase.from("baustellen").select("*").order("start_datum", { ascending: true }),
       supabase.from("partien").select("*").order("name"),
       supabase.from("baustellen_termine").select("*"),
+      supabase.from("profiles").select("*"),
     ]);
     setBaustellen((bs.data as Baustelle[]) ?? []);
     setPartien((p.data as Partie[]) ?? []);
     setTermine((t.data as Termin[]) ?? []);
+    setProfiles((pr.data as Profile[]) ?? []);
   };
 
   useEffect(() => {
@@ -114,6 +112,28 @@ export default function Arbeitsplanung() {
   const rangeEnd = new Date(anchorWeek.getTime() + totalDays * DAY_MS);
 
   const partienById = useMemo(() => Object.fromEntries(partien.map((p) => [p.id, p])), [partien]);
+  const profilesById = useMemo(() => Object.fromEntries(profiles.map((p) => [p.id, p])), [profiles]);
+
+  const membersByPartie = useMemo(() => {
+    const m: Record<string, Profile[]> = {};
+    profiles.forEach((p) => {
+      if (p.partie_id) {
+        (m[p.partie_id] = m[p.partie_id] || []).push(p);
+      }
+    });
+    return m;
+  }, [profiles]);
+
+  const polierName = (partie: Partie | null) => {
+    if (!partie?.partieleiter_id) return null;
+    const p = profilesById[partie.partieleiter_id];
+    return p ? `${p.nachname}` : null;
+  };
+  const bauleiterShort = (id: string | null) => {
+    if (!id) return "—";
+    const p = profilesById[id];
+    return p ? p.nachname : "—";
+  };
 
   const grouped = useMemo(() => {
     const filtered = baustellen.filter((b) => {
@@ -184,39 +204,6 @@ export default function Arbeitsplanung() {
   const movePeriod = (weeks: number) => {
     const next = new Date(anchorWeek.getTime() + weeks * 7 * DAY_MS);
     setAnchorWeek(startOfISOWeek(next));
-  };
-
-  const onSubmitBaustelle = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    const payload = {
-      bvh_name: fd.get("bvh_name") as string,
-      kostenstelle: (fd.get("kostenstelle") as string) || null,
-      bauherr: (fd.get("bauherr") as string) || null,
-      baustellen_adresse: (fd.get("adresse") as string) || null,
-      ort: (fd.get("ort") as string) || null,
-      plz: (fd.get("plz") as string) || null,
-      start_datum: (fd.get("start_datum") as string) || null,
-      end_datum: (fd.get("end_datum") as string) || null,
-      status: (fd.get("status") as BaustellenStatus) || "geplant",
-      partie_id: (fd.get("partie_id") as string) || null,
-      auftragssumme: fd.get("auftragssumme") ? Number(fd.get("auftragssumme")) : null,
-      art_bauarbeiten: (fd.get("art_bauarbeiten") as string) || null,
-      notizen: (fd.get("notizen") as string) || null,
-    };
-
-    const { error } = editing?.id
-      ? await supabase.from("baustellen").update(payload).eq("id", editing.id)
-      : await supabase.from("baustellen").insert(payload as any);
-
-    if (error) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
-      return;
-    }
-    toast({ title: editing?.id ? "Baustelle aktualisiert" : "Baustelle angelegt" });
-    setDialogOpen(false);
-    setEditing(null);
-    load();
   };
 
   return (
@@ -299,22 +286,49 @@ export default function Arbeitsplanung() {
       </Card>
 
       {/* Mobile: simple list (Gantt only on >=md) */}
-      <div className="md:hidden space-y-2">
-        {grouped.map((g) => (
+      <div className="md:hidden space-y-3">
+        {grouped.map((g) => {
+          const polier = polierName(g.partie);
+          const members = g.partie ? membersByPartie[g.partie.id] ?? [] : [];
+          return (
           <div key={g.partie?.id ?? "ohne"}>
             <div
-              className="px-3 py-1.5 rounded-t-md text-xs font-semibold flex items-center gap-2"
+              className="px-3 py-2 rounded-t-md text-xs"
               style={{
-                background: g.partie ? `${g.partie.farbcode}20` : "hsl(var(--muted))",
+                background: g.partie ? `${g.partie.farbcode}25` : "hsl(var(--muted))",
                 color: g.partie?.farbcode ?? undefined,
               }}
             >
-              <span
-                className="inline-block h-2.5 w-2.5 rounded-full"
-                style={{ background: g.partie?.farbcode ?? "#999" }}
-              />
-              {g.partie?.name ?? "Ohne Partie"}
-              <span className="ml-auto text-[10px] opacity-70">{g.rows.length}</span>
+              <div className="flex items-center gap-2">
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-full shrink-0"
+                  style={{ background: g.partie?.farbcode ?? "#999" }}
+                />
+                <div className="font-bold uppercase flex-1 min-w-0 truncate">
+                  {polier ? `Polier ${polier}` : g.partie?.name ?? "Ohne Partie"}
+                </div>
+                <span className="text-[10px] opacity-70 shrink-0">{g.rows.length} BVH</span>
+              </div>
+              {members.length > 0 && (
+                <div className="flex gap-1 mt-1.5 overflow-x-auto whitespace-nowrap">
+                  {members.map((m) => (
+                    <span
+                      key={m.id}
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-white/60 text-[10px] font-medium shrink-0"
+                      style={{ color: g.partie?.farbcode }}
+                    >
+                      <span
+                        className="h-3.5 w-3.5 rounded-full text-white text-[7px] font-bold flex items-center justify-center"
+                        style={{ background: g.partie?.farbcode ?? "#999" }}
+                      >
+                        {m.vorname[0]}
+                        {m.nachname[0]}
+                      </span>
+                      {m.vorname} {m.nachname[0]}.
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="space-y-1.5 pt-1.5">
               {g.rows.map((b) => (
@@ -342,75 +356,126 @@ export default function Arbeitsplanung() {
               ))}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Desktop: Gantt chart */}
       <Card className="overflow-hidden hidden md:block">
         <div className="flex">
           {/* Left fixed multi-column area (Excel-style) */}
-          <div className="shrink-0 border-r bg-card" style={{ width: 460 }}>
+          <div className="shrink-0 border-r bg-card" style={{ width: 540 }}>
             {/* Two-row header to match timeline header height (28+28=56) */}
             <div className="bg-muted/60 border-b sticky top-0 z-10" style={{ height: 56 }}>
-              <div className="grid h-full text-[10px] font-semibold uppercase tracking-wide" style={{ gridTemplateColumns: "1fr 90px 80px 80px 50px" }}>
-                <div className="px-2 py-1 border-r flex items-end">Bauvorhaben (BVH)</div>
+              <div
+                className="grid h-full text-[10px] font-semibold uppercase tracking-wide"
+                style={{ gridTemplateColumns: "1fr 80px 80px 65px 65px 40px" }}
+              >
+                <div className="px-2 py-1 border-r flex items-end">BVH</div>
                 <div className="px-2 py-1 border-r flex items-end">Kostenstelle</div>
-                <div className="px-2 py-1 border-r flex items-end">Start</div>
-                <div className="px-2 py-1 border-r flex items-end">Ende</div>
-                <div className="px-2 py-1 flex items-end">Status</div>
+                <div className="px-2 py-1 border-r flex items-end">Bauleiter</div>
+                <div className="px-2 py-1 border-r flex items-end">POL-Beginn</div>
+                <div className="px-2 py-1 border-r flex items-end">POL-Ende</div>
+                <div className="px-1 py-1 flex items-end justify-center">Anz.</div>
               </div>
             </div>
-            {grouped.map((g) => (
-              <div key={g.partie?.id ?? "ohne"}>
-                <div
-                  className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide flex items-center gap-2 border-b"
-                  style={{
-                    background: g.partie ? `${g.partie.farbcode}25` : "hsl(var(--muted))",
-                    color: g.partie?.farbcode ?? undefined,
-                    height: 28,
-                  }}
-                >
-                  <span
-                    className="inline-block h-3 w-3 rounded-full"
-                    style={{ background: g.partie?.farbcode ?? "#999" }}
-                  />
-                  {g.partie?.name ?? "Ohne Partie"}
-                  <span className="ml-auto text-[10px] opacity-70">{g.rows.length} BVH</span>
-                </div>
-                {g.rows.map((b) => (
-                  <Link
-                    to={`/baustellen/${b.id}`}
-                    key={b.id}
-                    className="grid border-b text-[11px] hover:bg-muted/50 cursor-pointer"
+            {grouped.map((g) => {
+              const polier = polierName(g.partie);
+              const members = g.partie ? membersByPartie[g.partie.id] ?? [] : [];
+              return (
+                <div key={g.partie?.id ?? "ohne"}>
+                  {/* Polier-Header (fixed height, members in single horizontal scroll row) */}
+                  <div
+                    className="border-b flex flex-col justify-center px-3 py-1.5"
                     style={{
-                      gridTemplateColumns: "1fr 90px 80px 80px 50px",
-                      height: 28,
+                      background: g.partie ? `${g.partie.farbcode}25` : "hsl(var(--muted))",
+                      color: g.partie?.farbcode ?? undefined,
+                      height: members.length > 0 ? 56 : 36,
                     }}
                   >
-                    <div className="px-2 flex items-center gap-1.5 border-r min-w-0">
-                      <Building2 className="h-3 w-3 text-muted-foreground shrink-0" />
-                      <span className="font-medium truncate">{b.bvh_name}</span>
-                    </div>
-                    <div className="px-2 flex items-center border-r truncate text-muted-foreground">
-                      {b.kostenstelle ?? "—"}
-                    </div>
-                    <div className="px-2 flex items-center border-r text-muted-foreground tabular-nums">
-                      {b.start_datum ? new Date(b.start_datum).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}
-                    </div>
-                    <div className="px-2 flex items-center border-r text-muted-foreground tabular-nums">
-                      {b.end_datum ? new Date(b.end_datum).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—"}
-                    </div>
-                    <div className="px-1 flex items-center justify-center">
+                    <div className="flex items-center gap-2">
                       <span
-                        className="h-2 w-2 rounded-full"
-                        style={{ background: STATUS_DOT[b.status] }}
-                        title={STATUS_LABEL[b.status]}
+                        className="inline-block h-3 w-3 rounded-full shrink-0"
+                        style={{ background: g.partie?.farbcode ?? "#999" }}
                       />
+                      <div className="font-bold text-xs uppercase truncate flex-1 min-w-0">
+                        {polier ? `Polier ${polier}` : g.partie?.name ?? "Ohne Partie"}
+                        {polier && g.partie && (
+                          <span className="ml-1.5 text-[10px] font-normal opacity-70">
+                            ({g.partie.name})
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] opacity-70 shrink-0">{g.rows.length} BVH</span>
                     </div>
-                  </Link>
-                ))}
-              </div>
-            ))}
+                    {members.length > 0 && (
+                      <div className="flex gap-1 mt-1 overflow-x-auto whitespace-nowrap pb-0.5">
+                        {members.map((m) => (
+                          <span
+                            key={m.id}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-white/60 text-[10px] font-medium shrink-0"
+                            style={{ color: g.partie?.farbcode }}
+                            title={`${m.vorname} ${m.nachname}`}
+                          >
+                            <span
+                              className="h-3.5 w-3.5 rounded-full text-white text-[7px] font-bold flex items-center justify-center"
+                              style={{ background: g.partie?.farbcode ?? "#999" }}
+                            >
+                              {m.vorname[0]}
+                              {m.nachname[0]}
+                            </span>
+                            {m.vorname} {m.nachname[0]}.
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {g.rows.map((b) => (
+                    <Link
+                      to={`/baustellen/${b.id}`}
+                      key={b.id}
+                      className="grid border-b text-[11px] hover:bg-muted/50 cursor-pointer"
+                      style={{
+                        gridTemplateColumns: "1fr 80px 80px 65px 65px 40px",
+                        height: 28,
+                      }}
+                    >
+                      <div className="px-2 flex items-center gap-1.5 border-r min-w-0">
+                        <Building2 className="h-3 w-3 text-muted-foreground shrink-0" />
+                        <span className="font-medium truncate">{b.bvh_name}</span>
+                      </div>
+                      <div className="px-2 flex items-center border-r truncate text-muted-foreground">
+                        {b.kostenstelle ?? "—"}
+                      </div>
+                      <div className="px-2 flex items-center border-r truncate text-muted-foreground">
+                        {bauleiterShort(b.bauleiter_id)}
+                      </div>
+                      <div className="px-2 flex items-center border-r text-muted-foreground tabular-nums">
+                        {b.start_datum
+                          ? new Date(b.start_datum).toLocaleDateString("de-AT", {
+                              day: "2-digit",
+                              month: "2-digit",
+                              year: "2-digit",
+                            })
+                          : "—"}
+                      </div>
+                      <div className="px-2 flex items-center border-r text-muted-foreground tabular-nums">
+                        {b.end_datum
+                          ? new Date(b.end_datum).toLocaleDateString("de-AT", {
+                              day: "2-digit",
+                              month: "2-digit",
+                              year: "2-digit",
+                            })
+                          : "—"}
+                      </div>
+                      <div className="px-1 flex items-center justify-center text-muted-foreground tabular-nums">
+                        {b.anzahl_mitarbeiter ?? "—"}
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              );
+            })}
             {grouped.length === 0 && (
               <div className="p-6 text-center text-sm text-muted-foreground">
                 Noch keine Baustellen.
@@ -460,13 +525,16 @@ export default function Arbeitsplanung() {
 
               {/* Body */}
               <div className="relative">
-                {grouped.map((g) => (
+                {grouped.map((g) => {
+                  const memberCount = g.partie ? (membersByPartie[g.partie.id] ?? []).length : 0;
+                  const headerH = memberCount > 0 ? 56 : 36;
+                  return (
                   <div key={g.partie?.id ?? "ohne"}>
-                    {/* Group spacer matches left column */}
+                    {/* Group spacer matches left column header height */}
                     <div
                       className="border-b"
                       style={{
-                        height: 28,
+                        height: headerH,
                         background: g.partie ? `${g.partie.farbcode}25` : "hsl(var(--muted))",
                       }}
                     />
@@ -544,7 +612,8 @@ export default function Arbeitsplanung() {
                       );
                     })}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -573,113 +642,22 @@ export default function Arbeitsplanung() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editing?.id ? "Baustelle bearbeiten" : "Neue Baustelle"}</DialogTitle>
-            <DialogDescription>Stammdaten der Baustelle</DialogDescription>
+            <DialogTitle>
+              {editing?.id ? "Baustelle bearbeiten" : "Baustellenmeldung"}
+            </DialogTitle>
           </DialogHeader>
-          <form onSubmit={onSubmitBaustelle} className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="col-span-2 space-y-1.5">
-                <Label htmlFor="bvh_name">BVH (Bauvorhaben) *</Label>
-                <Input id="bvh_name" name="bvh_name" defaultValue={editing?.bvh_name ?? ""} required />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="kostenstelle">Kostenstelle</Label>
-                <Input id="kostenstelle" name="kostenstelle" defaultValue={editing?.kostenstelle ?? ""} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="bauherr">Bauherr</Label>
-                <Input id="bauherr" name="bauherr" defaultValue={editing?.bauherr ?? ""} />
-              </div>
-              <div className="col-span-2 space-y-1.5">
-                <Label htmlFor="adresse">Baustellen-Adresse</Label>
-                <Input id="adresse" name="adresse" defaultValue={editing?.baustellen_adresse ?? ""} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="plz">PLZ</Label>
-                <Input id="plz" name="plz" defaultValue={editing?.plz ?? ""} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="ort">Ort</Label>
-                <Input id="ort" name="ort" defaultValue={editing?.ort ?? ""} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="start_datum">Start</Label>
-                <Input
-                  id="start_datum"
-                  name="start_datum"
-                  type="date"
-                  defaultValue={editing?.start_datum ?? ""}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="end_datum">Ende</Label>
-                <Input
-                  id="end_datum"
-                  name="end_datum"
-                  type="date"
-                  defaultValue={editing?.end_datum ?? ""}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="status">Status</Label>
-                <select
-                  id="status"
-                  name="status"
-                  defaultValue={editing?.status ?? "geplant"}
-                  className="w-full h-10 rounded-md border bg-background px-3 text-sm"
-                >
-                  <option value="geplant">Geplant</option>
-                  <option value="aktiv">Aktiv</option>
-                  <option value="pausiert">Pausiert</option>
-                  <option value="abgeschlossen">Abgeschlossen</option>
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="partie_id">Partie</Label>
-                <select
-                  id="partie_id"
-                  name="partie_id"
-                  defaultValue={editing?.partie_id ?? ""}
-                  className="w-full h-10 rounded-md border bg-background px-3 text-sm"
-                >
-                  <option value="">— ohne Partie —</option>
-                  {partien.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="auftragssumme">Auftragssumme (EUR)</Label>
-                <Input
-                  id="auftragssumme"
-                  name="auftragssumme"
-                  type="number"
-                  step="0.01"
-                  defaultValue={editing?.auftragssumme ?? ""}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="art_bauarbeiten">Art der Bauarbeiten</Label>
-                <Input
-                  id="art_bauarbeiten"
-                  name="art_bauarbeiten"
-                  defaultValue={editing?.art_bauarbeiten ?? ""}
-                />
-              </div>
-              <div className="col-span-2 space-y-1.5">
-                <Label htmlFor="notizen">Notizen</Label>
-                <Textarea id="notizen" name="notizen" defaultValue={editing?.notizen ?? ""} />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
-                Abbrechen
-              </Button>
-              <Button type="submit">{editing?.id ? "Speichern" : "Anlegen"}</Button>
-            </DialogFooter>
-          </form>
+          <BaustellenmeldungForm
+            initial={editing}
+            onCancel={() => {
+              setDialogOpen(false);
+              setEditing(null);
+            }}
+            onSaved={() => {
+              setDialogOpen(false);
+              setEditing(null);
+              load();
+            }}
+          />
         </DialogContent>
       </Dialog>
     </div>

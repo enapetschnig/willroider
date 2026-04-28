@@ -18,13 +18,10 @@ import { Plus, Building2, Search } from "lucide-react";
 import {
   Dialog,
   DialogContent,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { useToast } from "@/hooks/use-toast";
+import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
 import type { Database, BaustellenStatus } from "@/integrations/supabase/types";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -39,7 +36,6 @@ const STATUS_LABEL: Record<BaustellenStatus, string> = {
 
 export default function Baustellen() {
   const { isAdmin } = useAuth();
-  const { toast } = useToast();
   const [data, setData] = useState<Baustelle[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
   const [search, setSearch] = useState("");
@@ -74,38 +70,6 @@ export default function Baustellen() {
       return true;
     });
   }, [data, search, statusFilter]);
-
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    const payload = {
-      bvh_name: fd.get("bvh_name") as string,
-      kostenstelle: (fd.get("kostenstelle") as string) || null,
-      bauherr: (fd.get("bauherr") as string) || null,
-      bauherr_adresse: (fd.get("bauherr_adresse") as string) || null,
-      baustellen_adresse: (fd.get("baustellen_adresse") as string) || null,
-      plz: (fd.get("plz") as string) || null,
-      ort: (fd.get("ort") as string) || null,
-      start_datum: (fd.get("start_datum") as string) || null,
-      end_datum: (fd.get("end_datum") as string) || null,
-      status: (fd.get("status") as BaustellenStatus) || "geplant",
-      partie_id: (fd.get("partie_id") as string) || null,
-      auftragssumme: fd.get("auftragssumme") ? Number(fd.get("auftragssumme")) : null,
-      art_bauarbeiten: (fd.get("art_bauarbeiten") as string) || null,
-      dacheindeckung: (fd.get("dacheindeckung") as string) || null,
-      farben_grundierung: (fd.get("farben_grundierung") as string) || null,
-      anzahl_mitarbeiter: fd.get("anzahl_mitarbeiter") ? Number(fd.get("anzahl_mitarbeiter")) : null,
-      notizen: (fd.get("notizen") as string) || null,
-    };
-    const { error } = await supabase.from("baustellen").insert(payload as any);
-    if (error) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
-      return;
-    }
-    toast({ title: "Baustelle angelegt" });
-    setDialogOpen(false);
-    load();
-  };
 
   return (
     <div className="space-y-4">
@@ -220,98 +184,15 @@ export default function Baustellen() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Neue Baustelle anlegen</DialogTitle>
+            <DialogTitle>Baustellenmeldung</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="col-span-2 space-y-1.5">
-                <Label>BVH (Bauvorhaben) *</Label>
-                <Input name="bvh_name" required />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Kostenstelle</Label>
-                <Input name="kostenstelle" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Status</Label>
-                <select name="status" defaultValue="geplant" className="w-full h-10 rounded-md border bg-background px-3 text-sm">
-                  <option value="geplant">Geplant</option>
-                  <option value="aktiv">Aktiv</option>
-                  <option value="pausiert">Pausiert</option>
-                  <option value="abgeschlossen">Abgeschlossen</option>
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Bauherr</Label>
-                <Input name="bauherr" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Bauherr-Adresse</Label>
-                <Input name="bauherr_adresse" />
-              </div>
-              <div className="col-span-2 space-y-1.5">
-                <Label>Baustellen-Adresse</Label>
-                <Input name="baustellen_adresse" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>PLZ</Label>
-                <Input name="plz" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Ort</Label>
-                <Input name="ort" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Start</Label>
-                <Input name="start_datum" type="date" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Ende (vsl.)</Label>
-                <Input name="end_datum" type="date" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Partie</Label>
-                <select name="partie_id" className="w-full h-10 rounded-md border bg-background px-3 text-sm">
-                  <option value="">— ohne —</option>
-                  {partien.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Anzahl Mitarbeiter</Label>
-                <Input name="anzahl_mitarbeiter" type="number" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Auftragssumme (EUR)</Label>
-                <Input name="auftragssumme" type="number" step="0.01" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Art der Bauarbeiten</Label>
-                <Input name="art_bauarbeiten" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Dacheindeckung</Label>
-                <Input name="dacheindeckung" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Farben/Grundierung</Label>
-                <Input name="farben_grundierung" />
-              </div>
-              <div className="col-span-2 space-y-1.5">
-                <Label>Notizen</Label>
-                <Textarea name="notizen" />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
-                Abbrechen
-              </Button>
-              <Button type="submit">Anlegen</Button>
-            </DialogFooter>
-          </form>
+          <BaustellenmeldungForm
+            onCancel={() => setDialogOpen(false)}
+            onSaved={() => {
+              setDialogOpen(false);
+              load();
+            }}
+          />
         </DialogContent>
       </Dialog>
     </div>

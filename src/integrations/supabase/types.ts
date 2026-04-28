@@ -108,6 +108,8 @@ export type Database = {
           dacheindeckung: string | null;
           farben_grundierung: string | null;
           notizen: string | null;
+          bautraeger: boolean | null;
+          pflicht_evaluierung_id: string | null;
           created_by: string | null;
           created_at: string;
           updated_at: string;
