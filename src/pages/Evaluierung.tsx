@@ -19,31 +19,24 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Plus, ShieldCheck, ShieldAlert, CheckCircle2 } from "lucide-react";
 import type { Database, EvaluierungTyp, Json } from "@/integrations/supabase/types";
+import { UNTERWEISUNG_OPTIONS, getUnterweisung, unterweisungLabel } from "@/lib/unterweisungen";
 
 type Eval = Database["public"]["Tables"]["evaluierungen"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 
-const CHECKLIST_KURZ = [
-  { key: "absturzsicherung", label: "Absturzsicherung vorhanden" },
-  { key: "psa", label: "Persönliche Schutzausrüstung getragen" },
-  { key: "werkzeuge", label: "Werkzeuge geprüft" },
-  { key: "arbeitsbereich", label: "Arbeitsbereich abgesichert" },
-];
-
-const CHECKLIST_LANG = [
-  ...CHECKLIST_KURZ,
-  { key: "kran_pruefung", label: "Kran-Prüfprotokoll aktuell" },
-  { key: "geruest_pruefung", label: "Gerüst-Abnahme erfolgt" },
-  { key: "leitern", label: "Leitern auf Stabilität geprüft" },
-  { key: "stromversorgung", label: "Elektrik / Verlängerungen geprüft" },
-  { key: "fluchtwege", label: "Fluchtwege frei" },
-  { key: "erste_hilfe", label: "Erste-Hilfe-Material vorhanden" },
-  { key: "feuerloescher", label: "Feuerlöscher vorhanden" },
-  { key: "lagerung", label: "Sichere Lagerung Fertigteilelemente" },
-  { key: "transport", label: "Transport / Hubmittel geprüft" },
-  { key: "versetzung", label: "Versetz-Anweisung vorhanden" },
-];
+// Sammelt alle checkbaren Items (kind: "checklist" oder "arbeitsmittel") aus allen Sektionen
+function getCheckItems(typ: EvaluierungTyp) {
+  const u = getUnterweisung(typ);
+  if (!u) return [] as { key: string; label: string; section: string }[];
+  const items: { key: string; label: string; section: string }[] = [];
+  u.sections.forEach((sec) => {
+    if (sec.kind === "checklist" || sec.kind === "arbeitsmittel") {
+      sec.items.forEach((it) => items.push({ ...it, section: sec.heading }));
+    }
+  });
+  return items;
+}
 
 export default function Evaluierung() {
   const { user, isAdmin } = useAuth();
@@ -71,18 +64,18 @@ export default function Evaluierung() {
   useEffect(() => {
     load();
     if (baustelleParam) {
-      setEditing({ baustelle_id: baustelleParam, datum: new Date().toISOString().slice(0, 10), typ: "kurz" });
+      setEditing({ baustelle_id: baustelleParam, datum: new Date().toISOString().slice(0, 10), typ: "baustelle" });
     }
   }, []);
 
   const openNew = () => {
-    setEditing({ datum: new Date().toISOString().slice(0, 10), typ: "kurz" });
+    setEditing({ datum: new Date().toISOString().slice(0, 10), typ: "baustelle" });
     setChecklist({});
   };
 
   const openEdit = (e: Eval) => {
     setEditing(e);
-    setChecklist((e.checklist as Record<string, string>) || {});
+    setChecklist((e.checkliste as Record<string, string>) || {});
   };
 
   const save = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -92,7 +85,7 @@ export default function Evaluierung() {
     const payload = {
       baustelle_id: fd.get("baustelle_id") as string,
       datum: fd.get("datum") as string,
-      typ: (fd.get("typ") as EvaluierungTyp) || "kurz",
+      typ: (fd.get("typ") as EvaluierungTyp) || "baustelle",
       vortragender_id: user?.id ?? null,
       checkliste: checklist as unknown as Json,
       notizen: (fd.get("notizen") as string) || null,
@@ -119,8 +112,8 @@ export default function Evaluierung() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Sicherheitsunterweisung & Gefahrenevaluierung"
-        description="Digitale Checkliste gemäß ASchG vor Arbeitsbeginn auf jeder Baustelle."
+        title="Unterweisungen"
+        description="Werkstatt · Baustelle · Fertigteilmontage – digitale Checklisten gemäß ASchG."
         actions={
           isAdmin && (
             <Button onClick={openNew}>
@@ -145,8 +138,8 @@ export default function Evaluierung() {
                       <ShieldAlert className="h-4 w-4 text-amber-500" />
                     )}
                     <div className="font-medium">{b?.bvh_name ?? "—"}</div>
-                    <Badge variant="outline" className="text-[10px] capitalize">
-                      {e.typ === "kurz" ? "Kurz" : "Lang"}
+                    <Badge variant="outline" className="text-[10px]">
+                      {unterweisungLabel(e.typ)}
                     </Badge>
                   </div>
                   <div className="text-xs text-muted-foreground">
@@ -214,49 +207,80 @@ export default function Evaluierung() {
                   <Input type="date" name="datum" required defaultValue={editing.datum ?? ""} />
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Typ</Label>
+                  <Label>Unterweisungs-Typ</Label>
                   <select
                     name="typ"
-                    defaultValue={editing.typ ?? "kurz"}
+                    defaultValue={editing.typ ?? "baustelle"}
+                    onChange={(e) =>
+                      setEditing((prev) => (prev ? { ...prev, typ: e.target.value as EvaluierungTyp } : prev))
+                    }
                     className="w-full h-10 rounded-md border bg-background px-3 text-sm"
                   >
-                    <option value="kurz">Kurzversion</option>
-                    <option value="lang">Langversion</option>
+                    {UNTERWEISUNG_OPTIONS.map((u) => (
+                      <option key={u.value} value={u.value}>
+                        {u.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
 
-              <div className="space-y-2 border-t pt-3">
-                <Label>Checkliste</Label>
-                {(editing.typ === "lang" ? CHECKLIST_LANG : CHECKLIST_KURZ).map((c) => (
-                  <div
-                    key={c.key}
-                    className="flex items-center justify-between gap-2 text-sm border-b py-2"
-                  >
-                    <span className="flex-1">{c.label}</span>
-                    <div className="flex gap-1">
-                      {["i.O.", "nicht i.O.", "n.A."].map((opt) => (
-                        <button
-                          type="button"
-                          key={opt}
-                          onClick={() => setChecklist((s) => ({ ...s, [c.key]: opt }))}
-                          className={`px-2 py-1 text-[11px] rounded border ${
-                            checklist[c.key] === opt
-                              ? opt === "i.O."
-                                ? "bg-emerald-600 text-white border-emerald-600"
-                                : opt === "nicht i.O."
-                                ? "bg-destructive text-white border-destructive"
-                                : "bg-muted"
-                              : "bg-background"
-                          }`}
-                        >
-                          {opt}
-                        </button>
-                      ))}
+              {(() => {
+                const items = getCheckItems(editing.typ ?? "baustelle");
+                if (items.length === 0) {
+                  return (
+                    <div className="text-xs text-muted-foreground border rounded p-3">
+                      Diese Unterweisung enthält keine zu prüfenden Punkte – Mitarbeiter müssen
+                      den Inhalt nur lesen und bestätigen.
                     </div>
+                  );
+                }
+                // Group by section
+                const bySection: Record<string, typeof items> = {};
+                items.forEach((it) => {
+                  (bySection[it.section] = bySection[it.section] || []).push(it);
+                });
+                return (
+                  <div className="space-y-3 border-t pt-3">
+                    <Label>Checkliste</Label>
+                    {Object.entries(bySection).map(([section, secItems]) => (
+                      <div key={section} className="space-y-1">
+                        <div className="text-xs font-bold uppercase tracking-wide text-primary">
+                          {section}
+                        </div>
+                        {secItems.map((c) => (
+                          <div
+                            key={c.key}
+                            className="flex items-center justify-between gap-2 text-sm border-b py-1.5"
+                          >
+                            <span className="flex-1">{c.label}</span>
+                            <div className="flex gap-1 shrink-0">
+                              {["i.O.", "nicht i.O.", "n.A."].map((opt) => (
+                                <button
+                                  type="button"
+                                  key={opt}
+                                  onClick={() => setChecklist((s) => ({ ...s, [c.key]: opt }))}
+                                  className={`px-2 py-1 text-[11px] rounded border ${
+                                    checklist[c.key] === opt
+                                      ? opt === "i.O."
+                                        ? "bg-emerald-600 text-white border-emerald-600"
+                                        : opt === "nicht i.O."
+                                        ? "bg-destructive text-white border-destructive"
+                                        : "bg-muted"
+                                      : "bg-background"
+                                  }`}
+                                >
+                                  {opt}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                );
+              })()}
 
               <div className="space-y-1.5">
                 <Label>Notizen</Label>

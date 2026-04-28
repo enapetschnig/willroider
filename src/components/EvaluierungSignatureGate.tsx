@@ -4,32 +4,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ShieldAlert, CheckCircle2, Eraser } from "lucide-react";
-import type { Json } from "@/integrations/supabase/types";
-
-const CHECKLIST_KURZ = [
-  { key: "absturzsicherung", label: "Absturzsicherung vorhanden" },
-  { key: "psa", label: "Persönliche Schutzausrüstung getragen" },
-  { key: "werkzeuge", label: "Werkzeuge geprüft" },
-  { key: "arbeitsbereich", label: "Arbeitsbereich abgesichert" },
-];
-const CHECKLIST_LANG = [
-  ...CHECKLIST_KURZ,
-  { key: "kran_pruefung", label: "Kran-Prüfprotokoll aktuell" },
-  { key: "geruest_pruefung", label: "Gerüst-Abnahme erfolgt" },
-  { key: "leitern", label: "Leitern auf Stabilität geprüft" },
-  { key: "stromversorgung", label: "Elektrik / Verlängerungen geprüft" },
-  { key: "fluchtwege", label: "Fluchtwege frei" },
-  { key: "erste_hilfe", label: "Erste-Hilfe-Material vorhanden" },
-  { key: "feuerloescher", label: "Feuerlöscher vorhanden" },
-  { key: "lagerung", label: "Sichere Lagerung Fertigteilelemente" },
-  { key: "transport", label: "Transport / Hubmittel geprüft" },
-  { key: "versetzung", label: "Versetz-Anweisung vorhanden" },
-];
+import { getUnterweisung } from "@/lib/unterweisungen";
+import type { EvaluierungTyp, Json } from "@/integrations/supabase/types";
 
 type OpenSignature = {
   unterschriftId: string;
   evaluierungId: string;
-  typ: "kurz" | "lang";
+  typ: EvaluierungTyp;
   checkliste: Json;
   notizen: string | null;
   baustelleName: string;
@@ -60,7 +41,7 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
     const list: OpenSignature[] = (data ?? []).map((r: any) => ({
       unterschriftId: r.id,
       evaluierungId: r.evaluierung_id,
-      typ: r.evaluierungen?.typ ?? "kurz",
+      typ: r.evaluierungen?.typ ?? "baustelle",
       checkliste: r.evaluierungen?.checkliste ?? {},
       notizen: r.evaluierungen?.notizen ?? null,
       baustelleName: r.evaluierungen?.baustellen?.bvh_name ?? "Baustelle",
@@ -89,7 +70,6 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // hi-dpi setup
     const rect = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     canvas.width = rect.width * dpr;
@@ -156,7 +136,7 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
 
   if (!current) return <>{children}</>;
 
-  const items = current.typ === "lang" ? CHECKLIST_LANG : CHECKLIST_KURZ;
+  const u = getUnterweisung(current.typ);
   const checkliste = (current.checkliste as Record<string, string>) || {};
 
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -194,17 +174,13 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
       setSubmitting(false);
       return;
     }
-    // Pop current, fetch fresh list (covers race conditions)
     const remaining = pending.slice(1);
     setPending(remaining);
     setStep("read");
     setScrolledToBottom(false);
     setHasDrawn(false);
     setSubmitting(false);
-    if (remaining.length === 0) {
-      // re-check just in case
-      load();
-    }
+    if (remaining.length === 0) load();
   };
 
   return (
@@ -213,16 +189,18 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
         <ShieldAlert className="h-5 w-5 shrink-0" />
         <div className="flex-1 min-w-0">
           <div className="font-bold text-sm sm:text-base">
-            Sicherheitsunterweisung erforderlich
+            {u?.title ?? "Unterweisung erforderlich"}
           </div>
           <div className="text-xs opacity-90 truncate">
             {current.baustelleName}
             {current.kostenstelle ? ` · ${current.kostenstelle}` : ""}
           </div>
         </div>
-        <div className="text-[10px] opacity-90 shrink-0">
-          {pending.length} offen
-        </div>
+        {pending.length > 1 && (
+          <div className="text-[10px] opacity-90 shrink-0">
+            {pending.length} offen
+          </div>
+        )}
       </div>
 
       {step === "read" ? (
@@ -232,74 +210,147 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
             onScroll={onScroll}
             style={{ WebkitOverflowScrolling: "touch" }}
           >
-            <div className="text-sm text-muted-foreground">
-              Bitte lies die Evaluierung sorgfältig durch und unterschreibe danach. Erst dann
-              kannst du die App weiter nutzen.
-            </div>
-
-            <Card>
+            <Card className="border-primary/30">
               <CardContent className="p-3">
-                <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Evaluierung
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {u?.subtitle ?? "Sicherheitsunterweisung"}
                 </div>
-                <div className="font-semibold">
-                  {current.typ === "lang" ? "Langversion" : "Kurzversion"} ·{" "}
+                <div className="font-bold text-base">{u?.title}</div>
+                <div className="text-[11px] text-muted-foreground mt-1">
+                  {u?.rechtsgrundlage}
+                </div>
+                <div className="text-xs mt-2 pt-2 border-t">
+                  Baustelle: <strong>{current.baustelleName}</strong>
+                  {current.kostenstelle && ` · ${current.kostenstelle}`} · Datum{" "}
                   {new Date(current.datum).toLocaleDateString("de-AT")}
                 </div>
               </CardContent>
             </Card>
 
-            <div className="space-y-1.5">
-              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Checkliste
-              </div>
-              {items.map((it) => {
-                const v = checkliste[it.key];
-                return (
-                  <div
-                    key={it.key}
-                    className="flex items-center justify-between border-b py-2 text-sm"
-                  >
-                    <span className="flex-1 pr-2">{it.label}</span>
-                    <span
-                      className={`text-[11px] px-2 py-1 rounded ${
-                        v === "i.O."
-                          ? "bg-emerald-600 text-white"
-                          : v === "nicht i.O."
-                          ? "bg-destructive text-white"
-                          : "bg-muted text-muted-foreground"
-                      }`}
-                    >
-                      {v ?? "—"}
-                    </span>
-                  </div>
-                );
-              })}
+            <div className="text-sm text-muted-foreground">
+              Bitte lies die Unterweisung sorgfältig durch. Erst danach kannst du unterschreiben
+              und die App weiter nutzen.
             </div>
+
+            {(u?.sections ?? []).map((sec, i) => {
+              if (sec.kind === "text") {
+                return (
+                  <Card key={i}>
+                    <CardContent className="p-3 space-y-1.5">
+                      {sec.heading && (
+                        <div className="text-xs font-bold uppercase tracking-wide text-primary">
+                          {sec.heading}
+                        </div>
+                      )}
+                      <ul className="space-y-1 text-sm leading-relaxed">
+                        {sec.lines.map((l, j) => (
+                          <li key={j} className="flex gap-2">
+                            <span className="text-primary shrink-0">•</span>
+                            <span>{l}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                );
+              }
+              if (sec.kind === "checklist") {
+                return (
+                  <Card key={i}>
+                    <CardContent className="p-3 space-y-1.5">
+                      <div className="text-xs font-bold uppercase tracking-wide text-primary mb-1">
+                        {sec.heading}
+                      </div>
+                      <ul className="space-y-1.5 text-sm">
+                        {sec.items.map((it) => {
+                          const v = checkliste[it.key];
+                          return (
+                            <li key={it.key} className="flex items-start gap-2 border-b pb-1.5 last:border-0">
+                              <span
+                                className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 mt-0.5 font-semibold ${
+                                  v === "i.O."
+                                    ? "bg-emerald-600 text-white"
+                                    : v === "nicht i.O."
+                                    ? "bg-destructive text-white"
+                                    : "bg-muted text-muted-foreground"
+                                }`}
+                              >
+                                {v ?? "–"}
+                              </span>
+                              <span className="flex-1">{it.label}</span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                );
+              }
+              if (sec.kind === "arbeitsmittel") {
+                return (
+                  <Card key={i}>
+                    <CardContent className="p-3 space-y-1.5">
+                      <div className="text-xs font-bold uppercase tracking-wide text-primary mb-1">
+                        {sec.heading}
+                      </div>
+                      <ul className="space-y-1 text-sm">
+                        {sec.items.map((it) => {
+                          const v = checkliste[it.key];
+                          return (
+                            <li key={it.key} className="flex items-center gap-2 border-b pb-1 last:border-0">
+                              <span className="flex-1">{it.label}</span>
+                              <span
+                                className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 font-semibold ${
+                                  v === "i.O."
+                                    ? "bg-emerald-600 text-white"
+                                    : v === "nicht i.O."
+                                    ? "bg-destructive text-white"
+                                    : "bg-muted text-muted-foreground"
+                                }`}
+                              >
+                                {v ?? "n.v."}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                );
+              }
+              return null;
+            })}
 
             {current.notizen && (
               <Card>
                 <CardContent className="p-3 text-sm">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-                    Notizen / Hinweise
+                  <div className="text-xs font-bold uppercase tracking-wide text-primary mb-1">
+                    Hinweise / Notizen vom Bauleiter
                   </div>
                   {current.notizen}
                 </CardContent>
               </Card>
             )}
 
-            <div className="text-xs text-muted-foreground border rounded p-3 bg-muted/30">
-              Mit der Unterschrift bestätigst du, dass du die Sicherheitsunterweisung gelesen und
-              verstanden hast. Diese Unterschrift wird gemäß ASchG dokumentiert.
-            </div>
+            <Card className="border-2 border-primary/30 bg-primary/5">
+              <CardContent className="p-3 text-sm">
+                <div className="text-xs font-bold uppercase tracking-wide text-primary mb-1">
+                  Bestätigung
+                </div>
+                {u?.bestätigung}
+              </CardContent>
+            </Card>
 
             {!scrolledToBottom && (
               <div className="text-center text-[11px] text-muted-foreground italic pb-2">
-                ↓ bis zum Ende scrollen
+                ↓ bitte ans Ende scrollen, um zu bestätigen
               </div>
             )}
           </div>
-          <div className="border-t bg-card p-3" style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 12px)" }}>
+          <div
+            className="border-t bg-card p-3"
+            style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 12px)" }}
+          >
             <Button
               className="w-full h-12"
               disabled={!scrolledToBottom}
@@ -312,9 +363,7 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
       ) : (
         <>
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            <div className="text-sm">
-              Unterschreibe mit dem Finger im Feld unten:
-            </div>
+            <div className="text-sm">Unterschreibe mit dem Finger im Feld unten:</div>
             <div className="border-2 border-dashed rounded-md bg-white">
               <canvas
                 ref={canvasRef}
@@ -330,7 +379,10 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
               </Button>
             </div>
           </div>
-          <div className="border-t bg-card p-3" style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 12px)" }}>
+          <div
+            className="border-t bg-card p-3"
+            style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 12px)" }}
+          >
             <Button
               className="w-full h-12"
               disabled={!hasDrawn || submitting}

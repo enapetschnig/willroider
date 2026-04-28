@@ -16,7 +16,7 @@ export type AppRole =
 export type BaustellenStatus = 'geplant' | 'aktiv' | 'abgeschlossen' | 'pausiert';
 export type StundenStatus = 'offen' | 'zm_freigabe' | 'buero_freigabe' | 'exportiert' | 'abgelehnt';
 export type Wochentyp = 'L' | 'K' | 'F' | 'U';
-export type EvaluierungTyp = 'kurz' | 'lang';
+export type EvaluierungTyp = 'werkstatt' | 'baustelle' | 'fertigteilmontage' | 'kurz' | 'lang';
 
 export type Database = {
   __InternalSupabase: { PostgrestVersion: '13.0.5' };

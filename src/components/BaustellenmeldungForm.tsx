@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { generateBaustellenmeldungPdf } from "@/lib/baustellenmeldungPdf";
+import { UNTERWEISUNG_OPTIONS } from "@/lib/unterweisungen";
 import { ShieldCheck, Save } from "lucide-react";
 import type { Database, BaustellenStatus, EvaluierungTyp } from "@/integrations/supabase/types";
 
@@ -364,7 +365,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
               ))}
             </select>
           </Field>
-          <Field label="Pflicht-Evaluierung für die zugeordneten Mitarbeiter">
+          <Field label="Pflicht-Unterweisung für die zugeordneten Mitarbeiter">
             <select
               value={pflichtEval}
               onChange={(e) => setPflichtEval(e.target.value as any)}
@@ -372,18 +373,26 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
               disabled={!partieId || !!initial?.pflicht_evaluierung_id}
             >
               <option value="">Keine</option>
-              <option value="kurz">Kurzversion</option>
-              <option value="lang">Langversion</option>
+              {UNTERWEISUNG_OPTIONS.map((u) => (
+                <option key={u.value} value={u.value}>
+                  {u.label}
+                </option>
+              ))}
             </select>
-            {pflichtEval && partieId && !initial?.pflicht_evaluierung_id && (
+            {pflichtEval && (
               <div className="text-[11px] text-muted-foreground mt-1">
-                Mitarbeiter dieser Partie müssen die Evaluierung beim nächsten App-Öffnen
-                unterschreiben.
+                {UNTERWEISUNG_OPTIONS.find((u) => u.value === pflichtEval)?.description}
+              </div>
+            )}
+            {pflichtEval && partieId && !initial?.pflicht_evaluierung_id && (
+              <div className="text-[11px] text-primary mt-1">
+                → Mitarbeiter dieser Partie müssen die Unterweisung beim nächsten App-Öffnen
+                lesen und unterschreiben.
               </div>
             )}
             {initial?.pflicht_evaluierung_id && (
               <div className="text-[11px] text-emerald-600 mt-1">
-                Pflicht-Evaluierung bereits angelegt.
+                Pflicht-Unterweisung bereits angelegt.
               </div>
             )}
           </Field>
