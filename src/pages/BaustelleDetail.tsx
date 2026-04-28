@@ -285,13 +285,21 @@ export default function BaustelleDetail() {
       <PageHeader
         title={b.bvh_name}
         description={[b.kostenstelle, b.ort, b.bauherr].filter(Boolean).join(" · ")}
-        actions={
-          isAdmin ? (
-            <div className="flex flex-wrap items-center gap-2">
+        actions={!isAdmin ? <Badge>{STATUS_LABEL[b.status]}</Badge> : undefined}
+      />
+
+      {/* Admin-Toolbar — Status, Bearbeiten, Löschen jeweils klar beschriftet */}
+      {isAdmin && (
+        <Card>
+          <CardContent className="p-3 flex flex-col sm:flex-row gap-2 sm:items-center">
+            <div className="flex items-center gap-2 sm:flex-1">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground shrink-0">
+                Status
+              </Label>
               <select
                 value={b.status}
                 onChange={(e) => updateStatus(e.target.value as BaustellenStatus)}
-                className="h-9 px-3 rounded-md border bg-background text-sm"
+                className="h-11 sm:h-10 px-3 rounded-md border bg-background text-sm font-medium flex-1 sm:flex-none sm:min-w-[180px]"
                 aria-label="Status ändern"
               >
                 {Object.entries(STATUS_LABEL).map(([v, l]) => (
@@ -300,30 +308,26 @@ export default function BaustelleDetail() {
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="grid grid-cols-2 sm:flex gap-2">
               <Button
                 variant="outline"
-                size="sm"
                 onClick={() => setEditDialog(true)}
-                className="h-9"
+                className="h-11 sm:h-10"
               >
                 <Pencil className="h-4 w-4 mr-1.5" /> Bearbeiten
               </Button>
               <Button
                 variant="outline"
-                size="sm"
                 onClick={deleteBaustelle}
-                className="h-9 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                aria-label="Baustelle endgültig löschen"
-                title="Baustelle endgültig löschen (mit allen Buchungen)"
+                className="h-11 sm:h-10 border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground"
               >
-                <Trash2 className="h-4 w-4" />
+                <Trash2 className="h-4 w-4 mr-1.5" /> Löschen
               </Button>
             </div>
-          ) : (
-            <Badge>{STATUS_LABEL[b.status]}</Badge>
-          )
-        }
-      />
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
         <Card>
