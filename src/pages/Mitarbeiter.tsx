@@ -90,6 +90,35 @@ export default function Mitarbeiter() {
     }
   };
 
+  const deletePermanent = async (p: Profile) => {
+    const fullName = `${p.vorname} ${p.nachname}`.trim() || p.email || "diesen Mitarbeiter";
+    const confirmText = window.prompt(
+      `⚠️ ENDGÜLTIG LÖSCHEN\n\n` +
+        `${fullName} und ALLE zugehörigen Daten werden gelöscht:\n` +
+        `• Profil & Login-Account\n` +
+        `• Alle Stundenbuchungen\n` +
+        `• Alle Einteilungen & Unterschriften\n\n` +
+        `Das kann NICHT rückgängig gemacht werden!\n\n` +
+        `Tippe "${p.nachname || fullName}" ein, um zu bestätigen:`
+    );
+    if (confirmText === null) return;
+    if (confirmText.trim() !== (p.nachname || fullName)) {
+      toast({
+        variant: "destructive",
+        title: "Bestätigung falsch",
+        description: "Eingabe stimmt nicht — Löschung abgebrochen.",
+      });
+      return;
+    }
+    const { error } = await supabase.rpc("admin_delete_user", { _user_id: p.id });
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    } else {
+      toast({ title: `${fullName} gelöscht`, description: "Alle Daten wurden entfernt." });
+      load();
+    }
+  };
+
   const setRole = async (userId: string, role: AppRole) => {
     await supabase.from("user_roles").delete().eq("user_id", userId);
     const { error } = await supabase.from("user_roles").insert({ user_id: userId, role });
@@ -254,15 +283,31 @@ export default function Mitarbeiter() {
                     </div>
                     <div className="flex gap-2 pt-1">
                       <Button
-                        variant="outline"
+                        variant={p.is_active ? "outline" : "default"}
                         size="sm"
-                        className="flex-1"
+                        className="flex-1 h-10"
                         onClick={() => toggleActive(p)}
                       >
                         {p.is_active ? "Deaktivieren" : "Freischalten"}
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => setEditing(p)}>
-                        <Edit className="h-4 w-4 mr-1" /> Details
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-10"
+                        onClick={() => setEditing(p)}
+                        aria-label="Bearbeiten"
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-10 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => deletePermanent(p)}
+                        aria-label="Endgültig löschen"
+                        title="Endgültig löschen (mit allen Buchungen)"
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </CardContent>
@@ -350,14 +395,29 @@ export default function Mitarbeiter() {
                         </TableCell>
                         <TableCell className="text-right space-x-1">
                           <Button
-                            variant="outline"
+                            variant={p.is_active ? "outline" : "default"}
                             size="sm"
                             onClick={() => toggleActive(p)}
                           >
                             {p.is_active ? "Deaktivieren" : "Freischalten"}
                           </Button>
-                          <Button variant="ghost" size="sm" onClick={() => setEditing(p)}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditing(p)}
+                            aria-label="Bearbeiten"
+                          >
                             <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            onClick={() => deletePermanent(p)}
+                            aria-label="Endgültig löschen"
+                            title="Endgültig löschen (inkl. aller Buchungen)"
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </TableCell>
                       </TableRow>

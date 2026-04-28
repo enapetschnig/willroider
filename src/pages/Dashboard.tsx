@@ -164,31 +164,36 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title={`Hallo ${fullName.split(" ")[0] || "willkommen"}!`} />
-
-      {/* Pending-Users-Banner (Admin) */}
+      {/* Neue-Anmeldungen-Banner (Admin) — bewusst ganz oben, vor dem Greeting */}
       {isAdmin && pendingCount > 0 && (
-        <Card className="border-amber-400 bg-amber-50">
-          <CardContent className="p-4">
-            <div className="flex items-start gap-3">
-              <div className="h-10 w-10 rounded-md bg-amber-200 flex items-center justify-center text-amber-900 shrink-0">
-                <UserPlus className="h-5 w-5" />
+        <Card className="border-2 border-amber-500 bg-gradient-to-r from-amber-50 to-amber-100 shadow-md ring-2 ring-amber-500/20">
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex items-start gap-3 sm:gap-4">
+              <div className="relative shrink-0">
+                <div className="h-11 w-11 sm:h-12 sm:w-12 rounded-full bg-amber-500 flex items-center justify-center text-white shadow-md">
+                  <UserPlus className="h-5 w-5 sm:h-6 sm:w-6" />
+                </div>
+                <span className="absolute -top-0.5 -right-0.5 h-5 min-w-[20px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-amber-50 animate-pulse">
+                  {pendingCount}
+                </span>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="font-semibold text-sm sm:text-base text-amber-950">
+                <div className="font-bold text-base sm:text-lg text-amber-950 leading-tight">
                   {pendingCount === 1
-                    ? "1 Mitarbeiter wartet auf Freischaltung"
-                    : `${pendingCount} Mitarbeiter warten auf Freischaltung`}
+                    ? "Neue Anmeldung wartet auf dich"
+                    : `${pendingCount} neue Anmeldungen warten auf dich`}
                 </div>
-                <div className="text-xs text-amber-800 mt-0.5">
-                  Neue Anmeldungen müssen vor dem ersten Login von dir aktiviert werden.
+                <div className="text-xs sm:text-sm text-amber-800 mt-1">
+                  Bevor sich {pendingCount === 1 ? "diese Person" : "diese Personen"} einloggen
+                  {pendingCount === 1 ? " kann" : " können"}, musst du sie freischalten.
                 </div>
-                <div className="mt-2 flex flex-wrap gap-1">
+                <div className="mt-2 flex flex-wrap gap-1.5">
                   {pendingProfiles.slice(0, 5).map((p) => (
                     <span
                       key={p.id}
-                      className="inline-flex items-center gap-1.5 bg-white/70 rounded-full px-2 py-0.5 text-[11px]"
+                      className="inline-flex items-center gap-1.5 bg-white rounded-full px-2.5 py-1 text-xs shadow-sm border border-amber-200"
                     >
+                      <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
                       <strong>
                         {p.vorname} {p.nachname}
                       </strong>
@@ -196,22 +201,31 @@ export default function Dashboard() {
                     </span>
                   ))}
                   {pendingCount > 5 && (
-                    <span className="text-[11px] text-amber-800 italic self-center">
+                    <span className="text-xs text-amber-800 italic self-center">
                       +{pendingCount - 5} weitere
                     </span>
                   )}
                 </div>
               </div>
-              <Link to="/mitarbeiter" className="shrink-0">
-                <Button size="sm" className="bg-amber-600 hover:bg-amber-700 text-white">
-                  Verwalten
-                  <ArrowRight className="h-3.5 w-3.5 ml-1" />
+              <Link to="/mitarbeiter" className="shrink-0 hidden sm:block">
+                <Button className="bg-amber-600 hover:bg-amber-700 text-white shadow-md">
+                  Jetzt freischalten
+                  <ArrowRight className="h-4 w-4 ml-1.5" />
                 </Button>
               </Link>
             </div>
+            {/* Mobile-CTA breit unten */}
+            <Link to="/mitarbeiter" className="sm:hidden block mt-3">
+              <Button className="w-full h-11 bg-amber-600 hover:bg-amber-700 text-white shadow-md">
+                Jetzt freischalten
+                <ArrowRight className="h-4 w-4 ml-1.5" />
+              </Button>
+            </Link>
           </CardContent>
         </Card>
       )}
+
+      <PageHeader title={`Hallo ${fullName.split(" ")[0] || "willkommen"}!`} />
 
       {/* Schnellzugriff */}
       <div>
