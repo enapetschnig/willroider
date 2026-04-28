@@ -109,20 +109,20 @@ export default function Dashboard() {
     color: string;
   }[] = [
     {
-      to: "/mein-tag",
-      label: "Mein Tag",
-      desc: "Heutige Einteilung & Baustelle",
-      cta: "Heute öffnen",
-      icon: ClipboardList,
-      show: true,
-      color: WILLROIDER_RED,
-    },
-    {
       to: "/stunden",
       label: "Stunden erfassen",
       desc: "Tägliche Stundenbuchung",
       cta: "Stunden erfassen",
       icon: Clock,
+      show: true,
+      color: WILLROIDER_RED,
+    },
+    {
+      to: "/mein-tag",
+      label: "Mein Tag",
+      desc: "Heutige Einteilung & Baustelle",
+      cta: "Heute öffnen",
+      icon: ClipboardList,
       show: true,
       color: WILLROIDER_RED,
     },

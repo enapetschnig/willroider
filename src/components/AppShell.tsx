@@ -13,8 +13,6 @@ import {
   CheckCircle2,
   BarChart3,
   LogOut,
-  Menu,
-  X,
   Smartphone,
   User as UserIcon,
 } from "lucide-react";
@@ -60,7 +58,6 @@ const NAV: NavItem[] = [
 export function AppShell({ children }: { children: ReactNode }) {
   const { profile, role, isAdmin, canReview, signOut } = useAuth();
   const navigate = useNavigate();
-  const [mobileOpen, setMobileOpen] = useState(false);
   const [installOpen, setInstallOpen] = useState(false);
 
   // Auto-show install prompt one time per device (skipped if already installed)
@@ -149,15 +146,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         <header className="bg-card border-b sticky top-0 z-30">
           <div className="flex items-center justify-between px-3 sm:px-4 lg:px-6 py-3 gap-2">
             <div className="flex items-center gap-2 min-w-0">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="lg:hidden"
-                onClick={() => setMobileOpen((v) => !v)}
-                aria-label="Menü"
-              >
-                {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-              </Button>
               <Link
                 to="/"
                 className="lg:hidden flex items-center gap-2 min-w-0"
@@ -201,31 +189,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-
-          {/* Mobile drawer */}
-          {mobileOpen && (
-            <nav className="lg:hidden border-t bg-card px-2 py-2 space-y-0.5">
-              {visibleNav.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.end ?? true}
-                  onClick={() => setMobileOpen(false)}
-                  className={({ isActive }) =>
-                    cn(
-                      "flex items-center gap-3 px-3 py-2 rounded-md text-sm",
-                      isActive
-                        ? "bg-primary/10 text-primary font-medium"
-                        : "hover:bg-muted"
-                    )
-                  }
-                >
-                  <item.icon className="h-4 w-4" />
-                  <span>{item.label}</span>
-                </NavLink>
-              ))}
-            </nav>
-          )}
         </header>
 
         <main className="flex-1 px-3 sm:px-4 lg:px-6 py-3 sm:py-6 max-w-full pb-28 lg:pb-6">

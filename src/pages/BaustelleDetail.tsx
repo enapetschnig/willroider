@@ -329,7 +329,11 @@ export default function BaustelleDetail() {
         </Card>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+      <div
+        className={`grid gap-2 sm:gap-3 ${
+          isAdmin ? "grid-cols-2 lg:grid-cols-4" : "grid-cols-2"
+        }`}
+      >
         <Card>
           <CardContent className="p-3">
             <div className="text-xs text-muted-foreground">Zeitraum</div>
@@ -339,18 +343,22 @@ export default function BaustelleDetail() {
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-3">
-            <div className="text-xs text-muted-foreground">Stunden gesamt</div>
-            <div className="text-sm font-semibold">{sumStunden.toFixed(1)} h</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3">
-            <div className="text-xs text-muted-foreground">Kosten</div>
-            <div className="text-sm font-semibold">€ {sumKosten.toFixed(2)}</div>
-          </CardContent>
-        </Card>
+        {isAdmin && (
+          <>
+            <Card>
+              <CardContent className="p-3">
+                <div className="text-xs text-muted-foreground">Stunden gesamt</div>
+                <div className="text-sm font-semibold">{sumStunden.toFixed(1)} h</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3">
+                <div className="text-xs text-muted-foreground">Kosten</div>
+                <div className="text-sm font-semibold">€ {sumKosten.toFixed(2)}</div>
+              </CardContent>
+            </Card>
+          </>
+        )}
         <Card>
           <CardContent className="p-3">
             <div className="text-xs text-muted-foreground">Auftragssumme</div>
@@ -364,14 +372,14 @@ export default function BaustelleDetail() {
       {/* Section-Cards (mobile-optimiert): große Touch-Ziele statt Tab-Pills */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
         {[
-          { value: "dokumente", label: "Dokumente", icon: FileText, count: null, color: "#dc2626" },
-          { value: "team", label: "Team", icon: Users, count: team.length, color: partie?.farbcode ?? "#3b82f6" },
-          { value: "termine", label: "Termine", icon: CalendarDays, count: termine.length, color: "#f59e0b" },
-          { value: "stunden", label: "Stunden", icon: Clock, count: stunden.length, color: "#10b981" },
-          { value: "kosten", label: "Kosten", icon: Banknote, count: kosten.length, color: "#8b5cf6" },
-          { value: "eval", label: "Unterweisung", icon: ShieldCheck, count: evals.length, color: "#84cc16" },
-          { value: "info", label: "Stammdaten", icon: Building2, count: null, color: "#6b7280" },
-        ].map((s) => {
+          { value: "dokumente", label: "Dokumente", icon: FileText, count: null, color: "#dc2626", show: true },
+          { value: "team", label: "Team", icon: Users, count: team.length, color: partie?.farbcode ?? "#3b82f6", show: true },
+          { value: "termine", label: "Termine", icon: CalendarDays, count: termine.length, color: "#f59e0b", show: true },
+          { value: "stunden", label: "Stunden", icon: Clock, count: stunden.length, color: "#10b981", show: isAdmin },
+          { value: "kosten", label: "Kosten", icon: Banknote, count: kosten.length, color: "#8b5cf6", show: isAdmin },
+          { value: "eval", label: "Unterweisung", icon: ShieldCheck, count: evals.length, color: "#84cc16", show: true },
+          { value: "info", label: "Stammdaten", icon: Building2, count: null, color: "#6b7280", show: true },
+        ].filter((s) => s.show).map((s) => {
           const active = activeTab === s.value;
           return (
             <button
@@ -651,7 +659,7 @@ export default function BaustelleDetail() {
           <BaustelleDokumente baustelleId={b.id} />
         </TabsContent>
 
-        <TabsContent value="kosten">
+        {isAdmin && <TabsContent value="kosten">
           <div className="flex justify-end mb-2">
             {isAdmin && (
               <Button onClick={() => setKostenDialog(true)} size="sm">
@@ -684,9 +692,9 @@ export default function BaustelleDetail() {
               </Card>
             )}
           </div>
-        </TabsContent>
+        </TabsContent>}
 
-        <TabsContent value="stunden">
+        {isAdmin && <TabsContent value="stunden">
           <Card>
             <CardContent className="p-0 overflow-x-auto">
               <table className="w-full text-sm">
@@ -714,7 +722,7 @@ export default function BaustelleDetail() {
               )}
             </CardContent>
           </Card>
-        </TabsContent>
+        </TabsContent>}
 
         <TabsContent value="eval">
           <Card>
