@@ -1,4 +1,4 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -15,8 +15,10 @@ import {
   LogOut,
   Menu,
   X,
+  Smartphone,
   User as UserIcon,
 } from "lucide-react";
+import { InstallPromptDialog } from "./InstallPromptDialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import {
@@ -55,6 +57,26 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { profile, role, isAdmin, canReview, signOut } = useAuth();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [installOpen, setInstallOpen] = useState(false);
+
+  // Auto-show install prompt one time per device (skipped if already installed)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const isStandalone = window.matchMedia("(display-mode: standalone)").matches;
+    if (isStandalone) return;
+    if (localStorage.getItem("willroider:install-dismissed") === "true") return;
+    const t = window.setTimeout(() => setInstallOpen(true), 4000);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  const closeInstallDialog = () => {
+    setInstallOpen(false);
+    try {
+      localStorage.setItem("willroider:install-dismissed", "true");
+    } catch {
+      /* ignore */
+    }
+  };
 
   const visibleNav = NAV.filter((n) => {
     if (!n.roles || n.roles.includes("all")) return true;
@@ -153,6 +175,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </div>
                 ) : null}
                 <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setInstallOpen(true)}>
+                  <Smartphone className="mr-2 h-4 w-4" />
+                  <span>App zum Startbildschirm</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <ChangePasswordDialog />
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout}>
@@ -223,6 +250,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
       </div>
+
+      <InstallPromptDialog open={installOpen} onClose={closeInstallDialog} />
     </div>
   );
 }

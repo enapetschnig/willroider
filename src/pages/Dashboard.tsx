@@ -14,10 +14,31 @@ import {
   Users,
   ArrowRight,
   CheckCircle2,
+  UserPlus,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
+
+type PendingProfile = {
+  id: string;
+  vorname: string;
+  nachname: string;
+  email: string | null;
+  created_at: string;
+};
+
+function relTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "gerade eben";
+  if (min < 60) return `vor ${min} Min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `vor ${h} Std`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `vor ${d} Tag${d === 1 ? "" : "en"}`;
+  return new Date(iso).toLocaleDateString("de-AT");
+}
 
 const STATUS_LABEL: Record<Baustelle["status"], string> = {
   geplant: "Geplant",
@@ -35,6 +56,8 @@ const STATUS_VARIANT: Record<Baustelle["status"], "default" | "secondary" | "out
 export default function Dashboard() {
   const { profile, isAdmin, canReview } = useAuth();
   const [aktiveBaustellen, setAktiveBaustellen] = useState<Baustelle[]>([]);
+  const [pendingProfiles, setPendingProfiles] = useState<PendingProfile[]>([]);
+  const [pendingCount, setPendingCount] = useState<number>(0);
 
   useEffect(() => {
     supabase
@@ -45,6 +68,32 @@ export default function Dashboard() {
       .limit(8)
       .then(({ data }) => setAktiveBaustellen((data as Baustelle[]) ?? []));
   }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const loadPending = async () => {
+      const { data, count } = await supabase
+        .from("profiles")
+        .select("id, vorname, nachname, email, created_at", { count: "exact" })
+        .eq("is_active", false)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      setPendingProfiles((data as PendingProfile[]) ?? []);
+      setPendingCount(count ?? 0);
+    };
+    loadPending();
+    const ch = supabase
+      .channel("dashboard-pending")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "profiles" },
+        loadPending
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [isAdmin]);
 
   const fullName = profile ? `${profile.vorname} ${profile.nachname}`.trim() : "";
 
@@ -96,6 +145,53 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <PageHeader title={`Hallo ${fullName.split(" ")[0] || "willkommen"}!`} />
+
+      {/* Pending-Users-Banner (Admin) */}
+      {isAdmin && pendingCount > 0 && (
+        <Card className="border-amber-400 bg-amber-50">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <div className="h-10 w-10 rounded-md bg-amber-200 flex items-center justify-center text-amber-900 shrink-0">
+                <UserPlus className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm sm:text-base text-amber-950">
+                  {pendingCount === 1
+                    ? "1 Mitarbeiter wartet auf Freischaltung"
+                    : `${pendingCount} Mitarbeiter warten auf Freischaltung`}
+                </div>
+                <div className="text-xs text-amber-800 mt-0.5">
+                  Neue Anmeldungen müssen vor dem ersten Login von dir aktiviert werden.
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {pendingProfiles.slice(0, 5).map((p) => (
+                    <span
+                      key={p.id}
+                      className="inline-flex items-center gap-1.5 bg-white/70 rounded-full px-2 py-0.5 text-[11px]"
+                    >
+                      <strong>
+                        {p.vorname} {p.nachname}
+                      </strong>
+                      <span className="text-muted-foreground">· {relTime(p.created_at)}</span>
+                    </span>
+                  ))}
+                  {pendingCount > 5 && (
+                    <span className="text-[11px] text-amber-800 italic self-center">
+                      +{pendingCount - 5} weitere
+                    </span>
+                  )}
+                </div>
+              </div>
+              <Link to="/mitarbeiter" className="shrink-0">
+                <Button size="sm" className="bg-amber-600 hover:bg-amber-700 text-white">
+                  Verwalten
+                  <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                </Button>
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Schnellzugriff */}
       <div>
