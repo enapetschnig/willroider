@@ -115,6 +115,8 @@ export default function Arbeitsplanung() {
     null
   );
   const [selection, setSelection] = useState<Set<string>>(new Set());
+  const [dragAnchor, setDragAnchor] = useState<{ workerId: string; iso: string } | null>(null);
+  const [dragHover, setDragHover] = useState<{ workerId: string; iso: string } | null>(null);
   const [popover, setPopover] = useState<{
     workerId: string;
     cells: { workerId: string; iso: string }[];
@@ -254,41 +256,93 @@ export default function Arbeitsplanung() {
     [baustellen]
   );
 
-  const onCellClick = (e: React.MouseEvent, workerId: string, iso: string) => {
-    if (!isAdmin) return;
-    e.stopPropagation();
-    const key = cellKey(workerId, iso);
+  const makeRange = (
+    a: { workerId: string; iso: string },
+    b: { workerId: string; iso: string }
+  ): { workerId: string; iso: string }[] => {
+    if (a.workerId !== b.workerId) return [a];
+    const aT = new Date(a.iso).getTime();
+    const bT = new Date(b.iso).getTime();
+    const [s, e] = aT <= bT ? [aT, bT] : [bT, aT];
+    const cells: { workerId: string; iso: string }[] = [];
+    for (let t = s; t <= e; t += DAY_MS) {
+      cells.push({ workerId: a.workerId, iso: isoDate(new Date(t)) });
+    }
+    return cells;
+  };
 
-    // Shift-Click: range selection (only if anchor is the same worker)
+  const onCellPointerDown = (e: React.PointerEvent, workerId: string, iso: string) => {
+    if (!isAdmin) return;
+    e.preventDefault();
+
+    // Shift+Click → instant range from previous anchor
     if (e.shiftKey && selectionAnchor && selectionAnchor.workerId === workerId) {
-      const aTime = new Date(selectionAnchor.iso).getTime();
-      const bTime = new Date(iso).getTime();
-      const [s, eT] = aTime <= bTime ? [aTime, bTime] : [bTime, aTime];
-      const cells: { workerId: string; iso: string }[] = [];
-      const set = new Set<string>();
-      for (let t = s; t <= eT; t += DAY_MS) {
-        const isoT = isoDate(new Date(t));
-        cells.push({ workerId, iso: isoT });
-        set.add(cellKey(workerId, isoT));
-      }
-      setSelection(set);
+      const cells = makeRange(selectionAnchor, { workerId, iso });
+      setSelection(new Set(cells.map((c) => cellKey(c.workerId, c.iso))));
       setPopover({
         workerId,
         cells,
-        anchor: { x: (e as any).clientX, y: (e as any).clientY },
+        anchor: { x: e.clientX, y: e.clientY },
       });
       return;
     }
 
-    // Single click: select just this cell
+    // Drag-Start
+    setDragAnchor({ workerId, iso });
+    setDragHover({ workerId, iso });
     setSelectionAnchor({ workerId, iso });
-    setSelection(new Set([key]));
-    setPopover({
-      workerId,
-      cells: [{ workerId, iso }],
-      anchor: { x: (e as any).clientX, y: (e as any).clientY },
-    });
+    setSelection(new Set([cellKey(workerId, iso)]));
   };
+
+  // Drag-Tracking: globaler PointerMove + PointerUp
+  useEffect(() => {
+    if (!dragAnchor) return;
+
+    const findCellAtPoint = (x: number, y: number) => {
+      const stack = (document.elementsFromPoint
+        ? (document.elementsFromPoint(x, y) as HTMLElement[])
+        : [document.elementFromPoint(x, y) as HTMLElement | null].filter(Boolean) as HTMLElement[]);
+      for (const el of stack) {
+        const cell = (el as HTMLElement).closest?.("[data-cell='1']") as HTMLElement | null;
+        if (cell) return { workerId: cell.dataset.worker ?? "", iso: cell.dataset.iso ?? "" };
+      }
+      return null;
+    };
+
+    const onMove = (e: PointerEvent) => {
+      if (!dragAnchor) return;
+      const c = findCellAtPoint(e.clientX, e.clientY);
+      if (c && c.workerId === dragAnchor.workerId && c.iso) {
+        if (!dragHover || dragHover.iso !== c.iso) {
+          setDragHover({ workerId: c.workerId, iso: c.iso });
+          const cells = makeRange(dragAnchor, c);
+          setSelection(new Set(cells.map((x) => cellKey(x.workerId, x.iso))));
+        }
+      }
+    };
+
+    const onUp = (e: PointerEvent) => {
+      const finalHover = dragHover ?? dragAnchor;
+      const cells = makeRange(dragAnchor, finalHover);
+      setSelection(new Set(cells.map((c) => cellKey(c.workerId, c.iso))));
+      setPopover({
+        workerId: dragAnchor.workerId,
+        cells,
+        anchor: { x: e.clientX, y: e.clientY },
+      });
+      setDragAnchor(null);
+      setDragHover(null);
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+    return () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+    };
+  }, [dragAnchor, dragHover]);
 
   const closePopover = () => {
     setPopover(null);
@@ -571,8 +625,9 @@ export default function Arbeitsplanung() {
           workerGroups={workerGroups}
           dayHeaders={dayHeaders}
           assignments={assignments}
+          selection={selection}
           isAdmin={isAdmin}
-          onCellClick={onCellClick}
+          onCellPointerDown={onCellPointerDown}
           partien={partien}
         />
       </div>
@@ -712,7 +767,10 @@ export default function Arbeitsplanung() {
                           return (
                             <button
                               key={i}
-                              onClick={(e) => onCellClick(e, m.id, iso)}
+                              data-cell="1"
+                              data-worker={m.id}
+                              data-iso={iso}
+                              onPointerDown={(e) => onCellPointerDown(e, m.id, iso)}
                               className={`relative border-r text-[9px] truncate font-medium transition ${
                                 d.isToday ? "ring-1 ring-primary/40 ring-inset" : ""
                               } ${selected ? "ring-2 ring-primary ring-inset z-10" : ""}`}
@@ -724,13 +782,15 @@ export default function Arbeitsplanung() {
                                 color: bg !== "transparent" ? textColor : undefined,
                                 cursor: isAdmin ? "pointer" : "default",
                                 opacity: a?.isReadOnly ? 0.65 : 1,
+                                touchAction: isAdmin ? "none" : undefined,
+                                userSelect: "none",
                               }}
                               title={
                                 a
                                   ? a.source === "fehlzeit"
                                     ? `${FEHLZEIT_LABEL[a.fehlzeitTyp ?? ""] ?? a.fehlzeitTyp} · ${iso}${a.isReadOnly ? " (eingereicht)" : ""}`
                                     : `${a.baustelleName} · ${iso}`
-                                  : `${m.vorname} ${m.nachname} · ${iso}${isAdmin ? " · klick für Aktion" : ""}`
+                                  : `${m.vorname} ${m.nachname} · ${iso}${isAdmin ? " · klick oder ziehen" : ""}`
                               }
                             >
                               {label && (
@@ -764,7 +824,7 @@ export default function Arbeitsplanung() {
         ))}
         {isAdmin && (
           <div className="ml-auto text-[11px] italic">
-            Klick auf Zelle = Aktion · Shift+Klick = Bereich auswählen
+            Klick = Aktion · Ziehen = Bereich auswählen · Shift+Klick = bis hier markieren
           </div>
         )}
       </div>
@@ -1153,15 +1213,17 @@ function MobileWorkerPlan({
   workerGroups,
   dayHeaders,
   assignments,
+  selection,
   isAdmin,
-  onCellClick,
+  onCellPointerDown,
   partien,
 }: {
   workerGroups: { partie: Partie | null; members: Profile[] }[];
   dayHeaders: { date: Date; isToday: boolean; week: number; year: number }[];
   assignments: Map<string, AssignmentCell>;
+  selection: Set<string>;
   isAdmin: boolean;
-  onCellClick: (e: React.MouseEvent, workerId: string, iso: string) => void;
+  onCellPointerDown: (e: React.PointerEvent, workerId: string, iso: string) => void;
   partien: Partie[];
 }) {
   if (workerGroups.length === 0) {
@@ -1240,20 +1302,26 @@ function MobileWorkerPlan({
                         label = (a.baustelleName ?? "").slice(0, 1);
                       }
                     }
+                    const sel = selection.has(cellKey(m.id, iso));
                     return (
                       <button
                         key={i}
-                        onClick={(e) => onCellClick(e, m.id, iso)}
+                        data-cell="1"
+                        data-worker={m.id}
+                        data-iso={iso}
+                        onPointerDown={(e) => onCellPointerDown(e, m.id, iso)}
                         disabled={!isAdmin}
                         className={`text-[9px] truncate font-medium ${
                           d.isToday ? "ring-1 ring-primary/40 ring-inset" : ""
-                        }`}
+                        } ${sel ? "ring-2 ring-primary ring-inset z-10" : ""}`}
                         style={{
                           height: "100%",
                           background: bg,
                           color: bg !== "transparent" ? "white" : undefined,
                           opacity: a?.isReadOnly ? 0.65 : 1,
                           cursor: isAdmin ? "pointer" : "default",
+                          touchAction: isAdmin ? "none" : undefined,
+                          userSelect: "none",
                         }}
                       >
                         {label}
