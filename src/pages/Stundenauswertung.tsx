@@ -17,6 +17,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { TimePickerInput } from "@/components/TimePickerInput";
 import {
   ChevronDown,
   ChevronUp,
@@ -1235,26 +1236,8 @@ function EditBuchungForm({
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label className="text-xs">Start</Label>
-              <Input
-                type="time"
-                step={900}
-                value={startZeit}
-                onChange={(e) => setStartZeit(e.target.value)}
-                onBlur={(e) => setStartZeit(snap15(e.target.value))}
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Ende</Label>
-              <Input
-                type="time"
-                step={900}
-                value={endZeit}
-                onChange={(e) => setEndZeit(e.target.value)}
-                onBlur={(e) => setEndZeit(snap15(e.target.value))}
-              />
-            </div>
+            <TimePickerInput label="Start" value={startZeit} onChange={setStartZeit} />
+            <TimePickerInput label="Ende" value={endZeit} onChange={setEndZeit} />
           </div>
           <div className="flex items-center gap-2">
             <Switch checked={hasPause} onCheckedChange={setHasPause} />
@@ -1262,26 +1245,8 @@ function EditBuchungForm({
           </div>
           {hasPause && (
             <div className="grid grid-cols-2 gap-2">
-              <div>
-                <Label className="text-xs">Pause von</Label>
-                <Input
-                  type="time"
-                  step={900}
-                  value={pauseVon}
-                  onChange={(e) => setPauseVon(e.target.value)}
-                  onBlur={(e) => setPauseVon(snap15(e.target.value))}
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Pause bis</Label>
-                <Input
-                  type="time"
-                  step={900}
-                  value={pauseBis}
-                  onChange={(e) => setPauseBis(e.target.value)}
-                  onBlur={(e) => setPauseBis(snap15(e.target.value))}
-                />
-              </div>
+              <TimePickerInput label="Pause von" value={pauseVon} onChange={setPauseVon} />
+              <TimePickerInput label="Pause bis" value={pauseBis} onChange={setPauseBis} />
             </div>
           )}
           <div className="text-xs text-muted-foreground">

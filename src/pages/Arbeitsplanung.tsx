@@ -110,6 +110,10 @@ export default function Arbeitsplanung() {
   });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Partial<Baustelle> | null>(null);
+  const [partieDialog, setPartieDialog] = useState(false);
+  const [newPartieName, setNewPartieName] = useState("");
+  const [newPartieFarbe, setNewPartieFarbe] = useState("#3b82f6");
+  const [newPartieleiterId, setNewPartieleiterId] = useState("");
   const [assignments, setAssignments] = useState<Map<string, AssignmentCell>>(new Map());
   const [selectionAnchor, setSelectionAnchor] = useState<{ workerId: string; iso: string } | null>(
     null
@@ -390,6 +394,55 @@ export default function Arbeitsplanung() {
     }
   };
 
+  const createPartie = async () => {
+    if (!isAdmin) return;
+    if (!newPartieName.trim()) {
+      toast({ variant: "destructive", title: "Name fehlt" });
+      return;
+    }
+    const payload: any = {
+      name: newPartieName.trim(),
+      farbcode: newPartieFarbe,
+    };
+    if (newPartieleiterId) {
+      payload.partieleiter_id = newPartieleiterId;
+    }
+    const { data, error } = await supabase
+      .from("partien")
+      .insert(payload)
+      .select()
+      .single();
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    // Wenn ein Partieleiter gewählt wurde: dessen profile.partie_id + is_partieleiter setzen
+    if (newPartieleiterId && data) {
+      await supabase
+        .from("profiles")
+        .update({ partie_id: data.id, is_partieleiter: true })
+        .eq("id", newPartieleiterId);
+    }
+    toast({ title: `Partie „${newPartieName}" angelegt` });
+    setPartieDialog(false);
+    setNewPartieName("");
+    setNewPartieFarbe("#3b82f6");
+    setNewPartieleiterId("");
+    load();
+  };
+
+  const deletePartieFromPlan = async (partieId: string, partieName: string) => {
+    if (!isAdmin) return;
+    if (!confirm(`Partie „${partieName}" löschen? Mitarbeiter werden entkoppelt.`)) return;
+    const { error } = await supabase.from("partien").delete().eq("id", partieId);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    toast({ title: "Partie gelöscht" });
+    load();
+  };
+
   // ─── Cell-Aktionen: Mitarbeiter pro Tag einteilen / Fehlzeit setzen ───
   const clearCellsRaw = async (cells: { workerId: string; iso: string }[]) => {
     if (cells.length === 0) return;
@@ -564,11 +617,13 @@ export default function Arbeitsplanung() {
         actions={
           <div className="flex flex-wrap gap-2">
             {isAdmin && (
-              <Button asChild variant="outline" size="sm">
-                <Link to="/mitarbeiter?tab=partien">
-                  <Users className="h-4 w-4 mr-2" />
-                  Partien verwalten
-                </Link>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPartieDialog(true)}
+              >
+                <UserPlus className="h-4 w-4 mr-2" />
+                Neue Partie
               </Button>
             )}
             {canCreateBaustelle && (
@@ -709,6 +764,7 @@ export default function Arbeitsplanung() {
                     allPartien={partien}
                     unassignedMembers={unassignedMembers}
                     onAssign={assignMemberToPartie}
+                    onDeletePartie={deletePartieFromPlan}
                     isAdmin={isAdmin}
                   />
                   {g.members.map((m) => (
@@ -927,6 +983,80 @@ export default function Arbeitsplanung() {
           />
         </DialogContent>
       </Dialog>
+
+      {/* Neue-Partie-Dialog */}
+      <Dialog open={partieDialog} onOpenChange={setPartieDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Neue Partie anlegen</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs uppercase tracking-wide text-muted-foreground">
+                Name
+              </label>
+              <input
+                value={newPartieName}
+                onChange={(e) => setNewPartieName(e.target.value)}
+                placeholder="z.B. Partie Müller"
+                autoFocus
+                className="w-full h-11 rounded-md border bg-background px-3 text-sm mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-wide text-muted-foreground">
+                Farbe
+              </label>
+              <div className="flex items-center gap-2 mt-1">
+                <input
+                  type="color"
+                  value={newPartieFarbe}
+                  onChange={(e) => setNewPartieFarbe(e.target.value)}
+                  className="h-11 w-16 rounded-md border bg-background cursor-pointer"
+                />
+                <div
+                  className="h-11 flex-1 rounded-md flex items-center justify-center text-white text-sm font-semibold"
+                  style={{ background: newPartieFarbe }}
+                >
+                  {newPartieName || "Vorschau"}
+                </div>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-wide text-muted-foreground">
+                Vorarbeiter / Polier (optional)
+              </label>
+              <select
+                value={newPartieleiterId}
+                onChange={(e) => setNewPartieleiterId(e.target.value)}
+                className="w-full h-11 rounded-md border bg-background px-3 text-sm mt-1"
+              >
+                <option value="">— später festlegen —</option>
+                {profiles
+                  .filter((p) => p.is_active !== false)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.vorname} {p.nachname}
+                      {p.partie_id ? " (wechselt aus aktueller Partie)" : ""}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPartieDialog(false)}
+              >
+                Abbrechen
+              </Button>
+              <Button onClick={createPartie} disabled={!newPartieName.trim()}>
+                <Plus className="h-4 w-4 mr-1.5" /> Partie anlegen
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -940,6 +1070,7 @@ function PolierHeader({
   allPartien,
   unassignedMembers,
   onAssign,
+  onDeletePartie,
   isAdmin,
   variant = "desktop",
 }: {
@@ -950,6 +1081,7 @@ function PolierHeader({
   allPartien: Partie[];
   unassignedMembers: Profile[];
   onAssign: (memberId: string, newPartieId: string | null) => void;
+  onDeletePartie?: (partieId: string, partieName: string) => void;
   isAdmin: boolean;
   variant?: "desktop" | "mobile";
 }) {
@@ -989,6 +1121,17 @@ function PolierHeader({
           )}
         </div>
         <span className="text-[10px] opacity-70 shrink-0">{bvhCount} BVH</span>
+        {isAdmin && partie && onDeletePartie && (
+          <button
+            onClick={() => onDeletePartie(partie.id, partie.name)}
+            className="h-6 w-6 rounded-full bg-white/70 hover:bg-destructive hover:text-destructive-foreground border flex items-center justify-center shrink-0 transition"
+            style={{ color: farbe }}
+            title={`Partie „${partie.name}" löschen`}
+            aria-label={`Partie ${partie.name} löschen`}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
         {isAdmin && partie && (
           <Popover>
             <PopoverTrigger asChild>
@@ -1132,10 +1275,10 @@ function MemberPill({
           ))}
           <button
             onClick={() => onAssign(member.id, null)}
-            className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted flex items-center gap-2 border-t mt-1 pt-2 text-muted-foreground"
+            className="w-full text-left text-xs px-2 py-2 rounded border-t mt-1 pt-2 flex items-center gap-2 text-destructive hover:bg-destructive/10 font-medium"
           >
-            <X className="h-3 w-3" />
-            Aus Partie entfernen
+            <X className="h-3.5 w-3.5" />
+            Aus Partie „{partie?.name ?? "—"}" entfernen
           </button>
         </div>
       </PopoverContent>

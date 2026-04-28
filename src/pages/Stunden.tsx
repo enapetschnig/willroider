@@ -1722,6 +1722,7 @@ function TimeStepper({
 }) {
   const inputH = big ? "h-12" : "h-11";
   const btnH = big ? "h-12 w-12" : "h-11 w-11";
+  const [pickerOpen, setPickerOpen] = useState(false);
   return (
     <div>
       <Label className="text-xs uppercase tracking-wide text-muted-foreground">{label}</Label>
@@ -1735,14 +1736,26 @@ function TimeStepper({
         >
           <Minus className="h-4 w-4" />
         </Button>
-        <Input
-          type="time"
-          step={900}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={(e) => onChange(snap15(e.target.value))}
-          className={`${inputH} text-center font-semibold tabular-nums px-1`}
-        />
+        <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className={`${inputH} flex-1 rounded-md border bg-background text-center font-semibold tabular-nums hover:bg-muted transition`}
+              aria-label={`${label} ändern`}
+            >
+              {value}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="p-0 w-32" align="center">
+            <TimeListPicker
+              value={value}
+              onSelect={(v) => {
+                onChange(v);
+                setPickerOpen(false);
+              }}
+            />
+          </PopoverContent>
+        </Popover>
         <Button
           type="button"
           variant="outline"
@@ -1753,6 +1766,53 @@ function TimeStepper({
           <Plus className="h-4 w-4" />
         </Button>
       </div>
+    </div>
+  );
+}
+
+// Quarter-hour Quick-Picker (96 Optionen 00:00 bis 23:45)
+function TimeListPicker({
+  value,
+  onSelect,
+}: {
+  value: string;
+  onSelect: (v: string) => void;
+}) {
+  const [refEl, setRefEl] = useState<HTMLDivElement | null>(null);
+  const options = useMemo(() => {
+    const arr: string[] = [];
+    for (let m = 0; m < 24 * 60; m += 15) arr.push(minToTime(m));
+    return arr;
+  }, []);
+  // Auf den aktuellen Wert scrollen, sobald die Liste gemountet ist
+  useEffect(() => {
+    if (!refEl) return;
+    const target = refEl.querySelector<HTMLButtonElement>(`[data-time="${value}"]`);
+    if (target) {
+      const off = target.offsetTop - refEl.clientHeight / 2 + target.clientHeight / 2;
+      refEl.scrollTop = Math.max(0, off);
+    }
+  }, [refEl, value]);
+  return (
+    <div ref={setRefEl} className="max-h-64 overflow-y-auto py-1">
+      {options.map((t) => {
+        const sel = t === value;
+        return (
+          <button
+            key={t}
+            type="button"
+            data-time={t}
+            onClick={() => onSelect(t)}
+            className={`w-full text-center text-sm py-2 tabular-nums transition ${
+              sel
+                ? "bg-primary text-primary-foreground font-bold"
+                : "hover:bg-muted"
+            }`}
+          >
+            {t}
+          </button>
+        );
+      })}
     </div>
   );
 }
