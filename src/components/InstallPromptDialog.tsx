@@ -6,6 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -16,6 +17,8 @@ import {
   CheckCircle2,
   Apple,
   Download,
+  MoreHorizontal,
+  ChevronDown,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -102,38 +105,72 @@ export function InstallPromptDialog({ open, onClose }: InstallPromptDialogProps)
               <CardContent className="p-3 flex items-center gap-3">
                 <Apple className="h-5 w-5 text-foreground shrink-0" />
                 <div className="text-xs">
-                  <strong>iPhone / iPad</strong> – in Safari öffnen und folgen:
+                  <strong>iPhone / iPad</strong> – wähle deinen Browser:
                 </div>
               </CardContent>
             </Card>
 
-            <ol className="space-y-3">
-              <Step
-                n={1}
-                icon={Share2}
-                title="Teilen-Symbol antippen"
-                desc="Unten in der Mitte der Safari-Leiste (Quadrat mit Pfeil nach oben)."
-              />
-              <Step
-                n={2}
-                icon={Plus}
-                title={'„Zum Home-Bildschirm" wählen'}
-                desc="In der Liste nach unten scrollen, bis du den Eintrag siehst."
-              />
-              <Step
-                n={3}
-                icon={SquareArrowUp}
-                title="Hinzufügen bestätigen"
-                desc={'Oben rechts auf „Hinzufügen" tippen. Fertig – das Symbol ist jetzt auf deinem Home-Bildschirm.'}
-              />
-            </ol>
+            <Tabs defaultValue="safari">
+              <TabsList className="grid grid-cols-2 w-full">
+                <TabsTrigger value="safari">Safari</TabsTrigger>
+                <TabsTrigger value="chrome">Chrome</TabsTrigger>
+              </TabsList>
 
-            <div className="text-xs text-muted-foreground bg-muted/50 rounded p-3">
-              Hinweis: Funktioniert nur in <strong>Safari</strong>, nicht in Chrome auf
-              iOS.
-            </div>
+              <TabsContent value="safari" className="pt-3">
+                <ol className="space-y-3">
+                  <Step
+                    n={1}
+                    icon={MoreHorizontal}
+                    title={'Drei-Punkte-Symbol „· · ·" unten rechts'}
+                    desc="In der Safari-Leiste unten rechts auf das Symbol mit den drei waagerechten Punkten tippen."
+                  />
+                  <Step
+                    n={2}
+                    icon={Share2}
+                    title={'„Teilen"'}
+                    desc={'Im Menü auf den Eintrag „Teilen" tippen.'}
+                  />
+                  <Step
+                    n={3}
+                    icon={ChevronDown}
+                    title={'„Mehr anzeigen"'}
+                    desc={'Im Teilen-Sheet ganz nach unten scrollen und auf „Mehr anzeigen" tippen.'}
+                  />
+                  <Step
+                    n={4}
+                    icon={Plus}
+                    title={'„Zum Home-Bildschirm"'}
+                    desc={'Auf „Zum Home-Bildschirm" tippen → oben rechts auf „Hinzufügen" bestätigen.'}
+                  />
+                </ol>
+              </TabsContent>
+
+              <TabsContent value="chrome" className="pt-3">
+                <ol className="space-y-3">
+                  <Step
+                    n={1}
+                    icon={Share2}
+                    title="Teilen-Symbol oben rechts"
+                    desc="Oben rechts neben der Adresszeile auf das Teilen-Symbol tippen."
+                  />
+                  <Step
+                    n={2}
+                    icon={ChevronDown}
+                    title={'„Mehr anzeigen"'}
+                    desc={'Im Sheet auf „Mehr anzeigen" oder den Pfeil nach unten tippen.'}
+                  />
+                  <Step
+                    n={3}
+                    icon={Plus}
+                    title={'„Zum Home-Bildschirm hinzufügen"'}
+                    desc={'Auf „Zum Home-Bildschirm hinzufügen" tippen → bestätigen.'}
+                  />
+                </ol>
+              </TabsContent>
+            </Tabs>
           </div>
         ) : (
+          // Android / Desktop
           <div className="space-y-3">
             {deferredPrompt ? (
               <>
@@ -146,29 +183,38 @@ export function InstallPromptDialog({ open, onClose }: InstallPromptDialogProps)
                   <Download className="h-5 w-5 mr-2" />
                   Jetzt installieren
                 </Button>
+                <div className="text-[11px] text-muted-foreground text-center">
+                  Falls der Knopf nicht funktioniert, folge der Anleitung darunter:
+                </div>
               </>
-            ) : (
-              <ol className="space-y-3">
-                <Step
-                  n={1}
-                  icon={SquareArrowUp}
-                  title="Browser-Menü öffnen"
-                  desc="Tippe auf die drei Punkte (⋮) oben rechts in Chrome."
-                />
-                <Step
-                  n={2}
-                  icon={Plus}
-                  title={'„App installieren" oder „Zum Startbildschirm hinzufügen"'}
-                  desc={'Manchmal versteckt unter „App installieren".'}
-                />
-                <Step
-                  n={3}
-                  icon={Smartphone}
-                  title="Bestätigen"
-                  desc="Die App erscheint auf deinem Startbildschirm wie eine normale App."
-                />
-              </ol>
-            )}
+            ) : null}
+
+            <Card>
+              <CardContent className="p-3 text-xs">
+                <strong>Android (Chrome / Edge / Samsung Internet)</strong> – manuelle
+                Installation:
+              </CardContent>
+            </Card>
+            <ol className="space-y-3">
+              <Step
+                n={1}
+                icon={MoreHorizontal}
+                title="Browser-Menü öffnen"
+                desc="Tippe auf die drei Punkte oben rechts (⋮)."
+              />
+              <Step
+                n={2}
+                icon={Plus}
+                title={'„App installieren" oder „Zum Startbildschirm hinzufügen"'}
+                desc={'Je nach Browser unter „App installieren" oder im Untermenü „Zum Startbildschirm hinzufügen".'}
+              />
+              <Step
+                n={3}
+                icon={Smartphone}
+                title="Bestätigen"
+                desc="Die App erscheint auf deinem Startbildschirm wie eine normale App."
+              />
+            </ol>
           </div>
         )}
 
