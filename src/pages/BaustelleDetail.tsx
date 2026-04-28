@@ -20,6 +20,7 @@ import {
   Clock,
   ShieldCheck,
   Users,
+  Pencil,
 } from "lucide-react";
 import {
   Dialog,
@@ -31,6 +32,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
 import type { Database, BaustellenStatus } from "@/integrations/supabase/types";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -65,6 +67,7 @@ export default function BaustelleDetail() {
   const [allPartien, setAllPartien] = useState<Partie[]>([]);
   const [terminDialog, setTerminDialog] = useState(false);
   const [kostenDialog, setKostenDialog] = useState(false);
+  const [editDialog, setEditDialog] = useState(false);
   const [activeTab, setActiveTab] = useState<string>("dokumente");
 
   const load = async () => {
@@ -233,6 +236,35 @@ export default function BaustelleDetail() {
     load();
   };
 
+  const deleteBaustelle = async () => {
+    if (!b) return;
+    const confirmText = window.prompt(
+      `⚠️ ENDGÜLTIG LÖSCHEN\n\n` +
+        `"${b.bvh_name}" und ALLE zugehörigen Daten werden gelöscht:\n` +
+        `• Alle Stundenbuchungen auf dieser Baustelle\n` +
+        `• Alle Termine, Dokumente, Kosten\n` +
+        `• Alle Einteilungen & Evaluierungen\n\n` +
+        `Das kann NICHT rückgängig gemacht werden!\n\n` +
+        `Tippe "${b.bvh_name}" ein, um zu bestätigen:`
+    );
+    if (confirmText === null) return;
+    if (confirmText.trim() !== b.bvh_name) {
+      toast({
+        variant: "destructive",
+        title: "Bestätigung falsch",
+        description: "Eingabe stimmt nicht — Löschung abgebrochen.",
+      });
+      return;
+    }
+    const { error } = await supabase.from("baustellen").delete().eq("id", b.id);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    toast({ title: `Baustelle "${b.bvh_name}" gelöscht` });
+    navigate("/baustellen");
+  };
+
   if (!b) {
     return (
       <div className="text-sm text-muted-foreground">Baustelle wird geladen…</div>
@@ -255,17 +287,38 @@ export default function BaustelleDetail() {
         description={[b.kostenstelle, b.ort, b.bauherr].filter(Boolean).join(" · ")}
         actions={
           isAdmin ? (
-            <select
-              value={b.status}
-              onChange={(e) => updateStatus(e.target.value as BaustellenStatus)}
-              className="h-9 px-3 rounded-md border bg-background text-sm"
-            >
-              {Object.entries(STATUS_LABEL).map(([v, l]) => (
-                <option key={v} value={v}>
-                  {l}
-                </option>
-              ))}
-            </select>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={b.status}
+                onChange={(e) => updateStatus(e.target.value as BaustellenStatus)}
+                className="h-9 px-3 rounded-md border bg-background text-sm"
+                aria-label="Status ändern"
+              >
+                {Object.entries(STATUS_LABEL).map(([v, l]) => (
+                  <option key={v} value={v}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setEditDialog(true)}
+                className="h-9"
+              >
+                <Pencil className="h-4 w-4 mr-1.5" /> Bearbeiten
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={deleteBaustelle}
+                className="h-9 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                aria-label="Baustelle endgültig löschen"
+                title="Baustelle endgültig löschen (mit allen Buchungen)"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
           ) : (
             <Badge>{STATUS_LABEL[b.status]}</Badge>
           )
@@ -753,6 +806,23 @@ export default function BaustelleDetail() {
               <Button type="submit">Speichern</Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bearbeiten-Dialog: gesamte Baustellen-Stammdaten editieren */}
+      <Dialog open={editDialog} onOpenChange={setEditDialog}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Baustelle bearbeiten</DialogTitle>
+          </DialogHeader>
+          <BaustellenmeldungForm
+            initial={b}
+            onCancel={() => setEditDialog(false)}
+            onSaved={() => {
+              setEditDialog(false);
+              load();
+            }}
+          />
         </DialogContent>
       </Dialog>
     </div>
