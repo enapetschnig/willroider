@@ -66,6 +66,34 @@ const STATUS_LABEL: Record<BaustellenStatus, string> = {
   abgeschlossen: "Abgeschlossen",
 };
 
+type AssignmentCell = {
+  source: "einteilung" | "fehlzeit";
+  refId: string;
+  einteilungId?: string;
+  baustelleId?: string | null;
+  baustelleName?: string;
+  baustelleColor?: string;
+  fehlzeitTyp?: string;
+  status?: string;
+  isReadOnly?: boolean;
+};
+
+const FEHLZEIT_LABEL: Record<string, string> = {
+  U: "Urlaub",
+  K: "Krank",
+  F: "Feiertag",
+  SW: "Schlechtwetter",
+};
+const FEHLZEIT_COLOR: Record<string, string> = {
+  U: "#3b82f6",
+  K: "#ef4444",
+  F: "#8b5cf6",
+  SW: "#f59e0b",
+};
+
+const cellKey = (workerId: string, iso: string) => `${workerId}:${iso}`;
+const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+
 export default function Arbeitsplanung() {
   const { canCreateBaustelle, isAdmin } = useAuth();
   const { toast } = useToast();
@@ -82,7 +110,17 @@ export default function Arbeitsplanung() {
   });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Partial<Baustelle> | null>(null);
-  const dayWidth = 18; // px
+  const [assignments, setAssignments] = useState<Map<string, AssignmentCell>>(new Map());
+  const [selectionAnchor, setSelectionAnchor] = useState<{ workerId: string; iso: string } | null>(
+    null
+  );
+  const [selection, setSelection] = useState<Set<string>>(new Set());
+  const [popover, setPopover] = useState<{
+    workerId: string;
+    cells: { workerId: string; iso: string }[];
+    anchor: { x: number; y: number };
+  } | null>(null);
+  const dayWidth = 22; // px
 
   const load = async () => {
     const [bs, p, t, pr] = await Promise.all([
@@ -97,6 +135,52 @@ export default function Arbeitsplanung() {
     setProfiles((pr.data as Profile[]) ?? []);
   };
 
+  const loadAssignments = async () => {
+    const startIso = isoDate(rangeStart);
+    const endIso = isoDate(new Date(rangeStart.getTime() + (totalDays - 1) * DAY_MS));
+    const [{ data: emRows }, { data: fzRows }] = await Promise.all([
+      supabase
+        .from("einteilung_mitarbeiter")
+        .select(
+          "id, mitarbeiter_id, einteilung_id, einteilungen!inner(id, datum, baustelle_id, baustellen(bvh_name))"
+        )
+        .gte("einteilungen.datum", startIso)
+        .lte("einteilungen.datum", endIso),
+      supabase
+        .from("stundenbuchungen")
+        .select("id, mitarbeiter_id, datum, fehlzeit_typ, status")
+        .gte("datum", startIso)
+        .lte("datum", endIso)
+        .not("fehlzeit_typ", "is", null),
+    ]);
+    const map = new Map<string, AssignmentCell>();
+    (emRows ?? []).forEach((r: any) => {
+      const e = r.einteilungen;
+      if (!e?.datum) return;
+      const b = baustellen.find((x) => x.id === e.baustelle_id);
+      const partie = b?.partie_id ? partienById[b.partie_id] : null;
+      map.set(cellKey(r.mitarbeiter_id, e.datum), {
+        source: "einteilung",
+        refId: r.id,
+        einteilungId: r.einteilung_id,
+        baustelleId: e.baustelle_id,
+        baustelleName: e.baustellen?.bvh_name ?? b?.bvh_name ?? "Bauhof",
+        baustelleColor: partie?.farbcode ?? "#6b7280",
+      });
+    });
+    (fzRows ?? []).forEach((r: any) => {
+      // Fehlzeit überschreibt Einteilung (Mitarbeiter nicht da)
+      map.set(cellKey(r.mitarbeiter_id, r.datum), {
+        source: "fehlzeit",
+        refId: r.id,
+        fehlzeitTyp: r.fehlzeit_typ,
+        status: r.status,
+        isReadOnly: r.status !== "offen",
+      });
+    });
+    setAssignments(map);
+  };
+
   useEffect(() => {
     load();
 
@@ -104,11 +188,18 @@ export default function Arbeitsplanung() {
       .channel("planung-bs")
       .on("postgres_changes", { event: "*", schema: "public", table: "baustellen" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "baustellen_termine" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "einteilungen" }, () => loadAssignments())
+      .on("postgres_changes", { event: "*", schema: "public", table: "einteilung_mitarbeiter" }, () => loadAssignments())
+      .on("postgres_changes", { event: "*", schema: "public", table: "stundenbuchungen" }, () => loadAssignments())
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
     };
   }, []);
+
+  useEffect(() => {
+    loadAssignments();
+  }, [anchorWeek, weeksVisible, baustellen, partien]);
 
   const totalDays = weeksVisible * 7;
   const rangeStart = anchorWeek;
@@ -143,6 +234,68 @@ export default function Arbeitsplanung() {
     [profiles]
   );
 
+  const workerGroups = useMemo(() => {
+    const groups: { partie: Partie | null; members: Profile[] }[] = [];
+    const filtered =
+      filterPartie === "alle"
+        ? partien
+        : filterPartie === "ohne"
+        ? []
+        : partien.filter((p) => p.id === filterPartie);
+    filtered.forEach((p) => {
+      const members = (membersByPartie[p.id] ?? []).filter((m) => m.is_active !== false);
+      if (members.length > 0) groups.push({ partie: p, members });
+    });
+    return groups;
+  }, [partien, membersByPartie, filterPartie]);
+
+  const activeBaustellen = useMemo(
+    () => baustellen.filter((b) => b.status === "aktiv" || b.status === "geplant"),
+    [baustellen]
+  );
+
+  const onCellClick = (e: React.MouseEvent, workerId: string, iso: string) => {
+    if (!isAdmin) return;
+    e.stopPropagation();
+    const key = cellKey(workerId, iso);
+
+    // Shift-Click: range selection (only if anchor is the same worker)
+    if (e.shiftKey && selectionAnchor && selectionAnchor.workerId === workerId) {
+      const aTime = new Date(selectionAnchor.iso).getTime();
+      const bTime = new Date(iso).getTime();
+      const [s, eT] = aTime <= bTime ? [aTime, bTime] : [bTime, aTime];
+      const cells: { workerId: string; iso: string }[] = [];
+      const set = new Set<string>();
+      for (let t = s; t <= eT; t += DAY_MS) {
+        const isoT = isoDate(new Date(t));
+        cells.push({ workerId, iso: isoT });
+        set.add(cellKey(workerId, isoT));
+      }
+      setSelection(set);
+      setPopover({
+        workerId,
+        cells,
+        anchor: { x: (e as any).clientX, y: (e as any).clientY },
+      });
+      return;
+    }
+
+    // Single click: select just this cell
+    setSelectionAnchor({ workerId, iso });
+    setSelection(new Set([key]));
+    setPopover({
+      workerId,
+      cells: [{ workerId, iso }],
+      anchor: { x: (e as any).clientX, y: (e as any).clientY },
+    });
+  };
+
+  const closePopover = () => {
+    setPopover(null);
+    setSelection(new Set());
+    setSelectionAnchor(null);
+  };
+
   const assignMemberToPartie = async (memberId: string, newPartieId: string | null) => {
     if (!isAdmin) return;
     const { error } = await supabase
@@ -157,24 +310,119 @@ export default function Arbeitsplanung() {
     }
   };
 
-  const grouped = useMemo(() => {
-    const filtered = baustellen.filter((b) => {
-      if (filterPartie === "alle") return true;
-      if (filterPartie === "ohne") return !b.partie_id;
-      return b.partie_id === filterPartie;
-    });
-    const groups = new Map<string, { partie: Partie | null; rows: Baustelle[] }>();
-    for (const b of filtered) {
-      const key = b.partie_id ?? "ohne";
-      if (!groups.has(key)) {
-        groups.set(key, { partie: b.partie_id ? partienById[b.partie_id] : null, rows: [] });
-      }
-      groups.get(key)!.rows.push(b);
+  // ─── Cell-Aktionen: Mitarbeiter pro Tag einteilen / Fehlzeit setzen ───
+  const clearCellsRaw = async (cells: { workerId: string; iso: string }[]) => {
+    if (cells.length === 0) return;
+    const workerIds = Array.from(new Set(cells.map((c) => c.workerId)));
+    const dates = Array.from(new Set(cells.map((c) => c.iso)));
+    // Einteilung-Mitarbeiter-Einträge für (worker, datum) löschen
+    const { data: emToDelete } = await supabase
+      .from("einteilung_mitarbeiter")
+      .select("id, mitarbeiter_id, einteilung_id, einteilungen!inner(datum)")
+      .in("mitarbeiter_id", workerIds)
+      .in("einteilungen.datum", dates);
+    const emIds = (emToDelete ?? [])
+      .filter((r: any) =>
+        cells.some(
+          (c) => c.workerId === r.mitarbeiter_id && c.iso === r.einteilungen?.datum
+        )
+      )
+      .map((r: any) => r.id);
+    if (emIds.length > 0) {
+      await supabase.from("einteilung_mitarbeiter").delete().in("id", emIds);
     }
-    return [...groups.values()].sort((a, b) =>
-      (a.partie?.name ?? "ZZ").localeCompare(b.partie?.name ?? "ZZ")
-    );
-  }, [baustellen, filterPartie, partienById]);
+    // Fehlzeit-Einträge mit Status offen löschen
+    const { data: fzToDelete } = await supabase
+      .from("stundenbuchungen")
+      .select("id, mitarbeiter_id, datum")
+      .in("mitarbeiter_id", workerIds)
+      .in("datum", dates)
+      .not("fehlzeit_typ", "is", null)
+      .eq("status", "offen");
+    const fzIds = (fzToDelete ?? [])
+      .filter((r: any) => cells.some((c) => c.workerId === r.mitarbeiter_id && c.iso === r.datum))
+      .map((r: any) => r.id);
+    if (fzIds.length > 0) {
+      await supabase.from("stundenbuchungen").delete().in("id", fzIds);
+    }
+  };
+
+  const assignBaustelle = async (
+    cells: { workerId: string; iso: string }[],
+    baustelleId: string
+  ) => {
+    if (!isAdmin || cells.length === 0) return;
+    await clearCellsRaw(cells);
+
+    // Einteilungen pro datum sicherstellen, dann einteilung_mitarbeiter Insert
+    const inserts: { mitarbeiter_id: string; einteilung_id: string }[] = [];
+    const datesSeen = new Map<string, string>(); // iso -> einteilung_id
+    for (const c of cells) {
+      let einteilungId = datesSeen.get(c.iso);
+      if (!einteilungId) {
+        const { data: existing } = await supabase
+          .from("einteilungen")
+          .select("id")
+          .eq("datum", c.iso)
+          .eq("baustelle_id", baustelleId)
+          .maybeSingle();
+        if (existing?.id) {
+          einteilungId = existing.id;
+        } else {
+          const { data: created, error } = await supabase
+            .from("einteilungen")
+            .insert({ datum: c.iso, baustelle_id: baustelleId })
+            .select("id")
+            .single();
+          if (error) {
+            toast({ variant: "destructive", title: "Fehler", description: error.message });
+            return;
+          }
+          einteilungId = created!.id;
+        }
+        datesSeen.set(c.iso, einteilungId!);
+      }
+      inserts.push({ mitarbeiter_id: c.workerId, einteilung_id: einteilungId! });
+    }
+    if (inserts.length > 0) {
+      const { error } = await supabase.from("einteilung_mitarbeiter").insert(inserts as any);
+      if (error) {
+        toast({ variant: "destructive", title: "Fehler", description: error.message });
+        return;
+      }
+    }
+    toast({ title: `${cells.length} Tag${cells.length === 1 ? "" : "e"} eingeteilt` });
+    loadAssignments();
+  };
+
+  const setFehlzeit = async (cells: { workerId: string; iso: string }[], typ: string) => {
+    if (!isAdmin || cells.length === 0) return;
+    await clearCellsRaw(cells);
+    const rows = cells.map((c) => ({
+      mitarbeiter_id: c.workerId,
+      datum: c.iso,
+      fehlzeit_typ: typ,
+      fehlzeit_stunden: 8,
+      arbeitsstunden: 0,
+      status: "offen",
+    }));
+    const { error } = await supabase.from("stundenbuchungen").insert(rows as any);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    toast({
+      title: `${FEHLZEIT_LABEL[typ] ?? typ} für ${cells.length} Tag${cells.length === 1 ? "" : "e"} gesetzt`,
+    });
+    loadAssignments();
+  };
+
+  const clearCells = async (cells: { workerId: string; iso: string }[]) => {
+    if (!isAdmin || cells.length === 0) return;
+    await clearCellsRaw(cells);
+    toast({ title: `${cells.length} Eintrag${cells.length === 1 ? "" : "e"} entfernt` });
+    loadAssignments();
+  };
 
   const dayHeaders = useMemo(() => {
     const days: { date: Date; week: number; year: number; isMonday: boolean; isToday: boolean }[] = [];
@@ -317,137 +565,72 @@ export default function Arbeitsplanung() {
         </CardContent>
       </Card>
 
-      {/* Mobile: simple list (Gantt only on >=md) */}
+      {/* Mobile: kompakter Worker-Plan pro Tag */}
       <div className="md:hidden space-y-3">
-        {grouped.map((g) => {
-          const polier = polierName(g.partie);
-          const members = g.partie ? membersByPartie[g.partie.id] ?? [] : [];
-          return (
-          <div key={g.partie?.id ?? "ohne"}>
-            <PolierHeader
-              partie={g.partie}
-              polier={polier}
-              bvhCount={g.rows.length}
-              members={members}
-              allPartien={partien}
-              unassignedMembers={unassignedMembers}
-              onAssign={assignMemberToPartie}
-              isAdmin={isAdmin}
-              variant="mobile"
-            />
-            <div className="space-y-1.5 pt-1.5">
-              {g.rows.map((b) => (
-                <Link to={`/baustellen/${b.id}`} key={b.id}>
-                  <Card>
-                    <CardContent className="p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="font-semibold text-sm truncate">{b.bvh_name}</div>
-                          <div className="text-[11px] text-muted-foreground truncate">
-                            {[b.kostenstelle, b.ort].filter(Boolean).join(" · ")}
-                          </div>
-                        </div>
-                        <Badge variant="outline" className="text-[10px] shrink-0">
-                          {STATUS_LABEL[b.status]}
-                        </Badge>
-                      </div>
-                      <div className="text-[11px] text-muted-foreground mt-1">
-                        {b.start_datum && new Date(b.start_datum).toLocaleDateString("de-AT")} –{" "}
-                        {b.end_datum ? new Date(b.end_datum).toLocaleDateString("de-AT") : "offen"}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-              ))}
-            </div>
-          </div>
-          );
-        })}
+        <MobileWorkerPlan
+          workerGroups={workerGroups}
+          dayHeaders={dayHeaders}
+          assignments={assignments}
+          isAdmin={isAdmin}
+          onCellClick={onCellClick}
+          partien={partien}
+        />
       </div>
 
-      {/* Desktop: Gantt chart */}
+      {/* Desktop: Mitarbeiter-Gantt */}
       <Card className="overflow-hidden hidden md:block">
         <div className="flex">
-          {/* Left fixed multi-column area (Excel-style) */}
-          <div className="shrink-0 border-r bg-card" style={{ width: 540 }}>
-            {/* Two-row header to match timeline header height (28+28=56) */}
-            <div className="bg-muted/60 border-b sticky top-0 z-10" style={{ height: 56 }}>
-              <div
-                className="grid h-full text-[10px] font-semibold uppercase tracking-wide"
-                style={{ gridTemplateColumns: "1fr 80px 80px 65px 65px 40px" }}
-              >
-                <div className="px-2 py-1 border-r flex items-end">BVH</div>
-                <div className="px-2 py-1 border-r flex items-end">Kostenstelle</div>
-                <div className="px-2 py-1 border-r flex items-end">Bauleiter</div>
-                <div className="px-2 py-1 border-r flex items-end">POL-Beginn</div>
-                <div className="px-2 py-1 border-r flex items-end">POL-Ende</div>
-                <div className="px-1 py-1 flex items-end justify-center">Anz.</div>
-              </div>
+          {/* Left fixed: Polier + Mitarbeiter */}
+          <div className="shrink-0 border-r bg-card" style={{ width: 240 }}>
+            <div
+              className="bg-muted/60 border-b sticky top-0 z-10 px-3 text-[10px] font-semibold uppercase tracking-wide flex items-end"
+              style={{ height: 56 }}
+            >
+              <span className="pb-1">Polier · Mitarbeiter</span>
             </div>
-            {grouped.map((g) => {
+            {workerGroups.map((g) => {
               const polier = polierName(g.partie);
-              const members = g.partie ? membersByPartie[g.partie.id] ?? [] : [];
               return (
                 <div key={g.partie?.id ?? "ohne"}>
                   <PolierHeader
                     partie={g.partie}
                     polier={polier}
-                    bvhCount={g.rows.length}
-                    members={members}
+                    bvhCount={g.members.length}
+                    members={[]}
                     allPartien={partien}
                     unassignedMembers={unassignedMembers}
                     onAssign={assignMemberToPartie}
                     isAdmin={isAdmin}
                   />
-                  {g.rows.map((b) => (
-                    <Link
-                      to={`/baustellen/${b.id}`}
-                      key={b.id}
-                      className="grid border-b text-[11px] hover:bg-muted/50 cursor-pointer"
-                      style={{
-                        gridTemplateColumns: "1fr 80px 80px 65px 65px 40px",
-                        height: 28,
-                      }}
+                  {g.members.map((m) => (
+                    <div
+                      key={m.id}
+                      className="border-b flex items-center gap-2 px-2 text-[11px] truncate"
+                      style={{ height: 28 }}
                     >
-                      <div className="px-2 flex items-center gap-1.5 border-r min-w-0">
-                        <Building2 className="h-3 w-3 text-muted-foreground shrink-0" />
-                        <span className="font-medium truncate">{b.bvh_name}</span>
-                      </div>
-                      <div className="px-2 flex items-center border-r truncate text-muted-foreground">
-                        {b.kostenstelle ?? "—"}
-                      </div>
-                      <div className="px-2 flex items-center border-r truncate text-muted-foreground">
-                        {bauleiterShort(b.bauleiter_id)}
-                      </div>
-                      <div className="px-2 flex items-center border-r text-muted-foreground tabular-nums">
-                        {b.start_datum
-                          ? new Date(b.start_datum).toLocaleDateString("de-AT", {
-                              day: "2-digit",
-                              month: "2-digit",
-                              year: "2-digit",
-                            })
-                          : "—"}
-                      </div>
-                      <div className="px-2 flex items-center border-r text-muted-foreground tabular-nums">
-                        {b.end_datum
-                          ? new Date(b.end_datum).toLocaleDateString("de-AT", {
-                              day: "2-digit",
-                              month: "2-digit",
-                              year: "2-digit",
-                            })
-                          : "—"}
-                      </div>
-                      <div className="px-1 flex items-center justify-center text-muted-foreground tabular-nums">
-                        {b.anzahl_mitarbeiter ?? "—"}
-                      </div>
-                    </Link>
+                      <span
+                        className="h-5 w-5 rounded-full flex items-center justify-center text-white text-[8px] font-bold shrink-0"
+                        style={{ background: g.partie?.farbcode ?? "#999" }}
+                      >
+                        {m.vorname[0]}
+                        {m.nachname[0]}
+                      </span>
+                      <span className="font-medium truncate">
+                        {m.nachname} {m.vorname[0]}.
+                      </span>
+                      {m.id === g.partie?.partieleiter_id && (
+                        <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0 ml-auto">
+                          Polier
+                        </Badge>
+                      )}
+                    </div>
                   ))}
                 </div>
               );
             })}
-            {grouped.length === 0 && (
+            {workerGroups.length === 0 && (
               <div className="p-6 text-center text-sm text-muted-foreground">
-                Noch keine Baustellen.
+                Keine Mitarbeiter in Partien zugeordnet.
               </div>
             )}
           </div>
@@ -494,95 +677,74 @@ export default function Arbeitsplanung() {
 
               {/* Body */}
               <div className="relative">
-                {grouped.map((g) => {
-                  const memberCount = g.partie ? (membersByPartie[g.partie.id] ?? []).length : 0;
-                  const headerH = memberCount > 0 ? 56 : 36;
-                  return (
+                {workerGroups.map((g) => (
                   <div key={g.partie?.id ?? "ohne"}>
-                    {/* Group spacer matches left column header height */}
                     <div
                       className="border-b"
                       style={{
-                        height: headerH,
+                        height: 36,
                         background: g.partie ? `${g.partie.farbcode}25` : "hsl(var(--muted))",
                       }}
                     />
-                    {g.rows.map((b) => {
-                      const pos = positionFor(b);
-                      const baustelleColor = g.partie?.farbcode ?? "#3b82f6";
-                      const myTermine = termine.filter((t) => t.baustelle_id === b.id);
-                      return (
-                        <div
-                          key={b.id}
-                          className="border-b relative"
-                          style={{ height: 28 }}
-                        >
-                          {/* Vertical day grid */}
-                          <div className="absolute inset-0 flex pointer-events-none">
-                            {dayHeaders.map((d, i) => (
-                              <div
-                                key={i}
-                                className={`border-r ${
-                                  d.isToday
-                                    ? "bg-primary/10"
-                                    : d.date.getDay() === 0 || d.date.getDay() === 6
-                                    ? "bg-muted/40"
-                                    : ""
-                                }`}
-                                style={{ width: dayWidth }}
-                              />
-                            ))}
-                          </div>
-                          {/* Bar */}
-                          {pos && (
-                            <div
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => {
-                                setEditing(b);
-                                setDialogOpen(true);
-                              }}
-                              className="absolute top-[3px] bottom-[3px] rounded-sm shadow-sm flex items-center px-1.5 text-[10px] text-white font-medium cursor-pointer hover:brightness-110 truncate"
+                    {g.members.map((m) => (
+                      <div
+                        key={m.id}
+                        className="border-b relative flex"
+                        style={{ height: 28 }}
+                      >
+                        {dayHeaders.map((d, i) => {
+                          const iso = isoDate(d.date);
+                          const a = assignments.get(cellKey(m.id, iso));
+                          const isWeekend = d.date.getDay() === 0 || d.date.getDay() === 6;
+                          const selected = selection.has(cellKey(m.id, iso));
+                          let bg = "transparent";
+                          let label = "";
+                          let textColor = "white";
+                          if (a) {
+                            if (a.source === "fehlzeit") {
+                              bg = FEHLZEIT_COLOR[a.fehlzeitTyp ?? "U"] ?? "#6b7280";
+                              label = a.fehlzeitTyp ?? "";
+                            } else {
+                              bg = a.baustelleColor ?? "#6b7280";
+                              label = a.baustelleName ?? "BV";
+                            }
+                          }
+                          return (
+                            <button
+                              key={i}
+                              onClick={(e) => onCellClick(e, m.id, iso)}
+                              className={`relative border-r text-[9px] truncate font-medium transition ${
+                                d.isToday ? "ring-1 ring-primary/40 ring-inset" : ""
+                              } ${selected ? "ring-2 ring-primary ring-inset z-10" : ""}`}
                               style={{
-                                left: pos.left,
-                                width: Math.max(pos.width, dayWidth),
-                                background: baustelleColor,
-                                opacity: b.status === "abgeschlossen" ? 0.55 : 1,
-                                border:
-                                  b.status === "geplant"
-                                    ? "1.5px dashed rgba(255,255,255,0.7)"
-                                    : "1px solid rgba(0,0,0,0.15)",
+                                width: dayWidth,
+                                height: "100%",
+                                background:
+                                  bg !== "transparent" ? bg : isWeekend ? "rgba(0,0,0,0.04)" : "transparent",
+                                color: bg !== "transparent" ? textColor : undefined,
+                                cursor: isAdmin ? "pointer" : "default",
+                                opacity: a?.isReadOnly ? 0.65 : 1,
                               }}
-                              title={`${b.bvh_name} · ${STATUS_LABEL[b.status]}`}
+                              title={
+                                a
+                                  ? a.source === "fehlzeit"
+                                    ? `${FEHLZEIT_LABEL[a.fehlzeitTyp ?? ""] ?? a.fehlzeitTyp} · ${iso}${a.isReadOnly ? " (eingereicht)" : ""}`
+                                    : `${a.baustelleName} · ${iso}`
+                                  : `${m.vorname} ${m.nachname} · ${iso}${isAdmin ? " · klick für Aktion" : ""}`
+                              }
                             >
-                              <span className="truncate">{b.bvh_name}</span>
-                            </div>
-                          )}
-                          {/* Termine markers */}
-                          {myTermine.map((t) => {
-                            const td = new Date(t.termin_datum);
-                            td.setHours(0, 0, 0, 0);
-                            if (td < rangeStart || td > rangeEnd) return null;
-                            const left =
-                              ((td.getTime() - rangeStart.getTime()) / DAY_MS) * dayWidth +
-                              dayWidth / 2;
-                            return (
-                              <div
-                                key={t.id}
-                                className="absolute top-0 bottom-0 flex items-center"
-                                style={{ left: left - 6 }}
-                                title={`${t.typ}: ${t.bezeichnung ?? ""}`}
-                              >
-                                <span className="h-3 w-3 rotate-45 bg-yellow-400 border border-yellow-700" />
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })}
+                              {label && (
+                                <span className="absolute inset-0 flex items-center justify-center px-0.5 truncate">
+                                  {label.slice(0, 2)}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ))}
                   </div>
-                  );
-                })}
+                ))}
               </div>
             </div>
           </div>
@@ -590,23 +752,45 @@ export default function Arbeitsplanung() {
       </Card>
 
       {/* Legend */}
-      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-        <div className="flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded-sm bg-emerald-500" /> Aktiv
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded-sm bg-blue-500" /> Geplant
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded-sm bg-amber-500" /> Pausiert
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded-sm bg-gray-400" /> Abgeschlossen
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="h-3 w-3 rotate-45 bg-yellow-400 border border-yellow-700" /> Kran/Material-Termin
-        </div>
+      <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+        {Object.entries(FEHLZEIT_LABEL).map(([k, l]) => (
+          <div key={k} className="flex items-center gap-1.5">
+            <span
+              className="h-3 w-3 rounded-sm"
+              style={{ background: FEHLZEIT_COLOR[k] }}
+            />
+            <span className="font-mono font-semibold">{k}</span> {l}
+          </div>
+        ))}
+        {isAdmin && (
+          <div className="ml-auto text-[11px] italic">
+            Klick auf Zelle = Aktion · Shift+Klick = Bereich auswählen
+          </div>
+        )}
       </div>
+
+      {popover && (
+        <CellPopover
+          anchor={popover.anchor}
+          cells={popover.cells}
+          baustellen={activeBaustellen}
+          partien={partien}
+          assignments={assignments}
+          onAssignBaustelle={(bId) => {
+            assignBaustelle(popover.cells, bId);
+            closePopover();
+          }}
+          onSetFehlzeit={(typ) => {
+            setFehlzeit(popover.cells, typ);
+            closePopover();
+          }}
+          onClear={() => {
+            clearCells(popover.cells);
+            closePopover();
+          }}
+          onClose={closePopover}
+        />
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -842,5 +1026,246 @@ function MemberPill({
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+// ─── Cell-Popover (Aktionen für ausgewählte Zellen) ───
+function CellPopover({
+  anchor,
+  cells,
+  baustellen,
+  partien,
+  assignments,
+  onAssignBaustelle,
+  onSetFehlzeit,
+  onClear,
+  onClose,
+}: {
+  anchor: { x: number; y: number };
+  cells: { workerId: string; iso: string }[];
+  baustellen: Baustelle[];
+  partien: Partie[];
+  assignments: Map<string, AssignmentCell>;
+  onAssignBaustelle: (baustelleId: string) => void;
+  onSetFehlzeit: (typ: string) => void;
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  const hasExisting = cells.some((c) => assignments.get(cellKey(c.workerId, c.iso)));
+  const [w] = [240]; // popover width
+  // Position: clamp innerhalb viewport
+  const x = Math.min(Math.max(8, anchor.x - 100), window.innerWidth - w - 8);
+  const y = Math.min(anchor.y + 12, window.innerHeight - 320);
+
+  const dateLabels = (() => {
+    if (cells.length === 1) return new Date(cells[0].iso).toLocaleDateString("de-AT");
+    const sorted = [...cells].sort((a, b) => a.iso.localeCompare(b.iso));
+    return `${new Date(sorted[0].iso).toLocaleDateString("de-AT", {
+      day: "2-digit",
+      month: "2-digit",
+    })} – ${new Date(sorted[sorted.length - 1].iso).toLocaleDateString("de-AT", {
+      day: "2-digit",
+      month: "2-digit",
+    })} (${cells.length} Tage)`;
+  })();
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <div
+        className="fixed z-50 bg-card border-2 border-primary/30 rounded-lg shadow-xl p-3"
+        style={{ left: x, top: y, width: w }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-xs font-semibold mb-2">{dateLabels}</div>
+
+        <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+          Auf Baustelle einteilen
+        </div>
+        <div className="space-y-1 max-h-44 overflow-y-auto mb-2">
+          {baustellen.length === 0 ? (
+            <div className="text-xs text-muted-foreground italic px-1">
+              Keine aktiven Baustellen.
+            </div>
+          ) : (
+            baustellen.map((b) => {
+              const partie = b.partie_id ? partien.find((p) => p.id === b.partie_id) : null;
+              return (
+                <button
+                  key={b.id}
+                  onClick={() => onAssignBaustelle(b.id)}
+                  className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted flex items-center gap-2"
+                >
+                  <span
+                    className="h-2.5 w-2.5 rounded-full shrink-0"
+                    style={{ background: partie?.farbcode ?? "#6b7280" }}
+                  />
+                  <span className="truncate flex-1">{b.bvh_name}</span>
+                  {b.kostenstelle && (
+                    <span className="text-[9px] text-muted-foreground tabular-nums shrink-0">
+                      {b.kostenstelle}
+                    </span>
+                  )}
+                </button>
+              );
+            })
+          )}
+        </div>
+
+        <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 border-t pt-2">
+          Fehlzeit
+        </div>
+        <div className="grid grid-cols-2 gap-1 mb-2">
+          {Object.entries(FEHLZEIT_LABEL).map(([k, l]) => (
+            <button
+              key={k}
+              onClick={() => onSetFehlzeit(k)}
+              className="text-xs px-2 py-2 rounded text-white font-medium"
+              style={{ background: FEHLZEIT_COLOR[k] }}
+            >
+              {k} · {l}
+            </button>
+          ))}
+        </div>
+
+        {hasExisting && (
+          <button
+            onClick={onClear}
+            className="w-full text-xs px-2 py-2 rounded border border-destructive/40 text-destructive hover:bg-destructive/10 flex items-center justify-center gap-1.5 mb-1"
+          >
+            <Trash2 className="h-3 w-3" />
+            Eintrag entfernen
+          </button>
+        )}
+        <button
+          onClick={onClose}
+          className="w-full text-xs px-2 py-1.5 rounded hover:bg-muted text-muted-foreground"
+        >
+          Abbrechen
+        </button>
+      </div>
+    </>
+  );
+}
+
+// ─── Mobile: Worker-Plan kompakt ───
+function MobileWorkerPlan({
+  workerGroups,
+  dayHeaders,
+  assignments,
+  isAdmin,
+  onCellClick,
+  partien,
+}: {
+  workerGroups: { partie: Partie | null; members: Profile[] }[];
+  dayHeaders: { date: Date; isToday: boolean; week: number; year: number }[];
+  assignments: Map<string, AssignmentCell>;
+  isAdmin: boolean;
+  onCellClick: (e: React.MouseEvent, workerId: string, iso: string) => void;
+  partien: Partie[];
+}) {
+  if (workerGroups.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-6 text-center text-sm text-muted-foreground">
+          Keine Mitarbeiter in Partien zugeordnet.
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <>
+      {workerGroups.map((g) => (
+        <Card key={g.partie?.id ?? "ohne"} className="overflow-hidden">
+          <div
+            className="px-3 py-2 text-xs font-bold uppercase"
+            style={{
+              background: g.partie ? `${g.partie.farbcode}25` : "hsl(var(--muted))",
+              color: g.partie?.farbcode ?? undefined,
+            }}
+          >
+            {g.partie?.name ?? "Ohne Partie"}
+          </div>
+          <div className="overflow-x-auto">
+            <div style={{ minWidth: dayHeaders.length * 22 + 120 }}>
+              {/* Day-header */}
+              <div
+                className="grid border-b text-[9px] text-center"
+                style={{
+                  gridTemplateColumns: `120px repeat(${dayHeaders.length}, 22px)`,
+                  background: "hsl(var(--muted))",
+                }}
+              >
+                <div className="py-1 px-2 border-r font-semibold text-left">Mitarbeiter</div>
+                {dayHeaders.map((d, i) => (
+                  <div
+                    key={i}
+                    className={`py-1 ${d.isToday ? "bg-primary/20 text-primary font-semibold" : ""}`}
+                  >
+                    {d.date.getDate()}
+                  </div>
+                ))}
+              </div>
+              {/* Rows */}
+              {g.members.map((m) => (
+                <div
+                  key={m.id}
+                  className="grid border-b text-[10px] items-center"
+                  style={{
+                    gridTemplateColumns: `120px repeat(${dayHeaders.length}, 22px)`,
+                    height: 28,
+                  }}
+                >
+                  <div className="px-2 border-r truncate font-medium flex items-center gap-1.5">
+                    <span
+                      className="h-4 w-4 rounded-full flex items-center justify-center text-white text-[7px] font-bold shrink-0"
+                      style={{ background: g.partie?.farbcode ?? "#999" }}
+                    >
+                      {m.vorname[0]}
+                      {m.nachname[0]}
+                    </span>
+                    <span className="truncate">{m.nachname}</span>
+                  </div>
+                  {dayHeaders.map((d, i) => {
+                    const iso = isoDate(d.date);
+                    const a = assignments.get(cellKey(m.id, iso));
+                    let bg = "transparent";
+                    let label = "";
+                    if (a) {
+                      if (a.source === "fehlzeit") {
+                        bg = FEHLZEIT_COLOR[a.fehlzeitTyp ?? "U"] ?? "#6b7280";
+                        label = a.fehlzeitTyp ?? "";
+                      } else {
+                        bg = a.baustelleColor ?? "#6b7280";
+                        label = (a.baustelleName ?? "").slice(0, 1);
+                      }
+                    }
+                    return (
+                      <button
+                        key={i}
+                        onClick={(e) => onCellClick(e, m.id, iso)}
+                        disabled={!isAdmin}
+                        className={`text-[9px] truncate font-medium ${
+                          d.isToday ? "ring-1 ring-primary/40 ring-inset" : ""
+                        }`}
+                        style={{
+                          height: "100%",
+                          background: bg,
+                          color: bg !== "transparent" ? "white" : undefined,
+                          opacity: a?.isReadOnly ? 0.65 : 1,
+                          cursor: isAdmin ? "pointer" : "default",
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+      ))}
+    </>
   );
 }
