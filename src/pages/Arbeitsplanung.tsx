@@ -1166,9 +1166,9 @@ function CellPopover({
   onClose: () => void;
 }) {
   const hasExisting = cells.some((c) => assignments.get(cellKey(c.workerId, c.iso)));
-  const [w] = [240]; // popover width
+  const [w] = [320]; // popover width — breit genug für volle Baustellen-Namen
   // Position: clamp innerhalb viewport
-  const x = Math.min(Math.max(8, anchor.x - 100), window.innerWidth - w - 8);
+  const x = Math.min(Math.max(8, anchor.x - w / 2), window.innerWidth - w - 8);
   const y = Math.min(anchor.y + 12, window.innerHeight - 320);
 
   const dateLabels = (() => {
@@ -1215,18 +1215,20 @@ function CellPopover({
                 <button
                   key={b.id}
                   onClick={() => onAssignBaustelle(b.id)}
-                  className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted flex items-center gap-2"
+                  className="w-full text-left text-xs px-2 py-2 rounded hover:bg-muted flex items-start gap-2"
                 >
                   <span
-                    className="h-2.5 w-2.5 rounded-full shrink-0"
+                    className="h-2.5 w-2.5 rounded-full shrink-0 mt-1"
                     style={{ background: partie?.farbcode ?? "#6b7280" }}
                   />
-                  <span className="truncate flex-1">{b.bvh_name}</span>
-                  {b.kostenstelle && (
-                    <span className="text-[9px] text-muted-foreground tabular-nums shrink-0">
-                      {b.kostenstelle}
-                    </span>
-                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium leading-tight break-words">{b.bvh_name}</div>
+                    {(b.kostenstelle || b.ort) && (
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        {[b.kostenstelle, b.ort].filter(Boolean).join(" · ")}
+                      </div>
+                    )}
+                  </div>
                 </button>
               );
             })

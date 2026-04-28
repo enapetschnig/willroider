@@ -53,11 +53,23 @@ const STATUS_VARIANT: Record<Baustelle["status"], "default" | "secondary" | "out
   abgeschlossen: "secondary",
 };
 
+type HeuteEintrag = {
+  einteilungId: string;
+  baustelleId: string;
+  bvhName: string;
+  kostenstelle: string | null;
+  ort: string | null;
+  partieFarbe: string | null;
+  bereitsGebucht: number; // Stunden, die heute schon auf diese Baustelle gebucht sind
+};
+
 export default function Dashboard() {
-  const { profile, isAdmin, canReview } = useAuth();
+  const { user, profile, isAdmin, canReview } = useAuth();
   const [aktiveBaustellen, setAktiveBaustellen] = useState<Baustelle[]>([]);
   const [pendingProfiles, setPendingProfiles] = useState<PendingProfile[]>([]);
   const [pendingCount, setPendingCount] = useState<number>(0);
+  const [heuteEinteilungen, setHeuteEinteilungen] = useState<HeuteEintrag[]>([]);
+  const [heuteFehlzeit, setHeuteFehlzeit] = useState<string | null>(null);
 
   useEffect(() => {
     supabase
@@ -68,6 +80,86 @@ export default function Dashboard() {
       .limit(8)
       .then(({ data }) => setAktiveBaustellen((data as Baustelle[]) ?? []));
   }, []);
+
+  // Heutige Einteilung des aktuellen Users + Realtime-Sync
+  useEffect(() => {
+    if (!user) return;
+    const today = new Date().toISOString().slice(0, 10);
+
+    const loadHeute = async () => {
+      // 1) Tagesgenaue Einteilung über einteilung_mitarbeiter
+      const { data: emRows } = await supabase
+        .from("einteilung_mitarbeiter")
+        .select(
+          "id, einteilungen!inner(id, datum, baustelle_id, baustellen(id, bvh_name, kostenstelle, ort, partie_id, partien(farbcode)))"
+        )
+        .eq("mitarbeiter_id", user.id)
+        .eq("einteilungen.datum", today);
+
+      const eintraege: HeuteEintrag[] = (emRows ?? [])
+        .filter((r: any) => r.einteilungen?.baustellen)
+        .map((r: any) => ({
+          einteilungId: r.einteilungen.id,
+          baustelleId: r.einteilungen.baustelle_id,
+          bvhName: r.einteilungen.baustellen.bvh_name ?? "Baustelle",
+          kostenstelle: r.einteilungen.baustellen.kostenstelle ?? null,
+          ort: r.einteilungen.baustellen.ort ?? null,
+          partieFarbe: r.einteilungen.baustellen.partien?.farbcode ?? null,
+          bereitsGebucht: 0,
+        }));
+
+      // 2) Schon gebuchte Stunden heute pro Baustelle dazuholen
+      if (eintraege.length > 0) {
+        const { data: stunden } = await supabase
+          .from("stundenbuchungen")
+          .select("baustelle_id, arbeitsstunden")
+          .eq("mitarbeiter_id", user.id)
+          .eq("datum", today);
+        if (stunden) {
+          for (const e of eintraege) {
+            e.bereitsGebucht = stunden
+              .filter((r: any) => r.baustelle_id === e.baustelleId)
+              .reduce((s: number, r: any) => s + Number(r.arbeitsstunden ?? 0), 0);
+          }
+        }
+      }
+
+      // 3) Falls Fehlzeit für heute (Urlaub/Krank/Feiertag/SW)
+      const { data: fz } = await supabase
+        .from("stundenbuchungen")
+        .select("fehlzeit_typ")
+        .eq("mitarbeiter_id", user.id)
+        .eq("datum", today)
+        .not("fehlzeit_typ", "is", null)
+        .maybeSingle();
+
+      setHeuteEinteilungen(eintraege);
+      setHeuteFehlzeit((fz?.fehlzeit_typ as string | null) ?? null);
+    };
+    loadHeute();
+
+    const ch = supabase
+      .channel("dashboard-heute")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "einteilung_mitarbeiter" },
+        loadHeute
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "einteilungen" },
+        loadHeute
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "stundenbuchungen", filter: `mitarbeiter_id=eq.${user.id}` },
+        loadHeute
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [user]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -228,6 +320,72 @@ export default function Dashboard() {
       )}
 
       <PageHeader title={`Hallo ${fullName.split(" ")[0] || "willkommen"}!`} />
+
+      {/* Heute-Card: heutige Einteilung mit Quick-Stundenbuchung */}
+      {(heuteEinteilungen.length > 0 || heuteFehlzeit) && (
+        <Card className="border-2 border-primary/40 bg-primary/5 shadow-sm">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-primary font-semibold">
+              <ClipboardList className="h-4 w-4" />
+              Heute
+              <span className="text-muted-foreground font-normal normal-case ml-auto">
+                {new Date().toLocaleDateString("de-AT", {
+                  weekday: "long",
+                  day: "2-digit",
+                  month: "long",
+                })}
+              </span>
+            </div>
+
+            {heuteFehlzeit ? (
+              <div className="text-sm">
+                Heute eingetragen als <strong>{heuteFehlzeit}</strong> — keine Buchung nötig.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {heuteEinteilungen.map((e) => (
+                  <div
+                    key={e.einteilungId}
+                    className="flex items-center gap-3 rounded-md border bg-card p-3"
+                  >
+                    <div
+                      className="h-10 w-10 rounded-md flex items-center justify-center shrink-0"
+                      style={{
+                        background: e.partieFarbe ? `${e.partieFarbe}25` : "hsl(var(--primary)/0.1)",
+                        color: e.partieFarbe ?? "hsl(var(--primary))",
+                      }}
+                    >
+                      <Building2 className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm sm:text-base leading-tight">
+                        {e.bvhName}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground truncate">
+                        {[e.kostenstelle, e.ort].filter(Boolean).join(" · ")}
+                      </div>
+                      {e.bereitsGebucht > 0 && (
+                        <div className="text-[11px] text-emerald-700 font-medium mt-0.5">
+                          ✓ {e.bereitsGebucht.toFixed(2).replace(".", ",")}h schon gebucht
+                        </div>
+                      )}
+                    </div>
+                    <Link
+                      to={`/stunden?baustelle=${e.baustelleId}`}
+                      className="shrink-0"
+                    >
+                      <Button size="sm" className="h-10">
+                        <Clock className="h-4 w-4 mr-1.5" />
+                        {e.bereitsGebucht > 0 ? "Nachbuchen" : "Stunden buchen"}
+                      </Button>
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Schnellzugriff */}
       <div>

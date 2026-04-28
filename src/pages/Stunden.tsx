@@ -288,10 +288,16 @@ export default function Stunden() {
             .order("bvh_name"),
     ]);
     setRows((r.data as Stunde[]) ?? []);
-    setBaustellen((b.data as Baustelle[]) ?? []);
+    const blist = (b.data as Baustelle[]) ?? [];
+    setBaustellen(blist);
 
-    if (!baustelleId && (b.data as Baustelle[])?.length === 1) {
-      setBaustelleId((b.data as Baustelle[])[0].id);
+    // URL-Query ?baustelle=ID → vorausgewählt setzen (z.B. von der Heute-Card)
+    const urlParams = new URLSearchParams(window.location.search);
+    const fromUrl = urlParams.get("baustelle");
+    if (fromUrl && blist.some((x) => x.id === fromUrl)) {
+      setBaustelleId(fromUrl);
+    } else if (!baustelleId && blist.length === 1) {
+      setBaustelleId(blist[0].id);
     }
   };
 
