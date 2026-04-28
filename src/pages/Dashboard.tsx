@@ -12,22 +12,12 @@ import {
   Clock,
   ClipboardList,
   Users,
-  AlertTriangle,
   ArrowRight,
   CheckCircle2,
-  Activity,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
-
-type Stats = {
-  baustellenAktiv: number;
-  baustellenGeplant: number;
-  mitarbeiterAktiv: number;
-  stundenOffen: number;
-  partienCount: number;
-};
 
 const STATUS_LABEL: Record<Baustelle["status"], string> = {
   geplant: "Geplant",
@@ -43,43 +33,17 @@ const STATUS_VARIANT: Record<Baustelle["status"], "default" | "secondary" | "out
 };
 
 export default function Dashboard() {
-  const { profile, role, isAdmin, canReview } = useAuth();
-  const [stats, setStats] = useState<Stats>({
-    baustellenAktiv: 0,
-    baustellenGeplant: 0,
-    mitarbeiterAktiv: 0,
-    stundenOffen: 0,
-    partienCount: 0,
-  });
+  const { profile, isAdmin, canReview } = useAuth();
   const [aktiveBaustellen, setAktiveBaustellen] = useState<Baustelle[]>([]);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const load = async () => {
-      const [bs, bsAktiv, ma, stundenOffen, partien] = await Promise.all([
-        supabase.from("baustellen").select("id", { count: "exact", head: true }).eq("status", "geplant"),
-        supabase
-          .from("baustellen")
-          .select("*")
-          .eq("status", "aktiv")
-          .order("start_datum", { ascending: true })
-          .limit(8),
-        supabase.from("profiles").select("id", { count: "exact", head: true }).eq("is_active", true),
-        supabase.from("stundenbuchungen").select("id", { count: "exact", head: true }).in("status", ["offen", "zm_freigabe"]),
-        supabase.from("partien").select("id", { count: "exact", head: true }),
-      ]);
-
-      setStats({
-        baustellenAktiv: bsAktiv.data?.length ?? 0,
-        baustellenGeplant: bs.count ?? 0,
-        mitarbeiterAktiv: ma.count ?? 0,
-        stundenOffen: stundenOffen.count ?? 0,
-        partienCount: partien.count ?? 0,
-      });
-      setAktiveBaustellen((bsAktiv.data as Baustelle[]) ?? []);
-      setLoading(false);
-    };
-    load();
+    supabase
+      .from("baustellen")
+      .select("*")
+      .eq("status", "aktiv")
+      .order("start_datum", { ascending: true })
+      .limit(8)
+      .then(({ data }) => setAktiveBaustellen((data as Baustelle[]) ?? []));
   }, []);
 
   const fullName = profile ? `${profile.vorname} ${profile.nachname}`.trim() : "";
@@ -131,49 +95,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={`Hallo ${fullName.split(" ")[0] || "willkommen"}!`}
-        description="Übersicht über laufende Baustellen, Einteilungen und offene Aufgaben."
-      />
-
-      {/* Stat tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-        <StatTile
-          icon={Activity}
-          label="Aktive Baustellen"
-          value={stats.baustellenAktiv}
-          loading={loading}
-          tone="primary"
-        />
-        <StatTile
-          icon={CalendarDays}
-          label="Geplante Baustellen"
-          value={stats.baustellenGeplant}
-          loading={loading}
-          tone="muted"
-        />
-        <StatTile
-          icon={Users}
-          label="Mitarbeiter aktiv"
-          value={stats.mitarbeiterAktiv}
-          loading={loading}
-          tone="muted"
-        />
-        <StatTile
-          icon={ClipboardList}
-          label="Partien"
-          value={stats.partienCount}
-          loading={loading}
-          tone="primary"
-        />
-        <StatTile
-          icon={AlertTriangle}
-          label="Offene Stunden"
-          value={stats.stundenOffen}
-          loading={loading}
-          tone="warn"
-        />
-      </div>
+      <PageHeader title={`Hallo ${fullName.split(" ")[0] || "willkommen"}!`} />
 
       {/* Schnellzugriff */}
       <div>
@@ -251,36 +173,3 @@ export default function Dashboard() {
   );
 }
 
-function StatTile({
-  icon: Icon,
-  label,
-  value,
-  loading,
-  tone,
-}: {
-  icon: typeof Clock;
-  label: string;
-  value: number;
-  loading: boolean;
-  tone: "primary" | "muted" | "warn";
-}) {
-  const toneClass =
-    tone === "primary"
-      ? "bg-primary/10 text-primary"
-      : tone === "warn"
-      ? "bg-yellow-100 text-yellow-800"
-      : "bg-muted text-foreground";
-  return (
-    <Card>
-      <CardContent className="p-3 flex items-center gap-3">
-        <div className={`h-10 w-10 rounded-md flex items-center justify-center ${toneClass}`}>
-          <Icon className="h-5 w-5" />
-        </div>
-        <div className="min-w-0">
-          <div className="text-xl font-bold leading-none">{loading ? "…" : value}</div>
-          <div className="text-[11px] text-muted-foreground">{label}</div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}

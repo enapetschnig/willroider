@@ -26,11 +26,16 @@ import {
   ChevronRight,
   Calendar,
   Send,
+  Users,
+  AlertTriangle,
+  CheckCircle2,
 } from "lucide-react";
 import type { Database, StundenStatus } from "@/integrations/supabase/types";
 
 type Stunde = Database["public"]["Tables"]["stundenbuchungen"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
+type Profile = Database["public"]["Tables"]["profiles"]["Row"];
+type Partie = Database["public"]["Tables"]["partien"]["Row"];
 
 const STATUS_LABEL: Record<StundenStatus, string> = {
   offen: "Offen",
@@ -52,8 +57,10 @@ const FEHLZEITEN = [
   { value: "K", label: "Krank", color: "#ef4444" },
   { value: "F", label: "Feiertag", color: "#8b5cf6" },
   { value: "SW", label: "Schlechtwetter", color: "#f59e0b" },
-  { value: "S", label: "Sozialst.", color: "#10b981" },
 ];
+
+const initials = (p: { vorname: string; nachname: string }) =>
+  `${p.vorname[0] ?? ""}${p.nachname[0] ?? ""}`.toUpperCase();
 
 export default function Stunden() {
   const { user, profile } = useAuth();
@@ -63,9 +70,13 @@ export default function Stunden() {
   const [editing, setEditing] = useState<Partial<Stunde> | null>(null);
   const [extras, setExtras] = useState(false);
 
+  // Polier-Mode
+  const [polierPartie, setPolierPartie] = useState<Partie | null>(null);
+  const [partieMembers, setPartieMembers] = useState<Profile[]>([]);
+  const [forUserId, setForUserId] = useState<string>("");
+
   const todayIso = () => new Date().toISOString().slice(0, 10);
 
-  // Quick book form state
   const [date, setDate] = useState<string>(todayIso);
   const [hours, setHours] = useState<number>(8);
   const [baustelleId, setBaustelleId] = useState<string>("");
@@ -77,23 +88,64 @@ export default function Stunden() {
   const [km, setKm] = useState<number>(0);
   const [notizen, setNotizen] = useState<string>("");
 
+  const isPolier = !!polierPartie;
+
+  // ─── Polier-Detektion (genau wenn dieser User Partieleiter einer Partie ist) ───
+  useEffect(() => {
+    if (!user) return;
+    supabase
+      .from("partien")
+      .select("*")
+      .eq("partieleiter_id", user.id)
+      .maybeSingle()
+      .then(async ({ data: p }) => {
+        if (!p) {
+          setPolierPartie(null);
+          setPartieMembers([]);
+          setForUserId(user.id);
+          return;
+        }
+        setPolierPartie(p as Partie);
+        const { data: members } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("partie_id", p.id)
+          .eq("is_active", true)
+          .order("nachname");
+        setPartieMembers((members as Profile[]) ?? []);
+        setForUserId(user.id);
+      });
+  }, [user]);
+
+  // ─── Daten laden: Buchungen (eigene + falls Polier auch der Partie) + Baustellen ───
   const load = async () => {
     if (!user) return;
     const fromDate = new Date();
     fromDate.setDate(fromDate.getDate() - 30);
+    const fromIso = fromDate.toISOString().slice(0, 10);
+
+    let stundenQuery = supabase
+      .from("stundenbuchungen")
+      .select("*")
+      .gte("datum", fromIso)
+      .order("datum", { ascending: false });
+
+    if (isPolier && partieMembers.length > 0) {
+      const ids = [user.id, ...partieMembers.map((m) => m.id)];
+      stundenQuery = stundenQuery.in("mitarbeiter_id", Array.from(new Set(ids)));
+    } else {
+      stundenQuery = stundenQuery.eq("mitarbeiter_id", user.id);
+    }
+
+    const partieIdForBaustellen = polierPartie?.id ?? profile?.partie_id;
 
     const [r, b] = await Promise.all([
-      supabase
-        .from("stundenbuchungen")
-        .select("*")
-        .eq("mitarbeiter_id", user.id)
-        .gte("datum", fromDate.toISOString().slice(0, 10))
-        .order("datum", { ascending: false }),
-      profile?.partie_id
+      stundenQuery,
+      partieIdForBaustellen
         ? supabase
             .from("baustellen")
             .select("*")
-            .eq("partie_id", profile.partie_id)
+            .eq("partie_id", partieIdForBaustellen)
             .in("status", ["aktiv", "geplant"])
             .order("bvh_name")
         : supabase
@@ -105,7 +157,6 @@ export default function Stunden() {
     setRows((r.data as Stunde[]) ?? []);
     setBaustellen((b.data as Baustelle[]) ?? []);
 
-    // Default Baustelle: first active one of partie
     if (!baustelleId && (b.data as Baustelle[])?.length === 1) {
       setBaustelleId((b.data as Baustelle[])[0].id);
     }
@@ -113,7 +164,31 @@ export default function Stunden() {
 
   useEffect(() => {
     load();
-  }, [user, profile]);
+  }, [user, profile, polierPartie, partieMembers]);
+
+  // ─── Tagesstatus pro Person für gewähltes Datum ───
+  const statusForDate = useMemo(() => {
+    const map = new Map<string, { hours: number; rows: Stunde[] }>();
+    rows
+      .filter((r) => r.datum === date)
+      .forEach((r) => {
+        const cur = map.get(r.mitarbeiter_id) ?? { hours: 0, rows: [] };
+        cur.hours += Number(r.arbeitsstunden ?? r.fehlzeit_stunden ?? 0);
+        cur.rows.push(r);
+        map.set(r.mitarbeiter_id, cur);
+      });
+    return map;
+  }, [rows, date]);
+
+  // ─── Doppel-Buchung-Warnung ───
+  const existingForCurrent = useMemo(() => {
+    return rows.find(
+      (r) =>
+        r.mitarbeiter_id === forUserId &&
+        r.datum === date &&
+        (fehlzeitTyp ? !!r.fehlzeit_typ : r.baustelle_id === baustelleId)
+    );
+  }, [rows, forUserId, date, baustelleId, fehlzeitTyp]);
 
   const totalsThisMonth = useMemo(() => {
     const monthStart = new Date();
@@ -122,15 +197,17 @@ export default function Stunden() {
     let arbeit = 0,
       fahrt = 0,
       fehl = 0;
-    rows.forEach((r) => {
-      if (new Date(r.datum) >= monthStart) {
-        arbeit += Number(r.arbeitsstunden ?? 0);
-        fahrt += Number(r.fahrstunden ?? 0);
-        fehl += Number(r.fehlzeit_stunden ?? 0);
-      }
-    });
+    rows
+      .filter((r) => r.mitarbeiter_id === user?.id)
+      .forEach((r) => {
+        if (new Date(r.datum) >= monthStart) {
+          arbeit += Number(r.arbeitsstunden ?? 0);
+          fahrt += Number(r.fahrstunden ?? 0);
+          fehl += Number(r.fehlzeit_stunden ?? 0);
+        }
+      });
     return { arbeit, fahrt, fehl };
-  }, [rows]);
+  }, [rows, user]);
 
   const moveDate = (d: number) => {
     const nd = new Date(date);
@@ -139,7 +216,6 @@ export default function Stunden() {
   };
 
   const resetForm = () => {
-    setDate(todayIso());
     setHours(8);
     setTaetigkeit("");
     setFehlzeitTyp("");
@@ -152,7 +228,7 @@ export default function Stunden() {
   };
 
   const submit = async () => {
-    if (!user) return;
+    if (!user || !forUserId) return;
     if (!fehlzeitTyp && !baustelleId) {
       toast({
         variant: "destructive",
@@ -162,8 +238,25 @@ export default function Stunden() {
       return;
     }
 
+    if (existingForCurrent) {
+      const personLabel =
+        forUserId === user.id
+          ? "dich"
+          : partieMembers.find((m) => m.id === forUserId)?.vorname ?? "diese Person";
+      const ok = window.confirm(
+        `Für ${personLabel} ist am ${new Date(date).toLocaleDateString("de-AT")} schon ` +
+          `${Number(existingForCurrent.arbeitsstunden ?? existingForCurrent.fehlzeit_stunden ?? 0).toFixed(1)}h ` +
+          `auf ${
+            existingForCurrent.baustelle_id
+              ? baustellen.find((b) => b.id === existingForCurrent.baustelle_id)?.bvh_name ?? "Baustelle"
+              : `Fehlzeit (${existingForCurrent.fehlzeit_typ})`
+          } gebucht. Trotzdem zusätzliche Buchung anlegen?`
+      );
+      if (!ok) return;
+    }
+
     const payload = {
-      mitarbeiter_id: user.id,
+      mitarbeiter_id: forUserId,
       datum: date,
       baustelle_id: fehlzeitTyp ? null : baustelleId || null,
       arbeitsstunden: fehlzeitTyp ? 0 : hours,
@@ -182,7 +275,13 @@ export default function Stunden() {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
       return;
     }
-    toast({ title: "Stunden gebucht", description: `${hours}h für ${date}` });
+    const personLabel =
+      forUserId === user.id
+        ? "dich"
+        : partieMembers.find((m) => m.id === forUserId)
+        ? `${partieMembers.find((m) => m.id === forUserId)!.vorname} ${partieMembers.find((m) => m.id === forUserId)!.nachname}`
+        : "Mitarbeiter";
+    toast({ title: "Stunden gebucht", description: `${hours}h für ${personLabel}` });
     resetForm();
     load();
   };
@@ -193,40 +292,166 @@ export default function Stunden() {
     load();
   };
 
-  const submitForApproval = async (id: string) => {
-    await supabase.from("stundenbuchungen").update({ status: "zm_freigabe" }).eq("id", id);
-    toast({ title: "Zur Freigabe eingereicht" });
-    load();
-  };
-
   const submitAllOpen = async () => {
     if (!user) return;
     const open = rows.filter((r) => r.status === "offen");
     if (open.length === 0) return;
-    await supabase
-      .from("stundenbuchungen")
-      .update({ status: "zm_freigabe" })
-      .eq("mitarbeiter_id", user.id)
-      .eq("status", "offen");
-    toast({ title: `${open.length} Buchungen eingereicht` });
+    const ids = open.map((r) => r.id);
+    await supabase.from("stundenbuchungen").update({ status: "zm_freigabe" }).in("id", ids);
+    toast({ title: `${open.length} Buchung${open.length === 1 ? "" : "en"} eingereicht` });
     load();
+  };
+
+  // ─── Hilfslogik: Wem gehört die Buchung in der Liste? ───
+  const personById = useMemo(() => {
+    const map = new Map<string, Profile>();
+    partieMembers.forEach((m) => map.set(m.id, m));
+    if (profile && user) {
+      map.set(user.id, {
+        ...(profile as any),
+        id: user.id,
+      });
+    }
+    return map;
+  }, [partieMembers, profile, user]);
+
+  const focusPerson = (uid: string) => {
+    setForUserId(uid);
+    resetForm();
   };
 
   return (
     <div className="space-y-4 max-w-2xl mx-auto">
-      <PageHeader
-        title="Stundenerfassung"
-        description="Erfasse deine Arbeitsstunden, Fahrtzeiten und Fehlzeiten."
-      />
+      <PageHeader title="Stundenerfassung" />
+
+      {/* Polier-Personenwahl */}
+      {isPolier && (
+        <Card className="border-primary/30">
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-center gap-2 text-xs">
+              <Users className="h-4 w-4 text-primary" />
+              <span className="font-semibold uppercase tracking-wide">
+                Polier · {polierPartie?.name}
+              </span>
+              <span className="ml-auto text-muted-foreground">
+                Du buchst für{" "}
+                <strong>
+                  {forUserId === user?.id
+                    ? "dich"
+                    : (() => {
+                        const p = partieMembers.find((m) => m.id === forUserId);
+                        return p ? `${p.vorname} ${p.nachname}` : "?";
+                      })()}
+                </strong>
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {/* Mich */}
+              <button
+                onClick={() => focusPerson(user!.id)}
+                className={`px-2.5 py-1.5 rounded-full text-xs font-medium border transition flex items-center gap-1.5 ${
+                  forUserId === user?.id
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-background hover:bg-muted"
+                }`}
+              >
+                <span
+                  className="h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
+                  style={{ background: polierPartie?.farbcode ?? "#999" }}
+                >
+                  {profile ? initials(profile as any) : ""}
+                </span>
+                Mich
+                {(() => {
+                  const s = statusForDate.get(user!.id);
+                  if (!s) return null;
+                  return (
+                    <span className="text-[10px] opacity-70 tabular-nums">{s.hours.toFixed(1)}h</span>
+                  );
+                })()}
+              </button>
+
+              {partieMembers
+                .filter((m) => m.id !== user?.id)
+                .map((m) => {
+                  const s = statusForDate.get(m.id);
+                  const active = forUserId === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => focusPerson(m.id)}
+                      className={`px-2.5 py-1.5 rounded-full text-xs font-medium border transition flex items-center gap-1.5 ${
+                        active
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-background hover:bg-muted"
+                      }`}
+                    >
+                      <span
+                        className="h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
+                        style={{ background: polierPartie?.farbcode ?? "#999" }}
+                      >
+                        {initials(m)}
+                      </span>
+                      <span className="truncate max-w-[80px]">
+                        {m.vorname} {m.nachname[0]}.
+                      </span>
+                      {s ? (
+                        <span
+                          className={`text-[10px] tabular-nums ${
+                            active ? "opacity-90" : "text-emerald-600 font-semibold"
+                          }`}
+                          title={`${s.hours.toFixed(1)}h gebucht`}
+                        >
+                          {s.hours.toFixed(1)}h
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground">—</span>
+                      )}
+                    </button>
+                  );
+                })}
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              Tippe einen Mitarbeiter an, um seine Stunden für{" "}
+              {new Date(date).toLocaleDateString("de-AT")} einzugeben.
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Doppel-Buchung-Warnung */}
+      {existingForCurrent && (
+        <Card className="border-amber-400 bg-amber-50">
+          <CardContent className="p-3 flex items-start gap-2 text-xs">
+            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <strong>Schon gebucht:</strong>{" "}
+              {Number(
+                existingForCurrent.arbeitsstunden ?? existingForCurrent.fehlzeit_stunden ?? 0
+              ).toFixed(1)}
+              h am {new Date(existingForCurrent.datum).toLocaleDateString("de-AT")}
+              {existingForCurrent.baustelle_id
+                ? ` auf ${baustellen.find((b) => b.id === existingForCurrent.baustelle_id)?.bvh_name ?? "Baustelle"}`
+                : ` (${existingForCurrent.fehlzeit_typ})`}
+              . Eine weitere Buchung wäre möglich (Tag-Splitting), du wirst beim Speichern aber
+              nochmal gefragt.
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Quick-Book Card */}
       <Card>
         <CardContent className="p-4 space-y-4">
-          {/* Datum mit Pfeilen */}
           <div>
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">Datum</Label>
             <div className="flex items-center gap-2 mt-1.5">
-              <Button variant="outline" size="icon" className="h-11 w-11 shrink-0" onClick={() => moveDate(-1)}>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-11 w-11 shrink-0"
+                onClick={() => moveDate(-1)}
+              >
                 <ChevronLeft className="h-5 w-5" />
               </Button>
               <Input
@@ -235,7 +460,12 @@ export default function Stunden() {
                 onChange={(e) => setDate(e.target.value)}
                 className="text-center font-medium h-11"
               />
-              <Button variant="outline" size="icon" className="h-11 w-11 shrink-0" onClick={() => moveDate(1)}>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-11 w-11 shrink-0"
+                onClick={() => moveDate(1)}
+              >
                 <ChevronRight className="h-5 w-5" />
               </Button>
             </div>
@@ -270,7 +500,6 @@ export default function Stunden() {
             </div>
           </div>
 
-          {/* Mode: Arbeit oder Fehlzeit */}
           <div>
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">
               {fehlzeitTyp ? "Fehlzeit" : "Baustelle"}
@@ -295,11 +524,7 @@ export default function Stunden() {
                       ? "text-white border-transparent"
                       : "bg-background hover:bg-muted"
                   }`}
-                  style={
-                    fehlzeitTyp === f.value
-                      ? { background: f.color }
-                      : undefined
-                  }
+                  style={fehlzeitTyp === f.value ? { background: f.color } : undefined}
                 >
                   {f.label}
                 </button>
@@ -358,7 +583,6 @@ export default function Stunden() {
             )}
           </div>
 
-          {/* Stunden Big Display */}
           <div>
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">
               {fehlzeitTyp ? "Fehlzeit-Stunden" : "Arbeitsstunden"}
@@ -400,7 +624,6 @@ export default function Stunden() {
             </div>
           </div>
 
-          {/* Tätigkeit */}
           {!fehlzeitTyp && (
             <div>
               <Label className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -415,7 +638,6 @@ export default function Stunden() {
             </div>
           )}
 
-          {/* Erweitert */}
           {!fehlzeitTyp && (
             <button
               onClick={() => setExtras(!extras)}
@@ -482,32 +704,29 @@ export default function Stunden() {
             </div>
           )}
 
-          {/* Submit */}
           <Button onClick={submit} className="w-full h-12 text-base">
             <Plus className="h-5 w-5 mr-2" /> Buchung speichern
           </Button>
         </CardContent>
       </Card>
 
-      {/* Monat-Summary */}
+      {/* Monat-Summary (eigene) */}
       <Card>
         <CardContent className="p-3 grid grid-cols-3 gap-2 text-center">
           <div>
             <div className="text-2xl font-bold tabular-nums">
               {totalsThisMonth.arbeit.toFixed(1)}
             </div>
-            <div className="text-[10px] text-muted-foreground uppercase">Arbeit</div>
+            <div className="text-[10px] text-muted-foreground uppercase">
+              Arbeit{isPolier && " · ich"}
+            </div>
           </div>
           <div>
-            <div className="text-2xl font-bold tabular-nums">
-              {totalsThisMonth.fahrt.toFixed(1)}
-            </div>
+            <div className="text-2xl font-bold tabular-nums">{totalsThisMonth.fahrt.toFixed(1)}</div>
             <div className="text-[10px] text-muted-foreground uppercase">Fahrt</div>
           </div>
           <div>
-            <div className="text-2xl font-bold tabular-nums">
-              {totalsThisMonth.fehl.toFixed(1)}
-            </div>
+            <div className="text-2xl font-bold tabular-nums">{totalsThisMonth.fehl.toFixed(1)}</div>
             <div className="text-[10px] text-muted-foreground uppercase">Fehlzeit</div>
           </div>
         </CardContent>
@@ -516,7 +735,9 @@ export default function Stunden() {
       {/* Letzte Buchungen */}
       <div>
         <div className="flex items-center justify-between mb-2 px-1">
-          <h2 className="text-sm font-semibold">Letzte Buchungen</h2>
+          <h2 className="text-sm font-semibold">
+            {isPolier ? "Buchungen meiner Partie" : "Meine Buchungen"}
+          </h2>
           {rows.some((r) => r.status === "offen") && (
             <Button size="sm" variant="outline" onClick={submitAllOpen}>
               <Send className="h-3.5 w-3.5 mr-1" /> Alle offenen einreichen
@@ -526,6 +747,9 @@ export default function Stunden() {
         <div className="space-y-1.5">
           {rows.map((r) => {
             const b = baustellen.find((x) => x.id === r.baustelle_id);
+            const p = personById.get(r.mitarbeiter_id);
+            const ownEntry = r.mitarbeiter_id === user?.id;
+            const canEdit = r.status === "offen" && (ownEntry || isPolier);
             return (
               <Card key={r.id}>
                 <CardContent className="p-3 flex items-center gap-3">
@@ -535,7 +759,7 @@ export default function Stunden() {
                     <Calendar className="h-4 w-4" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 text-sm">
+                    <div className="flex items-center gap-1.5 text-sm flex-wrap">
                       <span className="font-semibold tabular-nums">
                         {new Date(r.datum).toLocaleDateString("de-AT", {
                           day: "2-digit",
@@ -551,15 +775,28 @@ export default function Stunden() {
                           {r.fehlzeit_typ}
                         </Badge>
                       )}
+                      {isPolier && p && (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] px-1.5 py-0"
+                          style={{
+                            borderColor: polierPartie?.farbcode,
+                            color: polierPartie?.farbcode,
+                          }}
+                        >
+                          {ownEntry ? "Ich" : `${p.vorname} ${p.nachname[0]}.`}
+                        </Badge>
+                      )}
                     </div>
                     <div className="text-xs text-muted-foreground truncate">
                       {b?.bvh_name ?? (r.fehlzeit_typ ? "Fehlzeit" : "—")}
+                      {r.taetigkeit && ` · ${r.taetigkeit}`}
                     </div>
                   </div>
-                  <Badge variant="outline" className="text-[10px] shrink-0">
+                  <Badge variant="outline" className="text-xs shrink-0">
                     {STATUS_LABEL[r.status]}
                   </Badge>
-                  {r.status === "offen" && (
+                  {canEdit && (
                     <div className="flex shrink-0">
                       <Button
                         variant="ghost"
@@ -588,6 +825,7 @@ export default function Stunden() {
           {rows.length === 0 && (
             <Card>
               <CardContent className="p-6 text-center text-sm text-muted-foreground">
+                <CheckCircle2 className="h-6 w-6 mx-auto mb-2 opacity-50" />
                 Noch keine Buchungen. Trag deine ersten Stunden oben ein.
               </CardContent>
             </Card>
@@ -595,7 +833,6 @@ export default function Stunden() {
         </div>
       </div>
 
-      {/* Edit dialog */}
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="max-w-sm sm:max-w-md">
           <DialogHeader>
