@@ -104,6 +104,7 @@ export default function Dashboard() {
     cta: string;
     icon: typeof Clock;
     show: boolean;
+    color: string;
   }[] = [
     {
       to: "/mein-tag",
@@ -112,6 +113,7 @@ export default function Dashboard() {
       cta: "Heute öffnen",
       icon: ClipboardList,
       show: true,
+      color: "#0ea5e9", // sky
     },
     {
       to: "/stunden",
@@ -120,6 +122,7 @@ export default function Dashboard() {
       cta: "Stunden erfassen",
       icon: Clock,
       show: true,
+      color: "#10b981", // emerald
     },
     {
       to: "/baustellen",
@@ -128,6 +131,7 @@ export default function Dashboard() {
       cta: "Baustellen öffnen",
       icon: Building2,
       show: true,
+      color: "#dc2626", // red (Willroider)
     },
     {
       to: "/arbeitsplanung",
@@ -136,6 +140,7 @@ export default function Dashboard() {
       cta: "Planung öffnen",
       icon: CalendarDays,
       show: isAdmin,
+      color: "#f59e0b", // amber
     },
     {
       to: "/mitarbeiter",
@@ -144,6 +149,7 @@ export default function Dashboard() {
       cta: "Verwalten",
       icon: Users,
       show: isAdmin,
+      color: "#8b5cf6", // violet
     },
     {
       to: "/stunden/freigabe",
@@ -152,6 +158,7 @@ export default function Dashboard() {
       cta: "Stunden prüfen",
       icon: CheckCircle2,
       show: canReview,
+      color: "#84cc16", // lime
     },
   ];
 
@@ -213,18 +220,30 @@ export default function Dashboard() {
           {cards
             .filter((c) => c.show)
             .map((c) => (
-              <Link key={c.to} to={c.to} className="group">
-                <Card className="cursor-pointer hover:shadow-lg hover:border-primary/50 transition-all h-full flex flex-col">
+              <Link key={c.to} to={c.to} className="group block">
+                <Card
+                  className="cursor-pointer hover:shadow-lg transition-all h-full flex flex-col overflow-hidden border-2 hover:-translate-y-0.5"
+                  style={{ borderColor: `${c.color}33` }}
+                >
+                  <div className="h-1.5 w-full" style={{ background: c.color }} />
                   <CardHeader className="space-y-2 pb-3">
-                    <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <c.icon className="h-6 w-6 text-primary" />
+                    <div
+                      className="h-14 w-14 rounded-xl flex items-center justify-center shadow-sm"
+                      style={{ background: `${c.color}1a`, color: c.color }}
+                    >
+                      <c.icon className="h-7 w-7" />
                     </div>
                     <CardTitle className="text-lg sm:text-xl">{c.label}</CardTitle>
                     <CardDescription className="text-sm">{c.desc}</CardDescription>
                   </CardHeader>
                   <CardContent className="mt-auto pt-0">
-                    <Button className="w-full" size="sm">
+                    <Button
+                      className="w-full text-white shadow-sm group-hover:brightness-110 transition"
+                      size="sm"
+                      style={{ background: c.color }}
+                    >
                       {c.cta}
+                      <ArrowRight className="h-4 w-4 ml-1" />
                     </Button>
                   </CardContent>
                 </Card>
