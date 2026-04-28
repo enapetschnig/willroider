@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   CalendarDays,
@@ -37,20 +37,24 @@ type NavItem = {
   label: string;
   icon: typeof LayoutDashboard;
   roles?: ("admin" | "review" | "all")[];
+  /** end=true → highlight nur wenn Pfad EXAKT übereinstimmt. Default true. */
+  end?: boolean;
 };
 
 const NAV: NavItem[] = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["all"] },
-  { to: "/mein-tag", label: "Mein Tag", icon: ClipboardList, roles: ["all"] },
-  { to: "/arbeitsplanung", label: "Arbeitsplanung", icon: CalendarDays, roles: ["admin"] },
-  { to: "/baustellen", label: "Baustellen", icon: Building2, roles: ["all"] },
-  { to: "/mitarbeiter", label: "Mitarbeiter & Partien", icon: Users, roles: ["admin"] },
-  { to: "/fahrzeuge", label: "Fahrzeuge", icon: Truck, roles: ["admin"] },
-  { to: "/stunden", label: "Stunden", icon: Clock, roles: ["all"] },
-  { to: "/stunden/auswertung", label: "Auswertung", icon: BarChart3, roles: ["review"] },
-  { to: "/stunden/freigabe", label: "Freigaben", icon: CheckCircle2, roles: ["review"] },
-  { to: "/evaluierung", label: "Evaluierung", icon: ShieldCheck, roles: ["admin"] },
-  { to: "/kalender", label: "Arbeitszeitkalender", icon: CalendarRange, roles: ["admin"] },
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["all"], end: true },
+  { to: "/mein-tag", label: "Mein Tag", icon: ClipboardList, roles: ["all"], end: true },
+  { to: "/arbeitsplanung", label: "Arbeitsplanung", icon: CalendarDays, roles: ["admin"], end: true },
+  // /baustellen darf auch /baustellen/:id markieren
+  { to: "/baustellen", label: "Baustellen", icon: Building2, roles: ["all"], end: false },
+  { to: "/mitarbeiter", label: "Mitarbeiter & Partien", icon: Users, roles: ["admin"], end: true },
+  { to: "/fahrzeuge", label: "Fahrzeuge", icon: Truck, roles: ["admin"], end: true },
+  // exact match, sonst werden /stunden/auswertung & /stunden/freigabe auch hier markiert
+  { to: "/stunden", label: "Zeiterfassung", icon: Clock, roles: ["all"], end: true },
+  { to: "/stunden/auswertung", label: "Auswertung", icon: BarChart3, roles: ["review"], end: true },
+  { to: "/stunden/freigabe", label: "Freigaben", icon: CheckCircle2, roles: ["review"], end: true },
+  { to: "/evaluierung", label: "Evaluierung", icon: ShieldCheck, roles: ["admin"], end: true },
+  { to: "/kalender", label: "Arbeitszeitkalender", icon: CalendarRange, roles: ["admin"], end: true },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -104,19 +108,23 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-muted/30 flex">
       {/* Sidebar (desktop) */}
       <aside className="hidden lg:flex w-64 shrink-0 flex-col bg-card border-r">
-        <div className="px-4 py-4 border-b flex items-center gap-3">
+        <Link
+          to="/"
+          className="px-4 py-4 border-b flex items-center gap-3 hover:bg-muted/40 transition-colors"
+          aria-label="Zum Dashboard"
+        >
           <img src="/willroider-logo.jpg" alt="Holzbau Willroider" className="h-9 w-auto shrink-0" />
           <div className="leading-tight min-w-0">
             <div className="font-semibold text-sm truncate">Holzbau Willroider</div>
             <div className="text-[11px] text-muted-foreground">Baustellenmanagement</div>
           </div>
-        </div>
+        </Link>
         <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
           {visibleNav.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
-              end={item.to === "/"}
+              end={item.end ?? true}
               className={({ isActive }) =>
                 cn(
                   "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
@@ -150,10 +158,14 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
               </Button>
-              <div className="lg:hidden flex items-center gap-2 min-w-0">
+              <Link
+                to="/"
+                className="lg:hidden flex items-center gap-2 min-w-0"
+                aria-label="Zum Dashboard"
+              >
                 <img src="/willroider-logo.jpg" alt="Logo" className="h-7 w-auto shrink-0" />
                 <div className="text-sm font-semibold truncate">Holzbau Willroider</div>
-              </div>
+              </Link>
               <div className="hidden lg:block text-xs text-muted-foreground">
                 Angemeldet als <span className="font-medium text-foreground">{fullName}</span>
                 {role ? <span> · {roleLabel[role] ?? role}</span> : null}
@@ -197,7 +209,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <NavLink
                   key={item.to}
                   to={item.to}
-                  end={item.to === "/"}
+                  end={item.end ?? true}
                   onClick={() => setMobileOpen(false)}
                   className={({ isActive }) =>
                     cn(
