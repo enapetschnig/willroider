@@ -760,13 +760,36 @@ export default function Stunden() {
                               : b?.bvh_name ?? "—"}
                           </span>
                           {r.status === "offen" && (
-                            <button
-                              onClick={() => remove(r.id)}
-                              className="text-muted-foreground hover:text-destructive shrink-0"
-                              aria-label="Löschen"
+                            <div className="flex items-center gap-0.5 shrink-0">
+                              <button
+                                onClick={() => setEditing(r)}
+                                className="text-muted-foreground hover:text-primary p-1"
+                                aria-label="Buchung bearbeiten"
+                                title="Bearbeiten"
+                              >
+                                <Edit className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={() => remove(r.id)}
+                                className="text-muted-foreground hover:text-destructive p-1"
+                                aria-label="Buchung löschen"
+                                title="Löschen"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          )}
+                          {r.status !== "offen" && (
+                            <span
+                              className="text-[9px] uppercase tracking-wide text-muted-foreground shrink-0"
+                              title="Bereits eingereicht — nicht mehr editierbar"
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                              {r.status === "zm_freigabe"
+                                ? "ZM"
+                                : r.status === "buero_freigabe"
+                                ? "Büro"
+                                : r.status}
+                            </span>
                           )}
                         </div>
                       );
