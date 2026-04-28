@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { feiertagAt } from "@/lib/feiertage";
 import {
   Building2,
   CalendarDays,
@@ -366,6 +367,29 @@ export default function Dashboard() {
       )}
 
       <PageHeader title={`Hallo ${fullName.split(" ")[0] || "willkommen"}!`} />
+
+      {/* Feiertag-Hinweis: automatisch aus Kalender (AT + Kärnten) */}
+      {(() => {
+        const todayIso = new Date().toISOString().slice(0, 10);
+        const fei = feiertagAt(todayIso);
+        if (!fei) return null;
+        return (
+          <Card className="border-2 border-violet-300 bg-violet-50">
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className="h-12 w-12 rounded-full bg-violet-500 text-white flex items-center justify-center shrink-0 font-bold text-lg">
+                F
+              </div>
+              <div className="flex-1">
+                <div className="font-bold text-violet-900">Heute ist Feiertag</div>
+                <div className="text-sm text-violet-800">
+                  {fei.name}
+                  {fei.scope === "kaernten" && " (Kärntner Landesfeiertag)"}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* Heute-Card: heutige Einteilung mit Quick-Stundenbuchung */}
       {(heuteEinteilungen.length > 0 || heuteFehlzeit) && (

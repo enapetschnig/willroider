@@ -47,6 +47,7 @@ import {
   MapPin,
 } from "lucide-react";
 import type { Database, StundenStatus } from "@/integrations/supabase/types";
+import { feiertagAt } from "@/lib/feiertage";
 
 type Stunde = Database["public"]["Tables"]["stundenbuchungen"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -71,8 +72,8 @@ const STATUS_COLOR: Record<StundenStatus, string> = {
 const FEHLZEITEN = [
   { value: "U", label: "Urlaub", color: "#3b82f6" },
   { value: "K", label: "Krank", color: "#ef4444" },
-  { value: "F", label: "Feiertag", color: "#8b5cf6" },
   { value: "SW", label: "Schlechtwetter", color: "#f59e0b" },
+  // F (Feiertag) wird automatisch aus dem Feiertagskalender ermittelt — kein manueller Eintrag.
 ];
 
 const initials = (p: { vorname: string; nachname: string }) =>
@@ -697,6 +698,29 @@ export default function Stunden() {
                     month: "long",
                   })}
                 </div>
+                {/* Feiertag-Hinweis: automatisch aus Kalender */}
+                {(() => {
+                  const fei = feiertagAt(date);
+                  if (!fei) return null;
+                  return (
+                    <div className="mt-2 rounded-md border border-violet-300 bg-violet-50 px-2.5 py-2 text-xs flex items-center gap-2">
+                      <span className="h-5 w-5 rounded-full bg-violet-500 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                        F
+                      </span>
+                      <div className="flex-1">
+                        <div className="font-semibold text-violet-900">
+                          Feiertag: {fei.name}
+                        </div>
+                        <div className="text-[11px] text-violet-700">
+                          {fei.scope === "kaernten"
+                            ? "Kärntner Landesfeiertag"
+                            : "Gesetzlicher Feiertag in Österreich"}{" "}
+                          — keine Buchung nötig.
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Bereits gebucht heute */}
@@ -776,7 +800,7 @@ export default function Stunden() {
                 <Label className="text-xs uppercase tracking-wide text-muted-foreground">
                   {fehlzeitTyp ? "Fehlzeit" : "Was wurde gemacht"}
                 </Label>
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5 mt-1.5">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mt-1.5">
                   <button
                     onClick={() => setFehlzeitTyp("")}
                     className={`h-11 rounded-md text-sm font-semibold border-2 transition ${

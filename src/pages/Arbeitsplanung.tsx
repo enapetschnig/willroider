@@ -18,6 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
 import { useToast } from "@/hooks/use-toast";
 import type { Database, BaustellenStatus } from "@/integrations/supabase/types";
+import { feiertagAt, type FeiertagInfo } from "@/lib/feiertage";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
@@ -562,18 +563,27 @@ export default function Arbeitsplanung() {
   };
 
   const dayHeaders = useMemo(() => {
-    const days: { date: Date; week: number; year: number; isMonday: boolean; isToday: boolean }[] = [];
+    const days: {
+      date: Date;
+      week: number;
+      year: number;
+      isMonday: boolean;
+      isToday: boolean;
+      feiertag: FeiertagInfo | null;
+    }[] = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     for (let i = 0; i < totalDays; i++) {
       const d = new Date(rangeStart.getTime() + i * DAY_MS);
       const w = isoWeek(d);
+      const iso = isoDate(d);
       days.push({
         date: d,
         week: w.week,
         year: w.year,
         isMonday: d.getDay() === 1,
         isToday: d.getTime() === today.getTime(),
+        feiertag: feiertagAt(iso),
       });
     }
     return days;
@@ -824,12 +834,22 @@ export default function Arbeitsplanung() {
                   {dayHeaders.map((d, i) => {
                     const isWeekend = d.date.getDay() === 0 || d.date.getDay() === 6;
                     const dow = ["S", "M", "D", "M", "D", "F", "S"][d.date.getDay()];
+                    const isFeiertag = !!d.feiertag;
                     return (
                       <div
                         key={i}
+                        title={
+                          d.feiertag
+                            ? `${d.feiertag.name}${
+                                d.feiertag.scope === "kaernten" ? " (Kärnten)" : ""
+                              } · ${d.date.toLocaleDateString("de-AT")}`
+                            : d.date.toLocaleDateString("de-AT")
+                        }
                         className={`text-[9px] flex flex-col items-center justify-center border-r leading-tight ${
                           d.isToday
                             ? "bg-primary/20 text-primary font-semibold"
+                            : isFeiertag
+                            ? "bg-violet-200 text-violet-900 font-semibold"
                             : isWeekend
                             ? "bg-muted/40 text-muted-foreground"
                             : "text-muted-foreground"
@@ -865,6 +885,7 @@ export default function Arbeitsplanung() {
                           const iso = isoDate(d.date);
                           const a = assignments.get(cellKey(m.id, iso));
                           const isWeekend = d.date.getDay() === 0 || d.date.getDay() === 6;
+                          const isFeiertag = !!d.feiertag;
                           const selected = selection.has(cellKey(m.id, iso));
                           let bg = "transparent";
                           let label = "";
@@ -877,6 +898,10 @@ export default function Arbeitsplanung() {
                               bg = a.baustelleColor ?? "#6b7280";
                               label = a.baustelleName ?? "BV";
                             }
+                          } else if (isFeiertag) {
+                            // Automatischer Feiertag — kein DB-Eintrag nötig
+                            bg = "#8b5cf6";
+                            label = "F";
                           }
                           return (
                             <button
@@ -893,9 +918,9 @@ export default function Arbeitsplanung() {
                                 height: "100%",
                                 background:
                                   bg !== "transparent" ? bg : isWeekend ? "rgba(0,0,0,0.04)" : "transparent",
+                                opacity: isFeiertag && !a ? 0.55 : a?.isReadOnly ? 0.65 : 1,
                                 color: bg !== "transparent" ? textColor : undefined,
                                 cursor: isAdmin ? "pointer" : "default",
-                                opacity: a?.isReadOnly ? 0.65 : 1,
                                 touchAction: isAdmin ? "none" : undefined,
                                 userSelect: "none",
                               }}
@@ -904,6 +929,8 @@ export default function Arbeitsplanung() {
                                   ? a.source === "fehlzeit"
                                     ? `${FEHLZEIT_LABEL[a.fehlzeitTyp ?? ""] ?? a.fehlzeitTyp} · ${iso}${a.isReadOnly ? " (eingereicht)" : ""}`
                                     : `${a.baustelleName} · ${iso}`
+                                  : isFeiertag
+                                  ? `Feiertag: ${d.feiertag?.name} · ${iso}`
                                   : `${m.vorname} ${m.nachname} · ${iso}${isAdmin ? " · klick oder ziehen" : ""}`
                               }
                             >
@@ -1607,7 +1634,18 @@ function MobileWorkerPlan({
                 {dayHeaders.map((d, i) => (
                   <div
                     key={i}
-                    className={`py-1 ${d.isToday ? "bg-primary/20 text-primary font-semibold" : ""}`}
+                    title={
+                      d.feiertag
+                        ? `${d.feiertag.name}${d.feiertag.scope === "kaernten" ? " (Kärnten)" : ""}`
+                        : undefined
+                    }
+                    className={`py-1 ${
+                      d.isToday
+                        ? "bg-primary/20 text-primary font-semibold"
+                        : d.feiertag
+                        ? "bg-violet-200 text-violet-900 font-semibold"
+                        : ""
+                    }`}
                   >
                     {d.date.getDate()}
                   </div>
@@ -1636,6 +1674,7 @@ function MobileWorkerPlan({
                   {dayHeaders.map((d, i) => {
                     const iso = isoDate(d.date);
                     const a = assignments.get(cellKey(m.id, iso));
+                    const isFeiertag = !!d.feiertag;
                     let bg = "transparent";
                     let label = "";
                     if (a) {
@@ -1646,6 +1685,9 @@ function MobileWorkerPlan({
                         bg = a.baustelleColor ?? "#6b7280";
                         label = (a.baustelleName ?? "").slice(0, 1);
                       }
+                    } else if (isFeiertag) {
+                      bg = "#8b5cf6";
+                      label = "F";
                     }
                     const sel = selection.has(cellKey(m.id, iso));
                     const tooltipText = a
@@ -1660,6 +1702,8 @@ function MobileWorkerPlan({
                           ).toLocaleDateString("de-AT")}${
                             a.isReadOnly ? " (eingereicht)" : ""
                           }`
+                      : isFeiertag
+                      ? `Feiertag: ${d.feiertag?.name} · ${new Date(iso).toLocaleDateString("de-AT")}`
                       : new Date(iso).toLocaleDateString("de-AT");
                     const ariaLbl = `${m.vorname} ${m.nachname} – ${tooltipText}`;
                     return (
@@ -1679,7 +1723,7 @@ function MobileWorkerPlan({
                           height: "100%",
                           background: bg,
                           color: bg !== "transparent" ? "white" : undefined,
-                          opacity: a?.isReadOnly ? 0.65 : 1,
+                          opacity: isFeiertag && !a ? 0.55 : a?.isReadOnly ? 0.65 : 1,
                           cursor: isAdmin ? "pointer" : "default",
                           touchAction: isAdmin ? "none" : undefined,
                           userSelect: "none",
