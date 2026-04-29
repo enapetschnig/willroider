@@ -10,7 +10,6 @@ import {
   Clock,
   CalendarRange,
   ShieldCheck,
-  CheckCircle2,
   BarChart3,
   LogOut,
   Smartphone,
@@ -47,10 +46,9 @@ const NAV: NavItem[] = [
   { to: "/baustellen", label: "Baustellen", icon: Building2, roles: ["all"], end: false },
   { to: "/mitarbeiter", label: "Mitarbeiter & Partien", icon: Users, roles: ["admin"], end: true },
   { to: "/fahrzeuge", label: "Fahrzeuge", icon: Truck, roles: ["admin"], end: true },
-  // exact match, sonst werden /stunden/auswertung & /stunden/freigabe auch hier markiert
+  // exact match, sonst wird /stunden/auswertung auch hier markiert
   { to: "/stunden", label: "Zeiterfassung", icon: Clock, roles: ["all"], end: true },
   { to: "/stunden/auswertung", label: "Auswertung", icon: BarChart3, roles: ["review"], end: true },
-  { to: "/stunden/freigabe", label: "Freigaben", icon: CheckCircle2, roles: ["review"], end: true },
   { to: "/evaluierung", label: "Evaluierung", icon: ShieldCheck, roles: ["admin"], end: true },
   { to: "/kalender", label: "Arbeitszeitkalender", icon: CalendarRange, roles: ["admin"], end: true },
 ];

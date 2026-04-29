@@ -14,7 +14,6 @@ import {
   ClipboardList,
   Users,
   ArrowRight,
-  CheckCircle2,
   UserPlus,
   Truck,
 } from "lucide-react";
@@ -69,7 +68,7 @@ type HeuteEintrag = {
 };
 
 export default function Dashboard() {
-  const { user, profile, isAdmin, canReview } = useAuth();
+  const { user, profile, isAdmin } = useAuth();
   const [aktiveBaustellen, setAktiveBaustellen] = useState<Baustelle[]>([]);
   const [pendingProfiles, setPendingProfiles] = useState<PendingProfile[]>([]);
   const [pendingCount, setPendingCount] = useState<number>(0);
@@ -290,15 +289,6 @@ export default function Dashboard() {
       cta: "Verwalten",
       icon: Users,
       show: isAdmin,
-      color: WILLROIDER_RED,
-    },
-    {
-      to: "/stunden/freigabe",
-      label: "Freigaben",
-      desc: "Stunden prüfen & freigeben",
-      cta: "Stunden prüfen",
-      icon: CheckCircle2,
-      show: canReview,
       color: WILLROIDER_RED,
     },
   ];

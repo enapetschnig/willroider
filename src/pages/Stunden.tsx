@@ -35,7 +35,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar,
-  Send,
   Users,
   AlertTriangle,
   CheckCircle2,
@@ -584,16 +583,6 @@ export default function Stunden() {
   const remove = async (id: string) => {
     if (!confirm("Buchung löschen?")) return;
     await supabase.from("stundenbuchungen").delete().eq("id", id);
-    load();
-  };
-
-  const submitAllOpen = async () => {
-    if (!user) return;
-    const open = rows.filter((r) => r.status === "offen");
-    if (open.length === 0) return;
-    const ids = open.map((r) => r.id);
-    await supabase.from("stundenbuchungen").update({ status: "zm_freigabe" }).in("id", ids);
-    toast({ title: `${open.length} Buchung${open.length === 1 ? "" : "en"} eingereicht` });
     load();
   };
 
@@ -1176,11 +1165,6 @@ export default function Stunden() {
                   ? "Buchungen meiner Partie"
                   : "Meine Buchungen"}
               </h2>
-              {rows.some((r) => r.status === "offen" && r.mitarbeiter_id === user?.id) && (
-                <Button size="sm" variant="outline" onClick={submitAllOpen}>
-                  <Send className="h-3.5 w-3.5 mr-1" /> Alle offenen einreichen
-                </Button>
-              )}
             </div>
             <div className="space-y-1.5">
               {rows.map((r) => (
