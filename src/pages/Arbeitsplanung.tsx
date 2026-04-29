@@ -94,7 +94,10 @@ const FEHLZEIT_COLOR: Record<string, string> = {
 };
 
 const cellKey = (workerId: string, iso: string) => `${workerId}:${iso}`;
-const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+// Lokale ISO-Konvertierung (KEIN toISOString — sonst Timezone-Bug:
+// 1. Mai 00:00 lokal wird in CEST zu 30. April 22:00 UTC → falsches Datum)
+const isoDate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 export default function Arbeitsplanung() {
   const { canCreateBaustelle, isAdmin } = useAuth();
@@ -752,6 +755,7 @@ export default function Arbeitsplanung() {
           isAdmin={isAdmin}
           onCellPointerDown={onCellPointerDown}
           partien={partien}
+          onAssignMember={assignMemberToPartie}
         />
       </div>
 
@@ -781,29 +785,52 @@ export default function Arbeitsplanung() {
                     onDeletePartie={deletePartieFromPlan}
                     isAdmin={isAdmin}
                   />
-                  {g.members.map((m) => (
-                    <div
-                      key={m.id}
-                      className="border-b flex items-center gap-2 px-2 text-[11px] truncate"
-                      style={{ height: 28 }}
-                    >
-                      <span
-                        className="h-5 w-5 rounded-full flex items-center justify-center text-white text-[8px] font-bold shrink-0"
-                        style={{ background: g.partie?.farbcode ?? "#999" }}
+                  {g.members.map((m) => {
+                    const row = (
+                      <button
+                        type="button"
+                        className={`border-b flex items-center gap-2 px-2 text-[11px] w-full text-left transition ${
+                          isAdmin
+                            ? "hover:bg-muted cursor-pointer"
+                            : "cursor-default"
+                        }`}
+                        style={{ height: 28 }}
+                        title={
+                          isAdmin
+                            ? `${m.vorname} ${m.nachname} · klick zum Verschieben/Entfernen`
+                            : `${m.vorname} ${m.nachname}`
+                        }
                       >
-                        {m.vorname[0]}
-                        {m.nachname[0]}
-                      </span>
-                      <span className="font-medium truncate">
-                        {m.nachname} {m.vorname[0]}.
-                      </span>
-                      {m.id === g.partie?.partieleiter_id && (
-                        <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0 ml-auto">
-                          Polier
-                        </Badge>
-                      )}
-                    </div>
-                  ))}
+                        <span
+                          className="h-5 w-5 rounded-full flex items-center justify-center text-white text-[8px] font-bold shrink-0"
+                          style={{ background: g.partie?.farbcode ?? "#999" }}
+                        >
+                          {m.vorname[0]}
+                          {m.nachname[0]}
+                        </span>
+                        <span className="font-medium truncate">
+                          {m.nachname} {m.vorname[0]}.
+                        </span>
+                        {m.id === g.partie?.partieleiter_id && (
+                          <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0 ml-auto">
+                            Polier
+                          </Badge>
+                        )}
+                      </button>
+                    );
+                    if (!isAdmin) return <div key={m.id}>{row}</div>;
+                    return (
+                      <MemberActionPopover
+                        key={m.id}
+                        member={m}
+                        partie={g.partie}
+                        allPartien={partien}
+                        onAssign={assignMemberToPartie}
+                      >
+                        {row}
+                      </MemberActionPopover>
+                    );
+                  })}
                 </div>
               );
             })}
@@ -1235,6 +1262,70 @@ function PolierHeader({
   );
 }
 
+// ─── Wrapper-Popover für Mitarbeiter-Aktion (Verschieben / Entfernen) ───
+// Wird sowohl von MemberPill als auch von den Desktop-/Mobile-Reihen verwendet.
+function MemberActionPopover({
+  member,
+  partie,
+  allPartien,
+  onAssign,
+  children,
+}: {
+  member: Profile;
+  partie: Partie | null;
+  allPartien: Partie[];
+  onAssign: (memberId: string, newPartieId: string | null) => void;
+  children: React.ReactNode;
+}) {
+  const otherPartien = allPartien.filter((p) => p.id !== partie?.id);
+  return (
+    <Popover>
+      <PopoverTrigger asChild>{children}</PopoverTrigger>
+      <PopoverContent align="start" className="w-60 p-2">
+        <div className="text-xs font-semibold mb-2 px-1">
+          {member.vorname} {member.nachname}
+          {partie && (
+            <span className="ml-1.5 font-normal text-muted-foreground">
+              · {partie.name}
+            </span>
+          )}
+        </div>
+        {otherPartien.length > 0 && (
+          <>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground px-1 pb-1">
+              In andere Partie verschieben
+            </div>
+            <div className="space-y-0.5 mb-1">
+              {otherPartien.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => onAssign(member.id, p.id)}
+                  className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted flex items-center gap-2"
+                >
+                  <span
+                    className="h-2.5 w-2.5 rounded-full shrink-0"
+                    style={{ background: p.farbcode }}
+                  />
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        {partie && (
+          <button
+            onClick={() => onAssign(member.id, null)}
+            className="w-full text-left text-xs px-2 py-2 rounded border-t mt-1 pt-2 flex items-center gap-2 text-destructive hover:bg-destructive/10 font-medium"
+          >
+            <X className="h-3.5 w-3.5" />
+            Aus Partie „{partie.name}" entfernen
+          </button>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // ─── Mitarbeiter-Pill mit Popover für Re-Assignment ───
 function MemberPill({
   member,
@@ -1648,14 +1739,16 @@ function MobileWorkerPlan({
   isAdmin,
   onCellPointerDown,
   partien,
+  onAssignMember,
 }: {
   workerGroups: { partie: Partie | null; members: Profile[] }[];
-  dayHeaders: { date: Date; isToday: boolean; week: number; year: number }[];
+  dayHeaders: any[];
   assignments: Map<string, AssignmentCell>;
   selection: Set<string>;
   isAdmin: boolean;
   onCellPointerDown: (e: React.PointerEvent, workerId: string, iso: string) => void;
   partien: Partie[];
+  onAssignMember: (memberId: string, newPartieId: string | null) => void;
 }) {
   if (workerGroups.length === 0) {
     return (
@@ -1720,16 +1813,41 @@ function MobileWorkerPlan({
                     height: 28,
                   }}
                 >
-                  <div className="px-2 border-r truncate font-medium flex items-center gap-1.5">
-                    <span
-                      className="h-4 w-4 rounded-full flex items-center justify-center text-white text-[7px] font-bold shrink-0"
-                      style={{ background: g.partie?.farbcode ?? "#999" }}
-                    >
-                      {m.vorname[0]}
-                      {m.nachname[0]}
-                    </span>
-                    <span className="truncate">{m.nachname}</span>
-                  </div>
+                  {(() => {
+                    const cell = (
+                      <button
+                        type="button"
+                        className={`px-2 border-r truncate font-medium flex items-center gap-1.5 h-full text-left ${
+                          isAdmin ? "hover:bg-muted active:bg-muted/70" : ""
+                        }`}
+                        title={
+                          isAdmin
+                            ? `${m.vorname} ${m.nachname} · tippen zum Verschieben/Entfernen`
+                            : `${m.vorname} ${m.nachname}`
+                        }
+                      >
+                        <span
+                          className="h-4 w-4 rounded-full flex items-center justify-center text-white text-[7px] font-bold shrink-0"
+                          style={{ background: g.partie?.farbcode ?? "#999" }}
+                        >
+                          {m.vorname[0]}
+                          {m.nachname[0]}
+                        </span>
+                        <span className="truncate">{m.nachname}</span>
+                      </button>
+                    );
+                    if (!isAdmin) return cell;
+                    return (
+                      <MemberActionPopover
+                        member={m}
+                        partie={g.partie}
+                        allPartien={partien}
+                        onAssign={onAssignMember}
+                      >
+                        {cell}
+                      </MemberActionPopover>
+                    );
+                  })()}
                   {dayHeaders.map((d, i) => {
                     const iso = isoDate(d.date);
                     const a = assignments.get(cellKey(m.id, iso));
