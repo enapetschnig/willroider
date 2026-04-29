@@ -21,6 +21,7 @@ import {
   ShieldCheck,
   Users,
   Pencil,
+  AlertTriangle,
 } from "lucide-react";
 import {
   Dialog,
@@ -236,32 +237,28 @@ export default function BaustelleDetail() {
     load();
   };
 
-  const deleteBaustelle = async () => {
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  const deleteBaustelle = () => {
     if (!b) return;
-    const confirmText = window.prompt(
-      `⚠️ ENDGÜLTIG LÖSCHEN\n\n` +
-        `"${b.bvh_name}" und ALLE zugehörigen Daten werden gelöscht:\n` +
-        `• Alle Stundenbuchungen auf dieser Baustelle\n` +
-        `• Alle Termine, Dokumente, Kosten\n` +
-        `• Alle Einteilungen & Evaluierungen\n\n` +
-        `Das kann NICHT rückgängig gemacht werden!\n\n` +
-        `Tippe "${b.bvh_name}" ein, um zu bestätigen:`
-    );
-    if (confirmText === null) return;
-    if (confirmText.trim() !== b.bvh_name) {
-      toast({
-        variant: "destructive",
-        title: "Bestätigung falsch",
-        description: "Eingabe stimmt nicht — Löschung abgebrochen.",
-      });
-      return;
-    }
+    setDeleteConfirm("");
+    setDeleteOpen(true);
+  };
+
+  const confirmDeleteBaustelle = async () => {
+    if (!b) return;
+    if (deleteConfirm.trim() !== b.bvh_name) return;
+    setDeleting(true);
     const { error } = await supabase.from("baustellen").delete().eq("id", b.id);
+    setDeleting(false);
     if (error) {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
       return;
     }
     toast({ title: `Baustelle "${b.bvh_name}" gelöscht` });
+    setDeleteOpen(false);
     navigate("/baustellen");
   };
 
@@ -835,6 +832,83 @@ export default function BaustelleDetail() {
               load();
             }}
           />
+        </DialogContent>
+      </Dialog>
+
+      {/* Endgültig-Löschen-Dialog mit Eingabefeld */}
+      <Dialog open={deleteOpen} onOpenChange={(o) => !o && setDeleteOpen(false)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Baustelle endgültig löschen
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-md border-2 border-destructive/40 bg-destructive/5 p-3 text-sm space-y-2">
+              <div>
+                <strong>{b.bvh_name}</strong>
+                {b.kostenstelle && (
+                  <span className="text-muted-foreground"> · {b.kostenstelle}</span>
+                )}
+              </div>
+              <div className="text-xs">
+                Beim Bestätigen werden <strong>unwiderruflich</strong> gelöscht:
+              </div>
+              <ul className="text-xs list-disc list-inside space-y-0.5">
+                <li>Alle Stundenbuchungen auf dieser Baustelle</li>
+                <li>Alle Termine, Dokumente, Kosten</li>
+                <li>Alle Einteilungen &amp; Evaluierungen</li>
+              </ul>
+            </div>
+            <div>
+              <Label htmlFor="bs-del-confirm" className="text-sm">
+                Tippe zur Bestätigung den BVH-Namen ein:
+              </Label>
+              <div className="mt-1 mb-1.5">
+                <code className="inline-block rounded bg-muted px-2 py-1 text-base font-bold break-all">
+                  {b.bvh_name}
+                </code>
+              </div>
+              <Input
+                id="bs-del-confirm"
+                autoFocus
+                autoComplete="off"
+                value={deleteConfirm}
+                onChange={(e) => setDeleteConfirm(e.target.value)}
+                placeholder={b.bvh_name}
+                className={`h-11 ${
+                  deleteConfirm && deleteConfirm.trim() !== b.bvh_name
+                    ? "border-destructive focus-visible:ring-destructive"
+                    : ""
+                }`}
+              />
+              {deleteConfirm && deleteConfirm.trim() !== b.bvh_name && (
+                <div className="text-xs text-destructive mt-1">
+                  Eingabe stimmt nicht mit „{b.bvh_name}" überein.
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter className="mt-2 gap-2 sm:gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteOpen(false)}
+              disabled={deleting}
+            >
+              Abbrechen
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deleteConfirm.trim() !== b.bvh_name || deleting}
+              onClick={confirmDeleteBaustelle}
+            >
+              <Trash2 className="h-4 w-4 mr-1.5" />
+              {deleting ? "Lösche…" : "Endgültig löschen"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { CheckCircle2, XCircle, Plus, Edit, Trash2 } from "lucide-react";
+import { CheckCircle2, XCircle, Plus, Edit, Trash2, AlertTriangle } from "lucide-react";
 import type { Database, AppRole } from "@/integrations/supabase/types";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -57,6 +57,9 @@ export default function Mitarbeiter() {
   const [editing, setEditing] = useState<Profile | null>(null);
   const [editingPartie, setEditingPartie] = useState<Partial<Partie> | null>(null);
   const [assignToPartie, setAssignToPartie] = useState<Partie | null>(null);
+  const [deletingProfile, setDeletingProfile] = useState<Profile | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState<string>("");
+  const [deleting, setDeleting] = useState<boolean>(false);
 
   const load = async () => {
     const [profRes, partRes, roleRes] = await Promise.all([
@@ -90,33 +93,37 @@ export default function Mitarbeiter() {
     }
   };
 
-  const deletePermanent = async (p: Profile) => {
-    const fullName = `${p.vorname} ${p.nachname}`.trim() || p.email || "diesen Mitarbeiter";
-    const confirmText = window.prompt(
-      `⚠️ ENDGÜLTIG LÖSCHEN\n\n` +
-        `${fullName} und ALLE zugehörigen Daten werden gelöscht:\n` +
-        `• Profil & Login-Account\n` +
-        `• Alle Stundenbuchungen\n` +
-        `• Alle Einteilungen & Unterschriften\n\n` +
-        `Das kann NICHT rückgängig gemacht werden!\n\n` +
-        `Tippe "${p.nachname || fullName}" ein, um zu bestätigen:`
-    );
-    if (confirmText === null) return;
-    if (confirmText.trim() !== (p.nachname || fullName)) {
+  const openDelete = (p: Profile) => {
+    setDeletingProfile(p);
+    setDeleteConfirmText("");
+  };
+
+  const confirmDelete = async () => {
+    const p = deletingProfile;
+    if (!p) return;
+    const expected = (p.nachname || `${p.vorname} ${p.nachname}`.trim() || p.email || "")
+      .toString()
+      .trim();
+    if (deleteConfirmText.trim() !== expected) {
       toast({
         variant: "destructive",
-        title: "Bestätigung falsch",
-        description: "Eingabe stimmt nicht — Löschung abgebrochen.",
+        title: "Bestätigung stimmt nicht",
+        description: `Eingabe muss exakt "${expected}" lauten.`,
       });
       return;
     }
+    setDeleting(true);
     const { error } = await supabase.rpc("admin_delete_user", { _user_id: p.id });
+    setDeleting(false);
     if (error) {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
-    } else {
-      toast({ title: `${fullName} gelöscht`, description: "Alle Daten wurden entfernt." });
-      load();
+      return;
     }
+    const fullName = `${p.vorname} ${p.nachname}`.trim() || p.email || "Mitarbeiter";
+    toast({ title: `${fullName} gelöscht`, description: "Alle zugehörigen Daten entfernt." });
+    setDeletingProfile(null);
+    setDeleteConfirmText("");
+    load();
   };
 
   const setRole = async (userId: string, role: AppRole) => {
@@ -303,7 +310,7 @@ export default function Mitarbeiter() {
                         variant="outline"
                         size="sm"
                         className="h-10 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        onClick={() => deletePermanent(p)}
+                        onClick={() => openDelete(p)}
                         aria-label="Endgültig löschen"
                         title="Endgültig löschen (mit allen Buchungen)"
                       >
@@ -413,7 +420,7 @@ export default function Mitarbeiter() {
                             variant="ghost"
                             size="sm"
                             className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                            onClick={() => deletePermanent(p)}
+                            onClick={() => openDelete(p)}
                             aria-label="Endgültig löschen"
                             title="Endgültig löschen (inkl. aller Buchungen)"
                           >
@@ -734,6 +741,105 @@ export default function Mitarbeiter() {
               </DialogFooter>
             </form>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Mitarbeiter endgültig löschen — eigener Confirm-Dialog mit Eingabefeld */}
+      <Dialog
+        open={!!deletingProfile}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeletingProfile(null);
+            setDeleteConfirmText("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          {deletingProfile && (() => {
+            const p = deletingProfile;
+            const fullName = `${p.vorname} ${p.nachname}`.trim() || p.email || "Mitarbeiter";
+            const expected = (p.nachname || fullName).toString().trim();
+            const matches = deleteConfirmText.trim() === expected;
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-destructive">
+                    <AlertTriangle className="h-5 w-5" />
+                    Mitarbeiter endgültig löschen
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="rounded-md border-2 border-destructive/40 bg-destructive/5 p-3 text-sm space-y-2">
+                    <div>
+                      <strong>{fullName}</strong>
+                      {p.pers_nr && (
+                        <span className="text-muted-foreground"> · Pers.-Nr. {p.pers_nr}</span>
+                      )}
+                    </div>
+                    <div className="text-xs">
+                      Beim Bestätigen werden <strong>unwiderruflich</strong> gelöscht:
+                    </div>
+                    <ul className="text-xs list-disc list-inside space-y-0.5">
+                      <li>Profil &amp; Login-Account</li>
+                      <li>Alle Stundenbuchungen</li>
+                      <li>Alle Einteilungen &amp; Unterschriften</li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="delete-confirm" className="text-sm">
+                      Tippe zur Bestätigung den Nachnamen ein:
+                    </Label>
+                    <div className="mt-1 mb-1.5">
+                      <code className="inline-block rounded bg-muted px-2 py-1 text-base font-bold tabular-nums">
+                        {expected}
+                      </code>
+                    </div>
+                    <Input
+                      id="delete-confirm"
+                      autoFocus
+                      autoComplete="off"
+                      value={deleteConfirmText}
+                      onChange={(e) => setDeleteConfirmText(e.target.value)}
+                      placeholder={expected}
+                      className={`h-11 ${
+                        deleteConfirmText && !matches
+                          ? "border-destructive focus-visible:ring-destructive"
+                          : ""
+                      }`}
+                    />
+                    {deleteConfirmText && !matches && (
+                      <div className="text-xs text-destructive mt-1">
+                        Eingabe stimmt nicht mit „{expected}" überein.
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <DialogFooter className="mt-2 gap-2 sm:gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setDeletingProfile(null);
+                      setDeleteConfirmText("");
+                    }}
+                    disabled={deleting}
+                  >
+                    Abbrechen
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    disabled={!matches || deleting}
+                    onClick={confirmDelete}
+                  >
+                    <Trash2 className="h-4 w-4 mr-1.5" />
+                    {deleting ? "Lösche…" : "Endgültig löschen"}
+                  </Button>
+                </DialogFooter>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </div>
