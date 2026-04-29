@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, ChevronLeft, ChevronRight, Filter, Building2, UserPlus, X, Users, Trash2 } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, Filter, Building2, UserPlus, X, Users, Trash2, Pencil } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -117,9 +117,32 @@ export default function Arbeitsplanung() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Partial<Baustelle> | null>(null);
   const [partieDialog, setPartieDialog] = useState(false);
+  const [editingPartieId, setEditingPartieId] = useState<string | null>(null);
   const [newPartieName, setNewPartieName] = useState("");
   const [newPartieFarbe, setNewPartieFarbe] = useState("#3b82f6");
   const [newPartieleiterId, setNewPartieleiterId] = useState("");
+
+  const openPartieEditor = (partie?: Partie | null) => {
+    if (partie) {
+      setEditingPartieId(partie.id);
+      setNewPartieName(partie.name);
+      setNewPartieFarbe(partie.farbcode || "#3b82f6");
+      setNewPartieleiterId(partie.partieleiter_id ?? "");
+    } else {
+      setEditingPartieId(null);
+      setNewPartieName("");
+      setNewPartieFarbe("#3b82f6");
+      setNewPartieleiterId("");
+    }
+    setPartieDialog(true);
+  };
+  const closePartieEditor = () => {
+    setPartieDialog(false);
+    setEditingPartieId(null);
+    setNewPartieName("");
+    setNewPartieFarbe("#3b82f6");
+    setNewPartieleiterId("");
+  };
   const [assignments, setAssignments] = useState<Map<string, AssignmentCell>>(new Map());
   const [selectionAnchor, setSelectionAnchor] = useState<{ workerId: string; iso: string } | null>(
     null
@@ -402,7 +425,7 @@ export default function Arbeitsplanung() {
     }
   };
 
-  const createPartie = async () => {
+  const savePartie = async () => {
     if (!isAdmin) return;
     if (!newPartieName.trim()) {
       toast({ variant: "destructive", title: "Name fehlt" });
@@ -411,31 +434,52 @@ export default function Arbeitsplanung() {
     const payload: any = {
       name: newPartieName.trim(),
       farbcode: newPartieFarbe,
+      partieleiter_id: newPartieleiterId || null,
     };
-    if (newPartieleiterId) {
-      payload.partieleiter_id = newPartieleiterId;
+
+    let savedId: string | null = null;
+    if (editingPartieId) {
+      // UPDATE: Falls der Partieleiter gewechselt wurde, alten Polier-Flag entfernen
+      const old = partien.find((p) => p.id === editingPartieId);
+      const { error } = await supabase
+        .from("partien")
+        .update(payload)
+        .eq("id", editingPartieId);
+      if (error) {
+        toast({ variant: "destructive", title: "Fehler", description: error.message });
+        return;
+      }
+      savedId = editingPartieId;
+      if (old?.partieleiter_id && old.partieleiter_id !== newPartieleiterId) {
+        await supabase
+          .from("profiles")
+          .update({ is_partieleiter: false })
+          .eq("id", old.partieleiter_id);
+      }
+      toast({ title: `Partie „${newPartieName}" aktualisiert` });
+    } else {
+      const { data, error } = await supabase
+        .from("partien")
+        .insert(payload)
+        .select()
+        .single();
+      if (error) {
+        toast({ variant: "destructive", title: "Fehler", description: error.message });
+        return;
+      }
+      savedId = data.id;
+      toast({ title: `Partie „${newPartieName}" angelegt` });
     }
-    const { data, error } = await supabase
-      .from("partien")
-      .insert(payload)
-      .select()
-      .single();
-    if (error) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
-      return;
-    }
+
     // Wenn ein Partieleiter gewählt wurde: dessen profile.partie_id + is_partieleiter setzen
-    if (newPartieleiterId && data) {
+    if (newPartieleiterId && savedId) {
       await supabase
         .from("profiles")
-        .update({ partie_id: data.id, is_partieleiter: true })
+        .update({ partie_id: savedId, is_partieleiter: true })
         .eq("id", newPartieleiterId);
     }
-    toast({ title: `Partie „${newPartieName}" angelegt` });
-    setPartieDialog(false);
-    setNewPartieName("");
-    setNewPartieFarbe("#3b82f6");
-    setNewPartieleiterId("");
+
+    closePartieEditor();
     load();
   };
 
@@ -637,7 +681,7 @@ export default function Arbeitsplanung() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setPartieDialog(true)}
+                onClick={() => openPartieEditor()}
               >
                 <UserPlus className="h-4 w-4 mr-2" />
                 Neue Partie
@@ -756,6 +800,7 @@ export default function Arbeitsplanung() {
           onCellPointerDown={onCellPointerDown}
           partien={partien}
           onAssignMember={assignMemberToPartie}
+          onEditPartie={openPartieEditor}
         />
       </div>
 
@@ -783,6 +828,7 @@ export default function Arbeitsplanung() {
                     unassignedMembers={unassignedMembers}
                     onAssign={assignMemberToPartie}
                     onDeletePartie={deletePartieFromPlan}
+                    onEditPartie={openPartieEditor}
                     isAdmin={isAdmin}
                   />
                   {g.members.map((m) => {
@@ -1049,11 +1095,13 @@ export default function Arbeitsplanung() {
         </DialogContent>
       </Dialog>
 
-      {/* Neue-Partie-Dialog */}
-      <Dialog open={partieDialog} onOpenChange={setPartieDialog}>
+      {/* Partie-Editor (anlegen / bearbeiten) */}
+      <Dialog open={partieDialog} onOpenChange={(o) => !o && closePartieEditor()}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Neue Partie anlegen</DialogTitle>
+            <DialogTitle>
+              {editingPartieId ? "Partie bearbeiten" : "Neue Partie anlegen"}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div>
@@ -1108,15 +1156,12 @@ export default function Arbeitsplanung() {
               </select>
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setPartieDialog(false)}
-              >
+              <Button type="button" variant="outline" onClick={closePartieEditor}>
                 Abbrechen
               </Button>
-              <Button onClick={createPartie} disabled={!newPartieName.trim()}>
-                <Plus className="h-4 w-4 mr-1.5" /> Partie anlegen
+              <Button onClick={savePartie} disabled={!newPartieName.trim()}>
+                <Plus className="h-4 w-4 mr-1.5" />
+                {editingPartieId ? "Speichern" : "Partie anlegen"}
               </Button>
             </div>
           </div>
@@ -1136,6 +1181,7 @@ function PolierHeader({
   unassignedMembers,
   onAssign,
   onDeletePartie,
+  onEditPartie,
   isAdmin,
   variant = "desktop",
 }: {
@@ -1147,6 +1193,7 @@ function PolierHeader({
   unassignedMembers: Profile[];
   onAssign: (memberId: string, newPartieId: string | null) => void;
   onDeletePartie?: (partieId: string, partieName: string) => void;
+  onEditPartie?: (partie: Partie) => void;
   isAdmin: boolean;
   variant?: "desktop" | "mobile";
 }) {
@@ -1186,6 +1233,17 @@ function PolierHeader({
           )}
         </div>
         <span className="text-[10px] opacity-70 shrink-0">{bvhCount} BVH</span>
+        {isAdmin && partie && onEditPartie && (
+          <button
+            onClick={() => onEditPartie(partie)}
+            className="h-6 w-6 rounded-full bg-white/70 hover:bg-white border flex items-center justify-center shrink-0 transition"
+            style={{ color: farbe }}
+            title={`Partie „${partie.name}" bearbeiten`}
+            aria-label={`Partie ${partie.name} bearbeiten`}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        )}
         {isAdmin && partie && onDeletePartie && (
           <button
             onClick={() => onDeletePartie(partie.id, partie.name)}
@@ -1740,6 +1798,7 @@ function MobileWorkerPlan({
   onCellPointerDown,
   partien,
   onAssignMember,
+  onEditPartie,
 }: {
   workerGroups: { partie: Partie | null; members: Profile[] }[];
   dayHeaders: any[];
@@ -1749,6 +1808,7 @@ function MobileWorkerPlan({
   onCellPointerDown: (e: React.PointerEvent, workerId: string, iso: string) => void;
   partien: Partie[];
   onAssignMember: (memberId: string, newPartieId: string | null) => void;
+  onEditPartie?: (partie: Partie) => void;
 }) {
   if (workerGroups.length === 0) {
     return (
@@ -1764,13 +1824,24 @@ function MobileWorkerPlan({
       {workerGroups.map((g) => (
         <Card key={g.partie?.id ?? "ohne"} className="overflow-hidden">
           <div
-            className="px-3 py-2 text-xs font-bold uppercase"
+            className="px-3 py-2 text-xs font-bold uppercase flex items-center gap-2"
             style={{
               background: g.partie ? `${g.partie.farbcode}25` : "hsl(var(--muted))",
               color: g.partie?.farbcode ?? undefined,
             }}
           >
-            {g.partie?.name ?? "Ohne Partie"}
+            <span className="flex-1 truncate">{g.partie?.name ?? "Ohne Partie"}</span>
+            {isAdmin && g.partie && onEditPartie && (
+              <button
+                onClick={() => onEditPartie(g.partie!)}
+                className="h-7 w-7 rounded-full bg-white/70 hover:bg-white flex items-center justify-center shrink-0"
+                style={{ color: g.partie.farbcode ?? undefined }}
+                title={`Partie „${g.partie.name}" bearbeiten`}
+                aria-label={`Partie ${g.partie.name} bearbeiten`}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
           <div className="overflow-x-auto">
             <div style={{ minWidth: dayHeaders.length * 22 + 120 }}>
