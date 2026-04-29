@@ -173,7 +173,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </div>
                 ) : null}
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setInstallOpen(true)}>
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    setInstallOpen(true);
+                  }}
+                >
                   <Smartphone className="mr-2 h-4 w-4" />
                   <span>App zum Startbildschirm</span>
                 </DropdownMenuItem>
