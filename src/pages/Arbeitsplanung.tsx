@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, ChevronLeft, ChevronRight, Filter, Building2, UserPlus, X, Users, Trash2, Pencil, FileText, Download } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, Filter, UserPlus, X, Trash2, Pencil, FileText, Download } from "lucide-react";
 import {
   generateTagesplanDocx,
   shareOrDownloadDocx,
@@ -24,12 +23,11 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
 import { useToast } from "@/hooks/use-toast";
-import type { Database, BaustellenStatus } from "@/integrations/supabase/types";
+import type { Database } from "@/integrations/supabase/types";
 import { feiertagAt, type FeiertagInfo } from "@/lib/feiertage";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
-type Termin = Database["public"]["Tables"]["baustellen_termine"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Fahrzeug = Database["public"]["Tables"]["fahrzeuge"]["Row"];
 
@@ -53,27 +51,6 @@ function isoWeek(d: Date): { year: number; week: number } {
     Math.round(((date.getTime() - week1.getTime()) / DAY_MS - 3 + ((week1.getDay() + 6) % 7)) / 7);
   return { year: date.getFullYear(), week };
 }
-
-const STATUS_COLOR: Record<BaustellenStatus, string> = {
-  aktiv: "bg-emerald-500",
-  geplant: "bg-blue-500",
-  pausiert: "bg-amber-500",
-  abgeschlossen: "bg-gray-400",
-};
-
-const STATUS_DOT: Record<BaustellenStatus, string> = {
-  aktiv: "#10b981",
-  geplant: "#3b82f6",
-  pausiert: "#f59e0b",
-  abgeschlossen: "#9ca3af",
-};
-
-const STATUS_LABEL: Record<BaustellenStatus, string> = {
-  aktiv: "Aktiv",
-  geplant: "Geplant",
-  pausiert: "Pausiert",
-  abgeschlossen: "Abgeschlossen",
-};
 
 type AssignmentCell = {
   source: "einteilung" | "fehlzeit";
@@ -111,7 +88,6 @@ export default function Arbeitsplanung() {
   const { toast } = useToast();
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
-  const [termine, setTermine] = useState<Termin[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [fahrzeuge, setFahrzeuge] = useState<Fahrzeug[]>([]);
   const [filterPartie, setFilterPartie] = useState<string>("alle");
@@ -171,16 +147,14 @@ export default function Arbeitsplanung() {
   const dayWidth = 22; // px
 
   const load = async () => {
-    const [bs, p, t, pr, fz] = await Promise.all([
+    const [bs, p, pr, fz] = await Promise.all([
       supabase.from("baustellen").select("*").order("start_datum", { ascending: true }),
       supabase.from("partien").select("*").order("name"),
-      supabase.from("baustellen_termine").select("*"),
       supabase.from("profiles").select("*"),
       supabase.from("fahrzeuge").select("*").eq("aktiv", true).order("kennzeichen"),
     ]);
     setBaustellen((bs.data as Baustelle[]) ?? []);
     setPartien((p.data as Partie[]) ?? []);
-    setTermine((t.data as Termin[]) ?? []);
     setProfiles((pr.data as Profile[]) ?? []);
     setFahrzeuge((fz.data as Fahrzeug[]) ?? []);
   };
@@ -237,7 +211,6 @@ export default function Arbeitsplanung() {
     const ch = supabase
       .channel("planung-bs")
       .on("postgres_changes", { event: "*", schema: "public", table: "baustellen" }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "baustellen_termine" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "einteilungen" }, () => loadAssignments())
       .on("postgres_changes", { event: "*", schema: "public", table: "einteilung_mitarbeiter" }, () => loadAssignments())
       .on("postgres_changes", { event: "*", schema: "public", table: "stundenbuchungen" }, () => loadAssignments())
@@ -254,6 +227,34 @@ export default function Arbeitsplanung() {
   const totalDays = weeksVisible * 7;
   const rangeStart = anchorWeek;
   const rangeEnd = new Date(anchorWeek.getTime() + totalDays * DAY_MS);
+
+  // dayHeaders vor barsByWorker, weil Bars die Tag-Indizes brauchen
+  const dayHeaders = useMemo(() => {
+    const days: {
+      date: Date;
+      week: number;
+      year: number;
+      isMonday: boolean;
+      isToday: boolean;
+      feiertag: FeiertagInfo | null;
+    }[] = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    for (let i = 0; i < totalDays; i++) {
+      const d = new Date(rangeStart.getTime() + i * DAY_MS);
+      const w = isoWeek(d);
+      const iso = isoDate(d);
+      days.push({
+        date: d,
+        week: w.week,
+        year: w.year,
+        isMonday: d.getDay() === 1,
+        isToday: d.getTime() === today.getTime(),
+        feiertag: feiertagAt(iso),
+      });
+    }
+    return days;
+  }, [rangeStart, totalDays]);
 
   const partienById = useMemo(() => Object.fromEntries(partien.map((p) => [p.id, p])), [partien]);
   const profilesById = useMemo(() => Object.fromEntries(profiles.map((p) => [p.id, p])), [profiles]);
@@ -272,11 +273,6 @@ export default function Arbeitsplanung() {
     if (!partie?.partieleiter_id) return null;
     const p = profilesById[partie.partieleiter_id];
     return p ? `${p.vorname} ${p.nachname}`.trim() : null;
-  };
-  const bauleiterShort = (id: string | null) => {
-    if (!id) return "—";
-    const p = profilesById[id];
-    return p ? p.nachname : "—";
   };
 
   const unassignedMembers = useMemo(
@@ -610,6 +606,8 @@ export default function Arbeitsplanung() {
     const produktionTaetigkeiten = new Set<string>();
     const stempelnNames: string[] = [];
     const stempelnTaetigkeiten = new Set<string>();
+    const sonstigeNames: string[] = [];
+    const sonstigeTaetigkeiten = new Set<string>();
     for (const e of (einteilungenRaw ?? []) as any[]) {
       const baustelleName = e.baustellen?.bvh_name ?? "—";
       const kostenstelle = e.baustellen?.kostenstelle ?? null;
@@ -648,6 +646,13 @@ export default function Arbeitsplanung() {
       if (isOhneBaustelle && /stempeln/i.test(taetStr)) {
         stempelnNames.push(...mitarbeiter);
         if (taet) stempelnTaetigkeiten.add(taet);
+        continue;
+      }
+      // Fallback: ohne Baustelle + ohne Spezial-Match → Sonstige-Block
+      // damit der Eintrag nicht als BVH "—" verloren geht.
+      if (isOhneBaustelle) {
+        sonstigeNames.push(...mitarbeiter);
+        if (taet) sonstigeTaetigkeiten.add(taet);
         continue;
       }
 
@@ -720,6 +725,18 @@ export default function Arbeitsplanung() {
             mitarbeiter: stempelnNames,
           }
         : null;
+    const sonstige: SpezialBlock | null =
+      sonstigeNames.length > 0
+        ? {
+            label: "Sonstige:",
+            fahrzeuge: [],
+            taetigkeit:
+              sonstigeTaetigkeiten.size > 0
+                ? Array.from(sonstigeTaetigkeiten).join("\n")
+                : null,
+            mitarbeiter: sonstigeNames,
+          }
+        : null;
 
     return {
       datum: iso,
@@ -729,6 +746,7 @@ export default function Arbeitsplanung() {
       polierschule,
       krank,
       stempeln,
+      sonstige,
     };
   };
 
@@ -883,33 +901,6 @@ export default function Arbeitsplanung() {
     loadAssignments();
   };
 
-  const dayHeaders = useMemo(() => {
-    const days: {
-      date: Date;
-      week: number;
-      year: number;
-      isMonday: boolean;
-      isToday: boolean;
-      feiertag: FeiertagInfo | null;
-    }[] = [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    for (let i = 0; i < totalDays; i++) {
-      const d = new Date(rangeStart.getTime() + i * DAY_MS);
-      const w = isoWeek(d);
-      const iso = isoDate(d);
-      days.push({
-        date: d,
-        week: w.week,
-        year: w.year,
-        isMonday: d.getDay() === 1,
-        isToday: d.getTime() === today.getTime(),
-        feiertag: feiertagAt(iso),
-      });
-    }
-    return days;
-  }, [rangeStart, totalDays]);
-
   const weekHeaders = useMemo(() => {
     const out: { week: number; year: number; offsetDays: number; widthDays: number }[] = [];
     let cur: { week: number; year: number; offsetDays: number; widthDays: number } | null = null;
@@ -924,20 +915,6 @@ export default function Arbeitsplanung() {
     if (cur) out.push(cur);
     return out;
   }, [dayHeaders]);
-
-  const positionFor = (b: Baustelle) => {
-    if (!b.start_datum) return null;
-    const start = new Date(b.start_datum);
-    start.setHours(0, 0, 0, 0);
-    const end = b.end_datum ? new Date(b.end_datum) : new Date(start.getTime() + 7 * DAY_MS);
-    end.setHours(0, 0, 0, 0);
-    if (end < rangeStart || start > rangeEnd) return null;
-    const clampedStart = start < rangeStart ? rangeStart : start;
-    const clampedEnd = end > rangeEnd ? rangeEnd : end;
-    const left = ((clampedStart.getTime() - rangeStart.getTime()) / DAY_MS) * dayWidth;
-    const width = ((clampedEnd.getTime() - clampedStart.getTime()) / DAY_MS + 1) * dayWidth;
-    return { left, width };
-  };
 
   const movePeriod = (weeks: number) => {
     const next = new Date(anchorWeek.getTime() + weeks * 7 * DAY_MS);
@@ -1508,6 +1485,7 @@ export default function Arbeitsplanung() {
                     tagesplanPreview.polierschule,
                     tagesplanPreview.krank,
                     tagesplanPreview.stempeln,
+                    tagesplanPreview.sonstige,
                   ]
                     .filter(Boolean)
                     .map((b, i) => (

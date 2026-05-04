@@ -1544,8 +1544,13 @@ function EditForm({
                   type="number"
                   step="0.25"
                   min={0}
+                  max={Number(row.arbeitsstunden ?? 0) || undefined}
                   value={zulageStunden}
-                  onChange={(e) => setZulageStunden(Number(e.target.value))}
+                  onChange={(e) => {
+                    const max = Number(row.arbeitsstunden ?? 0);
+                    const v = Number(e.target.value);
+                    setZulageStunden(max > 0 ? Math.min(v, max) : v);
+                  }}
                 />
               </div>
               {zulageTyp === "andere" && (

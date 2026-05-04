@@ -30,6 +30,7 @@ export type TagesplanData = {
   polierschule?: SpezialBlock | null;
   krank?: SpezialBlock | null;
   stempeln?: SpezialBlock | null;
+  sonstige?: SpezialBlock | null;
 };
 
 const WOCHENTAG = [
@@ -178,6 +179,7 @@ export async function generateTagesplanDocx(data: TagesplanData): Promise<Blob> 
   addSpezial(data.polierschule);
   addSpezial(data.krank);
   addSpezial(data.stempeln);
+  addSpezial(data.sonstige);
 
   // Ersetze: spacerBefore + dataRowXml → rows.join("")
   const newRows = rows.join("");
