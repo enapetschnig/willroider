@@ -7,7 +7,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, ChevronLeft, ChevronRight, Filter, Building2, UserPlus, X, Users, Trash2, Pencil } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, Filter, Building2, UserPlus, X, Users, Trash2, Pencil, FileText, Download } from "lucide-react";
+import {
+  generateTagesplanDocx,
+  shareOrDownloadDocx,
+  type TagesplanData,
+  type EinteilungBlock,
+  type SpezialBlock,
+} from "@/lib/arbeitseinteilungDocx";
 import {
   Dialog,
   DialogContent,
@@ -117,6 +124,11 @@ export default function Arbeitsplanung() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Partial<Baustelle> | null>(null);
   const [partieDialog, setPartieDialog] = useState(false);
+  const [tagesplanDate, setTagesplanDate] = useState<string>(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
+  const [tagesplanBusy, setTagesplanBusy] = useState(false);
   const [editingPartieId, setEditingPartieId] = useState<string | null>(null);
   const [newPartieName, setNewPartieName] = useState("");
   const [newPartieFarbe, setNewPartieFarbe] = useState("#3b82f6");
@@ -302,6 +314,74 @@ export default function Arbeitsplanung() {
     return m;
   }, [flatWorkerIds]);
 
+  // Bars: pro Mitarbeiter zusammenhängende Segmente gleicher Einteilung/Fehlzeit
+  type Bar = {
+    workerId: string;
+    startIdx: number; // Index in dayHeaders
+    endIdx: number;   // inklusive
+    color: string;
+    label: string; // BVH-Name oder Fehlzeit-Typ-Label
+    source: "einteilung" | "fehlzeit";
+    baustelleId?: string | null;
+    fehlzeitTyp?: string;
+    isReadOnly: boolean;
+    einteilungIds: Set<string>;
+  };
+  const barsByWorker = useMemo(() => {
+    const result = new Map<string, Bar[]>();
+    if (workerGroups.length === 0 || dayHeaders.length === 0) return result;
+    for (const g of workerGroups) {
+      for (const m of g.members) {
+        const bars: Bar[] = [];
+        let cur: Bar | null = null;
+        for (let i = 0; i < dayHeaders.length; i++) {
+          const iso = isoDate(dayHeaders[i].date);
+          const a = assignments.get(cellKey(m.id, iso));
+          if (!a) {
+            cur = null;
+            continue;
+          }
+          // Kontinuitäts-Schlüssel: gleiche Quelle + gleiche Baustelle/Fehlzeit
+          const key =
+            a.source === "fehlzeit"
+              ? `f:${a.fehlzeitTyp ?? ""}`
+              : `e:${a.baustelleId ?? "x"}`;
+          if (cur && (cur as any)._key === key && cur.endIdx === i - 1) {
+            cur.endIdx = i;
+            if (a.einteilungId) cur.einteilungIds.add(a.einteilungId);
+            cur.isReadOnly = cur.isReadOnly && !!a.isReadOnly;
+            continue;
+          }
+          // Neuer Bar
+          const color =
+            a.source === "fehlzeit"
+              ? FEHLZEIT_COLOR[a.fehlzeitTyp ?? "U"] ?? "#6b7280"
+              : a.baustelleColor ?? "#6b7280";
+          const label =
+            a.source === "fehlzeit"
+              ? FEHLZEIT_LABEL[a.fehlzeitTyp ?? ""] ?? a.fehlzeitTyp ?? ""
+              : a.baustelleName ?? "BV";
+          cur = {
+            workerId: m.id,
+            startIdx: i,
+            endIdx: i,
+            color,
+            label,
+            source: a.source,
+            baustelleId: a.baustelleId,
+            fehlzeitTyp: a.fehlzeitTyp,
+            isReadOnly: !!a.isReadOnly,
+            einteilungIds: new Set(a.einteilungId ? [a.einteilungId] : []),
+          };
+          (cur as any)._key = key;
+          bars.push(cur);
+        }
+        if (bars.length > 0) result.set(m.id, bars);
+      }
+    }
+    return result;
+  }, [workerGroups, dayHeaders, assignments]);
+
   // Liefert das Cartesian-Produkt zwischen zwei Zellen — über mehrere Mitarbeiter UND Tage
   const makeRange = (
     a: { workerId: string; iso: string },
@@ -363,8 +443,19 @@ export default function Arbeitsplanung() {
         ? (document.elementsFromPoint(x, y) as HTMLElement[])
         : [document.elementFromPoint(x, y) as HTMLElement | null].filter(Boolean) as HTMLElement[]);
       for (const el of stack) {
+        // Cell-Direktmodus (Mobile-Variante hat noch echte Cells)
         const cell = (el as HTMLElement).closest?.("[data-cell='1']") as HTMLElement | null;
         if (cell) return { workerId: cell.dataset.worker ?? "", iso: cell.dataset.iso ?? "" };
+        // Row-Modus (Desktop-Bars): Tag aus x-Position berechnen
+        const row = (el as HTMLElement).closest?.("[data-row='1']") as HTMLElement | null;
+        if (row && row.dataset.worker) {
+          const rect = row.getBoundingClientRect();
+          const idx = Math.max(
+            0,
+            Math.min(dayHeaders.length - 1, Math.floor((x - rect.left) / dayWidth))
+          );
+          return { workerId: row.dataset.worker, iso: isoDate(dayHeaders[idx].date) };
+        }
       }
       return null;
     };
@@ -403,7 +494,7 @@ export default function Arbeitsplanung() {
       document.removeEventListener("pointerup", onUp);
       document.removeEventListener("pointercancel", onUp);
     };
-  }, [dragAnchor, dragHover]);
+  }, [dragAnchor, dragHover, dayHeaders]);
 
   const closePopover = () => {
     setPopover(null);
@@ -493,6 +584,127 @@ export default function Arbeitsplanung() {
     }
     toast({ title: "Partie gelöscht" });
     load();
+  };
+
+  // ─── Tagesplan-Daten aggregieren + DOCX generieren ───
+  const buildTagesplanData = async (iso: string): Promise<TagesplanData> => {
+    // 1) Einteilungen am Tag mit Baustelle, Tätigkeit, Mitarbeiter, Fahrzeuge
+    const { data: einteilungenRaw } = await supabase
+      .from("einteilungen")
+      .select(
+        "id, baustelle_id, taetigkeit, baustellen(bvh_name, kostenstelle), einteilung_mitarbeiter(mitarbeiter_id, profiles(vorname, nachname)), einteilung_fahrzeuge(fahrzeug_id, fahrzeuge(kennzeichen, bezeichnung))"
+      )
+      .eq("datum", iso);
+
+    type Block = {
+      bvhName: string;
+      kostenstelle: string | null;
+      fahrzeuge: string[];
+      taetigkeit: string | null;
+      mitarbeiter: string[];
+    };
+    const blocks: Block[] = [];
+    const polierschuleNames: string[] = [];
+    for (const e of (einteilungenRaw ?? []) as any[]) {
+      const baustelleName = e.baustellen?.bvh_name ?? "—";
+      const kostenstelle = e.baustellen?.kostenstelle ?? null;
+      const taet: string | null = e.taetigkeit ?? null;
+      const mitarbeiter = (e.einteilung_mitarbeiter ?? [])
+        .map((em: any) =>
+          em.profiles ? `${em.profiles.vorname} ${em.profiles.nachname}`.trim() : null
+        )
+        .filter(Boolean) as string[];
+      const fahrzeuge = (e.einteilung_fahrzeuge ?? [])
+        .map((ef: any) => {
+          const kz = ef.fahrzeuge?.kennzeichen ?? "";
+          const bez = ef.fahrzeuge?.bezeichnung;
+          return bez ? `${kz} (${bez})` : kz;
+        })
+        .filter(Boolean) as string[];
+
+      // Spezialfall: Polierschule/Berufsschule/Bundesheer als Tätigkeit ohne Baustelle
+      if (
+        !e.baustelle_id &&
+        taet &&
+        /polierschule|berufsschule|bundesheer/i.test(taet)
+      ) {
+        polierschuleNames.push(...mitarbeiter);
+        continue;
+      }
+
+      blocks.push({
+        bvhName: baustelleName,
+        kostenstelle,
+        fahrzeuge,
+        taetigkeit: taet,
+        mitarbeiter,
+      });
+    }
+
+    // 2) Fehlzeiten am Tag → Urlaub / Krank
+    const { data: fz } = await supabase
+      .from("stundenbuchungen")
+      .select("fehlzeit_typ, mitarbeiter_id, profiles(vorname, nachname)")
+      .eq("datum", iso)
+      .not("fehlzeit_typ", "is", null);
+
+    const urlaubNames: string[] = [];
+    const krankNames: string[] = [];
+    for (const r of (fz ?? []) as any[]) {
+      const name = r.profiles
+        ? `${r.profiles.vorname} ${r.profiles.nachname}`.trim()
+        : null;
+      if (!name) continue;
+      if (r.fehlzeit_typ === "U") urlaubNames.push(name);
+      else if (r.fehlzeit_typ === "K") krankNames.push(name);
+    }
+
+    // 3) Spezialblöcke nur wenn nicht leer
+    const polierschule: SpezialBlock | null =
+      polierschuleNames.length > 0
+        ? {
+            label: "Polierschule:\nBerufsschule:\nBundesheer",
+            fahrzeuge: [],
+            taetigkeit: null,
+            mitarbeiter: polierschuleNames,
+          }
+        : null;
+    const urlaub: SpezialBlock | null =
+      urlaubNames.length > 0
+        ? { label: "Urlaub:", fahrzeuge: [], taetigkeit: null, mitarbeiter: urlaubNames }
+        : null;
+    const krank: SpezialBlock | null =
+      krankNames.length > 0
+        ? { label: "Krank:", fahrzeuge: [], taetigkeit: null, mitarbeiter: krankNames }
+        : null;
+
+    return {
+      datum: iso,
+      einteilungen: blocks as EinteilungBlock[],
+      urlaub,
+      polierschule,
+      krank,
+    };
+  };
+
+  const exportTagesplan = async () => {
+    if (tagesplanBusy) return;
+    setTagesplanBusy(true);
+    try {
+      const data = await buildTagesplanData(tagesplanDate);
+      const blob = await generateTagesplanDocx(data);
+      const fileName = `Arbeitseinteilung ${tagesplanDate}.docx`;
+      await shareOrDownloadDocx(blob, fileName);
+      toast({ title: `Tagesplan ${tagesplanDate} erstellt` });
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Tagesplan-Export fehlgeschlagen",
+        description: err?.message ?? String(err),
+      });
+    } finally {
+      setTagesplanBusy(false);
+    }
   };
 
   // ─── Cell-Aktionen: Mitarbeiter pro Tag einteilen / Fehlzeit setzen ───
@@ -726,6 +938,29 @@ export default function Arbeitsplanung() {
             {isoWeek(new Date(rangeEnd.getTime() - DAY_MS)).week}/
             {isoWeek(new Date(rangeEnd.getTime() - DAY_MS)).year}
           </div>
+          {/* Tagesplan-Export */}
+          {isAdmin && (
+            <div className="flex items-center gap-1.5 border-l pl-2 ml-1">
+              <input
+                type="date"
+                value={tagesplanDate}
+                onChange={(e) => setTagesplanDate(e.target.value)}
+                className="h-8 rounded-md border bg-background px-2 text-xs"
+                aria-label="Datum für Tagesplan"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={exportTagesplan}
+                disabled={tagesplanBusy}
+                title="Tagesplan als Word-Dokument exportieren / teilen"
+              >
+                <FileText className="h-4 w-4 mr-1.5" />
+                {tagesplanBusy ? "Erstelle…" : "Tagesplan"}
+                <Download className="h-3.5 w-3.5 ml-1.5 opacity-60" />
+              </Button>
+            </div>
+          )}
           <div className="ml-auto flex items-center gap-2">
             <Filter className="h-4 w-4 text-muted-foreground" />
             <Select value={filterPartie} onValueChange={setFilterPartie}>
@@ -937,8 +1172,24 @@ export default function Arbeitsplanung() {
                 </div>
               </div>
 
-              {/* Body */}
+              {/* Body — Gantt-Bars statt 1-Tag-Cells */}
               <div className="relative">
+                {/* Heute-Linie als senkrechter Strich über die ganze Body-Höhe */}
+                {(() => {
+                  const todayIdx = dayHeaders.findIndex((d) => d.isToday);
+                  if (todayIdx < 0) return null;
+                  return (
+                    <div
+                      className="absolute top-0 bottom-0 z-20 pointer-events-none"
+                      style={{
+                        left: todayIdx * dayWidth + dayWidth / 2,
+                        width: 2,
+                        background: "hsl(var(--destructive))",
+                        opacity: 0.6,
+                      }}
+                    />
+                  );
+                })()}
                 {workerGroups.map((g) => (
                   <div key={g.partie?.id ?? "ohne"}>
                     <div
@@ -948,75 +1199,101 @@ export default function Arbeitsplanung() {
                         background: g.partie ? `${g.partie.farbcode}25` : "hsl(var(--muted))",
                       }}
                     />
-                    {g.members.map((m) => (
-                      <div
-                        key={m.id}
-                        className="border-b relative flex"
-                        style={{ height: 28 }}
-                      >
-                        {dayHeaders.map((d, i) => {
-                          const iso = isoDate(d.date);
-                          const a = assignments.get(cellKey(m.id, iso));
-                          const isWeekend = d.date.getDay() === 0 || d.date.getDay() === 6;
-                          const isFeiertag = !!d.feiertag;
-                          const selected = selection.has(cellKey(m.id, iso));
-                          let bg = "transparent";
-                          let label = "";
-                          let textColor = "white";
-                          if (a) {
-                            if (a.source === "fehlzeit") {
-                              bg = FEHLZEIT_COLOR[a.fehlzeitTyp ?? "U"] ?? "#6b7280";
-                              label = a.fehlzeitTyp ?? "";
-                            } else {
-                              bg = a.baustelleColor ?? "#6b7280";
-                              label = a.baustelleName ?? "BV";
-                            }
-                          } else if (isFeiertag) {
-                            // Automatischer Feiertag — kein DB-Eintrag nötig
-                            bg = "#8b5cf6";
-                            label = "F";
-                          }
-                          return (
-                            <button
-                              key={i}
-                              data-cell="1"
-                              data-worker={m.id}
-                              data-iso={iso}
-                              onPointerDown={(e) => onCellPointerDown(e, m.id, iso)}
-                              className={`relative border-r text-[9px] truncate font-medium transition ${
-                                d.isToday ? "ring-1 ring-primary/40 ring-inset" : ""
-                              } ${selected ? "ring-2 ring-primary ring-inset z-10" : ""}`}
-                              style={{
-                                width: dayWidth,
-                                height: "100%",
-                                background:
-                                  bg !== "transparent" ? bg : isWeekend ? "rgba(0,0,0,0.04)" : "transparent",
-                                opacity: isFeiertag && !a ? 0.55 : a?.isReadOnly ? 0.65 : 1,
-                                color: bg !== "transparent" ? textColor : undefined,
-                                cursor: isAdmin ? "pointer" : "default",
-                                touchAction: isAdmin ? "none" : undefined,
-                                userSelect: "none",
-                              }}
-                              title={
-                                a
-                                  ? a.source === "fehlzeit"
-                                    ? `${FEHLZEIT_LABEL[a.fehlzeitTyp ?? ""] ?? a.fehlzeitTyp} · ${iso}${a.isReadOnly ? " (eingereicht)" : ""}`
-                                    : `${a.baustelleName} · ${iso}`
-                                  : isFeiertag
-                                  ? `Feiertag: ${d.feiertag?.name} · ${iso}`
-                                  : `${m.vorname} ${m.nachname} · ${iso}${isAdmin ? " · klick oder ziehen" : ""}`
-                              }
-                            >
-                              {label && (
-                                <span className="absolute inset-0 flex items-center justify-center px-0.5 truncate">
-                                  {label.slice(0, 2)}
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ))}
+                    {g.members.map((m) => {
+                      const bars = barsByWorker.get(m.id) ?? [];
+                      return (
+                        <div
+                          key={m.id}
+                          data-row="1"
+                          data-worker={m.id}
+                          onPointerDown={(e) => {
+                            if (!isAdmin) return;
+                            const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                            const idx = Math.max(
+                              0,
+                              Math.min(dayHeaders.length - 1, Math.floor((e.clientX - rect.left) / dayWidth))
+                            );
+                            const iso = isoDate(dayHeaders[idx].date);
+                            onCellPointerDown(e, m.id, iso);
+                          }}
+                          className="border-b relative"
+                          style={{
+                            height: 28,
+                            cursor: isAdmin ? "pointer" : "default",
+                            touchAction: isAdmin ? "none" : undefined,
+                            userSelect: "none",
+                          }}
+                        >
+                          {/* Hintergrund-Layer: Wochenende + Feiertag-Schatten + Tages-Border */}
+                          {dayHeaders.map((d, i) => {
+                            const isWeekend = d.date.getDay() === 0 || d.date.getDay() === 6;
+                            const isFeiertag = !!d.feiertag;
+                            return (
+                              <div
+                                key={i}
+                                className="absolute top-0 bottom-0 border-r border-border/40 pointer-events-none"
+                                style={{
+                                  left: i * dayWidth,
+                                  width: dayWidth,
+                                  background: isFeiertag
+                                    ? "rgba(139,92,246,0.12)"
+                                    : isWeekend
+                                    ? "rgba(0,0,0,0.04)"
+                                    : "transparent",
+                                }}
+                              />
+                            );
+                          })}
+                          {/* Selection-Overlay */}
+                          {dayHeaders.map((d, i) => {
+                            const iso = isoDate(d.date);
+                            const sel = selection.has(cellKey(m.id, iso));
+                            if (!sel) return null;
+                            return (
+                              <div
+                                key={`s${i}`}
+                                className="absolute top-0 bottom-0 z-10 pointer-events-none"
+                                style={{
+                                  left: i * dayWidth,
+                                  width: dayWidth,
+                                  boxShadow: "inset 0 0 0 2px hsl(var(--primary))",
+                                  background: "hsl(var(--primary)/0.08)",
+                                }}
+                              />
+                            );
+                          })}
+                          {/* Bars */}
+                          {bars.map((bar, bi) => {
+                            const left = bar.startIdx * dayWidth + 1;
+                            const width = (bar.endIdx - bar.startIdx + 1) * dayWidth - 2;
+                            const days = bar.endIdx - bar.startIdx + 1;
+                            const startDate = dayHeaders[bar.startIdx].date;
+                            const endDate = dayHeaders[bar.endIdx].date;
+                            const dateRange =
+                              days === 1
+                                ? startDate.toLocaleDateString("de-AT")
+                                : `${startDate.toLocaleDateString("de-AT")} – ${endDate.toLocaleDateString("de-AT")}`;
+                            return (
+                              <div
+                                key={bi}
+                                className="absolute pointer-events-none rounded-md flex items-center px-1.5 text-[10px] font-semibold text-white truncate shadow-sm"
+                                style={{
+                                  left,
+                                  width,
+                                  top: 2,
+                                  height: 24,
+                                  background: bar.color,
+                                  opacity: bar.isReadOnly ? 0.6 : 1,
+                                }}
+                                title={`${bar.label} · ${dateRange}${bar.isReadOnly ? " (eingereicht)" : ""}`}
+                              >
+                                <span className="truncate">{width < 60 ? (bar.label.slice(0, 2)) : bar.label}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
                   </div>
                 ))}
               </div>
