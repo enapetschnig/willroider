@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
@@ -141,16 +142,41 @@ export default function Mitarbeiter() {
     e.preventDefault();
     if (!editing) return;
     const fd = new FormData(e.currentTarget);
-    const payload = {
+    const str = (k: string) => ((fd.get(k) as string) || "").trim() || null;
+    const payload: any = {
       vorname: fd.get("vorname") as string,
       nachname: fd.get("nachname") as string,
-      pers_nr: (fd.get("pers_nr") as string) || null,
-      telefon: (fd.get("telefon") as string) || null,
-      qualifikation: (fd.get("qualifikation") as string) || null,
-      fuehrerschein: (fd.get("fuehrerschein") as string) || null,
+      pers_nr: str("pers_nr"),
+      telefon: str("telefon"),
+      qualifikation: str("qualifikation"),
+      fuehrerschein: str("fuehrerschein"),
       kran_berechtigung: fd.get("kran_berechtigung") === "on",
       partie_id: (fd.get("partie_id") as string) || null,
       is_partieleiter: fd.get("is_partieleiter") === "on",
+      // Personalanlage
+      geburtsdatum: str("geburtsdatum"),
+      geburtsort: str("geburtsort"),
+      sv_nr: str("sv_nr"),
+      staatsangehoerigkeit: str("staatsangehoerigkeit"),
+      religion: str("religion"),
+      familienstand: str("familienstand"),
+      wohn_strasse: str("wohn_strasse"),
+      wohn_plz: str("wohn_plz"),
+      wohn_ort: str("wohn_ort"),
+      wohn_land: str("wohn_land"),
+      erlernter_beruf: str("erlernter_beruf"),
+      letzter_arbeitgeber: str("letzter_arbeitgeber"),
+      vorbeschaeftigung_von: str("vorbeschaeftigung_von"),
+      vorbeschaeftigung_bis: str("vorbeschaeftigung_bis"),
+      sonstige_pruefungen: str("sonstige_pruefungen"),
+      bewerbung_als: str("bewerbung_als"),
+      bank_name: str("bank_name"),
+      bank_bic: str("bank_bic"),
+      bank_iban: str("bank_iban"),
+      vorstellungsdatum: str("vorstellungsdatum"),
+      stundenlohn: str("stundenlohn") ? Number(str("stundenlohn")) : null,
+      zulagen: str("zulagen"),
+      personal_vermerke: str("personal_vermerke"),
     };
     const { error } = await supabase.from("profiles").update(payload).eq("id", editing.id);
     if (error) {
@@ -604,80 +630,313 @@ export default function Mitarbeiter() {
         </TabsContent>
       </Tabs>
 
-      {/* Edit profile dialog */}
+      {/* Edit profile dialog — Personalanlageblatt 1:1 */}
       <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Mitarbeiter bearbeiten</DialogTitle>
+            <DialogTitle>Personalanlageblatt — {editing?.vorname} {editing?.nachname}</DialogTitle>
           </DialogHeader>
           {editing && (
-            <form onSubmit={saveProfile} className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>Vorname</Label>
-                  <Input name="vorname" defaultValue={editing.vorname} required />
+            <form onSubmit={saveProfile} className="space-y-5">
+              {/* Stammdaten */}
+              <section className="space-y-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground border-b pb-1">
+                  Stammdaten
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Vorname *</Label>
+                    <Input name="vorname" defaultValue={editing.vorname} required />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Nachname *</Label>
+                    <Input name="nachname" defaultValue={editing.nachname} required />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Geburtsdatum</Label>
+                    <Input
+                      name="geburtsdatum"
+                      type="date"
+                      defaultValue={editing.geburtsdatum ?? ""}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Geburtsort</Label>
+                    <Input name="geburtsort" defaultValue={editing.geburtsort ?? ""} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>SV-Nummer</Label>
+                    <Input
+                      name="sv_nr"
+                      defaultValue={editing.sv_nr ?? ""}
+                      placeholder="10-stellig"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Staatsangehörigkeit</Label>
+                    <Input
+                      name="staatsangehoerigkeit"
+                      defaultValue={editing.staatsangehoerigkeit ?? ""}
+                      placeholder="z.B. AT"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Religiöses Bekenntnis</Label>
+                    <Input name="religion" defaultValue={editing.religion ?? ""} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Familienstand</Label>
+                    <select
+                      name="familienstand"
+                      defaultValue={editing.familienstand ?? ""}
+                      className="w-full h-10 rounded-md border bg-background px-3 text-sm"
+                    >
+                      <option value="">—</option>
+                      <option value="ledig">ledig</option>
+                      <option value="verheiratet">verheiratet</option>
+                      <option value="geschieden">geschieden</option>
+                      <option value="verwitwet">verwitwet</option>
+                      <option value="Lebensgemeinschaft">Lebensgemeinschaft</option>
+                    </select>
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>Nachname</Label>
-                  <Input name="nachname" defaultValue={editing.nachname} required />
+              </section>
+
+              {/* Wohnort */}
+              <section className="space-y-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground border-b pb-1">
+                  Wohnort
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="sm:col-span-2 space-y-1.5">
+                    <Label>Straße + Hausnummer</Label>
+                    <Input name="wohn_strasse" defaultValue={editing.wohn_strasse ?? ""} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>PLZ</Label>
+                    <Input name="wohn_plz" defaultValue={editing.wohn_plz ?? ""} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Ort</Label>
+                    <Input name="wohn_ort" defaultValue={editing.wohn_ort ?? ""} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Land</Label>
+                    <Input
+                      name="wohn_land"
+                      defaultValue={editing.wohn_land ?? ""}
+                      placeholder="z.B. Österreich"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Telefon</Label>
+                    <Input
+                      name="telefon"
+                      type="tel"
+                      defaultValue={editing.telefon ?? ""}
+                    />
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>Pers.-Nr.</Label>
-                  <Input name="pers_nr" defaultValue={editing.pers_nr ?? ""} />
+              </section>
+
+              {/* Beruflich */}
+              <section className="space-y-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground border-b pb-1">
+                  Beruflich
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Erlernter Beruf</Label>
+                    <Input
+                      name="erlernter_beruf"
+                      defaultValue={editing.erlernter_beruf ?? ""}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Bewerbung als</Label>
+                    <Input
+                      name="bewerbung_als"
+                      defaultValue={editing.bewerbung_als ?? ""}
+                      placeholder="z.B. Zimmerer"
+                    />
+                  </div>
+                  <div className="sm:col-span-2 space-y-1.5">
+                    <Label>Letzter Arbeitgeber</Label>
+                    <Input
+                      name="letzter_arbeitgeber"
+                      defaultValue={editing.letzter_arbeitgeber ?? ""}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Beschäftigt von</Label>
+                    <Input
+                      name="vorbeschaeftigung_von"
+                      type="date"
+                      defaultValue={editing.vorbeschaeftigung_von ?? ""}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Beschäftigt bis</Label>
+                    <Input
+                      name="vorbeschaeftigung_bis"
+                      type="date"
+                      defaultValue={editing.vorbeschaeftigung_bis ?? ""}
+                    />
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>Telefon</Label>
-                  <Input name="telefon" defaultValue={editing.telefon ?? ""} />
+              </section>
+
+              {/* Qualifikationen */}
+              <section className="space-y-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground border-b pb-1">
+                  Qualifikationen & Prüfungen
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Qualifikation (intern)</Label>
+                    <Input
+                      name="qualifikation"
+                      defaultValue={editing.qualifikation ?? ""}
+                      placeholder="z.B. Polier, Lehrling 2.LJ"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Führerscheinklasse</Label>
+                    <Input
+                      name="fuehrerschein"
+                      defaultValue={editing.fuehrerschein ?? ""}
+                      placeholder="B, C, CE..."
+                    />
+                  </div>
+                  <div className="sm:col-span-2 space-y-1.5">
+                    <Label>Sonstige Prüfungen / Geräteschein etc.</Label>
+                    <Textarea
+                      name="sonstige_pruefungen"
+                      defaultValue={editing.sonstige_pruefungen ?? ""}
+                      rows={2}
+                      placeholder="z.B. Staplerschein, Kettensägenschein, ..."
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <Switch
+                      id="kran_berechtigung"
+                      name="kran_berechtigung"
+                      defaultChecked={!!editing.kran_berechtigung}
+                    />
+                    <Label htmlFor="kran_berechtigung">Kran-Berechtigung</Label>
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>Qualifikation</Label>
-                  <Input
-                    name="qualifikation"
-                    defaultValue={editing.qualifikation ?? ""}
-                    placeholder="z.B. Zimmerer, Lehrling"
-                  />
+              </section>
+
+              {/* Bank */}
+              <section className="space-y-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground border-b pb-1">
+                  Bankverbindung
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Bank</Label>
+                    <Input name="bank_name" defaultValue={editing.bank_name ?? ""} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>BIC</Label>
+                    <Input
+                      name="bank_bic"
+                      defaultValue={editing.bank_bic ?? ""}
+                      placeholder="z.B. RZSTAT2GXXX"
+                    />
+                  </div>
+                  <div className="sm:col-span-2 space-y-1.5">
+                    <Label>IBAN</Label>
+                    <Input
+                      name="bank_iban"
+                      defaultValue={editing.bank_iban ?? ""}
+                      placeholder="AT00 0000 0000 0000 0000"
+                    />
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>Führerscheinklasse</Label>
-                  <Input
-                    name="fuehrerschein"
-                    defaultValue={editing.fuehrerschein ?? ""}
-                    placeholder="B, C, CE..."
-                  />
+              </section>
+
+              {/* Lohn & Vermerke */}
+              <section className="space-y-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground border-b pb-1">
+                  Lohn & Vermerke
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Datum der Vorstellung</Label>
+                    <Input
+                      name="vorstellungsdatum"
+                      type="date"
+                      defaultValue={editing.vorstellungsdatum ?? ""}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Pers.-Nr. (intern)</Label>
+                    <Input name="pers_nr" defaultValue={editing.pers_nr ?? ""} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Stundenlohn (EUR)</Label>
+                    <Input
+                      name="stundenlohn"
+                      type="number"
+                      step="0.01"
+                      inputMode="decimal"
+                      defaultValue={editing.stundenlohn ?? ""}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Zulagen</Label>
+                    <Input
+                      name="zulagen"
+                      defaultValue={editing.zulagen ?? ""}
+                      placeholder="z.B. KFZ-Zulage 80,–"
+                    />
+                  </div>
+                  <div className="sm:col-span-2 space-y-1.5">
+                    <Label>Sonstige Vermerke</Label>
+                    <Textarea
+                      name="personal_vermerke"
+                      defaultValue={editing.personal_vermerke ?? ""}
+                      rows={3}
+                    />
+                  </div>
                 </div>
-                <div className="col-span-2 space-y-1.5">
-                  <Label>Partie</Label>
-                  <select
-                    name="partie_id"
-                    defaultValue={editing.partie_id ?? ""}
-                    className="w-full h-10 rounded-md border bg-background px-3 text-sm"
-                  >
-                    <option value="">— ohne Partie —</option>
-                    {partien.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
+              </section>
+
+              {/* Partie */}
+              <section className="space-y-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground border-b pb-1">
+                  Partie-Zuordnung
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Partie</Label>
+                    <select
+                      name="partie_id"
+                      defaultValue={editing.partie_id ?? ""}
+                      className="w-full h-10 rounded-md border bg-background px-3 text-sm"
+                    >
+                      <option value="">— ohne Partie —</option>
+                      {partien.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2 pt-7">
+                    <Switch
+                      id="is_partieleiter"
+                      name="is_partieleiter"
+                      defaultChecked={!!editing.is_partieleiter}
+                    />
+                    <Label htmlFor="is_partieleiter">Partieleiter / Polier</Label>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="is_partieleiter"
-                    name="is_partieleiter"
-                    defaultChecked={!!editing.is_partieleiter}
-                  />
-                  <Label htmlFor="is_partieleiter">Partieleiter</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="kran_berechtigung"
-                    name="kran_berechtigung"
-                    defaultChecked={!!editing.kran_berechtigung}
-                  />
-                  <Label htmlFor="kran_berechtigung">Kran-Berechtigung</Label>
-                </div>
-              </div>
-              <DialogFooter>
+              </section>
+
+              <DialogFooter className="sticky bottom-0 bg-card pt-3 border-t">
                 <Button type="button" variant="outline" onClick={() => setEditing(null)}>
                   Abbrechen
                 </Button>
