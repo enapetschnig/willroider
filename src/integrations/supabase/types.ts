@@ -235,6 +235,9 @@ export type Database = {
           taetigkeit: string | null;
           notizen: string | null;
           in_firma: boolean;
+          zulage_typ: string | null;
+          zulage_stunden: number;
+          zulage_notiz: string | null;
           status: StundenStatus;
           freigegeben_zm_id: string | null;
           freigegeben_zm_am: string | null;

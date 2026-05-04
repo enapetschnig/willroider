@@ -40,13 +40,13 @@ import {
   CheckCircle2,
   Clock,
   ChevronDown,
-  ChevronUp,
   Check,
   Factory,
   MapPin,
 } from "lucide-react";
 import type { Database, StundenStatus } from "@/integrations/supabase/types";
 import { feiertagAt } from "@/lib/feiertage";
+import { ZULAGEN, type ZulageTyp } from "@/lib/zulagen";
 
 type Stunde = Database["public"]["Tables"]["stundenbuchungen"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -191,6 +191,9 @@ export default function Stunden() {
   const [taggeldLang, setTaggeldLang] = useState<number>(0);
   const [km, setKm] = useState<number>(0);
   const [notizen, setNotizen] = useState<string>("");
+  const [zulageTyp, setZulageTyp] = useState<ZulageTyp | "">("");
+  const [zulageStunden, setZulageStunden] = useState<number>(0);
+  const [zulageNotiz, setZulageNotiz] = useState<string>("");
 
   const mode: Mode = isAdmin ? "admin" : polierPartie ? "polier" : "self";
   const hasPicker = mode !== "self";
@@ -402,6 +405,9 @@ export default function Stunden() {
     setTaggeldLang(0);
     setKm(0);
     setNotizen("");
+    setZulageTyp("");
+    setZulageStunden(0);
+    setZulageNotiz("");
     setExtras(false);
     setContinuationOf(null);
   };
@@ -415,6 +421,9 @@ export default function Stunden() {
     setTaggeldLang(0);
     setKm(0);
     setNotizen("");
+    setZulageTyp("");
+    setZulageStunden(0);
+    setZulageNotiz("");
     setExtras(false);
     if (lastBlock?.end_zeit) {
       const newStart = fmtTime(lastBlock.end_zeit) || DEFAULT_START;
@@ -531,6 +540,14 @@ export default function Stunden() {
       taetigkeit: taetigkeit || null,
       notizen: notizen || null,
       in_firma: !isFehlzeit && inFirma,
+      // Erschwerniszulage: nur bei Arbeit, nicht bei Fehlzeit
+      zulage_typ: !isFehlzeit && zulageTyp ? zulageTyp : null,
+      zulage_stunden:
+        !isFehlzeit && zulageTyp
+          ? Math.min(zulageStunden || arbeit, arbeit)
+          : 0,
+      zulage_notiz:
+        !isFehlzeit && zulageTyp === "andere" ? zulageNotiz.trim() || null : null,
       status: "offen" as StundenStatus,
     };
     let lastInserted: Stunde | null = null;
@@ -1057,6 +1074,71 @@ export default function Stunden() {
                 </div>
               )}
 
+              {/* Erschwerniszulage (KV § 6) */}
+              {!fehlzeitTyp && (
+                <div className="space-y-2">
+                  <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Erschwerniszulage
+                  </Label>
+                  <select
+                    value={zulageTyp}
+                    onChange={(e) => {
+                      const v = e.target.value as ZulageTyp | "";
+                      setZulageTyp(v);
+                      // Default: Zulage gilt für die ganze Buchung
+                      if (v && zulageStunden === 0) setZulageStunden(arbeitstundenLive);
+                      if (!v) setZulageStunden(0);
+                    }}
+                    className="w-full h-11 rounded-md border bg-background px-3 text-sm"
+                    aria-label="Erschwerniszulage"
+                  >
+                    <option value="">— keine —</option>
+                    {ZULAGEN.map((z) => (
+                      <option key={z.code} value={z.code}>
+                        {z.label} ({z.kv})
+                      </option>
+                    ))}
+                  </select>
+                  {zulageTyp && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                          Davon Zulagen-Stunden
+                        </Label>
+                        <Input
+                          inputMode="decimal"
+                          type="number"
+                          step="0.25"
+                          min={0}
+                          max={arbeitstundenLive}
+                          value={zulageStunden}
+                          onChange={(e) =>
+                            setZulageStunden(Math.min(Number(e.target.value), arbeitstundenLive))
+                          }
+                          className="h-10"
+                        />
+                        <div className="text-[10px] text-muted-foreground mt-0.5">
+                          max {arbeitstundenLive.toFixed(2).replace(".", ",")} h
+                        </div>
+                      </div>
+                      {zulageTyp === "andere" && (
+                        <div>
+                          <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                            Notiz / KV-Punkt
+                          </Label>
+                          <Input
+                            value={zulageNotiz}
+                            onChange={(e) => setZulageNotiz(e.target.value)}
+                            placeholder="z.B. § 6 g Künetten"
+                            className="h-10"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Erweitert */}
               {!fehlzeitTyp && (
                 <button
@@ -1336,10 +1418,18 @@ function EditForm({
     Number(row.arbeitsstunden ?? row.fehlzeit_stunden ?? 0)
   );
   const [taetigkeit, setTaetigkeit] = useState<string>(row.taetigkeit ?? "");
+  const [zulageTyp, setZulageTyp] = useState<ZulageTyp | "">(
+    (row.zulage_typ as ZulageTyp | null) ?? ""
+  );
+  const [zulageStunden, setZulageStunden] = useState<number>(
+    Number(row.zulage_stunden ?? 0)
+  );
+  const [zulageNotiz, setZulageNotiz] = useState<string>(row.zulage_notiz ?? "");
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const update: any = { datum, taetigkeit: taetigkeit || null };
+    let arbeit = 0;
     if (row.fehlzeit_typ) {
       update.fehlzeit_stunden = hours;
     } else if (hasTimes || (startZeit && endZeit)) {
@@ -1351,9 +1441,18 @@ function EditForm({
       update.end_zeit = sEnd;
       update.pause_von = sPV;
       update.pause_bis = sPB;
-      update.arbeitsstunden = calcArbeitsstunden(sStart, sEnd, sPV, sPB);
+      arbeit = calcArbeitsstunden(sStart, sEnd, sPV, sPB);
+      update.arbeitsstunden = arbeit;
     } else {
+      arbeit = hours;
       update.arbeitsstunden = hours;
+    }
+    // Zulage nur bei Arbeit
+    if (!row.fehlzeit_typ) {
+      update.zulage_typ = zulageTyp || null;
+      update.zulage_stunden = zulageTyp ? Math.min(zulageStunden, arbeit) : 0;
+      update.zulage_notiz =
+        zulageTyp === "andere" ? zulageNotiz.trim() || null : null;
     }
     const { error } = await supabase
       .from("stundenbuchungen")
@@ -1420,6 +1519,49 @@ function EditForm({
         <Label>Tätigkeit</Label>
         <Input value={taetigkeit} onChange={(e) => setTaetigkeit(e.target.value)} />
       </div>
+      {!row.fehlzeit_typ && (
+        <div className="space-y-2 pt-2 border-t">
+          <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+            Erschwerniszulage
+          </Label>
+          <select
+            value={zulageTyp}
+            onChange={(e) => setZulageTyp(e.target.value as ZulageTyp | "")}
+            className="w-full h-10 rounded-md border bg-background px-3 text-sm"
+          >
+            <option value="">— keine —</option>
+            {ZULAGEN.map((z) => (
+              <option key={z.code} value={z.code}>
+                {z.label} ({z.kv})
+              </option>
+            ))}
+          </select>
+          {zulageTyp && (
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-[10px]">Zulagen-Stunden</Label>
+                <Input
+                  type="number"
+                  step="0.25"
+                  min={0}
+                  value={zulageStunden}
+                  onChange={(e) => setZulageStunden(Number(e.target.value))}
+                />
+              </div>
+              {zulageTyp === "andere" && (
+                <div>
+                  <Label className="text-[10px]">Notiz</Label>
+                  <Input
+                    value={zulageNotiz}
+                    onChange={(e) => setZulageNotiz(e.target.value)}
+                    placeholder="z.B. § 6 g"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onClose}>
           Abbrechen

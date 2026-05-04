@@ -222,6 +222,9 @@ export default function Stundenauswertung() {
       "KM",
       "Fehlzeit",
       "Fz_Stunden",
+      "Zulage_Typ",
+      "Zulage_Stunden",
+      "Zulage_Notiz",
       "Tätigkeit",
       "Status",
     ];
@@ -250,6 +253,9 @@ export default function Stundenauswertung() {
           r.km_gefahren ?? 0,
           r.fehlzeit_typ ?? "",
           (r.fehlzeit_stunden ?? 0).toString().replace(".", ","),
+          (r as any).zulage_typ ?? "",
+          ((r as any).zulage_stunden ?? 0).toString().replace(".", ","),
+          ((r as any).zulage_notiz ?? "").replace(/[;\n]/g, " "),
           (r.taetigkeit ?? "").replace(/[;\n]/g, " "),
           r.status,
         ].join(";")
@@ -556,6 +562,7 @@ function PersonenAuswertung({
         taggeldKurz: number;
         taggeldLang: number;
         km: number;
+        zulagen: Record<string, number>; // typ → Stunden
         rows: Stunde[];
       }
     >();
@@ -571,6 +578,7 @@ function PersonenAuswertung({
         taggeldKurz: 0,
         taggeldLang: 0,
         km: 0,
+        zulagen: {},
         rows: [],
       };
       const a = Number(r.arbeitsstunden ?? 0);
@@ -581,6 +589,9 @@ function PersonenAuswertung({
       cur.taggeldKurz += Number(r.taggeld_kurz ?? 0);
       cur.taggeldLang += Number(r.taggeld_lang ?? 0);
       cur.km += Number(r.km_gefahren ?? 0);
+      const ztyp = (r as any).zulage_typ as string | null;
+      const zh = Number((r as any).zulage_stunden ?? 0);
+      if (ztyp && zh > 0) cur.zulagen[ztyp] = (cur.zulagen[ztyp] ?? 0) + zh;
       cur.rows.push(r);
       byPerson.set(r.mitarbeiter_id, cur);
     });
@@ -674,7 +685,11 @@ function PersonenAuswertung({
             {isOpen && (
               <div className="border-t bg-muted/20">
                 {/* Extras-Zeile */}
-                {(g.taggeldKurz > 0 || g.taggeldLang > 0 || g.km > 0 || g.fahrt > 0) && (
+                {(g.taggeldKurz > 0 ||
+                  g.taggeldLang > 0 ||
+                  g.km > 0 ||
+                  g.fahrt > 0 ||
+                  Object.keys(g.zulagen).length > 0) && (
                   <div className="px-3 py-2 border-b text-[11px] text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
                     {g.fahrt > 0 && (
                       <span>
@@ -696,6 +711,19 @@ function PersonenAuswertung({
                         KM <strong>{g.km.toFixed(0)}</strong>
                       </span>
                     )}
+                    {Object.entries(g.zulagen).map(([typ, h]) => {
+                      const labels: Record<string, string> = {
+                        aufsicht: "Aufsicht",
+                        schmutz: "Schmutz",
+                        hoehe: "Höhe",
+                        andere: "Zulage",
+                      };
+                      return (
+                        <span key={typ} className="text-amber-700">
+                          {labels[typ] ?? typ} <strong>{h.toFixed(1)} h</strong>
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
                 {g.rows.map((r) => {
