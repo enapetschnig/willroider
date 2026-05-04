@@ -137,15 +137,20 @@ export async function generateTagesplanDocx(data: TagesplanData): Promise<Blob> 
   })();
 
   // ── Baue alle Reihen zusammen ──
+  // Vorlage zeigt: Header → Spacer → Daten → Spacer → Daten → ... → Spacer → Spezialblöcke.
+  // Wir starten daher IMMER mit einem Spacer (auch nach Header).
   const rows: string[] = [];
+  const pushWithSpacer = (rowXml: string) => {
+    if (spacerBefore) rows.push(spacerBefore);
+    rows.push(rowXml);
+  };
   const formatBaustelleCol1 = (e: EinteilungBlock): string[] => {
     const out = [`${e.bvhName}:`];
     if (e.kostenstelle) out.push(e.kostenstelle);
     return out;
   };
   for (const e of data.einteilungen) {
-    if (rows.length > 0 && spacerBefore) rows.push(spacerBefore);
-    rows.push(
+    pushWithSpacer(
       buildDataRow(dataRowXml, {
         col1: formatBaustelleCol1(e),
         col2: e.fahrzeuge.length > 0 ? e.fahrzeuge : [""],
@@ -157,10 +162,11 @@ export async function generateTagesplanDocx(data: TagesplanData): Promise<Blob> 
 
   const addSpezial = (b: SpezialBlock | null | undefined) => {
     if (!b) return;
-    if (rows.length > 0 && spacerBefore) rows.push(spacerBefore);
-    rows.push(
+    // Mehrzeilige Labels: \n im Label aufsplitten
+    const labelLines = b.label.split("\n");
+    pushWithSpacer(
       buildDataRow(dataRowXml, {
-        col1: [b.label],
+        col1: labelLines,
         col2: b.fahrzeuge.length > 0 ? b.fahrzeuge : [""],
         col3: b.taetigkeit ? [b.taetigkeit] : [""],
         col4: b.mitarbeiter.length > 0 ? b.mitarbeiter : [""],

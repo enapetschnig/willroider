@@ -129,6 +129,7 @@ export default function Arbeitsplanung() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   });
   const [tagesplanBusy, setTagesplanBusy] = useState(false);
+  const [tagesplanPreview, setTagesplanPreview] = useState<TagesplanData | null>(null);
   const [editingPartieId, setEditingPartieId] = useState<string | null>(null);
   const [newPartieName, setNewPartieName] = useState("");
   const [newPartieFarbe, setNewPartieFarbe] = useState("#3b82f6");
@@ -605,6 +606,10 @@ export default function Arbeitsplanung() {
     };
     const blocks: Block[] = [];
     const polierschuleNames: string[] = [];
+    const produktionNames: string[] = [];
+    const produktionTaetigkeiten = new Set<string>();
+    const stempelnNames: string[] = [];
+    const stempelnTaetigkeiten = new Set<string>();
     for (const e of (einteilungenRaw ?? []) as any[]) {
       const baustelleName = e.baustellen?.bvh_name ?? "—";
       const kostenstelle = e.baustellen?.kostenstelle ?? null;
@@ -622,13 +627,27 @@ export default function Arbeitsplanung() {
         })
         .filter(Boolean) as string[];
 
-      // Spezialfall: Polierschule/Berufsschule/Bundesheer als Tätigkeit ohne Baustelle
-      if (
-        !e.baustelle_id &&
-        taet &&
-        /polierschule|berufsschule|bundesheer/i.test(taet)
-      ) {
+      const taetStr = taet ?? "";
+      const isOhneBaustelle = !e.baustelle_id;
+
+      // Spezialfall 1: Polierschule/Berufsschule/Bundesheer
+      if (isOhneBaustelle && /polierschule|berufsschule|bundesheer/i.test(taetStr)) {
         polierschuleNames.push(...mitarbeiter);
+        continue;
+      }
+      // Spezialfall 2: Produktion / Werkstatt / Abbund / Lager / Streichen
+      if (
+        isOhneBaustelle &&
+        /produktion|werkstatt|abbund|lager|streichen/i.test(taetStr)
+      ) {
+        produktionNames.push(...mitarbeiter);
+        if (taet) produktionTaetigkeiten.add(taet);
+        continue;
+      }
+      // Spezialfall 3: Stempeln (Gerüst-Stempeln)
+      if (isOhneBaustelle && /stempeln/i.test(taetStr)) {
+        stempelnNames.push(...mitarbeiter);
+        if (taet) stempelnTaetigkeiten.add(taet);
         continue;
       }
 
@@ -660,6 +679,18 @@ export default function Arbeitsplanung() {
     }
 
     // 3) Spezialblöcke nur wenn nicht leer
+    const produktion: SpezialBlock | null =
+      produktionNames.length > 0
+        ? {
+            label: "Produktion:",
+            fahrzeuge: [],
+            taetigkeit:
+              produktionTaetigkeiten.size > 0
+                ? Array.from(produktionTaetigkeiten).join("\n")
+                : null,
+            mitarbeiter: produktionNames,
+          }
+        : null;
     const polierschule: SpezialBlock | null =
       polierschuleNames.length > 0
         ? {
@@ -677,25 +708,56 @@ export default function Arbeitsplanung() {
       krankNames.length > 0
         ? { label: "Krank:", fahrzeuge: [], taetigkeit: null, mitarbeiter: krankNames }
         : null;
+    const stempeln: SpezialBlock | null =
+      stempelnNames.length > 0
+        ? {
+            label: "Stempeln:",
+            fahrzeuge: [],
+            taetigkeit:
+              stempelnTaetigkeiten.size > 0
+                ? Array.from(stempelnTaetigkeiten).join("\n")
+                : null,
+            mitarbeiter: stempelnNames,
+          }
+        : null;
 
     return {
       datum: iso,
       einteilungen: blocks as EinteilungBlock[],
+      produktion,
       urlaub,
       polierschule,
       krank,
+      stempeln,
     };
   };
 
-  const exportTagesplan = async () => {
+  const openTagesplanPreview = async () => {
     if (tagesplanBusy) return;
     setTagesplanBusy(true);
     try {
       const data = await buildTagesplanData(tagesplanDate);
-      const blob = await generateTagesplanDocx(data);
-      const fileName = `Arbeitseinteilung ${tagesplanDate}.docx`;
+      setTagesplanPreview(data);
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Daten-Ladung fehlgeschlagen",
+        description: err?.message ?? String(err),
+      });
+    } finally {
+      setTagesplanBusy(false);
+    }
+  };
+
+  const downloadTagesplanFromPreview = async () => {
+    if (!tagesplanPreview || tagesplanBusy) return;
+    setTagesplanBusy(true);
+    try {
+      const blob = await generateTagesplanDocx(tagesplanPreview);
+      const fileName = `Arbeitseinteilung ${tagesplanPreview.datum}.docx`;
       await shareOrDownloadDocx(blob, fileName);
-      toast({ title: `Tagesplan ${tagesplanDate} erstellt` });
+      toast({ title: `Tagesplan ${tagesplanPreview.datum} erstellt` });
+      setTagesplanPreview(null);
     } catch (err: any) {
       toast({
         variant: "destructive",
@@ -951,13 +1013,12 @@ export default function Arbeitsplanung() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={exportTagesplan}
+                onClick={openTagesplanPreview}
                 disabled={tagesplanBusy}
-                title="Tagesplan als Word-Dokument exportieren / teilen"
+                title="Tagesplan ansehen + als Word-Dokument exportieren / teilen"
               >
                 <FileText className="h-4 w-4 mr-1.5" />
-                {tagesplanBusy ? "Erstelle…" : "Tagesplan"}
-                <Download className="h-3.5 w-3.5 ml-1.5 opacity-60" />
+                {tagesplanBusy ? "Lädt…" : "Tagesplan"}
               </Button>
             </div>
           )}
@@ -1369,6 +1430,123 @@ export default function Arbeitsplanung() {
               load();
             }}
           />
+        </DialogContent>
+      </Dialog>
+
+      {/* Tagesplan-Vorschau */}
+      <Dialog
+        open={!!tagesplanPreview}
+        onOpenChange={(o) => !o && setTagesplanPreview(null)}
+      >
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-center">
+              {tagesplanPreview &&
+                (() => {
+                  const d = new Date(tagesplanPreview.datum);
+                  const wt = [
+                    "Sonntag",
+                    "Montag",
+                    "Dienstag",
+                    "Mittwoch",
+                    "Donnerstag",
+                    "Freitag",
+                    "Samstag",
+                  ][d.getDay()];
+                  return (
+                    <span className="font-bold underline">
+                      {wt} {d.toLocaleDateString("de-AT")}
+                    </span>
+                  );
+                })()}
+            </DialogTitle>
+          </DialogHeader>
+          {tagesplanPreview && (
+            <div className="space-y-3">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="bg-muted">
+                    <th className="border p-2 text-left italic underline w-1/4">BVH:</th>
+                    <th className="border p-2 text-left italic underline w-[15%]">Fahrz.</th>
+                    <th className="border p-2 text-left italic underline w-[18%]">Tätigkeit</th>
+                    <th className="border p-2 text-left italic underline">Mitarbeiter</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tagesplanPreview.einteilungen.map((e, i) => (
+                    <tr key={i} className="align-top">
+                      <td className="border p-2 font-bold">
+                        {e.bvhName}:
+                        {e.kostenstelle && (
+                          <div className="font-normal italic text-xs mt-0.5">
+                            {e.kostenstelle}
+                          </div>
+                        )}
+                      </td>
+                      <td className="border p-2 font-bold whitespace-pre-line">
+                        {e.fahrzeuge.join("\n")}
+                      </td>
+                      <td className="border p-2 italic whitespace-pre-line">
+                        {e.taetigkeit ?? ""}
+                      </td>
+                      <td className="border p-2 whitespace-pre-line">
+                        {e.mitarbeiter.join("\n")}
+                      </td>
+                    </tr>
+                  ))}
+                  {tagesplanPreview.einteilungen.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="border p-4 text-center text-muted-foreground italic">
+                        Keine Baustellen-Einteilungen für diesen Tag.
+                      </td>
+                    </tr>
+                  )}
+                  {/* Spezial-Blöcke */}
+                  {[
+                    tagesplanPreview.produktion,
+                    tagesplanPreview.urlaub,
+                    tagesplanPreview.polierschule,
+                    tagesplanPreview.krank,
+                    tagesplanPreview.stempeln,
+                  ]
+                    .filter(Boolean)
+                    .map((b, i) => (
+                      <tr key={`s${i}`} className="align-top bg-muted/30">
+                        <td className="border p-2 font-bold whitespace-pre-line">{b!.label}</td>
+                        <td className="border p-2 font-bold whitespace-pre-line">
+                          {b!.fahrzeuge.join("\n")}
+                        </td>
+                        <td className="border p-2 italic whitespace-pre-line">
+                          {b!.taetigkeit ?? ""}
+                        </td>
+                        <td className="border p-2 whitespace-pre-line">
+                          {b!.mitarbeiter.join("\n")}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+              <div className="flex flex-col sm:flex-row gap-2 sm:justify-end pt-2 border-t">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setTagesplanPreview(null)}
+                  disabled={tagesplanBusy}
+                >
+                  Abbrechen
+                </Button>
+                <Button
+                  type="button"
+                  onClick={downloadTagesplanFromPreview}
+                  disabled={tagesplanBusy}
+                  className="sm:min-w-[200px]"
+                >
+                  <Download className="h-4 w-4 mr-1.5" />
+                  {tagesplanBusy ? "Erstelle…" : "Word-Datei erstellen & teilen"}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
