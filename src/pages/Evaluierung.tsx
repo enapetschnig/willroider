@@ -20,6 +20,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Plus, ShieldCheck, ShieldAlert, CheckCircle2, Clock, ChevronDown, ChevronUp } from "lucide-react";
 import type { Database, EvaluierungTyp, Json } from "@/integrations/supabase/types";
 import { UNTERWEISUNG_OPTIONS, getUnterweisung, unterweisungLabel } from "@/lib/unterweisungen";
+import { localIso } from "@/lib/dateFmt";
 
 type Eval = Database["public"]["Tables"]["evaluierungen"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -102,12 +103,12 @@ export default function Evaluierung() {
   useEffect(() => {
     load();
     if (baustelleParam) {
-      setEditing({ baustelle_id: baustelleParam, datum: new Date().toISOString().slice(0, 10), typ: "baustelle" });
+      setEditing({ baustelle_id: baustelleParam, datum: localIso(), typ: "baustelle" });
     }
   }, []);
 
   const openNew = () => {
-    setEditing({ datum: new Date().toISOString().slice(0, 10), typ: "baustelle" });
+    setEditing({ datum: localIso(), typ: "baustelle" });
     setChecklist({});
   };
 

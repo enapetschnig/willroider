@@ -8,6 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Building2, MapPin, Navigation, Clock as ClockIcon, Users } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
+import { localIso } from "@/lib/dateFmt";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
@@ -31,7 +32,7 @@ export default function MeinTag() {
       return;
     }
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localIso();
 
     const [partieRes, bsRes, colleaguesRes] = await Promise.all([
       supabase.from("partien").select("*").eq("id", profile.partie_id).maybeSingle(),
@@ -61,6 +62,12 @@ export default function MeinTag() {
       .channel("mein-tag")
       .on("postgres_changes", { event: "*", schema: "public", table: "baustellen" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "partien" }, load)
+      // Realtime auf eigenes Profil — wenn Admin Partie wechselt, sehen wir's sofort
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "profiles", filter: `id=eq.${user?.id ?? ""}` },
+        load
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(ch);

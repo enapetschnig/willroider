@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ShieldAlert, CheckCircle2, Eraser } from "lucide-react";
 import { getUnterweisung } from "@/lib/unterweisungen";
 import type { EvaluierungTyp, Json } from "@/integrations/supabase/types";
+import { localIso } from "@/lib/dateFmt";
 
 type OpenSignature = {
   unterschriftId: string;
@@ -46,7 +47,7 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
       notizen: r.evaluierungen?.notizen ?? null,
       baustelleName: r.evaluierungen?.baustellen?.bvh_name ?? "Baustelle",
       kostenstelle: r.evaluierungen?.baustellen?.kostenstelle ?? null,
-      datum: r.evaluierungen?.datum ?? new Date().toISOString().slice(0, 10),
+      datum: r.evaluierungen?.datum ?? localIso(),
     }));
     setPending(list);
     if (list.length > 0) {

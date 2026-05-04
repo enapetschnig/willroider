@@ -18,6 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { TimePickerInput } from "@/components/TimePickerInput";
+import { localIso } from "@/lib/dateFmt";
 import {
   ChevronDown,
   ChevronUp,
@@ -139,7 +140,7 @@ export default function Stundenauswertung() {
     const monthStart = `${monat}-01`;
     const next = new Date(monthStart);
     next.setMonth(next.getMonth() + 1);
-    const monthEnd = next.toISOString().slice(0, 10);
+    const monthEnd = localIso(next);
 
     let q = supabase
       .from("stundenbuchungen")
@@ -611,13 +612,20 @@ function PersonenAuswertung({
   }
 
   const total = grouped.reduce(
-    (s, g) => ({
-      baustelle: s.baustelle + g.baustelle,
-      firma: s.firma + g.firma,
-      fahrt: s.fahrt + g.fahrt,
-      fehl: s.fehl + g.fehl,
-    }),
-    { baustelle: 0, firma: 0, fahrt: 0, fehl: 0 }
+    (s, g) => {
+      const zSum = Object.values(g.zulagen).reduce((a, b) => a + b, 0);
+      return {
+        baustelle: s.baustelle + g.baustelle,
+        firma: s.firma + g.firma,
+        fahrt: s.fahrt + g.fahrt,
+        fehl: s.fehl + g.fehl,
+        tgKurz: s.tgKurz + g.taggeldKurz,
+        tgLang: s.tgLang + g.taggeldLang,
+        km: s.km + g.km,
+        zulagen: s.zulagen + zSum,
+      };
+    },
+    { baustelle: 0, firma: 0, fahrt: 0, fehl: 0, tgKurz: 0, tgLang: 0, km: 0, zulagen: 0 }
   );
 
   const toggle = (id: string) => {
@@ -631,11 +639,21 @@ function PersonenAuswertung({
     <div className="space-y-2">
       {(mode === "admin" || mode === "polier") && grouped.length > 1 && (
         <Card>
-          <CardContent className="p-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
-            <SumCell value={total.baustelle} label="Baustelle" icon={<MapPin className="h-3 w-3" />} highlight />
-            <SumCell value={total.firma} label="Firma" icon={<Factory className="h-3 w-3" />} />
-            <SumCell value={total.fahrt} label="Fahrt" />
-            <SumCell value={total.fehl} label="Fehlzeit" />
+          <CardContent className="p-3 space-y-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+              <SumCell value={total.baustelle} label="Baustelle" icon={<MapPin className="h-3 w-3" />} highlight />
+              <SumCell value={total.firma} label="Firma" icon={<Factory className="h-3 w-3" />} />
+              <SumCell value={total.fahrt} label="Fahrt" />
+              <SumCell value={total.fehl} label="Fehlzeit" />
+            </div>
+            {(total.tgKurz > 0 || total.tgLang > 0 || total.km > 0 || total.zulagen > 0) && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs border-t pt-2">
+                <SumCell value={total.tgKurz} label="TG kurz" suffix="×" decimals={0} />
+                <SumCell value={total.tgLang} label="TG lang" suffix="×" decimals={0} />
+                <SumCell value={total.km} label="KM" decimals={0} />
+                <SumCell value={total.zulagen} label="Zulagen" suffix=" h" />
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -669,6 +687,31 @@ function PersonenAuswertung({
                 <div className="text-[11px] text-muted-foreground truncate">
                   {[g.person.pers_nr, partie?.name].filter(Boolean).join(" · ")}
                 </div>
+                {/* Spesen-Pills wenn vorhanden */}
+                {(g.taggeldKurz > 0 ||
+                  g.taggeldLang > 0 ||
+                  g.km > 0 ||
+                  Object.keys(g.zulagen).length > 0) && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {(g.taggeldKurz > 0 || g.taggeldLang > 0) && (
+                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-blue-300 text-blue-700 bg-blue-50">
+                        Diäten {g.taggeldKurz > 0 && `K${g.taggeldKurz.toFixed(0)}`}
+                        {g.taggeldKurz > 0 && g.taggeldLang > 0 && "/"}
+                        {g.taggeldLang > 0 && `L${g.taggeldLang.toFixed(0)}`}
+                      </Badge>
+                    )}
+                    {g.km > 0 && (
+                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-slate-300 text-slate-700 bg-slate-50">
+                        KM {g.km.toFixed(0)}
+                      </Badge>
+                    )}
+                    {Object.keys(g.zulagen).length > 0 && (
+                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-amber-300 text-amber-700 bg-amber-50">
+                        Zulagen {Object.values(g.zulagen).reduce((a, b) => a + b, 0).toFixed(1)} h
+                      </Badge>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="grid grid-cols-4 gap-2 text-center text-xs shrink-0 mr-1">
                 <CompactCell value={g.baustelle} label="BVH" />
@@ -773,15 +816,22 @@ function BaustellenAuswertung({
       string,
       {
         baustelle: Baustelle | null; // null = "ohne Baustelle"
-        baustelleStd: number; // Stunden auf der Baustelle (in_firma=false)
-        firmaStd: number; // Stunden in Firma, aber Bezug auf diese BVH
+        baustelleStd: number;
+        firmaStd: number;
         fahrt: number;
+        tgKurz: number;
+        tgLang: number;
+        km: number;
+        zulagen: number;
         rows: Stunde[];
-        perPerson: Map<string, { person: Profile; baustelle: number; firma: number }>;
+        perPerson: Map<
+          string,
+          { person: Profile; baustelle: number; firma: number; tgKurz: number; tgLang: number }
+        >;
       }
     >();
     rows
-      .filter((r) => !r.fehlzeit_typ) // Fehlzeiten sind keiner BVH zugeordnet
+      .filter((r) => !r.fehlzeit_typ)
       .forEach((r) => {
         const key = r.baustelle_id ?? "__none__";
         const cur =
@@ -791,16 +841,24 @@ function BaustellenAuswertung({
             baustelleStd: 0,
             firmaStd: 0,
             fahrt: 0,
+            tgKurz: 0,
+            tgLang: 0,
+            km: 0,
+            zulagen: 0,
             rows: [],
             perPerson: new Map<
               string,
-              { person: Profile; baustelle: number; firma: number }
+              { person: Profile; baustelle: number; firma: number; tgKurz: number; tgLang: number }
             >(),
           };
         const a = Number(r.arbeitsstunden ?? 0);
         if (r.in_firma) cur.firmaStd += a;
         else cur.baustelleStd += a;
         cur.fahrt += Number(r.fahrstunden ?? 0);
+        cur.tgKurz += Number(r.taggeld_kurz ?? 0);
+        cur.tgLang += Number(r.taggeld_lang ?? 0);
+        cur.km += Number(r.km_gefahren ?? 0);
+        cur.zulagen += Number(r.zulage_stunden ?? 0);
         cur.rows.push(r);
 
         const p = persons.get(r.mitarbeiter_id);
@@ -809,9 +867,13 @@ function BaustellenAuswertung({
             person: p,
             baustelle: 0,
             firma: 0,
+            tgKurz: 0,
+            tgLang: 0,
           };
           if (r.in_firma) pp.firma += a;
           else pp.baustelle += a;
+          pp.tgKurz += Number(r.taggeld_kurz ?? 0);
+          pp.tgLang += Number(r.taggeld_lang ?? 0);
           cur.perPerson.set(r.mitarbeiter_id, pp);
         }
 
@@ -838,8 +900,12 @@ function BaustellenAuswertung({
       baustelle: s.baustelle + g.baustelleStd,
       firma: s.firma + g.firmaStd,
       fahrt: s.fahrt + g.fahrt,
+      tgKurz: s.tgKurz + g.tgKurz,
+      tgLang: s.tgLang + g.tgLang,
+      km: s.km + g.km,
+      zulagen: s.zulagen + g.zulagen,
     }),
-    { baustelle: 0, firma: 0, fahrt: 0 }
+    { baustelle: 0, firma: 0, fahrt: 0, tgKurz: 0, tgLang: 0, km: 0, zulagen: 0 }
   );
 
   const toggle = (key: string) => {
@@ -853,10 +919,20 @@ function BaustellenAuswertung({
     <div className="space-y-2">
       {grouped.length > 1 && (
         <Card>
-          <CardContent className="p-3 grid grid-cols-3 gap-2 text-center text-xs">
-            <SumCell value={total.baustelle} label="Auswärts" icon={<MapPin className="h-3 w-3" />} highlight />
-            <SumCell value={total.firma} label="In Firma" icon={<Factory className="h-3 w-3" />} />
-            <SumCell value={total.fahrt} label="Fahrt" />
+          <CardContent className="p-3 space-y-2">
+            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+              <SumCell value={total.baustelle} label="Auswärts" icon={<MapPin className="h-3 w-3" />} highlight />
+              <SumCell value={total.firma} label="In Firma" icon={<Factory className="h-3 w-3" />} />
+              <SumCell value={total.fahrt} label="Fahrt" />
+            </div>
+            {(total.tgKurz > 0 || total.tgLang > 0 || total.km > 0 || total.zulagen > 0) && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs border-t pt-2">
+                <SumCell value={total.tgKurz} label="TG kurz" suffix="×" decimals={0} />
+                <SumCell value={total.tgLang} label="TG lang" suffix="×" decimals={0} />
+                <SumCell value={total.km} label="KM" decimals={0} />
+                <SumCell value={total.zulagen} label="Zulagen" suffix=" h" />
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -943,6 +1019,16 @@ function BaustellenAuswertung({
                                 {pp.firma.toFixed(1)}h
                               </span>
                             )}
+                            {(pp.tgKurz > 0 || pp.tgLang > 0) && (
+                              <span
+                                className="text-[10px] tabular-nums px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200"
+                                title={`Diäten: kurz ${pp.tgKurz}× / lang ${pp.tgLang}×`}
+                              >
+                                Diäten {pp.tgKurz > 0 && `K${pp.tgKurz.toFixed(0)}`}
+                                {pp.tgKurz > 0 && pp.tgLang > 0 && "/"}
+                                {pp.tgLang > 0 && `L${pp.tgLang.toFixed(0)}`}
+                              </span>
+                            )}
                             <span className="text-xs font-bold tabular-nums shrink-0">
                               {(pp.baustelle + pp.firma).toFixed(1)}h
                             </span>
@@ -982,11 +1068,15 @@ function SumCell({
   label,
   icon,
   highlight = false,
+  suffix,
+  decimals = 1,
 }: {
   value: number;
   label: string;
   icon?: React.ReactNode;
   highlight?: boolean;
+  suffix?: string;
+  decimals?: number;
 }) {
   return (
     <div>
@@ -995,7 +1085,8 @@ function SumCell({
           highlight ? "text-primary" : ""
         }`}
       >
-        {value.toFixed(1)}
+        {value.toFixed(decimals)}
+        {suffix && <span className="text-sm opacity-60 ml-0.5">{suffix}</span>}
       </div>
       <div className="text-[10px] uppercase text-muted-foreground flex items-center justify-center gap-1">
         {icon}
@@ -1073,6 +1164,34 @@ function BuchungRow({
             : "Zul."}
           {Number(r.zulage_stunden ?? 0) > 0 &&
             ` ${Number(r.zulage_stunden).toFixed(1)}h`}
+        </Badge>
+      )}
+      {/* Diäten + KM Indicators */}
+      {(r.taggeld_kurz ?? 0) > 0 && (
+        <Badge
+          variant="outline"
+          className="text-[9px] px-1 py-0 shrink-0 h-4 border-blue-300 text-blue-700 bg-blue-50"
+          title={`Taggeld kurz: ${r.taggeld_kurz}`}
+        >
+          K{r.taggeld_kurz}
+        </Badge>
+      )}
+      {(r.taggeld_lang ?? 0) > 0 && (
+        <Badge
+          variant="outline"
+          className="text-[9px] px-1 py-0 shrink-0 h-4 border-blue-400 text-blue-800 bg-blue-50"
+          title={`Taggeld lang: ${r.taggeld_lang}`}
+        >
+          L{r.taggeld_lang}
+        </Badge>
+      )}
+      {(r.km_gefahren ?? 0) > 0 && (
+        <Badge
+          variant="outline"
+          className="text-[9px] px-1 py-0 shrink-0 h-4 border-slate-300 text-slate-700 bg-slate-50"
+          title={`Kilometer: ${r.km_gefahren}`}
+        >
+          {r.km_gefahren} km
         </Badge>
       )}
       <span className="truncate flex-1">

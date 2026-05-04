@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { generateBaustellenanlageDocx, DOCX_MIME } from "@/lib/baustellenanlageDocx";
 import { Save } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
+import { localIso } from "@/lib/dateFmt";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -135,7 +136,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
         { ...savedRow, ...payload },
         bauleiterName
       );
-      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const dateStr = localIso().replace(/-/g, "");
       const path = `${id}/baustellenanlage/baustellenanlage_${dateStr}.docx`;
       const { error: upErr } = await supabase.storage
         .from("baustellen")

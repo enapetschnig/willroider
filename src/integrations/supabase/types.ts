@@ -36,35 +36,47 @@ export type Database = {
           partie_id: string | null;
           is_active: boolean | null;
           is_partieleiter: boolean | null;
-          // Personalanlage
+          // Personalanlage — nicht-sensitive Felder
           geburtsdatum: string | null;
           geburtsort: string | null;
-          sv_nr: string | null;
           staatsangehoerigkeit: string | null;
-          religion: string | null;
-          familienstand: string | null;
           wohn_strasse: string | null;
           wohn_plz: string | null;
           wohn_ort: string | null;
           wohn_land: string | null;
           erlernter_beruf: string | null;
-          letzter_arbeitgeber: string | null;
-          vorbeschaeftigung_von: string | null;
-          vorbeschaeftigung_bis: string | null;
           sonstige_pruefungen: string | null;
           bewerbung_als: string | null;
-          bank_name: string | null;
-          bank_bic: string | null;
-          bank_iban: string | null;
-          vorstellungsdatum: string | null;
-          stundenlohn: number | null;
-          zulagen: string | null;
-          personal_vermerke: string | null;
           created_at: string;
           updated_at: string;
         };
         Insert: Partial<Database['public']['Tables']['profiles']['Row']> & { id: string };
         Update: Partial<Database['public']['Tables']['profiles']['Row']>;
+        Relationships: [];
+      };
+      profiles_sensitive: {
+        Row: {
+          profile_id: string;
+          sv_nr: string | null;
+          religion: string | null;
+          familienstand: string | null;
+          bank_name: string | null;
+          bank_bic: string | null;
+          bank_iban: string | null;
+          stundenlohn: number | null;
+          zulagen: string | null;
+          letzter_arbeitgeber: string | null;
+          vorbeschaeftigung_von: string | null;
+          vorbeschaeftigung_bis: string | null;
+          personal_vermerke: string | null;
+          vorstellungsdatum: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['profiles_sensitive']['Row']> & {
+          profile_id: string;
+        };
+        Update: Partial<Database['public']['Tables']['profiles_sensitive']['Row']>;
         Relationships: [];
       };
       user_roles: {

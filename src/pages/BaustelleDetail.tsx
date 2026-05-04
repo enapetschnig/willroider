@@ -35,6 +35,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
 import type { Database, BaustellenStatus } from "@/integrations/supabase/types";
+import { localIso } from "@/lib/dateFmt";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Termin = Database["public"]["Tables"]["baustellen_termine"]["Row"];
@@ -145,7 +146,7 @@ export default function BaustelleDetail() {
       .from("evaluierungen")
       .insert({
         baustelle_id: b.id,
-        datum: b.start_datum ?? new Date().toISOString().slice(0, 10),
+        datum: b.start_datum ?? localIso(),
         typ,
         checkliste: {},
         abgeschlossen: false,
@@ -248,6 +249,7 @@ export default function BaustelleDetail() {
   };
 
   const confirmDeleteBaustelle = async () => {
+    if (deleting) return; // Doppelklick-Schutz
     if (!b) return;
     if (deleteConfirm.trim() !== b.bvh_name) return;
     setDeleting(true);
@@ -793,7 +795,7 @@ export default function BaustelleDetail() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Datum *</Label>
-                <Input name="datum" type="date" required defaultValue={new Date().toISOString().slice(0,10)} />
+                <Input name="datum" type="date" required defaultValue={localIso()} />
               </div>
               <div className="space-y-1.5">
                 <Label>Kostenart *</Label>

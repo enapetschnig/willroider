@@ -25,6 +25,7 @@ import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
 import { useToast } from "@/hooks/use-toast";
 import type { Database } from "@/integrations/supabase/types";
 import { feiertagAt, type FeiertagInfo } from "@/lib/feiertage";
+import { localIso } from "@/lib/dateFmt";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
@@ -78,10 +79,7 @@ const FEHLZEIT_COLOR: Record<string, string> = {
 };
 
 const cellKey = (workerId: string, iso: string) => `${workerId}:${iso}`;
-// Lokale ISO-Konvertierung (KEIN toISOString — sonst Timezone-Bug:
-// 1. Mai 00:00 lokal wird in CEST zu 30. April 22:00 UTC → falsches Datum)
-const isoDate = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const isoDate = (d: Date) => localIso(d);
 
 export default function Arbeitsplanung() {
   const { canCreateBaustelle, isAdmin } = useAuth();
@@ -755,6 +753,23 @@ export default function Arbeitsplanung() {
     setTagesplanBusy(true);
     try {
       const data = await buildTagesplanData(tagesplanDate);
+      const isEmpty =
+        data.einteilungen.length === 0 &&
+        !data.produktion &&
+        !data.urlaub &&
+        !data.polierschule &&
+        !data.krank &&
+        !data.stempeln &&
+        !data.sonstige;
+      if (isEmpty) {
+        toast({
+          variant: "destructive",
+          title: "Keine Daten für diesen Tag",
+          description:
+            "Für das gewählte Datum sind weder Einteilungen noch Fehlzeiten erfasst.",
+        });
+        return;
+      }
       setTagesplanPreview(data);
     } catch (err: any) {
       toast({

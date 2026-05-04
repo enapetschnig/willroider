@@ -47,6 +47,7 @@ import {
 import type { Database, StundenStatus } from "@/integrations/supabase/types";
 import { feiertagAt } from "@/lib/feiertage";
 import { ZULAGEN, type ZulageTyp } from "@/lib/zulagen";
+import { localIso } from "@/lib/dateFmt";
 
 type Stunde = Database["public"]["Tables"]["stundenbuchungen"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -115,11 +116,11 @@ function calcArbeitsstunden(
 const fmtTime = (t: string | null | undefined) => (t ? t.slice(0, 5) : "");
 const fmtH = (n: number) => `${n.toFixed(2).replace(".", ",")} h`;
 
-// Auf nächste 15 Min runden
-function snap15(t: string): string {
-  if (!t) return t;
+// Auf nächste 15 Min runden — defensiv gegen leere Inputs / NaN
+function snap15(t: string | null | undefined): string {
+  if (!t || typeof t !== "string" || !t.trim()) return "07:00";
   const [h, m] = t.split(":").map(Number);
-  if (Number.isNaN(h) || Number.isNaN(m)) return t;
+  if (Number.isNaN(h) || Number.isNaN(m)) return "07:00";
   const total = h * 60 + m;
   const rounded = Math.round(total / 15) * 15;
   const clamped = Math.max(0, Math.min(23 * 60 + 45, rounded));
@@ -164,7 +165,7 @@ export default function Stunden() {
   const [forUserIds, setForUserIds] = useState<Set<string>>(new Set());
   const [memberSearch, setMemberSearch] = useState<string>("");
 
-  const todayIso = () => new Date().toISOString().slice(0, 10);
+  const todayIso = () => localIso();
 
   const [date, setDate] = useState<string>(todayIso);
 
@@ -253,7 +254,7 @@ export default function Stunden() {
     if (!user) return;
     const fromDate = new Date();
     fromDate.setDate(fromDate.getDate() - 30);
-    const fromIso = fromDate.toISOString().slice(0, 10);
+    const fromIso = localIso(fromDate);
 
     let stundenQuery = supabase
       .from("stundenbuchungen")
@@ -382,7 +383,7 @@ export default function Stunden() {
   const moveDate = (d: number) => {
     const nd = new Date(date);
     nd.setDate(nd.getDate() + d);
-    setDate(nd.toISOString().slice(0, 10));
+    setDate(localIso(nd));
   };
 
   const resetTimeFields = () => {
@@ -691,7 +692,7 @@ export default function Stunden() {
                     onClick={() => {
                       const d = new Date();
                       d.setDate(d.getDate() - 1);
-                      setDate(d.toISOString().slice(0, 10));
+                      setDate(localIso(d));
                     }}
                   >
                     Gestern

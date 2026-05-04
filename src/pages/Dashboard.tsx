@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { feiertagAt } from "@/lib/feiertage";
+import { localIso } from "@/lib/dateFmt";
 import {
   Building2,
   CalendarDays,
@@ -88,7 +89,7 @@ export default function Dashboard() {
   // Heutige Einteilung des aktuellen Users + Realtime-Sync
   useEffect(() => {
     if (!user) return;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localIso();
 
     const loadHeute = async () => {
       // 1) Tagesgenaue Einteilung über einteilung_mitarbeiter
@@ -360,7 +361,7 @@ export default function Dashboard() {
 
       {/* Feiertag-Hinweis: automatisch aus Kalender (AT + Kärnten) */}
       {(() => {
-        const todayIso = new Date().toISOString().slice(0, 10);
+        const todayIso = localIso();
         const fei = feiertagAt(todayIso);
         if (!fei) return null;
         return (

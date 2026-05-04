@@ -56,6 +56,9 @@ export default function Mitarbeiter() {
   const [partien, setPartien] = useState<Partie[]>([]);
   const [roles, setRoles] = useState<Record<string, AppRole>>({});
   const [editing, setEditing] = useState<Profile | null>(null);
+  const [editingSensitive, setEditingSensitive] = useState<
+    Database["public"]["Tables"]["profiles_sensitive"]["Row"] | null
+  >(null);
   const [editingPartie, setEditingPartie] = useState<Partial<Partie> | null>(null);
   const [assignToPartie, setAssignToPartie] = useState<Partie | null>(null);
   const [deletingProfile, setDeletingProfile] = useState<Profile | null>(null);
@@ -81,6 +84,23 @@ export default function Mitarbeiter() {
     load();
   }, []);
 
+  const openEdit = async (p: Profile) => {
+    setEditing(p);
+    setEditingSensitive(null);
+    // Sensitive-Daten parallel laden — RLS lässt nur Admin oder eigene Daten durch
+    const { data } = await supabase
+      .from("profiles_sensitive")
+      .select("*")
+      .eq("profile_id", p.id)
+      .maybeSingle();
+    setEditingSensitive(data ?? null);
+  };
+
+  const closeEdit = () => {
+    setEditing(null);
+    setEditingSensitive(null);
+  };
+
   const toggleActive = async (p: Profile) => {
     const { error } = await supabase
       .from("profiles")
@@ -100,6 +120,7 @@ export default function Mitarbeiter() {
   };
 
   const confirmDelete = async () => {
+    if (deleting) return; // Doppelklick-Schutz
     const p = deletingProfile;
     if (!p) return;
     const expected = (p.nachname || `${p.vorname} ${p.nachname}`.trim() || p.email || "")
@@ -113,7 +134,7 @@ export default function Mitarbeiter() {
       });
       return;
     }
-    setDeleting(true);
+    setDeleting(true); // SOFORT setzen, nicht erst nach Validation
     const { error } = await supabase.rpc("admin_delete_user", { _user_id: p.id });
     setDeleting(false);
     if (error) {
@@ -143,7 +164,9 @@ export default function Mitarbeiter() {
     if (!editing) return;
     const fd = new FormData(e.currentTarget);
     const str = (k: string) => ((fd.get(k) as string) || "").trim() || null;
-    const payload: any = {
+
+    // 1) Nicht-sensitive Felder in profiles
+    const profilePayload: any = {
       vorname: fd.get("vorname") as string,
       nachname: fd.get("nachname") as string,
       pers_nr: str("pers_nr"),
@@ -153,38 +176,54 @@ export default function Mitarbeiter() {
       kran_berechtigung: fd.get("kran_berechtigung") === "on",
       partie_id: (fd.get("partie_id") as string) || null,
       is_partieleiter: fd.get("is_partieleiter") === "on",
-      // Personalanlage
       geburtsdatum: str("geburtsdatum"),
       geburtsort: str("geburtsort"),
-      sv_nr: str("sv_nr"),
       staatsangehoerigkeit: str("staatsangehoerigkeit"),
-      religion: str("religion"),
-      familienstand: str("familienstand"),
       wohn_strasse: str("wohn_strasse"),
       wohn_plz: str("wohn_plz"),
       wohn_ort: str("wohn_ort"),
       wohn_land: str("wohn_land"),
       erlernter_beruf: str("erlernter_beruf"),
-      letzter_arbeitgeber: str("letzter_arbeitgeber"),
-      vorbeschaeftigung_von: str("vorbeschaeftigung_von"),
-      vorbeschaeftigung_bis: str("vorbeschaeftigung_bis"),
       sonstige_pruefungen: str("sonstige_pruefungen"),
       bewerbung_als: str("bewerbung_als"),
+    };
+    const { error: pErr } = await supabase
+      .from("profiles")
+      .update(profilePayload)
+      .eq("id", editing.id);
+    if (pErr) {
+      toast({ variant: "destructive", title: "Fehler", description: pErr.message });
+      return;
+    }
+
+    // 2) Sensitive Felder in profiles_sensitive (RLS: nur Admin)
+    const stundenlohnStr = str("stundenlohn");
+    const sensitivePayload: any = {
+      profile_id: editing.id,
+      sv_nr: str("sv_nr"),
+      religion: str("religion"),
+      familienstand: str("familienstand"),
       bank_name: str("bank_name"),
       bank_bic: str("bank_bic"),
       bank_iban: str("bank_iban"),
-      vorstellungsdatum: str("vorstellungsdatum"),
-      stundenlohn: str("stundenlohn") ? Number(str("stundenlohn")) : null,
+      stundenlohn: stundenlohnStr ? Math.max(0, Number(stundenlohnStr)) : null,
       zulagen: str("zulagen"),
+      letzter_arbeitgeber: str("letzter_arbeitgeber"),
+      vorbeschaeftigung_von: str("vorbeschaeftigung_von"),
+      vorbeschaeftigung_bis: str("vorbeschaeftigung_bis"),
       personal_vermerke: str("personal_vermerke"),
+      vorstellungsdatum: str("vorstellungsdatum"),
     };
-    const { error } = await supabase.from("profiles").update(payload).eq("id", editing.id);
-    if (error) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
-      return;
+    const { error: sErr } = await supabase
+      .from("profiles_sensitive")
+      .upsert(sensitivePayload, { onConflict: "profile_id" });
+    if (sErr) {
+      // Wenn RLS blockt (Nicht-Admin) → ignorieren, profile-Update ist trotzdem durch
+      console.warn("profiles_sensitive update failed", sErr.message);
     }
+
     toast({ title: "Mitarbeiter aktualisiert" });
-    setEditing(null);
+    closeEdit();
     load();
   };
 
@@ -327,7 +366,7 @@ export default function Mitarbeiter() {
                         variant="outline"
                         size="sm"
                         className="h-10"
-                        onClick={() => setEditing(p)}
+                        onClick={() => openEdit(p)}
                         aria-label="Bearbeiten"
                       >
                         <Edit className="h-4 w-4" />
@@ -437,7 +476,7 @@ export default function Mitarbeiter() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => setEditing(p)}
+                            onClick={() => openEdit(p)}
                             aria-label="Bearbeiten"
                           >
                             <Edit className="h-4 w-4" />
@@ -631,7 +670,7 @@ export default function Mitarbeiter() {
       </Tabs>
 
       {/* Edit profile dialog — Personalanlageblatt 1:1 */}
-      <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
+      <Dialog open={!!editing} onOpenChange={(open) => { if (!open) closeEdit(); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Personalanlageblatt — {editing?.vorname} {editing?.nachname}</DialogTitle>
@@ -668,7 +707,7 @@ export default function Mitarbeiter() {
                     <Label>SV-Nummer</Label>
                     <Input
                       name="sv_nr"
-                      defaultValue={editing.sv_nr ?? ""}
+                      defaultValue={editingSensitive?.sv_nr ?? ""}
                       placeholder="10-stellig"
                     />
                   </div>
@@ -682,13 +721,13 @@ export default function Mitarbeiter() {
                   </div>
                   <div className="space-y-1.5">
                     <Label>Religiöses Bekenntnis</Label>
-                    <Input name="religion" defaultValue={editing.religion ?? ""} />
+                    <Input name="religion" defaultValue={editingSensitive?.religion ?? ""} />
                   </div>
                   <div className="space-y-1.5">
                     <Label>Familienstand</Label>
                     <select
                       name="familienstand"
-                      defaultValue={editing.familienstand ?? ""}
+                      defaultValue={editingSensitive?.familienstand ?? ""}
                       className="w-full h-10 rounded-md border bg-background px-3 text-sm"
                     >
                       <option value="">—</option>
@@ -764,7 +803,7 @@ export default function Mitarbeiter() {
                     <Label>Letzter Arbeitgeber</Label>
                     <Input
                       name="letzter_arbeitgeber"
-                      defaultValue={editing.letzter_arbeitgeber ?? ""}
+                      defaultValue={editingSensitive?.letzter_arbeitgeber ?? ""}
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -772,7 +811,7 @@ export default function Mitarbeiter() {
                     <Input
                       name="vorbeschaeftigung_von"
                       type="date"
-                      defaultValue={editing.vorbeschaeftigung_von ?? ""}
+                      defaultValue={editingSensitive?.vorbeschaeftigung_von ?? ""}
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -780,7 +819,7 @@ export default function Mitarbeiter() {
                     <Input
                       name="vorbeschaeftigung_bis"
                       type="date"
-                      defaultValue={editing.vorbeschaeftigung_bis ?? ""}
+                      defaultValue={editingSensitive?.vorbeschaeftigung_bis ?? ""}
                     />
                   </div>
                 </div>
@@ -836,13 +875,13 @@ export default function Mitarbeiter() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label>Bank</Label>
-                    <Input name="bank_name" defaultValue={editing.bank_name ?? ""} />
+                    <Input name="bank_name" defaultValue={editingSensitive?.bank_name ?? ""} />
                   </div>
                   <div className="space-y-1.5">
                     <Label>BIC</Label>
                     <Input
                       name="bank_bic"
-                      defaultValue={editing.bank_bic ?? ""}
+                      defaultValue={editingSensitive?.bank_bic ?? ""}
                       placeholder="z.B. RZSTAT2GXXX"
                     />
                   </div>
@@ -850,8 +889,10 @@ export default function Mitarbeiter() {
                     <Label>IBAN</Label>
                     <Input
                       name="bank_iban"
-                      defaultValue={editing.bank_iban ?? ""}
+                      defaultValue={editingSensitive?.bank_iban ?? ""}
                       placeholder="AT00 0000 0000 0000 0000"
+                      pattern="^[A-Za-z]{2}[0-9]{2}[A-Za-z0-9 ]{1,30}$"
+                      title="IBAN-Format: 2 Buchstaben + 2 Ziffern + bis 30 alphanumerische Zeichen (Leerzeichen erlaubt)"
                     />
                   </div>
                 </div>
@@ -868,7 +909,7 @@ export default function Mitarbeiter() {
                     <Input
                       name="vorstellungsdatum"
                       type="date"
-                      defaultValue={editing.vorstellungsdatum ?? ""}
+                      defaultValue={editingSensitive?.vorstellungsdatum ?? ""}
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -881,15 +922,16 @@ export default function Mitarbeiter() {
                       name="stundenlohn"
                       type="number"
                       step="0.01"
+                      min="0"
                       inputMode="decimal"
-                      defaultValue={editing.stundenlohn ?? ""}
+                      defaultValue={editingSensitive?.stundenlohn ?? ""}
                     />
                   </div>
                   <div className="space-y-1.5">
                     <Label>Zulagen</Label>
                     <Input
                       name="zulagen"
-                      defaultValue={editing.zulagen ?? ""}
+                      defaultValue={editingSensitive?.zulagen ?? ""}
                       placeholder="z.B. KFZ-Zulage 80,–"
                     />
                   </div>
@@ -897,7 +939,7 @@ export default function Mitarbeiter() {
                     <Label>Sonstige Vermerke</Label>
                     <Textarea
                       name="personal_vermerke"
-                      defaultValue={editing.personal_vermerke ?? ""}
+                      defaultValue={editingSensitive?.personal_vermerke ?? ""}
                       rows={3}
                     />
                   </div>
@@ -937,7 +979,7 @@ export default function Mitarbeiter() {
               </section>
 
               <DialogFooter className="sticky bottom-0 bg-card pt-3 border-t">
-                <Button type="button" variant="outline" onClick={() => setEditing(null)}>
+                <Button type="button" variant="outline" onClick={closeEdit}>
                   Abbrechen
                 </Button>
                 <Button type="submit">Speichern</Button>
