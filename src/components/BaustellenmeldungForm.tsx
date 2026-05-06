@@ -137,14 +137,14 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
         bauleiterName
       );
       const dateStr = localIso().replace(/-/g, "");
-      const path = `${id}/baustellenanlage/baustellenanlage_${dateStr}.docx`;
+      const path = `${id}/1-baustellenmanagement/baustellenanlage_${dateStr}.docx`;
       const { error: upErr } = await supabase.storage
         .from("baustellen")
         .upload(path, docxBlob, { contentType: DOCX_MIME, upsert: true });
       if (!upErr) {
         await supabase.from("dokumente").insert({
           baustelle_id: id!,
-          ordner: "baustellenanlage",
+          ordner: "1-baustellenmanagement",
           dateiname: `Baustellenanlage ${bvhName} ${dateStr}.docx`,
           storage_path: path,
           mimetype: DOCX_MIME,

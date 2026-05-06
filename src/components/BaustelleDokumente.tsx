@@ -20,22 +20,23 @@ import {
   File as FileIcon,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  BAUSTELLEN_ORDNER,
+  DEFAULT_VISIBILITY,
+  type OrdnerKey,
+  type Visibility,
+} from "@/lib/baustellenOrdner";
 
 type Dokument = Database["public"]["Tables"]["dokumente"]["Row"];
 
-const FOLDERS = [
-  { key: "baustellenanlage", label: "Baustellenanlage", icon: FileText, color: "#dc2626" },
-  { key: "fotos", label: "Fotos", icon: ImageIcon, color: "#3b82f6" },
-  { key: "plaene", label: "Pläne", icon: FileText, color: "#8b5cf6" },
-  { key: "berichte", label: "Berichte", icon: FileText, color: "#10b981" },
-  { key: "stundenzettel", label: "Stundenzettel", icon: FileText, color: "#f59e0b" },
-  { key: "rechnungen", label: "Rechnungen", icon: FileText, color: "#ef4444" },
-  { key: "lieferscheine", label: "Lieferscheine", icon: FileText, color: "#06b6d4" },
-  { key: "evaluierung", label: "Evaluierung", icon: FileText, color: "#84cc16" },
-  { key: "sonstige", label: "Sonstige", icon: FolderOpen, color: "#6b7280" },
-] as const;
+// Wrapper für Icon-Auswahl analog zu vorher (alle FileText außer Fotos)
+const FOLDERS = BAUSTELLEN_ORDNER.map((o) => ({
+  ...o,
+  icon: o.key === "fotos" ? ImageIcon : o.key === "92-sonstiges" ? FolderOpen : FileText,
+}));
 
-type FolderKey = typeof FOLDERS[number]["key"];
+type FolderKey = OrdnerKey;
 
 function isImage(mimetype?: string | null) {
   return !!mimetype && mimetype.startsWith("image/");
@@ -44,19 +45,32 @@ function isPdf(mimetype?: string | null) {
   return !!mimetype && mimetype === "application/pdf";
 }
 function folderMeta(key: string | null | undefined) {
-  return FOLDERS.find((f) => f.key === (key ?? "sonstige")) ?? FOLDERS[FOLDERS.length - 1];
+  return (
+    FOLDERS.find((f) => f.key === (key ?? "92-sonstiges")) ??
+    FOLDERS.find((f) => f.key === "92-sonstiges")!
+  );
 }
 
 export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const { toast } = useToast();
+  const { role } = useAuth();
   const [docs, setDocs] = useState<Dokument[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<"alle" | FolderKey>("alle");
   const [uploadFolder, setUploadFolder] = useState<FolderKey>("fotos");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState<string>("");
+  const [visibility, setVisibility] = useState<Visibility>(DEFAULT_VISIBILITY);
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
+
+  // Sichtbare Ordner anhand Rolle + DB-Settings filtern
+  const visibleFolders = useMemo(() => {
+    const r = role ?? "mitarbeiter";
+    const allowed = visibility[r] ?? DEFAULT_VISIBILITY[r] ?? DEFAULT_VISIBILITY.mitarbeiter;
+    const allowedSet = new Set(allowed);
+    return FOLDERS.filter((f) => allowedSet.has(f.key));
+  }, [role, visibility]);
 
   const load = async () => {
     setLoading(true);
@@ -69,22 +83,52 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     setLoading(false);
   };
 
+  // Visibility-Settings laden (einmalig)
+  useEffect(() => {
+    supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", "ordner_visibility")
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.value) setVisibility(data.value as Visibility);
+      });
+  }, []);
+
   useEffect(() => {
     load();
   }, [baustelleId]);
 
+  // upload-Folder zurücksetzen falls aktueller Default nicht erlaubt
+  useEffect(() => {
+    if (visibleFolders.length === 0) return;
+    if (!visibleFolders.some((f) => f.key === uploadFolder)) {
+      setUploadFolder(visibleFolders[0].key);
+    }
+  }, [visibleFolders]);
+
   const counts = useMemo(() => {
-    const c: Record<string, number> = { alle: docs.length };
-    FOLDERS.forEach((f) => {
-      c[f.key] = docs.filter((d) => (d.ordner ?? "sonstige") === f.key).length;
+    // "alle" zählt nur Docs in sichtbaren Ordnern
+    const allowedSet = new Set(visibleFolders.map((f) => f.key));
+    const c: Record<string, number> = {
+      alle: docs.filter((d) => allowedSet.has((d.ordner ?? "92-sonstiges") as OrdnerKey)).length,
+    };
+    visibleFolders.forEach((f) => {
+      c[f.key] = docs.filter((d) => (d.ordner ?? "92-sonstiges") === f.key).length;
     });
     return c;
-  }, [docs]);
+  }, [docs, visibleFolders]);
 
   const filtered = useMemo(() => {
-    if (activeFilter === "alle") return docs;
-    return docs.filter((d) => (d.ordner ?? "sonstige") === activeFilter);
-  }, [docs, activeFilter]);
+    const allowedSet = new Set(visibleFolders.map((f) => f.key));
+    if (activeFilter === "alle") {
+      // "alle" zeigt nur Dokumente aus sichtbaren Ordnern
+      return docs.filter((d) =>
+        allowedSet.has((d.ordner ?? "92-sonstiges") as OrdnerKey)
+      );
+    }
+    return docs.filter((d) => (d.ordner ?? "92-sonstiges") === activeFilter);
+  }, [docs, activeFilter, visibleFolders]);
 
   const upload = async (files: FileList | null, folder: FolderKey) => {
     if (!files || files.length === 0) return;
@@ -204,7 +248,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
           active={activeFilter === "alle"}
           onClick={() => setActiveFilter("alle")}
         />
-        {FOLDERS.map((f) => (
+        {visibleFolders.map((f) => (
           <FilterPill
             key={f.key}
             label={f.label}

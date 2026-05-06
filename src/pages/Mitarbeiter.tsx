@@ -28,6 +28,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { CheckCircle2, XCircle, Plus, Edit, Trash2, AlertTriangle } from "lucide-react";
 import type { Database, AppRole } from "@/integrations/supabase/types";
+import {
+  BAUSTELLEN_ORDNER,
+  DEFAULT_VISIBILITY,
+  type OrdnerKey,
+  type Visibility,
+} from "@/lib/baustellenOrdner";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
@@ -42,14 +48,19 @@ const ROLES: { value: AppRole; label: string }[] = [
 export default function Mitarbeiter() {
   const { toast } = useToast();
   const [params, setParams] = useSearchParams();
-  const initialTab = params.get("tab") === "partien" ? "partien" : "mitarbeiter";
+  const initialTab =
+    params.get("tab") === "partien"
+      ? "partien"
+      : params.get("tab") === "ordner"
+      ? "ordner"
+      : "mitarbeiter";
   const [tab, setTab] = useState(initialTab);
 
   const onTabChange = (v: string) => {
     setTab(v);
     const next = new URLSearchParams(params);
-    if (v === "partien") next.set("tab", "partien");
-    else next.delete("tab");
+    if (v === "mitarbeiter") next.delete("tab");
+    else next.set("tab", v);
     setParams(next, { replace: true });
   };
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -300,6 +311,7 @@ export default function Mitarbeiter() {
         <TabsList>
           <TabsTrigger value="mitarbeiter">Mitarbeiter ({profiles.length})</TabsTrigger>
           <TabsTrigger value="partien">Partien ({partien.length})</TabsTrigger>
+          <TabsTrigger value="ordner">Ordner-Sichtbarkeit</TabsTrigger>
         </TabsList>
 
         <TabsContent value="mitarbeiter">
@@ -666,6 +678,10 @@ export default function Mitarbeiter() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+        </TabsContent>
+
+        <TabsContent value="ordner">
+          <OrdnerVisibilitySettings />
         </TabsContent>
       </Tabs>
 
@@ -1143,6 +1159,128 @@ export default function Mitarbeiter() {
           })()}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ─── Ordner-Sichtbarkeit pro Rolle ───
+const ROLE_LABELS: { value: AppRole; label: string }[] = [
+  { value: "geschaeftsfuehrung", label: "Geschäftsführung" },
+  { value: "buero", label: "Büro" },
+  { value: "bauleiter", label: "Vorarbeiter / Polier" },
+  { value: "zimmermeister", label: "Zimmermeister" },
+  { value: "mitarbeiter", label: "Mitarbeiter" },
+];
+
+function OrdnerVisibilitySettings() {
+  const { toast } = useToast();
+  const [visibility, setVisibility] = useState<Visibility>(DEFAULT_VISIBILITY);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", "ordner_visibility")
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.value) setVisibility(data.value as Visibility);
+        setLoading(false);
+      });
+  }, []);
+
+  const toggle = (rolle: AppRole, ordnerKey: OrdnerKey) => {
+    setVisibility((prev) => {
+      const cur = new Set(prev[rolle] ?? []);
+      if (cur.has(ordnerKey)) cur.delete(ordnerKey);
+      else cur.add(ordnerKey);
+      return { ...prev, [rolle]: Array.from(cur) };
+    });
+  };
+
+  const save = async () => {
+    setSaving(true);
+    const { error } = await supabase
+      .from("app_settings")
+      .upsert({ key: "ordner_visibility", value: visibility as any }, { onConflict: "key" });
+    setSaving(false);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    toast({ title: "Ordner-Sichtbarkeit gespeichert" });
+  };
+
+  if (loading) return <div className="text-sm text-muted-foreground p-4">Lädt…</div>;
+
+  return (
+    <div className="space-y-3">
+      <Card>
+        <CardContent className="p-3 text-sm space-y-1">
+          <div className="font-semibold">Welche Rolle sieht welche Ordner?</div>
+          <div className="text-xs text-muted-foreground">
+            Häkchen = Ordner ist beim Öffnen einer Baustelle sichtbar. Ändert nichts an
+            den Dokumenten selbst — sie bleiben in der Datenbank, werden für nicht-
+            sichtbare Rollen nur ausgeblendet.
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="overflow-x-auto">
+        <CardContent className="p-0">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/60 sticky top-0">
+              <tr>
+                <th className="text-left px-3 py-2 font-semibold">Ordner</th>
+                {ROLE_LABELS.map((r) => (
+                  <th
+                    key={r.value}
+                    className="text-center px-2 py-2 text-[11px] font-semibold"
+                  >
+                    {r.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {BAUSTELLEN_ORDNER.map((o) => (
+                <tr key={o.key} className="border-t hover:bg-muted/20">
+                  <td className="px-3 py-1.5 flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 rounded-sm shrink-0"
+                      style={{ background: o.color }}
+                    />
+                    <span className="font-medium">{o.label}</span>
+                    <code className="text-[9px] text-muted-foreground ml-auto opacity-60">
+                      {o.key}
+                    </code>
+                  </td>
+                  {ROLE_LABELS.map((r) => {
+                    const checked = (visibility[r.value] ?? []).includes(o.key);
+                    return (
+                      <td key={r.value} className="text-center px-2 py-1.5">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggle(r.value, o.key)}
+                          className="h-4 w-4 cursor-pointer"
+                        />
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+
+      <div className="flex justify-end">
+        <Button onClick={save} disabled={saving}>
+          {saving ? "Speichert…" : "Sichtbarkeit speichern"}
+        </Button>
+      </div>
     </div>
   );
 }
