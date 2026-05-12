@@ -179,6 +179,8 @@ export default function Stunden() {
 
   // Fehlzeit-Mode hours
   const [fehlzeitHours, setFehlzeitHours] = useState<number>(8);
+  // Optionales End-Datum für Mehrtages-Fehlzeit (Urlaub/Krank über mehrere Tage)
+  const [fehlzeitBis, setFehlzeitBis] = useState<string>("");
 
   const [baustelleId, setBaustelleId] = useState<string>("");
   const [taetigkeit, setTaetigkeit] = useState<string>("");
@@ -393,10 +395,59 @@ export default function Stunden() {
     return rows.filter((r) => r.mitarbeiter_id === primaryUserId && r.datum === date);
   }, [rows, primaryUserId, date]);
 
-  const todayTotalH = todayBlocks.reduce(
-    (s, r) => s + Number(r.arbeitsstunden ?? r.fehlzeit_stunden ?? 0),
-    0
-  );
+  // Getrennt: Arbeitsstunden und Fehlzeit-Stunden pro Fehlzeit-Typ
+  const todaySummary = useMemo(() => {
+    let arbeit = 0;
+    const fehlzeit = new Map<string, number>();
+    todayBlocks.forEach((r) => {
+      if (r.fehlzeit_typ) {
+        fehlzeit.set(
+          r.fehlzeit_typ,
+          (fehlzeit.get(r.fehlzeit_typ) ?? 0) + Number(r.fehlzeit_stunden ?? 0)
+        );
+      } else {
+        arbeit += Number(r.arbeitsstunden ?? 0);
+      }
+    });
+    return { arbeit, fehlzeit };
+  }, [todayBlocks]);
+
+  // Werktage im Mehrtages-Fehlzeit-Zeitraum (für Submit-Button-Label)
+  const fehlzeitWorkdays = useMemo(() => {
+    if (!fehlzeitTyp || !fehlzeitBis || fehlzeitBis <= date) return 1;
+    let count = 0;
+    let cur = new Date(date + "T00:00:00");
+    const end = new Date(fehlzeitBis + "T00:00:00");
+    while (cur <= end) {
+      const day = cur.getDay();
+      const iso = localIso(cur);
+      if (day !== 0 && day !== 6 && !feiertagAt(iso)) count++;
+      cur.setDate(cur.getDate() + 1);
+    }
+    return count;
+  }, [fehlzeitTyp, fehlzeitBis, date]);
+
+  const fehlzeitLabel = (typ: string) =>
+    typ === "U"
+      ? "Urlaub"
+      : typ === "K"
+      ? "Krank"
+      : typ === "F"
+      ? "Feiertag"
+      : typ === "SW"
+      ? "Schlechtwetter"
+      : typ;
+
+  const fehlzeitBadgeClass = (typ: string) =>
+    typ === "U"
+      ? "bg-amber-100 text-amber-900 border-amber-300"
+      : typ === "K"
+      ? "bg-red-100 text-red-900 border-red-300"
+      : typ === "F"
+      ? "bg-violet-100 text-violet-900 border-violet-300"
+      : typ === "SW"
+      ? "bg-sky-100 text-sky-900 border-sky-300"
+      : "bg-muted text-foreground border-border";
 
   // Pause: pro Tag nur einmal (vom Lohn her). Wenn der primäre User heute
   // irgendwo eine Buchung mit pause_von/bis hat, wird der Pause-Toggle gesperrt.
@@ -452,6 +503,7 @@ export default function Stunden() {
   const fullReset = () => {
     resetTimeFields();
     setFehlzeitHours(8);
+    setFehlzeitBis("");
     setBaustelleId("");
     setTaetigkeit("");
     setFehlzeitTyp("");
@@ -581,8 +633,35 @@ export default function Stunden() {
     }
 
     const ids = Array.from(forUserIds);
+
+    // Mehrtages-Fehlzeit: Werktage von `date` bis `fehlzeitBis` aufbauen
+    // (Wochenenden + Feiertage überspringen). Bei Arbeit oder ohne Bis-Datum
+    // → nur ein Tag.
+    const dates: string[] = [];
+    if (isFehlzeit && fehlzeitBis && fehlzeitBis > date) {
+      let cur = new Date(date + "T00:00:00");
+      const end = new Date(fehlzeitBis + "T00:00:00");
+      while (cur <= end) {
+        const day = cur.getDay(); // 0 = So, 6 = Sa
+        const iso = localIso(cur);
+        if (day !== 0 && day !== 6 && !feiertagAt(iso)) {
+          dates.push(iso);
+        }
+        cur.setDate(cur.getDate() + 1);
+      }
+      if (dates.length === 0) {
+        toast({
+          variant: "destructive",
+          title: "Keine Werktage im Zeitraum",
+          description: "Zeitraum enthält nur Wochenenden/Feiertage.",
+        });
+        return;
+      }
+    } else {
+      dates.push(date);
+    }
+
     const commonPayload: any = {
-      datum: date,
       baustelle_id: isFehlzeit ? null : baustelleId || null,
       start_zeit: sStart,
       end_zeit: sEnd,
@@ -611,35 +690,41 @@ export default function Stunden() {
     let lastInserted: Stunde | null = null;
     let success = 0;
     for (const uid of ids) {
-      const payload: any = { ...commonPayload, mitarbeiter_id: uid };
-      const { data, error } = await supabase
-        .from("stundenbuchungen")
-        .insert(payload)
-        .select()
-        .single();
-      if (error) {
-        const p = allMembers.find((m) => m.id === uid);
-        toast({
-          variant: "destructive",
-          title: `Fehler bei ${p ? `${p.vorname} ${p.nachname}` : uid}`,
-          description: error.message,
-        });
-        continue;
+      for (const dt of dates) {
+        const payload: any = { ...commonPayload, mitarbeiter_id: uid, datum: dt };
+        const { data, error } = await supabase
+          .from("stundenbuchungen")
+          .insert(payload)
+          .select()
+          .single();
+        if (error) {
+          const p = allMembers.find((m) => m.id === uid);
+          toast({
+            variant: "destructive",
+            title: `Fehler bei ${p ? `${p.vorname} ${p.nachname}` : uid} (${dt})`,
+            description: error.message,
+          });
+          continue;
+        }
+        lastInserted = data as Stunde;
+        success++;
       }
-      lastInserted = data as Stunde;
-      success++;
     }
     if (success === 0) return;
 
+    const multiDay = dates.length > 1;
     toast({
-      title:
-        ids.length > 1
-          ? `${success} Buchungen gespeichert`
-          : continueFlag
-          ? "Block gespeichert – nächste Baustelle"
-          : "Buchung gespeichert",
+      title: multiDay
+        ? `${success} Fehlzeit-Buchungen gespeichert`
+        : ids.length > 1
+        ? `${success} Buchungen gespeichert`
+        : continueFlag
+        ? "Block gespeichert – nächste Baustelle"
+        : "Buchung gespeichert",
       description: isFehlzeit
-        ? `${fehlzeitHours}h ${fehlzeitTyp} · ${success} Mitarbeiter`
+        ? multiDay
+          ? `${fehlzeitHours}h ${fehlzeitTyp} · ${dates.length} Tage × ${ids.length} Mitarbeiter`
+          : `${fehlzeitHours}h ${fehlzeitTyp} · ${ids.length} Mitarbeiter`
         : `${arbeit.toFixed(2)}h · ${fmtTime(startZeit)}–${fmtTime(endZeit)}${
             ids.length > 1 ? ` · ${success} Mitarbeiter` : ""
           }`,
@@ -693,6 +778,7 @@ export default function Stunden() {
               members={allMembers}
               selectedIds={forUserIds}
               onToggle={togglePerson}
+              onSetSelection={setForUserIds}
               ownUserId={user!.id}
               ownProfile={profile as any}
               statusForDate={statusForDate}
@@ -788,41 +874,84 @@ export default function Stunden() {
               </div>
 
               {/* Bereits gebucht heute */}
-              {todayBlocks.length > 0 && (
+              {todayBlocks.length === 0 ? (
+                <div className="border-t pt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                  <Clock className="h-3.5 w-3.5" />
+                  Noch nichts gebucht für diesen Tag.
+                </div>
+              ) : (
                 <div className="border-t pt-3">
-                  <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
                     <Label className="text-xs uppercase tracking-wide text-muted-foreground">
                       Schon gebucht
                     </Label>
-                    <span className="text-xs font-bold tabular-nums">Σ {fmtH(todayTotalH)}</span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {todaySummary.arbeit > 0 && (
+                        <span className="text-xs font-bold tabular-nums">
+                          {fmtH(todaySummary.arbeit)} Arbeit
+                        </span>
+                      )}
+                      {Array.from(todaySummary.fehlzeit.entries())
+                        .filter(([, h]) => h > 0)
+                        .map(([typ, h]) => (
+                          <span
+                            key={typ}
+                            className={`text-[10px] font-semibold tabular-nums px-1.5 py-0.5 rounded border ${fehlzeitBadgeClass(typ)}`}
+                          >
+                            {fmtH(h)} {fehlzeitLabel(typ)}
+                          </span>
+                        ))}
+                    </div>
                   </div>
                   <div className="space-y-1">
                     {todayBlocks.map((r) => {
                       const b = baustellen.find((x) => x.id === r.baustelle_id);
+                      const hours = Number(
+                        r.arbeitsstunden ?? r.fehlzeit_stunden ?? 0
+                      );
+                      const isZero = hours <= 0;
                       return (
                         <div
                           key={r.id}
-                          className="flex items-center gap-2 text-xs bg-muted/40 rounded px-2 py-1.5"
+                          className={`flex items-center gap-2 text-xs rounded px-2 py-1.5 ${
+                            isZero
+                              ? "bg-amber-50 border border-amber-300"
+                              : "bg-muted/40"
+                          }`}
                         >
-                          <span className="font-bold tabular-nums shrink-0">
-                            {Number(r.arbeitsstunden ?? r.fehlzeit_stunden ?? 0)
-                              .toFixed(2)
-                              .replace(".", ",")}h
-                          </span>
+                          {isZero ? (
+                            <span
+                              className="text-amber-700 shrink-0"
+                              title="0 h gebucht — bitte prüfen"
+                            >
+                              <AlertTriangle className="h-3.5 w-3.5" />
+                            </span>
+                          ) : (
+                            <span className="font-bold tabular-nums shrink-0">
+                              {hours.toFixed(2).replace(".", ",")}h
+                            </span>
+                          )}
                           {r.start_zeit && r.end_zeit && (
                             <span className="text-muted-foreground tabular-nums shrink-0">
                               {fmtTime(r.start_zeit)}–{fmtTime(r.end_zeit)}
                             </span>
                           )}
-                          <span className="truncate flex-1">
-                            {r.fehlzeit_typ
-                              ? `Fehlzeit ${r.fehlzeit_typ}`
-                              : r.in_firma
-                              ? b?.bvh_name
-                                ? `Firma · ${b.bvh_name}`
-                                : "Firma"
-                              : b?.bvh_name ?? "—"}
-                          </span>
+                          {r.fehlzeit_typ ? (
+                            <span
+                              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border shrink-0 ${fehlzeitBadgeClass(r.fehlzeit_typ)}`}
+                            >
+                              {fehlzeitLabel(r.fehlzeit_typ)}
+                            </span>
+                          ) : (
+                            <span className="truncate flex-1">
+                              {r.in_firma
+                                ? b?.bvh_name
+                                  ? `Firma · ${b.bvh_name}`
+                                  : "Firma"
+                                : b?.bvh_name ?? "—"}
+                            </span>
+                          )}
+                          {r.fehlzeit_typ && <span className="flex-1" />}
                           {r.status === "offen" && (
                             <div className="flex items-center gap-0.5 shrink-0">
                               <button
@@ -1049,13 +1178,27 @@ export default function Stunden() {
                   )}
 
                   {/* Live-Arbeitszeit */}
-                  <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 flex items-center gap-3">
-                    <Clock className="h-5 w-5 text-primary" />
+                  <div
+                    className={`rounded-lg border p-3 flex items-center gap-3 transition-colors ${
+                      arbeitstundenLive > 0
+                        ? "bg-primary/5 border-primary/20"
+                        : "bg-muted/40 border-border"
+                    }`}
+                  >
+                    <Clock
+                      className={`h-5 w-5 ${
+                        arbeitstundenLive > 0 ? "text-primary" : "text-muted-foreground"
+                      }`}
+                    />
                     <div className="flex-1">
                       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                        Arbeitszeit
+                        Arbeitszeit (Live)
                       </div>
-                      <div className="text-2xl font-bold tabular-nums text-primary">
+                      <div
+                        className={`text-2xl font-bold tabular-nums ${
+                          arbeitstundenLive > 0 ? "text-primary" : "text-muted-foreground"
+                        }`}
+                      >
                         {fmtH(arbeitstundenLive)}
                       </div>
                     </div>
@@ -1072,11 +1215,47 @@ export default function Stunden() {
                 </div>
               )}
 
-              {/* Fehlzeit-Mode: Stunden-Picker */}
+              {/* Fehlzeit-Mode: Zeitraum + Stunden-Picker */}
               {fehlzeitTyp && (
-                <div className="border-t pt-3">
+                <div className="border-t pt-3 space-y-3">
+                  <div>
+                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Zeitraum
+                    </Label>
+                    <div className="grid grid-cols-2 gap-2 mt-1.5">
+                      <div>
+                        <div className="text-[10px] text-muted-foreground mb-0.5">
+                          Von
+                        </div>
+                        <Input
+                          type="date"
+                          value={date}
+                          onChange={(e) => setDate(e.target.value)}
+                          className="h-10"
+                        />
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-muted-foreground mb-0.5">
+                          Bis (optional)
+                        </div>
+                        <Input
+                          type="date"
+                          value={fehlzeitBis}
+                          min={date}
+                          onChange={(e) => setFehlzeitBis(e.target.value)}
+                          className="h-10"
+                          placeholder="nur ein Tag"
+                        />
+                      </div>
+                    </div>
+                    {fehlzeitBis && fehlzeitBis > date && (
+                      <div className="text-[11px] text-muted-foreground mt-1.5">
+                        Mehrtages-Eingabe — Wochenenden und Feiertage werden übersprungen.
+                      </div>
+                    )}
+                  </div>
                   <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Fehlzeit-Stunden
+                    Stunden pro Tag
                   </Label>
                   <div className="flex items-center gap-3 mt-1.5">
                     <Button
@@ -1293,7 +1472,16 @@ export default function Stunden() {
               <div className="flex flex-col sm:flex-row gap-2">
                 <Button onClick={() => submit(false)} className="flex-1 h-12 text-base">
                   <Plus className="h-5 w-5 mr-2" />
-                  {continuationOf ? "Fertig — Speichern" : "Speichern"}
+                  {(() => {
+                    if (continuationOf) return "Fertig — Speichern";
+                    const ma = forUserIds.size;
+                    const days = fehlzeitWorkdays;
+                    if (days > 1 && ma > 1)
+                      return `Für ${ma} MA × ${days} Tage speichern`;
+                    if (days > 1) return `Für ${days} Tage speichern`;
+                    if (ma > 1) return `Für ${ma} Mitarbeiter speichern`;
+                    return "Speichern";
+                  })()}
                 </Button>
                 {!fehlzeitTyp && (
                   <Button
@@ -1662,6 +1850,7 @@ function PersonPicker({
   members,
   selectedIds,
   onToggle,
+  onSetSelection,
   ownUserId,
   ownProfile,
   statusForDate,
@@ -1675,6 +1864,7 @@ function PersonPicker({
   members: Profile[];
   selectedIds: Set<string>;
   onToggle: (id: string) => void;
+  onSetSelection: (s: Set<string>) => void;
   ownUserId: string;
   ownProfile: Profile | null;
   statusForDate: Map<string, { hours: number }>;
@@ -1683,6 +1873,7 @@ function PersonPicker({
   date: string;
 }) {
   const isAdmin = mode === "admin";
+  const [open, setOpen] = useState(false);
 
   const filteredMembers = members.filter((m) => {
     if (!search) return true;
@@ -1694,7 +1885,7 @@ function PersonPicker({
     );
   });
 
-  const grouped = (() => {
+  const grouped = useMemo(() => {
     if (!isAdmin) return null;
     const map = new Map<string | "ohne", { partie: Partie | null; rows: Profile[] }>();
     filteredMembers.forEach((m) => {
@@ -1710,148 +1901,294 @@ function PersonPicker({
     return [...map.values()].sort((a, b) =>
       (a.partie?.name ?? "ZZ").localeCompare(b.partie?.name ?? "ZZ")
     );
-  })();
+  }, [isAdmin, filteredMembers, partien]);
 
-  const focused = (() => {
-    if (selectedIds.size === 0) return "niemanden";
-    if (selectedIds.size === 1) {
-      const id = Array.from(selectedIds)[0];
-      if (id === ownUserId) return "dich";
-      const m = members.find((x) => x.id === id);
-      return m ? `${m.vorname} ${m.nachname}` : "?";
-    }
-    return `${selectedIds.size} Mitarbeiter`;
-  })();
+  // Compact-Bar Inhalt: maximal 3 Avatare, Rest als "+N"
+  const selectedList = Array.from(selectedIds);
+  const selectedProfiles = selectedList
+    .map((id) =>
+      id === ownUserId && ownProfile ? ownProfile : members.find((m) => m.id === id)
+    )
+    .filter(Boolean) as Profile[];
+  const visibleAvatars = selectedProfiles.slice(0, 3);
+  const extraCount = Math.max(0, selectedProfiles.length - visibleAvatars.length);
 
-  const renderPill = (m: Profile, color: string) => {
+  const focusedLabel =
+    selectedIds.size === 0
+      ? "Niemand"
+      : selectedIds.size === 1
+      ? selectedIds.has(ownUserId)
+        ? "Mich"
+        : (() => {
+            const m = selectedProfiles[0];
+            return m ? `${m.vorname} ${m.nachname[0] ?? ""}.` : "1 Person";
+          })()
+      : `${selectedIds.size} Mitarbeiter`;
+
+  // Schnell-Aktionen
+  const selectOnlyMe = () => onSetSelection(new Set([ownUserId]));
+  const selectAllPartie = () => {
+    const ids = new Set([ownUserId]);
+    members.forEach((m) => {
+      if (!partie?.id || m.partie_id === partie.id) ids.add(m.id);
+    });
+    onSetSelection(ids);
+  };
+  const selectAll = () => {
+    const ids = new Set([ownUserId]);
+    members.forEach((m) => ids.add(m.id));
+    onSetSelection(ids);
+  };
+
+  const partieColor = (m: Profile) => {
+    if (!isAdmin) return partie?.farbcode ?? "#999";
+    return partien.find((p) => p.id === m.partie_id)?.farbcode ?? "#999";
+  };
+
+  const renderRow = (m: Profile) => {
     const s = statusForDate.get(m.id);
     const active = selectedIds.has(m.id);
+    const color = partieColor(m);
     return (
       <button
         key={m.id}
+        type="button"
         onClick={() => onToggle(m.id)}
-        className={`px-2.5 py-1.5 rounded-full text-xs font-medium border transition flex items-center gap-1.5 shrink-0 ${
+        className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-sm border transition ${
           active
-            ? "bg-primary text-primary-foreground border-primary"
-            : "bg-background hover:bg-muted"
+            ? "bg-primary/10 border-primary"
+            : "bg-background border-border hover:bg-muted"
         }`}
       >
         <span
-          className="h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
+          className="h-7 w-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
           style={{ background: color }}
         >
           {initials(m)}
         </span>
-        <span className="truncate max-w-[100px]">
-          {m.vorname} {m.nachname[0]}.
+        <span className="flex-1 text-left truncate">
+          {m.vorname} {m.nachname}
         </span>
-        {s ? (
-          <span
-            className={`text-[10px] tabular-nums ${
-              active ? "opacity-90" : "text-emerald-600 font-semibold"
-            }`}
-          >
-            {s.hours.toFixed(1)}h
+        {s && s.hours > 0 && (
+          <span className="text-[10px] font-semibold text-emerald-600 tabular-nums shrink-0">
+            {s.hours.toFixed(1)} h
           </span>
-        ) : (
-          <span className="text-[10px] text-muted-foreground">—</span>
         )}
+        {active && <Check className="h-4 w-4 text-primary shrink-0" />}
       </button>
     );
   };
 
   return (
-    <Card className="border-primary/30">
-      <CardContent className="p-3 space-y-2">
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <Users className="h-4 w-4 text-primary shrink-0" />
-          <span className="font-semibold uppercase tracking-wide">
-            {isAdmin ? "Admin" : `Polier · ${partie?.name ?? ""}`}
-          </span>
-          <span className="ml-auto text-muted-foreground">
-            Buche für <strong className="text-foreground">{focused}</strong>
-          </span>
-        </div>
-        <div className="text-[10px] text-muted-foreground italic">
-          Tipp: mehrere Pills antippen, um für mehrere Mitarbeiter gleichzeitig zu buchen.
-        </div>
-
-        {isAdmin && members.length > 6 && (
-          <Input
-            placeholder="Mitarbeiter suchen…"
-            value={search}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="h-9"
-          />
-        )}
-
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            onClick={() => onToggle(ownUserId)}
-            className={`px-2.5 py-1.5 rounded-full text-xs font-medium border transition flex items-center gap-1.5 ${
-              selectedIds.has(ownUserId)
-                ? "bg-primary text-primary-foreground border-primary"
-                : "bg-background hover:bg-muted"
-            }`}
-          >
-            <span className="h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white bg-primary">
-              {ownProfile ? initials(ownProfile) : "ME"}
-            </span>
-            Mich
-            {(() => {
-              const s = statusForDate.get(ownUserId);
-              if (!s) return null;
-              return (
-                <span className="text-[10px] opacity-70 tabular-nums">{s.hours.toFixed(1)}h</span>
-              );
-            })()}
-          </button>
-        </div>
-
-        {!isAdmin && (
-          <div className="flex flex-wrap gap-1.5">
-            {filteredMembers
-              .filter((m) => m.id !== ownUserId)
-              .map((m) => renderPill(m, partie?.farbcode ?? "#999"))}
+    <>
+      {/* Compact-Bar */}
+      <Card className="border-primary/30">
+        <CardContent className="p-3">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <Users className="h-4 w-4 text-primary shrink-0" />
+              <span className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground shrink-0">
+                Buchen für
+              </span>
+              <div className="flex items-center gap-1 min-w-0">
+                {visibleAvatars.length > 0 ? (
+                  <div className="flex -space-x-1.5">
+                    {visibleAvatars.map((m) => (
+                      <span
+                        key={m.id}
+                        className="h-6 w-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white border-2 border-background"
+                        style={{ background: partieColor(m) }}
+                        title={`${m.vorname} ${m.nachname}`}
+                      >
+                        {initials(m)}
+                      </span>
+                    ))}
+                    {extraCount > 0 && (
+                      <span className="h-6 w-6 rounded-full flex items-center justify-center text-[9px] font-bold bg-muted-foreground text-background border-2 border-background">
+                        +{extraCount}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-xs text-muted-foreground italic">
+                    niemand ausgewählt
+                  </span>
+                )}
+                <span className="text-sm font-semibold ml-1 truncate">
+                  {focusedLabel}
+                </span>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 shrink-0"
+              onClick={() => setOpen(true)}
+            >
+              Ändern
+            </Button>
           </div>
-        )}
+        </CardContent>
+      </Card>
 
-        {isAdmin && grouped && (
-          <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-            {grouped.map((g) => {
-              const rows = g.rows.filter((m) => m.id !== ownUserId);
-              if (rows.length === 0) return null;
-              const color = g.partie?.farbcode ?? "#999";
-              return (
-                <div key={g.partie?.id ?? "ohne"}>
-                  <div
-                    className="text-[10px] uppercase tracking-wide font-semibold mb-1 flex items-center gap-1.5"
-                    style={{ color }}
-                  >
-                    <span className="h-2 w-2 rounded-full" style={{ background: color }} />
-                    {g.partie?.name ?? "Ohne Partie"}
-                    <span className="opacity-60 font-normal">({rows.length})</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {rows.map((m) => renderPill(m, color))}
-                  </div>
+      {/* Auswahl-Dialog */}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-md max-h-[85vh] flex flex-col p-0 gap-0">
+          <DialogHeader className="px-4 pt-4 pb-2">
+            <DialogTitle className="text-base">
+              {isAdmin ? "Mitarbeiter auswählen" : `Partie · ${partie?.name ?? ""}`}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="px-4 pb-2 space-y-2">
+            <Input
+              autoFocus
+              placeholder="Name oder Pers.-Nr. suchen…"
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              className="h-9"
+            />
+            <div className="flex flex-wrap gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={selectOnlyMe}
+              >
+                Nur mich
+              </Button>
+              {!isAdmin && partie && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={selectAllPartie}
+                >
+                  Ganze Partie
+                </Button>
+              )}
+              {isAdmin && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={selectAll}
+                >
+                  Alle
+                </Button>
+              )}
+              <span className="ml-auto text-[11px] text-muted-foreground self-center tabular-nums">
+                {selectedIds.size} ausgewählt
+              </span>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-4 pb-2 space-y-3">
+            {/* Mich */}
+            <div className="space-y-1">
+              <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
+                Mich
+              </div>
+              <button
+                type="button"
+                onClick={() => onToggle(ownUserId)}
+                className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-sm border transition ${
+                  selectedIds.has(ownUserId)
+                    ? "bg-primary/10 border-primary"
+                    : "bg-background border-border hover:bg-muted"
+                }`}
+              >
+                <span className="h-7 w-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white bg-primary shrink-0">
+                  {ownProfile ? initials(ownProfile) : "ME"}
+                </span>
+                <span className="flex-1 text-left">
+                  {ownProfile
+                    ? `${ownProfile.vorname} ${ownProfile.nachname}`
+                    : "Mich"}
+                </span>
+                {(() => {
+                  const s = statusForDate.get(ownUserId);
+                  if (!s || s.hours <= 0) return null;
+                  return (
+                    <span className="text-[10px] font-semibold text-emerald-600 tabular-nums shrink-0">
+                      {s.hours.toFixed(1)} h
+                    </span>
+                  );
+                })()}
+                {selectedIds.has(ownUserId) && (
+                  <Check className="h-4 w-4 text-primary shrink-0" />
+                )}
+              </button>
+            </div>
+
+            {/* Andere */}
+            {!isAdmin && (
+              <div className="space-y-1">
+                <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
+                  Partie ({filteredMembers.filter((m) => m.id !== ownUserId).length})
                 </div>
-              );
-            })}
-            {grouped.every((g) => g.rows.filter((m) => m.id !== ownUserId).length === 0) && (
-              <div className="text-xs text-muted-foreground italic">
-                {search ? "Niemand passt zur Suche." : "Keine aktiven Mitarbeiter."}
+                <div className="space-y-1">
+                  {filteredMembers
+                    .filter((m) => m.id !== ownUserId)
+                    .map((m) => renderRow(m))}
+                  {filteredMembers.filter((m) => m.id !== ownUserId).length === 0 && (
+                    <div className="text-xs text-muted-foreground italic py-2">
+                      {search ? "Niemand passt zur Suche." : "Keine weiteren Mitarbeiter."}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
-          </div>
-        )}
 
-        <div className="text-[11px] text-muted-foreground">
-          Tippe eine Person an, um ihre Stunden für{" "}
-          {new Date(date).toLocaleDateString("de-AT")} einzugeben.
-        </div>
-      </CardContent>
-    </Card>
+            {isAdmin && grouped && (
+              <>
+                {grouped.map((g) => {
+                  const rows = g.rows.filter((m) => m.id !== ownUserId);
+                  if (rows.length === 0) return null;
+                  const color = g.partie?.farbcode ?? "#999";
+                  return (
+                    <div key={g.partie?.id ?? "ohne"} className="space-y-1">
+                      <div
+                        className="text-[10px] uppercase tracking-wide font-semibold flex items-center gap-1.5"
+                        style={{ color }}
+                      >
+                        <span
+                          className="h-2 w-2 rounded-full"
+                          style={{ background: color }}
+                        />
+                        {g.partie?.name ?? "Ohne Partie"}
+                        <span className="opacity-60 font-normal">({rows.length})</span>
+                      </div>
+                      <div className="space-y-1">{rows.map((m) => renderRow(m))}</div>
+                    </div>
+                  );
+                })}
+                {grouped.every(
+                  (g) => g.rows.filter((m) => m.id !== ownUserId).length === 0
+                ) && (
+                  <div className="text-xs text-muted-foreground italic py-2">
+                    {search ? "Niemand passt zur Suche." : "Keine weiteren Mitarbeiter."}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="px-4 py-3 border-t">
+            <Button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="w-full"
+            >
+              Fertig ({selectedIds.size})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
