@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { Building2, MapPin, Navigation, Clock as ClockIcon, Users } from "lucide-react";
+import { Building2, MapPin, Navigation, Clock as ClockIcon, Users, Sun, Hourglass } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
+import { fmtStunden, fmtTage } from "@/lib/konten";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
@@ -18,6 +19,8 @@ export default function MeinTag() {
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [partie, setPartie] = useState<Partie | null>(null);
   const [colleagues, setColleagues] = useState<{ id: string; vorname: string; nachname: string }[]>([]);
+  const [urlaubsSaldo, setUrlaubsSaldo] = useState<number | null>(null);
+  const [zaSaldo, setZaSaldo] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
@@ -73,6 +76,44 @@ export default function MeinTag() {
       supabase.removeChannel(ch);
     };
   }, [user, profile]);
+
+  // Eigene Konto-Salden laden
+  useEffect(() => {
+    if (!user) return;
+    const loadSalden = async () => {
+      const [{ data: u }, { data: z }] = await Promise.all([
+        supabase
+          .from("v_urlaubs_saldo" as any)
+          .select("saldo_tage")
+          .eq("mitarbeiter_id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("v_za_saldo" as any)
+          .select("saldo_stunden")
+          .eq("mitarbeiter_id", user.id)
+          .maybeSingle(),
+      ]);
+      setUrlaubsSaldo(u ? Number((u as any).saldo_tage ?? 0) : 0);
+      setZaSaldo(z ? Number((z as any).saldo_stunden ?? 0) : 0);
+    };
+    loadSalden();
+    const ch = supabase
+      .channel("mein-konten")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "urlaubs_buchungen", filter: `mitarbeiter_id=eq.${user.id}` },
+        loadSalden
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "za_buchungen", filter: `mitarbeiter_id=eq.${user.id}` },
+        loadSalden
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [user]);
 
   if (loading) {
     return <div className="text-sm text-muted-foreground">Lädt…</div>;
@@ -218,6 +259,44 @@ export default function MeinTag() {
             })}
           </div>
         )}
+
+        {/* Meine Konto-Salden */}
+        <div className="grid grid-cols-2 gap-2 sm:gap-3">
+          <Card className="border-amber-200 bg-amber-50">
+            <CardContent className="p-3">
+              <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-amber-900 font-semibold">
+                <Sun className="h-3.5 w-3.5" />
+                Urlaub
+              </div>
+              <div className="text-2xl font-bold tabular-nums text-amber-900 mt-1">
+                {urlaubsSaldo == null ? "—" : fmtTage(urlaubsSaldo)}
+              </div>
+              <div className="text-[10px] text-amber-800/70 mt-0.5">
+                Aktueller Saldo
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-sky-200 bg-sky-50">
+            <CardContent className="p-3">
+              <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-sky-900 font-semibold">
+                <Hourglass className="h-3.5 w-3.5" />
+                Zeitausgleich
+              </div>
+              <div
+                className={`text-2xl font-bold tabular-nums mt-1 ${
+                  zaSaldo != null && zaSaldo < 0
+                    ? "text-red-700"
+                    : "text-sky-900"
+                }`}
+              >
+                {zaSaldo == null ? "—" : fmtStunden(zaSaldo)}
+              </div>
+              <div className="text-[10px] text-sky-800/70 mt-0.5">
+                Aktueller Saldo
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

@@ -20,6 +20,14 @@ export type EvaluierungTyp = 'werkstatt' | 'baustelle' | 'fertigteilmontage' | '
 export type AngebotStatus = 'offen' | 'in_verhandlung' | 'angenommen' | 'abgelehnt' | 'zurueckgezogen';
 export type AngebotOrdnerEnum = 'ausschreibungsunterlagen' | 'plaene' | 'subunternehmer' | 'angebotsunterlagen';
 
+export type UrlaubsBuchungArt =
+  | 'initial' | 'jahresgutschrift' | 'monatsgutschrift'
+  | 'urlaub_genommen' | 'korrektur' | 'verfall';
+export type ZaBuchungArt =
+  | 'initial' | 'monatsabschluss' | 'zeitausgleich_genommen'
+  | 'korrektur' | 'auszahlung';
+export type UrlaubModell = 'fix_datum' | 'eintrittsdatum' | 'monatlich';
+
 export type Database = {
   __InternalSupabase: { PostgrestVersion: '13.0.5' };
   public: {
@@ -468,6 +476,91 @@ export type Database = {
           subpath: string;
         };
         Update: Partial<Database['public']['Tables']['angebot_ordner_unterordner']['Row']>;
+        Relationships: [];
+      };
+      profile_konten_settings: {
+        Row: {
+          profile_id: string;
+          eintrittsdatum: string | null;
+          beschaeftigungsgrad: number;
+          tagesnorm_stunden: number;
+          urlaub_jahresanspruch_tage: number;
+          urlaub_modell: UrlaubModell;
+          urlaub_stichtag_tag: number | null;
+          urlaub_stichtag_monat: number | null;
+          za_faktor: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['profile_konten_settings']['Row']> & {
+          profile_id: string;
+        };
+        Update: Partial<Database['public']['Tables']['profile_konten_settings']['Row']>;
+        Relationships: [];
+      };
+      urlaubs_buchungen: {
+        Row: {
+          id: string;
+          mitarbeiter_id: string;
+          art: UrlaubsBuchungArt;
+          tage: number;
+          wirksam_am: string;
+          notiz: string | null;
+          stundenbuchung_id: string | null;
+          erstellt_von: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['urlaubs_buchungen']['Row']> & {
+          mitarbeiter_id: string;
+          art: UrlaubsBuchungArt;
+          tage: number;
+          wirksam_am: string;
+        };
+        Update: Partial<Database['public']['Tables']['urlaubs_buchungen']['Row']>;
+        Relationships: [];
+      };
+      za_buchungen: {
+        Row: {
+          id: string;
+          mitarbeiter_id: string;
+          art: ZaBuchungArt;
+          stunden: number;
+          wirksam_am: string;
+          monat: string | null;
+          notiz: string | null;
+          stundenbuchung_id: string | null;
+          erstellt_von: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['za_buchungen']['Row']> & {
+          mitarbeiter_id: string;
+          art: ZaBuchungArt;
+          stunden: number;
+          wirksam_am: string;
+        };
+        Update: Partial<Database['public']['Tables']['za_buchungen']['Row']>;
+        Relationships: [];
+      };
+      monatsabschluss: {
+        Row: {
+          id: string;
+          mitarbeiter_id: string;
+          monat: string;
+          soll_stunden: number;
+          ist_stunden: number;
+          differenz_stunden: number;
+          za_buchung_id: string | null;
+          abgeschlossen_von: string | null;
+          abgeschlossen_am: string;
+        };
+        Insert: Partial<Database['public']['Tables']['monatsabschluss']['Row']> & {
+          mitarbeiter_id: string;
+          monat: string;
+          soll_stunden: number;
+          ist_stunden: number;
+          differenz_stunden: number;
+        };
+        Update: Partial<Database['public']['Tables']['monatsabschluss']['Row']>;
         Relationships: [];
       };
     };

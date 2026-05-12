@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   BarChart3,
   Briefcase,
+  Settings,
   LogOut,
   Smartphone,
   User as UserIcon,
@@ -43,17 +44,11 @@ const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["all"], end: true },
   { to: "/mein-tag", label: "Mein Tag", icon: ClipboardList, roles: ["all"], end: true },
   { to: "/arbeitsplanung", label: "Arbeitsplanung", icon: CalendarDays, roles: ["admin"], end: true },
-  // /angebote vor /baustellen — Akquise-Pipeline
   { to: "/angebote", label: "Angebote", icon: Briefcase, roles: ["admin"], end: false },
-  // /baustellen darf auch /baustellen/:id markieren
   { to: "/baustellen", label: "Baustellen", icon: Building2, roles: ["all"], end: false },
-  { to: "/mitarbeiter", label: "Mitarbeiter & Partien", icon: Users, roles: ["admin"], end: true },
-  { to: "/fahrzeuge", label: "Fahrzeuge", icon: Truck, roles: ["admin"], end: true },
-  // exact match, sonst wird /stunden/auswertung auch hier markiert
   { to: "/stunden", label: "Zeiterfassung", icon: Clock, roles: ["all"], end: true },
   { to: "/stunden/auswertung", label: "Auswertung", icon: BarChart3, roles: ["review"], end: true },
-  { to: "/evaluierung", label: "Evaluierung", icon: ShieldCheck, roles: ["admin"], end: true },
-  { to: "/kalender", label: "Arbeitszeitkalender", icon: CalendarRange, roles: ["admin"], end: true },
+  { to: "/admin", label: "Verwaltung", icon: Settings, roles: ["admin"], end: false },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {

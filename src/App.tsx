@@ -12,6 +12,8 @@ import Baustellen from "@/pages/Baustellen";
 import BaustelleDetail from "@/pages/BaustelleDetail";
 import Angebote from "@/pages/Angebote";
 import AngebotDetail from "@/pages/AngebotDetail";
+import Admin from "@/pages/Admin";
+import { Navigate } from "react-router-dom";
 import Mitarbeiter from "@/pages/Mitarbeiter";
 import Stunden from "@/pages/Stunden";
 import Stundenauswertung from "@/pages/Stundenauswertung";
@@ -41,12 +43,14 @@ const App = () => (
               <Route path="/baustellen/:id" element={<BaustelleDetail />} />
               <Route path="/angebote" element={<Angebote />} />
               <Route path="/angebote/:id" element={<AngebotDetail />} />
-              <Route path="/mitarbeiter" element={<Mitarbeiter />} />
-              <Route path="/fahrzeuge" element={<Fahrzeuge />} />
+              <Route path="/admin" element={<Admin />} />
+              {/* Alte Routen leiten in den Admin-Bereich um (Backwards-Compat) */}
+              <Route path="/mitarbeiter" element={<Navigate to="/admin?tab=mitarbeiter" replace />} />
+              <Route path="/fahrzeuge" element={<Navigate to="/admin?tab=fahrzeuge" replace />} />
+              <Route path="/kalender" element={<Navigate to="/admin?tab=kalender" replace />} />
+              <Route path="/evaluierung" element={<Navigate to="/admin?tab=evaluierung" replace />} />
               <Route path="/stunden" element={<Stunden />} />
               <Route path="/stunden/auswertung" element={<Stundenauswertung />} />
-              <Route path="/kalender" element={<Kalender />} />
-              <Route path="/evaluierung" element={<Evaluierung />} />
               <Route path="/mein-tag" element={<MeinTag />} />
             </Route>
             <Route path="*" element={<NotFound />} />
