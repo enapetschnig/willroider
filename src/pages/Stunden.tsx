@@ -159,6 +159,11 @@ export default function Stunden() {
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [editing, setEditing] = useState<Partial<Stunde> | null>(null);
   const [extras, setExtras] = useState(false);
+  // Set von "<mitarbeiter_id>_<yyyy-mm>" mit abgeschlossenen Monaten
+  const [lockedMonths, setLockedMonths] = useState<Set<string>>(new Set());
+
+  const isMonthLocked = (mitarbeiterId: string, datum: string) =>
+    lockedMonths.has(`${mitarbeiterId}_${datum.slice(0, 7)}`);
 
   const [polierPartie, setPolierPartie] = useState<Partie | null>(null);
   const [allMembers, setAllMembers] = useState<Profile[]>([]);
@@ -323,6 +328,23 @@ export default function Stunden() {
     setRows((r.data as Stunde[]) ?? []);
     const blist = (b.data as Baustelle[]) ?? [];
     setBaustellen(blist);
+
+    // Monatsabschluesse für die geladenen Buchungen ermitteln (cross-MA + Monate)
+    const rowList = (r.data as Stunde[]) ?? [];
+    if (rowList.length > 0) {
+      const fromMonat = fromIso.slice(0, 7);
+      const { data: ma } = await supabase
+        .from("monatsabschluss")
+        .select("mitarbeiter_id, monat")
+        .gte("monat", fromMonat);
+      const set = new Set<string>();
+      ((ma as any[]) ?? []).forEach((m) =>
+        set.add(`${m.mitarbeiter_id}_${m.monat}`)
+      );
+      setLockedMonths(set);
+    } else {
+      setLockedMonths(new Set());
+    }
 
     // URL-Query ?baustelle=ID → vorausgewählt setzen (z.B. von der Heute-Card)
     const urlParams = new URLSearchParams(window.location.search);
@@ -563,6 +585,36 @@ export default function Stunden() {
 
     const isFehlzeit = !!fehlzeitTyp;
 
+    // Monatslock-Check: für jeden ausgewählten MA prüfen ob der Monat (oder Mehrtages-Range) gesperrt ist
+    if (!isAdmin) {
+      const targetMonths = new Set<string>([date.slice(0, 7)]);
+      if (isFehlzeit && fehlzeitBis && fehlzeitBis > date) {
+        targetMonths.add(fehlzeitBis.slice(0, 7));
+      }
+      const blockers: string[] = [];
+      for (const uid of forUserIds) {
+        for (const m of targetMonths) {
+          if (lockedMonths.has(`${uid}_${m}`)) {
+            const p = allMembers.find((x) => x.id === uid);
+            blockers.push(
+              `${p ? `${p.vorname} ${p.nachname}` : "Mitarbeiter"} (${m})`
+            );
+            break;
+          }
+        }
+      }
+      if (blockers.length > 0) {
+        toast({
+          variant: "destructive",
+          title: "Monat abgeschlossen",
+          description: `Für ${blockers.join(
+            ", "
+          )} ist der Monat bereits abgeschlossen. Admin kontaktieren.`,
+        });
+        return;
+      }
+    }
+
     // Bei Arbeit: entweder Baustelle ODER Firma-Mode (mit/ohne Bezugs-Baustelle)
     if (!isFehlzeit && !baustelleId && !inFirma) {
       toast({
@@ -741,6 +793,16 @@ export default function Stunden() {
   };
 
   const remove = async (id: string) => {
+    const row = rows.find((r) => r.id === id);
+    if (row && isMonthLocked(row.mitarbeiter_id, row.datum) && !isAdmin) {
+      toast({
+        variant: "destructive",
+        title: "Monat abgeschlossen",
+        description:
+          "Diese Buchung kann nicht mehr gelöscht werden. Admin kontaktieren.",
+      });
+      return;
+    }
     if (!confirm("Buchung löschen?")) return;
     await supabase.from("stundenbuchungen").delete().eq("id", id);
     load();
@@ -952,7 +1014,15 @@ export default function Stunden() {
                             </span>
                           )}
                           {r.fehlzeit_typ && <span className="flex-1" />}
-                          {r.status === "offen" && (
+                          {isMonthLocked(r.mitarbeiter_id, r.datum) && (
+                            <span
+                              className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 shrink-0"
+                              title="Monat abgeschlossen — Buchung kann nicht mehr geändert werden"
+                            >
+                              gesperrt
+                            </span>
+                          )}
+                          {r.status === "offen" && !isMonthLocked(r.mitarbeiter_id, r.datum) && (
                             <div className="flex items-center gap-0.5 shrink-0">
                               <button
                                 onClick={() => setEditing(r)}

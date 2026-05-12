@@ -99,7 +99,7 @@ export default function Stundenauswertung() {
   const [zaSalden, setZaSalden] = useState<Record<string, number>>({});
   const [urlaubSalden, setUrlaubSalden] = useState<Record<string, number>>({});
   const [monatsabschluesse, setMonatsabschluesse] = useState<Record<string, boolean>>({});
-  const [monat, setMonat] = useState<string>(() => new Date().toISOString().slice(0, 7));
+  const [monat, setMonat] = useState<string>(() => localIso().slice(0, 7));
   const [tab, setTab] = useState<"uebersicht" | "detail" | "baustellen">("uebersicht");
   const [selectedMaId, setSelectedMaId] = useState<string>("");
   const [search, setSearch] = useState<string>("");
@@ -205,10 +205,41 @@ export default function Stundenauswertung() {
   };
   useEffect(reload, [user, monat, mode, members]);
 
+  // Realtime: bei Änderungen an stundenbuchungen / monatsabschluss / Konten neu laden
+  useEffect(() => {
+    if (!user) return;
+    const ch = supabase
+      .channel("auswertung-sync")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "stundenbuchungen" },
+        reload
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "monatsabschluss" },
+        reload
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "urlaubs_buchungen" },
+        reload
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "za_buchungen" },
+        reload
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [user, monat, mode, members]);
+
   const moveMonth = (d: number) => {
     const date = new Date(monat + "-01");
     date.setMonth(date.getMonth() + d);
-    setMonat(date.toISOString().slice(0, 7));
+    setMonat(localIso(date).slice(0, 7));
   };
 
   // Filter auf rows anwenden (Suche + Status)
