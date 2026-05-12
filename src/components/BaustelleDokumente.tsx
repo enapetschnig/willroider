@@ -38,6 +38,23 @@ const FOLDERS = BAUSTELLEN_ORDNER.map((o) => ({
 
 type FolderKey = OrdnerKey;
 
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
+
+// Storage-Pfad-sanitization: Umlaut-Translit, ASCII-only, mehrfach-_ kombiniert.
+// Original-Dateiname bleibt in der DB-Spalte `dateiname` erhalten.
+function sanitizeStorageName(name: string): string {
+  const translit: Record<string, string> = {
+    ä: "ae", ö: "oe", ü: "ue", Ä: "Ae", Ö: "Oe", Ü: "Ue", ß: "ss",
+  };
+  const ascii = name.replace(/[äöüÄÖÜß]/g, (c) => translit[c] ?? c);
+  const safe = ascii.replace(/[^\w.-]+/g, "_").replace(/_+/g, "_");
+  const trimmed = safe.replace(/^_+|_+$/g, "");
+  if (!trimmed || trimmed === "." || trimmed === "..") {
+    return `file-${Date.now()}`;
+  }
+  return trimmed.length > 120 ? trimmed.slice(0, 120) : trimmed;
+}
+
 function isImage(mimetype?: string | null) {
   return !!mimetype && mimetype.startsWith("image/");
 }
@@ -61,8 +78,15 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState<string>("");
   const [visibility, setVisibility] = useState<Visibility>(DEFAULT_VISIBILITY);
+  const [dragOver, setDragOver] = useState(false);
+  const [uploading, setUploading] = useState<{
+    name: string;
+    idx: number;
+    total: number;
+  } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   // Sichtbare Ordner anhand Rolle + DB-Settings filtern
   const visibleFolders = useMemo(() => {
@@ -130,15 +154,38 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     return docs.filter((d) => (d.ordner ?? "92-sonstiges") === activeFilter);
   }, [docs, activeFilter, visibleFolders]);
 
-  const upload = async (files: FileList | null, folder: FolderKey) => {
+  const upload = async (
+    files: FileList | File[] | null,
+    folder: FolderKey
+  ) => {
     if (!files || files.length === 0) return;
+    const list = Array.from(files);
     const { data: u } = await supabase.auth.getUser();
     let success = 0;
-    for (const file of Array.from(files)) {
-      const path = `${baustelleId}/${folder}/${Date.now()}_${file.name.replace(/[^\w.-]/g, "_")}`;
-      const { error: upErr } = await supabase.storage.from("baustellen").upload(path, file);
+    let skipped = 0;
+    for (let i = 0; i < list.length; i++) {
+      const file = list[i];
+      if (file.size > MAX_UPLOAD_BYTES) {
+        toast({
+          variant: "destructive",
+          title: `„${file.name}" zu groß`,
+          description: `Maximal 50 MB pro Datei (${(file.size / 1024 / 1024).toFixed(1)} MB).`,
+        });
+        skipped++;
+        continue;
+      }
+      setUploading({ name: file.name, idx: i + 1, total: list.length });
+      const safeName = sanitizeStorageName(file.name);
+      const path = `${baustelleId}/${folder}/${Date.now()}_${safeName}`;
+      const { error: upErr } = await supabase.storage
+        .from("baustellen")
+        .upload(path, file, { contentType: file.type || undefined });
       if (upErr) {
-        toast({ variant: "destructive", title: "Upload-Fehler", description: upErr.message });
+        toast({
+          variant: "destructive",
+          title: `Upload-Fehler: ${file.name}`,
+          description: upErr.message,
+        });
         continue;
       }
       const { error: dbErr } = await supabase.from("dokumente").insert({
@@ -151,13 +198,24 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         hochgeladen_von: u.user?.id ?? null,
       } as any);
       if (dbErr) {
-        toast({ variant: "destructive", title: "Fehler", description: dbErr.message });
+        toast({
+          variant: "destructive",
+          title: "DB-Fehler",
+          description: dbErr.message,
+        });
+        // Storage-Datei wieder entfernen, damit kein Waisenrest bleibt
+        await supabase.storage.from("baustellen").remove([path]);
         continue;
       }
       success++;
     }
+    setUploading(null);
     if (success > 0) {
-      toast({ title: `${success} Datei${success > 1 ? "en" : ""} hochgeladen` });
+      toast({
+        title: `${success} Datei${success > 1 ? "en" : ""} hochgeladen${
+          skipped > 0 ? ` · ${skipped} übersprungen` : ""
+        }`,
+      });
       // jump filter to that folder so it's visible
       setActiveFilter(folder);
     }
@@ -165,17 +223,27 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   };
 
   const open = async (d: Dokument) => {
-    const { data, error } = await supabase.storage
-      .from("baustellen")
-      .createSignedUrl(d.storage_path, 300);
-    if (error || !data) {
-      toast({ variant: "destructive", title: "Fehler", description: error?.message });
-      return;
-    }
+    // Bilder ohne `download`-Param → werden inline angezeigt.
+    // Andere Dateien mit `download: d.dateiname` → Browser nimmt den
+    // Original-Filename (inkl. Umlauten) für den Download.
     if (isImage(d.mimetype)) {
+      const { data, error } = await supabase.storage
+        .from("baustellen")
+        .createSignedUrl(d.storage_path, 300);
+      if (error || !data) {
+        toast({ variant: "destructive", title: "Fehler", description: error?.message });
+        return;
+      }
       setPreviewUrl(data.signedUrl);
       setPreviewName(d.dateiname);
     } else {
+      const { data, error } = await supabase.storage
+        .from("baustellen")
+        .createSignedUrl(d.storage_path, 300, { download: d.dateiname });
+      if (error || !data) {
+        toast({ variant: "destructive", title: "Fehler", description: error?.message });
+        return;
+      }
       window.open(data.signedUrl, "_blank");
     }
   };
@@ -200,8 +268,80 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     fileRef.current?.click();
   };
 
+  // Drop-Target wenn „Alle" aktiv = fotos; sonst der aktuell gefilterte Ordner
+  const defaultDropFolder: FolderKey =
+    activeFilter === "alle" ? "fotos" : (activeFilter as FolderKey);
+
+  // Drag&Drop für die gesamte Component
+  const onDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer?.types?.includes("Files")) {
+      e.preventDefault();
+      setDragOver(true);
+    }
+  };
+  const onDragLeave = (e: React.DragEvent) => {
+    // Nur leaven wenn wir wirklich den Wrapper verlassen (nicht ein Kind-Element)
+    if (e.currentTarget === e.target) setDragOver(false);
+  };
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) upload(files, defaultDropFolder);
+  };
+
+  // Drop direkt auf eine Filter-Pill → in genau diesen Ordner uploaden
+  const dropOnFolder = (folder: FolderKey) => (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) upload(files, folder);
+  };
+
+  // Paste aus Zwischenablage (z.B. Screenshot)
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      // Nicht hijacken, wenn der User gerade in einem Input/Textarea tippt
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      const files = e.clipboardData?.files;
+      if (!files || files.length === 0) return;
+      e.preventDefault();
+      upload(files, defaultDropFolder);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [baustelleId, activeFilter]);
+
   return (
-    <div className="space-y-3">
+    <div
+      ref={wrapperRef}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={`space-y-3 relative rounded-lg transition ${
+        dragOver ? "ring-2 ring-primary ring-offset-2 bg-primary/5" : ""
+      }`}
+    >
+      {dragOver && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-primary/10 border-2 border-dashed border-primary">
+          <div className="text-center bg-background/95 px-4 py-3 rounded-md shadow">
+            <Upload className="h-6 w-6 mx-auto mb-1 text-primary" />
+            <div className="text-sm font-semibold">Dateien hier ablegen</div>
+            <div className="text-[11px] text-muted-foreground">
+              → Ordner: {folderMeta(defaultDropFolder).label}
+            </div>
+          </div>
+        </div>
+      )}
       <input
         type="file"
         accept="image/*"
@@ -238,6 +378,25 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         </Button>
       </div>
 
+      <div className="text-[11px] text-muted-foreground -mt-1 px-1">
+        Dateien hierher ziehen oder mit{" "}
+        <kbd className="px-1 py-0.5 rounded border bg-muted text-[10px]">Cmd/Strg+V</kbd>{" "}
+        einfügen — max. 50 MB pro Datei.
+      </div>
+
+      {/* Upload-Progress-Banner */}
+      {uploading && (
+        <div className="rounded-md border bg-primary/5 border-primary/20 px-3 py-2 flex items-center gap-2 text-xs">
+          <Upload className="h-4 w-4 text-primary animate-pulse shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="font-medium truncate">{uploading.name}</div>
+            <div className="text-[10px] text-muted-foreground">
+              Datei {uploading.idx} von {uploading.total} wird hochgeladen…
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Filter Pills */}
       <div className="flex flex-wrap gap-1.5 -mx-1 px-1 overflow-x-auto pb-1">
         <FilterPill
@@ -257,6 +416,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
             count={counts[f.key] ?? 0}
             active={activeFilter === f.key}
             onClick={() => setActiveFilter(f.key)}
+            onDrop={dropOnFolder(f.key)}
           />
         ))}
       </div>
@@ -312,6 +472,7 @@ function FilterPill({
   count,
   active,
   onClick,
+  onDrop,
 }: {
   label: string;
   icon: typeof Camera;
@@ -319,14 +480,39 @@ function FilterPill({
   count: number;
   active: boolean;
   onClick: () => void;
+  onDrop?: (e: React.DragEvent) => void;
 }) {
+  const [hover, setHover] = useState(false);
   return (
     <button
       onClick={onClick}
+      onDragOver={
+        onDrop
+          ? (e) => {
+              if (e.dataTransfer?.types?.includes("Files")) {
+                e.preventDefault();
+                e.stopPropagation();
+                setHover(true);
+              }
+            }
+          : undefined
+      }
+      onDragLeave={onDrop ? () => setHover(false) : undefined}
+      onDrop={
+        onDrop
+          ? (e) => {
+              setHover(false);
+              onDrop(e);
+            }
+          : undefined
+      }
       className={`shrink-0 px-3.5 py-2.5 rounded-full text-xs font-medium border transition flex items-center gap-1.5 min-h-[40px] ${
         active ? "text-white border-transparent" : "bg-background hover:bg-muted"
-      }`}
-      style={active ? { background: color } : { color: count > 0 ? color : undefined }}
+      } ${hover ? "ring-2 ring-offset-1 scale-105" : ""}`}
+      style={{
+        ...(active ? { background: color } : { color: count > 0 ? color : undefined }),
+        ...(hover ? { boxShadow: `0 0 0 2px ${color}` } : {}),
+      }}
     >
       <Icon className="h-3.5 w-3.5" />
       {label}
