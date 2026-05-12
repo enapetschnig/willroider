@@ -15,9 +15,11 @@ import {
   FileText,
   Image as ImageIcon,
   Trash2,
-  Layers,
   FolderOpen,
+  Folder,
   File as FileIcon,
+  ArrowLeft,
+  ChevronRight,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
@@ -73,7 +75,8 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const { role } = useAuth();
   const [docs, setDocs] = useState<Dokument[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<"alle" | FolderKey>("alle");
+  // "root" = Ordner-Übersicht (Listenansicht), sonst = im Ordner drin
+  const [currentFolder, setCurrentFolder] = useState<"root" | FolderKey>("root");
   const [uploadFolder, setUploadFolder] = useState<FolderKey>("fotos");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState<string>("");
@@ -131,28 +134,36 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     }
   }, [visibleFolders]);
 
-  const counts = useMemo(() => {
-    // "alle" zählt nur Docs in sichtbaren Ordnern
-    const allowedSet = new Set(visibleFolders.map((f) => f.key));
-    const c: Record<string, number> = {
-      alle: docs.filter((d) => allowedSet.has((d.ordner ?? "92-sonstiges") as OrdnerKey)).length,
-    };
+  // Wenn im aktuellen Ordner kein Recht mehr → zurück zur Wurzel
+  useEffect(() => {
+    if (currentFolder === "root") return;
+    if (!visibleFolders.some((f) => f.key === currentFolder)) {
+      setCurrentFolder("root");
+    }
+  }, [visibleFolders, currentFolder]);
+
+  // Letzte hochgeladene Datei pro Ordner (für „aktualisiert" Datum in Liste)
+  const folderStats = useMemo(() => {
+    const stats: Record<string, { count: number; latest: string | null }> = {};
     visibleFolders.forEach((f) => {
-      c[f.key] = docs.filter((d) => (d.ordner ?? "92-sonstiges") === f.key).length;
+      stats[f.key] = { count: 0, latest: null };
     });
-    return c;
+    docs.forEach((d) => {
+      const k = (d.ordner ?? "92-sonstiges") as OrdnerKey;
+      if (!stats[k]) return;
+      stats[k].count++;
+      if (!stats[k].latest || d.created_at > stats[k].latest) {
+        stats[k].latest = d.created_at;
+      }
+    });
+    return stats;
   }, [docs, visibleFolders]);
 
+  // Dateien im aktuellen Ordner
   const filtered = useMemo(() => {
-    const allowedSet = new Set(visibleFolders.map((f) => f.key));
-    if (activeFilter === "alle") {
-      // "alle" zeigt nur Dokumente aus sichtbaren Ordnern
-      return docs.filter((d) =>
-        allowedSet.has((d.ordner ?? "92-sonstiges") as OrdnerKey)
-      );
-    }
-    return docs.filter((d) => (d.ordner ?? "92-sonstiges") === activeFilter);
-  }, [docs, activeFilter, visibleFolders]);
+    if (currentFolder === "root") return [] as Dokument[];
+    return docs.filter((d) => (d.ordner ?? "92-sonstiges") === currentFolder);
+  }, [docs, currentFolder]);
 
   const upload = async (
     files: FileList | File[] | null,
@@ -216,8 +227,8 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
           skipped > 0 ? ` · ${skipped} übersprungen` : ""
         }`,
       });
-      // jump filter to that folder so it's visible
-      setActiveFilter(folder);
+      // direkt in den Ordner springen, damit die Datei sichtbar ist
+      setCurrentFolder(folder);
     }
     load();
   };
@@ -263,14 +274,14 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   };
 
   const triggerUpload = () => {
-    // upload-target ordner = der aktuell gefilterte (außer "alle" → fotos default)
-    setUploadFolder(activeFilter === "alle" ? "fotos" : (activeFilter as FolderKey));
+    // In der Ordner-Ansicht → in diesen Ordner. In Wurzel → fotos als Default.
+    setUploadFolder(currentFolder === "root" ? "fotos" : currentFolder);
     fileRef.current?.click();
   };
 
-  // Drop-Target wenn „Alle" aktiv = fotos; sonst der aktuell gefilterte Ordner
+  // Aktueller Drop-Target-Ordner (z.B. für Paste oder globalen Drop)
   const defaultDropFolder: FolderKey =
-    activeFilter === "alle" ? "fotos" : (activeFilter as FolderKey);
+    currentFolder === "root" ? "fotos" : currentFolder;
 
   // Drag&Drop für die gesamte Component
   const onDragOver = (e: React.DragEvent) => {
@@ -319,7 +330,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [baustelleId, activeFilter]);
+  }, [baustelleId, currentFolder]);
 
   return (
     <div
@@ -364,25 +375,69 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         }}
       />
 
-      {/* Action Buttons – stacken auf sehr schmalen Screens */}
-      <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 gap-2">
-        <Button onClick={triggerCamera} variant="default" className="h-12" size="lg">
-          <Camera className="h-5 w-5 mr-2" />
-          Foto aufnehmen
-        </Button>
-        <Button onClick={triggerUpload} variant="outline" className="h-12" size="lg">
-          <Upload className="h-5 w-5 mr-2" />
-          <span className="truncate">
-            {activeFilter === "alle" ? "Hochladen" : `→ ${folderMeta(activeFilter).label}`}
-          </span>
-        </Button>
+      {/* Breadcrumb / Header-Zeile */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {currentFolder === "root" ? (
+          <div className="flex items-center gap-1.5 text-sm font-semibold">
+            <FolderOpen className="h-4 w-4 text-primary" />
+            Dokumente
+          </div>
+        ) : (
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8"
+              onClick={() => setCurrentFolder("root")}
+            >
+              <ArrowLeft className="h-4 w-4 mr-1" />
+              Zurück
+            </Button>
+            <div className="flex items-center gap-1 text-sm">
+              <button
+                onClick={() => setCurrentFolder("root")}
+                className="text-muted-foreground hover:text-foreground hover:underline"
+              >
+                Dokumente
+              </button>
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+              <span
+                className="font-semibold"
+                style={{ color: folderMeta(currentFolder).color }}
+              >
+                {folderMeta(currentFolder).label}
+              </span>
+              <span className="text-xs text-muted-foreground ml-1">
+                ({filtered.length})
+              </span>
+            </div>
+          </>
+        )}
+
+        <div className="ml-auto flex items-center gap-2">
+          {currentFolder === "fotos" || currentFolder === "root" ? (
+            <Button onClick={triggerCamera} variant="default" className="h-9">
+              <Camera className="h-4 w-4 mr-2" />
+              Foto aufnehmen
+            </Button>
+          ) : null}
+          {currentFolder !== "root" && (
+            <Button onClick={triggerUpload} variant="default" className="h-9">
+              <Upload className="h-4 w-4 mr-2" />
+              Hochladen
+            </Button>
+          )}
+        </div>
       </div>
 
-      <div className="text-[11px] text-muted-foreground -mt-1 px-1">
-        Dateien hierher ziehen oder mit{" "}
-        <kbd className="px-1 py-0.5 rounded border bg-muted text-[10px]">Cmd/Strg+V</kbd>{" "}
-        einfügen — max. 50 MB pro Datei.
-      </div>
+      {currentFolder === "root" && (
+        <div className="text-[11px] text-muted-foreground -mt-1 px-1">
+          Klicke auf einen Ordner, um die Inhalte zu sehen — oder ziehe Dateien
+          direkt auf einen Ordner. Auch{" "}
+          <kbd className="px-1 py-0.5 rounded border bg-muted text-[10px]">Cmd/Strg+V</kbd>{" "}
+          aus der Zwischenablage. Max. 50 MB pro Datei.
+        </div>
+      )}
 
       {/* Upload-Progress-Banner */}
       {uploading && (
@@ -397,32 +452,39 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         </div>
       )}
 
-      {/* Filter Pills */}
-      <div className="flex flex-wrap gap-1.5 -mx-1 px-1 overflow-x-auto pb-1">
-        <FilterPill
-          label="Alle"
-          icon={Layers}
-          color="#374151"
-          count={counts.alle}
-          active={activeFilter === "alle"}
-          onClick={() => setActiveFilter("alle")}
-        />
-        {visibleFolders.map((f) => (
-          <FilterPill
-            key={f.key}
-            label={f.label}
-            icon={f.icon}
-            color={f.color}
-            count={counts[f.key] ?? 0}
-            active={activeFilter === f.key}
-            onClick={() => setActiveFilter(f.key)}
-            onDrop={dropOnFolder(f.key)}
-          />
-        ))}
-      </div>
-
-      {/* Card Grid */}
-      {loading ? (
+      {/* Inhalt: Wurzel = Ordner-Liste, sonst = Datei-Grid */}
+      {currentFolder === "root" ? (
+        <Card>
+          <CardContent className="p-0">
+            {loading ? (
+              <div className="p-6 text-center text-sm text-muted-foreground">
+                Lädt…
+              </div>
+            ) : visibleFolders.length === 0 ? (
+              <div className="p-6 text-center text-sm text-muted-foreground">
+                Keine Ordner sichtbar für deine Rolle.
+              </div>
+            ) : (
+              <ul className="divide-y">
+                {visibleFolders.map((f) => {
+                  const stats = folderStats[f.key] ?? { count: 0, latest: null };
+                  return (
+                    <FolderRow
+                      key={f.key}
+                      label={f.label}
+                      color={f.color}
+                      count={stats.count}
+                      latest={stats.latest}
+                      onOpen={() => setCurrentFolder(f.key)}
+                      onDrop={dropOnFolder(f.key)}
+                    />
+                  );
+                })}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      ) : loading ? (
         <Card>
           <CardContent className="p-8 text-center text-sm text-muted-foreground">
             Lädt…
@@ -433,9 +495,10 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
           <CardContent className="p-8 text-center space-y-2">
             <FolderOpen className="h-8 w-8 mx-auto text-muted-foreground opacity-50" />
             <div className="text-sm text-muted-foreground">
-              {activeFilter === "alle"
-                ? "Noch keine Dateien hochgeladen."
-                : `Noch keine Dateien in ${folderMeta(activeFilter).label}.`}
+              Noch keine Dateien in {folderMeta(currentFolder).label}.
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Dateien hierher ziehen oder oben rechts „Hochladen" klicken.
             </div>
           </CardContent>
         </Card>
@@ -465,61 +528,64 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   );
 }
 
-function FilterPill({
+function FolderRow({
   label,
-  icon: Icon,
   color,
   count,
-  active,
-  onClick,
+  latest,
+  onOpen,
   onDrop,
 }: {
   label: string;
-  icon: typeof Camera;
   color: string;
   count: number;
-  active: boolean;
-  onClick: () => void;
-  onDrop?: (e: React.DragEvent) => void;
+  latest: string | null;
+  onOpen: () => void;
+  onDrop: (e: React.DragEvent) => void;
 }) {
   const [hover, setHover] = useState(false);
   return (
-    <button
-      onClick={onClick}
-      onDragOver={
-        onDrop
-          ? (e) => {
-              if (e.dataTransfer?.types?.includes("Files")) {
-                e.preventDefault();
-                e.stopPropagation();
-                setHover(true);
-              }
-            }
-          : undefined
-      }
-      onDragLeave={onDrop ? () => setHover(false) : undefined}
-      onDrop={
-        onDrop
-          ? (e) => {
-              setHover(false);
-              onDrop(e);
-            }
-          : undefined
-      }
-      className={`shrink-0 px-3.5 py-2.5 rounded-full text-xs font-medium border transition flex items-center gap-1.5 min-h-[40px] ${
-        active ? "text-white border-transparent" : "bg-background hover:bg-muted"
-      } ${hover ? "ring-2 ring-offset-1 scale-105" : ""}`}
-      style={{
-        ...(active ? { background: color } : { color: count > 0 ? color : undefined }),
-        ...(hover ? { boxShadow: `0 0 0 2px ${color}` } : {}),
+    <li
+      onClick={onOpen}
+      onDragOver={(e) => {
+        if (e.dataTransfer?.types?.includes("Files")) {
+          e.preventDefault();
+          e.stopPropagation();
+          setHover(true);
+        }
+      }}
+      onDragLeave={() => setHover(false)}
+      onDrop={(e) => {
+        setHover(false);
+        onDrop(e);
+      }}
+      className={`flex items-center gap-3 px-3 sm:px-4 py-2.5 cursor-pointer transition ${
+        hover ? "bg-primary/10" : "hover:bg-muted/50"
+      }`}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
       }}
     >
-      <Icon className="h-3.5 w-3.5" />
-      {label}
-      <span className={`text-[10px] tabular-nums ${active ? "opacity-90" : "opacity-60"}`}>
-        {count}
-      </span>
-    </button>
+      <Folder className="h-5 w-5 shrink-0" style={{ color }} fill={color} fillOpacity={0.15} />
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium truncate" style={{ color }}>
+          {label}
+        </div>
+        <div className="text-[11px] text-muted-foreground">
+          {count === 0
+            ? "leer"
+            : `${count} Datei${count > 1 ? "en" : ""}${
+                latest ? ` · zuletzt ${new Date(latest).toLocaleDateString("de-AT")}` : ""
+              }`}
+        </div>
+      </div>
+      <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+    </li>
   );
 }
 
