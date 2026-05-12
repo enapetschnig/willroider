@@ -1087,6 +1087,91 @@ export default function Stunden() {
           {/* Quick-Book Card */}
           <Card>
             <CardContent className="p-4 space-y-4">
+              {/* Bisher heute (Kontext-Erinnerung beim Eingeben einer weiteren Buchung) */}
+              {todayBlocks.length > 0 && (
+                <div className="rounded-md border bg-muted/30 p-2.5 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="uppercase tracking-wide font-semibold text-muted-foreground">
+                      Bisher heute
+                    </span>
+                    <span className="flex items-center gap-1.5 flex-wrap justify-end">
+                      {todaySummary.arbeit > 0 && (
+                        <span className="tabular-nums font-bold text-foreground">
+                          {fmtH(todaySummary.arbeit)} Arbeit
+                        </span>
+                      )}
+                      {Array.from(todaySummary.fehlzeit.entries())
+                        .filter(([, h]) => h > 0)
+                        .map(([typ, h]) => (
+                          <span
+                            key={typ}
+                            className={`text-[10px] font-semibold tabular-nums px-1.5 py-0.5 rounded border ${fehlzeitBadgeClass(typ)}`}
+                          >
+                            {fmtH(h)} {fehlzeitLabel(typ)}
+                          </span>
+                        ))}
+                    </span>
+                  </div>
+                  <ul className="space-y-1">
+                    {todayBlocks.slice(0, 3).map((r) => {
+                      const b = baustellen.find((x) => x.id === r.baustelle_id);
+                      const hours = Number(
+                        r.arbeitsstunden ?? r.fehlzeit_stunden ?? 0
+                      );
+                      const isLast =
+                        continuationOf &&
+                        r.end_zeit &&
+                        fmtTime(r.end_zeit) === continuationOf.endZeit;
+                      return (
+                        <li
+                          key={r.id}
+                          className={`flex items-center gap-2 text-xs px-2 py-1 rounded ${
+                            isLast ? "bg-primary/10 ring-1 ring-primary/30" : ""
+                          }`}
+                        >
+                          {isLast && (
+                            <span className="text-[9px] uppercase font-bold tracking-wide px-1 rounded bg-primary text-primary-foreground shrink-0">
+                              zuletzt
+                            </span>
+                          )}
+                          {r.start_zeit && r.end_zeit ? (
+                            <span className="tabular-nums text-muted-foreground shrink-0">
+                              {fmtTime(r.start_zeit)}–{fmtTime(r.end_zeit)}
+                            </span>
+                          ) : null}
+                          {r.fehlzeit_typ ? (
+                            <span
+                              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border shrink-0 ${fehlzeitBadgeClass(r.fehlzeit_typ)}`}
+                            >
+                              {fehlzeitLabel(r.fehlzeit_typ)}
+                            </span>
+                          ) : (
+                            <span className="truncate flex-1">
+                              {r.in_firma
+                                ? b?.bvh_name
+                                  ? `Firma · ${b.bvh_name}`
+                                  : "Firma"
+                                : b?.bvh_name ?? "—"}
+                            </span>
+                          )}
+                          {r.fehlzeit_typ && <span className="flex-1" />}
+                          <span className="font-bold tabular-nums shrink-0">
+                            {hours.toFixed(2).replace(".", ",")} h
+                          </span>
+                        </li>
+                      );
+                    })}
+                    {todayBlocks.length > 3 && (
+                      <li className="text-[10px] text-muted-foreground italic px-2">
+                        +{todayBlocks.length - 3} weitere Buchung
+                        {todayBlocks.length - 3 > 1 ? "en" : ""} oben in der
+                        Übersicht
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              )}
+
               {/* Mode: Arbeit / Fehlzeit — große Tap-Targets */}
               <div>
                 <Label className="text-sm font-semibold flex items-center gap-2">
