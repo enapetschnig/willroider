@@ -328,6 +328,7 @@ export type Database = {
           baustelle_id: string | null;
           mitarbeiter_id: string | null;
           ordner: string | null;
+          subpath: string | null;
           typ: string | null;
           dateiname: string;
           storage_path: string;
@@ -342,6 +343,23 @@ export type Database = {
           storage_path: string;
         };
         Update: Partial<Database['public']['Tables']['dokumente']['Row']>;
+        Relationships: [];
+      };
+      dokument_ordner: {
+        Row: {
+          id: string;
+          baustelle_id: string;
+          ordner: string;
+          subpath: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['dokument_ordner']['Row']> & {
+          baustelle_id: string;
+          ordner: string;
+          subpath: string;
+        };
+        Update: Partial<Database['public']['Tables']['dokument_ordner']['Row']>;
         Relationships: [];
       };
       kostenbuchungen: {
@@ -418,6 +436,7 @@ export type Database = {
           id: string;
           angebot_id: string;
           ordner: AngebotOrdnerEnum;
+          subpath: string | null;
           dateiname: string;
           storage_path: string;
           mimetype: string | null;
@@ -432,6 +451,23 @@ export type Database = {
           storage_path: string;
         };
         Update: Partial<Database['public']['Tables']['angebot_dokumente']['Row']>;
+        Relationships: [];
+      };
+      angebot_ordner_unterordner: {
+        Row: {
+          id: string;
+          angebot_id: string;
+          ordner: AngebotOrdnerEnum;
+          subpath: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['angebot_ordner_unterordner']['Row']> & {
+          angebot_id: string;
+          ordner: AngebotOrdnerEnum;
+          subpath: string;
+        };
+        Update: Partial<Database['public']['Tables']['angebot_ordner_unterordner']['Row']>;
         Relationships: [];
       };
     };

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -17,9 +19,11 @@ import {
   Trash2,
   FolderOpen,
   Folder,
+  FolderPlus,
   File as FileIcon,
   ArrowLeft,
   ChevronRight,
+  Home,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
@@ -29,9 +33,20 @@ import {
   type OrdnerKey,
   type Visibility,
 } from "@/lib/baustellenOrdner";
-import { MAX_UPLOAD_BYTES, sanitizeStorageName } from "@/lib/uploadHelpers";
+import {
+  MAX_UPLOAD_BYTES,
+  sanitizeStorageName,
+  joinSubpath,
+  sanitizeFolderName,
+  getDirectSubfolders,
+  readDropFiles,
+} from "@/lib/uploadHelpers";
+
+// Einheitliche, dezente Folder-Farbe (Windows-Yellow)
+const FOLDER_COLOR = "#eab308";
 
 type Dokument = Database["public"]["Tables"]["dokumente"]["Row"];
+type OrdnerMarker = Database["public"]["Tables"]["dokument_ordner"]["Row"];
 
 // Wrapper für Icon-Auswahl analog zu vorher (alle FileText außer Fotos)
 const FOLDERS = BAUSTELLEN_ORDNER.map((o) => ({
@@ -58,10 +73,14 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const { toast } = useToast();
   const { role } = useAuth();
   const [docs, setDocs] = useState<Dokument[]>([]);
+  const [folderMarkers, setFolderMarkers] = useState<OrdnerMarker[]>([]);
   const [loading, setLoading] = useState(true);
-  // "root" = Ordner-Übersicht (Listenansicht), sonst = im Ordner drin
+  // "root" = Top-Level-Übersicht (alle 14 Ordner). Sonst = im Ordner drin.
   const [currentFolder, setCurrentFolder] = useState<"root" | FolderKey>("root");
+  const [currentSubpath, setCurrentSubpath] = useState<string>(""); // Unterordner-Pfad
   const [uploadFolder, setUploadFolder] = useState<FolderKey>("fotos");
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState<string>("");
   const [visibility, setVisibility] = useState<Visibility>(DEFAULT_VISIBILITY);
@@ -85,14 +104,26 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
 
   const load = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from("dokumente")
-      .select("*")
-      .eq("baustelle_id", baustelleId)
-      .order("created_at", { ascending: false });
-    setDocs((data as Dokument[]) ?? []);
+    const [d, m] = await Promise.all([
+      supabase
+        .from("dokumente")
+        .select("*")
+        .eq("baustelle_id", baustelleId)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("dokument_ordner")
+        .select("*")
+        .eq("baustelle_id", baustelleId),
+    ]);
+    setDocs((d.data as Dokument[]) ?? []);
+    setFolderMarkers((m.data as OrdnerMarker[]) ?? []);
     setLoading(false);
   };
+
+  // Subpath zurücksetzen, wenn der Top-Level-Ordner wechselt
+  useEffect(() => {
+    setCurrentSubpath("");
+  }, [currentFolder]);
 
   // Visibility-Settings laden (einmalig)
   useEffect(() => {
@@ -126,7 +157,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     }
   }, [visibleFolders, currentFolder]);
 
-  // Letzte hochgeladene Datei pro Ordner (für „aktualisiert" Datum in Liste)
+  // Letzte hochgeladene Datei pro Top-Level-Ordner (für „aktualisiert" Datum in Wurzel)
   const folderStats = useMemo(() => {
     const stats: Record<string, { count: number; latest: string | null }> = {};
     visibleFolders.forEach((f) => {
@@ -143,23 +174,60 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     return stats;
   }, [docs, visibleFolders]);
 
-  // Dateien im aktuellen Ordner
+  // Dateien im aktuellen Top-Folder + Subpath (exakt)
   const filtered = useMemo(() => {
     if (currentFolder === "root") return [] as Dokument[];
-    return docs.filter((d) => (d.ordner ?? "92-sonstiges") === currentFolder);
-  }, [docs, currentFolder]);
+    return docs.filter(
+      (d) =>
+        (d.ordner ?? "92-sonstiges") === currentFolder &&
+        (d.subpath ?? "") === currentSubpath
+    );
+  }, [docs, currentFolder, currentSubpath]);
 
-  const upload = async (
-    files: FileList | File[] | null,
-    folder: FolderKey
-  ) => {
-    if (!files || files.length === 0) return;
-    const list = Array.from(files);
+  // Direkte Unterordner im aktuellen Pfad (aus Files + leeren Folder-Markern)
+  const subfolders = useMemo(() => {
+    if (currentFolder === "root") return [];
+    const allSubpaths: (string | null)[] = [];
+    docs.forEach((d) => {
+      if ((d.ordner ?? "92-sonstiges") === currentFolder) allSubpaths.push(d.subpath);
+    });
+    folderMarkers.forEach((m) => {
+      if (m.ordner === currentFolder) allSubpaths.push(m.subpath);
+    });
+    return getDirectSubfolders(allSubpaths, currentSubpath);
+  }, [docs, folderMarkers, currentFolder, currentSubpath]);
+
+  // Statistik pro Unterordner (Anzahl darunter, latest)
+  const subfolderStats = useMemo(() => {
+    if (currentFolder === "root") return {} as Record<string, { count: number; latest: string | null }>;
+    const stats: Record<string, { count: number; latest: string | null }> = {};
+    subfolders.forEach((s) => (stats[s] = { count: 0, latest: null }));
+    const prefix = currentSubpath ? currentSubpath + "/" : "";
+    docs.forEach((d) => {
+      if ((d.ordner ?? "92-sonstiges") !== currentFolder) return;
+      const sp = d.subpath ?? "";
+      if (currentSubpath && !sp.startsWith(prefix)) return;
+      if (!currentSubpath && !sp) return;
+      const rest = currentSubpath ? sp.slice(prefix.length) : sp;
+      const first = rest.split("/")[0];
+      if (!first || !stats[first]) return;
+      stats[first].count++;
+      if (!stats[first].latest || d.created_at > stats[first].latest!) {
+        stats[first].latest = d.created_at;
+      }
+    });
+    return stats;
+  }, [docs, subfolders, currentFolder, currentSubpath]);
+
+  type UploadItem = { file: File; subpath: string };
+
+  const uploadItems = async (items: UploadItem[], folder: FolderKey) => {
+    if (items.length === 0) return;
     const { data: u } = await supabase.auth.getUser();
     let success = 0;
     let skipped = 0;
-    for (let i = 0; i < list.length; i++) {
-      const file = list[i];
+    for (let i = 0; i < items.length; i++) {
+      const { file, subpath } = items[i];
       if (file.size > MAX_UPLOAD_BYTES) {
         toast({
           variant: "destructive",
@@ -169,9 +237,11 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         skipped++;
         continue;
       }
-      setUploading({ name: file.name, idx: i + 1, total: list.length });
+      setUploading({ name: file.name, idx: i + 1, total: items.length });
       const safeName = sanitizeStorageName(file.name);
-      const path = `${baustelleId}/${folder}/${Date.now()}_${safeName}`;
+      const sub = subpath ? subpath.split("/").map(sanitizeFolderName).filter(Boolean).join("/") : "";
+      const subStorageSegment = sub ? `${sub}/` : "";
+      const path = `${baustelleId}/${folder}/${subStorageSegment}${Date.now()}_${safeName}`;
       const { error: upErr } = await supabase.storage
         .from("baustellen")
         .upload(path, file, { contentType: file.type || undefined });
@@ -186,6 +256,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       const { error: dbErr } = await supabase.from("dokumente").insert({
         baustelle_id: baustelleId,
         ordner: folder,
+        subpath: sub || null,
         dateiname: file.name,
         storage_path: path,
         mimetype: file.type,
@@ -198,7 +269,6 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
           title: "DB-Fehler",
           description: dbErr.message,
         });
-        // Storage-Datei wieder entfernen, damit kein Waisenrest bleibt
         await supabase.storage.from("baustellen").remove([path]);
         continue;
       }
@@ -211,10 +281,17 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
           skipped > 0 ? ` · ${skipped} übersprungen` : ""
         }`,
       });
-      // direkt in den Ordner springen, damit die Datei sichtbar ist
       setCurrentFolder(folder);
     }
     load();
+  };
+
+  // Convenience: alte upload-Signatur weiterhin nutzbar (lädt in currentSubpath)
+  const upload = (files: FileList | File[] | null, folder: FolderKey) => {
+    if (!files || files.length === 0) return;
+    const list = Array.from(files);
+    const items: UploadItem[] = list.map((f) => ({ file: f, subpath: currentSubpath }));
+    return uploadItems(items, folder);
   };
 
   const open = async (d: Dokument) => {
@@ -278,20 +355,45 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     // Nur leaven wenn wir wirklich den Wrapper verlassen (nicht ein Kind-Element)
     if (e.currentTarget === e.target) setDragOver(false);
   };
-  const onDrop = (e: React.DragEvent) => {
+  const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const files = e.dataTransfer?.files;
-    if (files && files.length > 0) upload(files, defaultDropFolder);
+    const dropped = await readDropFiles(e);
+    if (dropped.length === 0) return;
+    const items: UploadItem[] = dropped.map((d) => ({
+      file: d.file,
+      subpath: joinSubpath(currentSubpath, d.relativePath),
+    }));
+    uploadItems(items, defaultDropFolder);
   };
 
-  // Drop direkt auf eine Filter-Pill → in genau diesen Ordner uploaden
-  const dropOnFolder = (folder: FolderKey) => (e: React.DragEvent) => {
+  // Drop direkt auf eine Top-Folder-Zeile (Wurzel) ODER Unterordner-Zeile
+  const dropOnTopFolder = (folder: FolderKey) => async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setDragOver(false);
-    const files = e.dataTransfer?.files;
-    if (files && files.length > 0) upload(files, folder);
+    const dropped = await readDropFiles(e);
+    if (dropped.length === 0) return;
+    const items: UploadItem[] = dropped.map((d) => ({
+      file: d.file,
+      subpath: d.relativePath,
+    }));
+    uploadItems(items, folder);
+  };
+
+  const dropOnSubfolder = (folderName: string) => async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    if (currentFolder === "root") return;
+    const target = joinSubpath(currentSubpath, folderName);
+    const dropped = await readDropFiles(e);
+    if (dropped.length === 0) return;
+    const items: UploadItem[] = dropped.map((d) => ({
+      file: d.file,
+      subpath: joinSubpath(target, d.relativePath),
+    }));
+    uploadItems(items, currentFolder);
   };
 
   // Paste aus Zwischenablage (z.B. Screenshot)
@@ -314,7 +416,52 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [baustelleId, currentFolder]);
+  }, [baustelleId, currentFolder, currentSubpath]);
+
+  // Neuer Unterordner anlegen (Marker in DB)
+  const createSubfolder = async () => {
+    if (currentFolder === "root") return;
+    const name = sanitizeFolderName(newFolderName);
+    if (!name) {
+      toast({ variant: "destructive", title: "Ungültiger Name" });
+      return;
+    }
+    const newSub = joinSubpath(currentSubpath, name);
+    // Schon vorhanden?
+    if (subfolders.includes(name)) {
+      toast({ variant: "destructive", title: `„${name}" existiert bereits` });
+      return;
+    }
+    const { data: u } = await supabase.auth.getUser();
+    const { error } = await supabase.from("dokument_ordner").insert({
+      baustelle_id: baustelleId,
+      ordner: currentFolder,
+      subpath: newSub,
+      created_by: u.user?.id ?? null,
+    } as any);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    setNewFolderOpen(false);
+    setNewFolderName("");
+    toast({ title: `Ordner „${name}" erstellt` });
+    load();
+  };
+
+  const enterSubfolder = (name: string) => {
+    setCurrentSubpath((p) => joinSubpath(p, name));
+  };
+
+  const breadcrumbSegments = currentSubpath ? currentSubpath.split("/").filter(Boolean) : [];
+  const goToBreadcrumb = (idx: number) => {
+    // -1 = Top-Folder-Wurzel (kein subpath), 0..n = Index der Segmente
+    if (idx < 0) {
+      setCurrentSubpath("");
+    } else {
+      setCurrentSubpath(breadcrumbSegments.slice(0, idx + 1).join("/"));
+    }
+  };
 
   return (
     <div
@@ -363,7 +510,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       <div className="flex items-center gap-2 flex-wrap">
         {currentFolder === "root" ? (
           <div className="flex items-center gap-1.5 text-sm font-semibold">
-            <FolderOpen className="h-4 w-4 text-primary" />
+            <Home className="h-4 w-4 text-muted-foreground" />
             Dokumente
           </div>
         ) : (
@@ -372,27 +519,53 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
               variant="outline"
               size="sm"
               className="h-8"
-              onClick={() => setCurrentFolder("root")}
+              onClick={() => {
+                if (currentSubpath) {
+                  // eine Ebene hoch
+                  const seg = breadcrumbSegments.slice(0, -1).join("/");
+                  setCurrentSubpath(seg);
+                } else {
+                  setCurrentFolder("root");
+                }
+              }}
             >
               <ArrowLeft className="h-4 w-4 mr-1" />
               Zurück
             </Button>
-            <div className="flex items-center gap-1 text-sm">
+            <div className="flex items-center gap-1 text-sm flex-wrap">
               <button
                 onClick={() => setCurrentFolder("root")}
-                className="text-muted-foreground hover:text-foreground hover:underline"
+                className="text-muted-foreground hover:text-foreground hover:underline inline-flex items-center gap-1"
               >
+                <Home className="h-3.5 w-3.5" />
                 Dokumente
               </button>
               <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-              <span
-                className="font-semibold"
-                style={{ color: folderMeta(currentFolder).color }}
+              <button
+                onClick={() => setCurrentSubpath("")}
+                className={`hover:underline ${
+                  currentSubpath ? "text-muted-foreground" : "font-semibold"
+                }`}
               >
                 {folderMeta(currentFolder).label}
-              </span>
+              </button>
+              {breadcrumbSegments.map((seg, i) => (
+                <span key={i} className="flex items-center gap-1">
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                  <button
+                    onClick={() => goToBreadcrumb(i)}
+                    className={`hover:underline ${
+                      i === breadcrumbSegments.length - 1
+                        ? "font-semibold"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {seg}
+                  </button>
+                </span>
+              ))}
               <span className="text-xs text-muted-foreground ml-1">
-                ({filtered.length})
+                ({filtered.length + subfolders.length})
               </span>
             </div>
           </>
@@ -406,10 +579,23 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
             </Button>
           ) : null}
           {currentFolder !== "root" && (
-            <Button onClick={triggerUpload} variant="default" className="h-9">
-              <Upload className="h-4 w-4 mr-2" />
-              Hochladen
-            </Button>
+            <>
+              <Button
+                onClick={() => {
+                  setNewFolderName("");
+                  setNewFolderOpen(true);
+                }}
+                variant="outline"
+                className="h-9"
+              >
+                <FolderPlus className="h-4 w-4 mr-2" />
+                Neuer Ordner
+              </Button>
+              <Button onClick={triggerUpload} variant="default" className="h-9">
+                <Upload className="h-4 w-4 mr-2" />
+                Hochladen
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -436,7 +622,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         </div>
       )}
 
-      {/* Inhalt: Wurzel = Ordner-Liste, sonst = Datei-Grid */}
+      {/* Inhalt: Wurzel = Top-Level-Ordner-Liste, sonst = Subfolders + Datei-Grid */}
       {currentFolder === "root" ? (
         <Card>
           <CardContent className="p-0">
@@ -456,11 +642,10 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
                     <FolderRow
                       key={f.key}
                       label={f.label}
-                      color={f.color}
                       count={stats.count}
                       latest={stats.latest}
                       onOpen={() => setCurrentFolder(f.key)}
-                      onDrop={dropOnFolder(f.key)}
+                      onDrop={dropOnTopFolder(f.key)}
                     />
                   );
                 })}
@@ -474,25 +659,96 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
             Lädt…
           </CardContent>
         </Card>
-      ) : filtered.length === 0 ? (
+      ) : filtered.length === 0 && subfolders.length === 0 ? (
         <Card>
           <CardContent className="p-8 text-center space-y-2">
             <FolderOpen className="h-8 w-8 mx-auto text-muted-foreground opacity-50" />
             <div className="text-sm text-muted-foreground">
-              Noch keine Dateien in {folderMeta(currentFolder).label}.
+              Noch leer in {folderMeta(currentFolder).label}
+              {currentSubpath ? ` / ${currentSubpath}` : ""}.
             </div>
             <div className="text-xs text-muted-foreground">
-              Dateien hierher ziehen oder oben rechts „Hochladen" klicken.
+              Dateien oder ganze Ordner hierher ziehen, oder „Neuer Ordner" /
+              „Hochladen" oben rechts.
             </div>
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-3">
-          {filtered.map((d) => (
-            <FileCard key={d.id} d={d} onOpen={() => open(d)} onDelete={(e) => remove(d, e)} />
-          ))}
+        <div className="space-y-3">
+          {subfolders.length > 0 && (
+            <Card>
+              <CardContent className="p-0">
+                <ul className="divide-y">
+                  {subfolders.map((name) => {
+                    const st = subfolderStats[name] ?? { count: 0, latest: null };
+                    return (
+                      <FolderRow
+                        key={name}
+                        label={name}
+                        count={st.count}
+                        latest={st.latest}
+                        onOpen={() => enterSubfolder(name)}
+                        onDrop={dropOnSubfolder(name)}
+                      />
+                    );
+                  })}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+          {filtered.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-3">
+              {filtered.map((d) => (
+                <FileCard
+                  key={d.id}
+                  d={d}
+                  onOpen={() => open(d)}
+                  onDelete={(e) => remove(d, e)}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
+
+      {/* Neuer-Ordner-Dialog */}
+      <Dialog open={newFolderOpen} onOpenChange={setNewFolderOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Neuer Ordner</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Input
+              autoFocus
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") createSubfolder();
+              }}
+              placeholder="Ordnername"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Wird angelegt in:{" "}
+              <strong>
+                {folderMeta(currentFolder === "root" ? "92-sonstiges" : currentFolder).label}
+                {currentSubpath ? ` / ${currentSubpath}` : ""}
+              </strong>
+            </p>
+          </div>
+          <DialogFooter className="flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setNewFolderOpen(false)}
+              className="flex-1"
+            >
+              Abbrechen
+            </Button>
+            <Button onClick={createSubfolder} className="flex-1">
+              Anlegen
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!previewUrl} onOpenChange={(o) => !o && setPreviewUrl(null)}>
         <DialogContent className="max-w-3xl">
@@ -514,14 +770,12 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
 
 function FolderRow({
   label,
-  color,
   count,
   latest,
   onOpen,
   onDrop,
 }: {
   label: string;
-  color: string;
   count: number;
   latest: string | null;
   onOpen: () => void;
@@ -555,11 +809,14 @@ function FolderRow({
         }
       }}
     >
-      <Folder className="h-5 w-5 shrink-0" style={{ color }} fill={color} fillOpacity={0.15} />
+      <Folder
+        className="h-5 w-5 shrink-0"
+        style={{ color: FOLDER_COLOR }}
+        fill={FOLDER_COLOR}
+        fillOpacity={0.25}
+      />
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium truncate" style={{ color }}>
-          {label}
-        </div>
+        <div className="text-sm font-medium truncate">{label}</div>
         <div className="text-[11px] text-muted-foreground">
           {count === 0
             ? "leer"
@@ -584,7 +841,6 @@ function FileCard({
 }) {
   const [thumb, setThumb] = useState<string | null>(null);
   const isImg = isImage(d.mimetype);
-  const meta = folderMeta(d.ordner);
 
   useEffect(() => {
     if (!isImg) return;
@@ -613,22 +869,15 @@ function FileCard({
           ) : (
             <div className="h-full w-full flex flex-col items-center justify-center gap-1 p-2">
               {isPdf(d.mimetype) ? (
-                <FileText className="h-10 w-10" style={{ color: meta.color }} />
+                <FileText className="h-10 w-10 text-muted-foreground" />
               ) : (
-                <FileIcon className="h-10 w-10" style={{ color: meta.color }} />
+                <FileIcon className="h-10 w-10 text-muted-foreground" />
               )}
-              <div className="text-[10px] uppercase font-bold tracking-wide" style={{ color: meta.color }}>
+              <div className="text-[10px] uppercase font-bold tracking-wide text-muted-foreground">
                 {(d.dateiname.split(".").pop() ?? "").slice(0, 4) || "FILE"}
               </div>
             </div>
           )}
-          {/* Folder badge */}
-          <div
-            className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide text-white shadow"
-            style={{ background: meta.color }}
-          >
-            {meta.label}
-          </div>
         </div>
         {/* Meta */}
         <div className="p-2">

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -12,15 +14,19 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   Upload,
   FileText,
-  Image as ImageIcon,
   Trash2,
   Folder,
   FolderOpen,
+  FolderPlus,
   File as FileIcon,
   ArrowLeft,
   ChevronRight,
+  Home,
 } from "lucide-react";
-import type { Database, AngebotOrdnerEnum } from "@/integrations/supabase/types";
+import type {
+  Database,
+  AngebotOrdnerEnum,
+} from "@/integrations/supabase/types";
 import {
   ANGEBOT_ORDNER,
   angebotOrdnerDef,
@@ -29,9 +35,16 @@ import {
 import {
   MAX_UPLOAD_BYTES,
   sanitizeStorageName,
+  joinSubpath,
+  sanitizeFolderName,
+  getDirectSubfolders,
+  readDropFiles,
 } from "@/lib/uploadHelpers";
 
 type Dokument = Database["public"]["Tables"]["angebot_dokumente"]["Row"];
+type Marker = Database["public"]["Tables"]["angebot_ordner_unterordner"]["Row"];
+
+const FOLDER_COLOR = "#eab308";
 
 function isImage(mimetype?: string | null) {
   return !!mimetype && mimetype.startsWith("image/");
@@ -39,19 +52,19 @@ function isImage(mimetype?: string | null) {
 function isPdf(mimetype?: string | null) {
   return !!mimetype && mimetype === "application/pdf";
 }
-function iconFor(key: AngebotOrdnerKey) {
-  if (key === "plaene") return ImageIcon;
-  return FileText;
-}
 function meta(key: string | null | undefined) {
   return angebotOrdnerDef(key) ?? ANGEBOT_ORDNER[3];
 }
 
+type UploadItem = { file: File; subpath: string };
+
 export function AngebotDokumente({ angebotId }: { angebotId: string }) {
   const { toast } = useToast();
   const [docs, setDocs] = useState<Dokument[]>([]);
+  const [folderMarkers, setFolderMarkers] = useState<Marker[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentFolder, setCurrentFolder] = useState<"root" | AngebotOrdnerKey>("root");
+  const [currentSubpath, setCurrentSubpath] = useState<string>("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState<string>("");
   const [dragOver, setDragOver] = useState(false);
@@ -60,22 +73,35 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
     idx: number;
     total: number;
   } | null>(null);
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from("angebot_dokumente")
-      .select("*")
-      .eq("angebot_id", angebotId)
-      .order("created_at", { ascending: false });
-    setDocs((data as Dokument[]) ?? []);
+    const [d, m] = await Promise.all([
+      supabase
+        .from("angebot_dokumente")
+        .select("*")
+        .eq("angebot_id", angebotId)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("angebot_ordner_unterordner")
+        .select("*")
+        .eq("angebot_id", angebotId),
+    ]);
+    setDocs((d.data as Dokument[]) ?? []);
+    setFolderMarkers((m.data as Marker[]) ?? []);
     setLoading(false);
   };
 
   useEffect(() => {
     load();
   }, [angebotId]);
+
+  useEffect(() => {
+    setCurrentSubpath("");
+  }, [currentFolder]);
 
   const folderStats = useMemo(() => {
     const stats: Record<string, { count: number; latest: string | null }> = {};
@@ -95,20 +121,51 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
 
   const filtered = useMemo(() => {
     if (currentFolder === "root") return [] as Dokument[];
-    return docs.filter((d) => d.ordner === currentFolder);
-  }, [docs, currentFolder]);
+    return docs.filter(
+      (d) => d.ordner === currentFolder && (d.subpath ?? "") === currentSubpath
+    );
+  }, [docs, currentFolder, currentSubpath]);
 
-  const upload = async (
-    files: FileList | File[] | null,
-    folder: AngebotOrdnerKey
-  ) => {
-    if (!files || files.length === 0) return;
-    const list = Array.from(files);
+  const subfolders = useMemo(() => {
+    if (currentFolder === "root") return [];
+    const all: (string | null)[] = [];
+    docs.forEach((d) => {
+      if (d.ordner === currentFolder) all.push(d.subpath);
+    });
+    folderMarkers.forEach((m) => {
+      if (m.ordner === currentFolder) all.push(m.subpath);
+    });
+    return getDirectSubfolders(all, currentSubpath);
+  }, [docs, folderMarkers, currentFolder, currentSubpath]);
+
+  const subfolderStats = useMemo(() => {
+    if (currentFolder === "root") return {} as Record<string, { count: number; latest: string | null }>;
+    const stats: Record<string, { count: number; latest: string | null }> = {};
+    subfolders.forEach((s) => (stats[s] = { count: 0, latest: null }));
+    const prefix = currentSubpath ? currentSubpath + "/" : "";
+    docs.forEach((d) => {
+      if (d.ordner !== currentFolder) return;
+      const sp = d.subpath ?? "";
+      if (currentSubpath && !sp.startsWith(prefix)) return;
+      if (!currentSubpath && !sp) return;
+      const rest = currentSubpath ? sp.slice(prefix.length) : sp;
+      const first = rest.split("/")[0];
+      if (!first || !stats[first]) return;
+      stats[first].count++;
+      if (!stats[first].latest || d.created_at > stats[first].latest!) {
+        stats[first].latest = d.created_at;
+      }
+    });
+    return stats;
+  }, [docs, subfolders, currentFolder, currentSubpath]);
+
+  const uploadItems = async (items: UploadItem[], folder: AngebotOrdnerKey) => {
+    if (items.length === 0) return;
     const { data: u } = await supabase.auth.getUser();
     let success = 0;
     let skipped = 0;
-    for (let i = 0; i < list.length; i++) {
-      const file = list[i];
+    for (let i = 0; i < items.length; i++) {
+      const { file, subpath } = items[i];
       if (file.size > MAX_UPLOAD_BYTES) {
         toast({
           variant: "destructive",
@@ -118,9 +175,13 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
         skipped++;
         continue;
       }
-      setUploading({ name: file.name, idx: i + 1, total: list.length });
+      setUploading({ name: file.name, idx: i + 1, total: items.length });
       const safeName = sanitizeStorageName(file.name);
-      const path = `${angebotId}/${folder}/${Date.now()}_${safeName}`;
+      const sub = subpath
+        ? subpath.split("/").map(sanitizeFolderName).filter(Boolean).join("/")
+        : "";
+      const subStorageSegment = sub ? `${sub}/` : "";
+      const path = `${angebotId}/${folder}/${subStorageSegment}${Date.now()}_${safeName}`;
       const { error: upErr } = await supabase.storage
         .from("angebote")
         .upload(path, file, { contentType: file.type || undefined });
@@ -135,6 +196,7 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
       const { error: dbErr } = await supabase.from("angebot_dokumente").insert({
         angebot_id: angebotId,
         ordner: folder as AngebotOrdnerEnum,
+        subpath: sub || null,
         dateiname: file.name,
         storage_path: path,
         mimetype: file.type,
@@ -162,6 +224,16 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
       setCurrentFolder(folder);
     }
     load();
+  };
+
+  const upload = (files: FileList | File[] | null, folder: AngebotOrdnerKey) => {
+    if (!files || files.length === 0) return;
+    const list = Array.from(files);
+    const items: UploadItem[] = list.map((f) => ({
+      file: f,
+      subpath: currentSubpath,
+    }));
+    return uploadItems(items, folder);
   };
 
   const openFile = async (d: Dokument) => {
@@ -210,18 +282,43 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
   const onDragLeave = (e: React.DragEvent) => {
     if (e.currentTarget === e.target) setDragOver(false);
   };
-  const onDrop = (e: React.DragEvent) => {
+  const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const files = e.dataTransfer?.files;
-    if (files && files.length > 0) upload(files, defaultDropFolder);
+    const dropped = await readDropFiles(e);
+    if (dropped.length === 0) return;
+    const items: UploadItem[] = dropped.map((d) => ({
+      file: d.file,
+      subpath: joinSubpath(currentSubpath, d.relativePath),
+    }));
+    uploadItems(items, defaultDropFolder);
   };
-  const dropOnFolder = (folder: AngebotOrdnerKey) => (e: React.DragEvent) => {
+  const dropOnTopFolder =
+    (folder: AngebotOrdnerKey) => async (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOver(false);
+      const dropped = await readDropFiles(e);
+      if (dropped.length === 0) return;
+      const items: UploadItem[] = dropped.map((d) => ({
+        file: d.file,
+        subpath: d.relativePath,
+      }));
+      uploadItems(items, folder);
+    };
+  const dropOnSubfolder = (folderName: string) => async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setDragOver(false);
-    const files = e.dataTransfer?.files;
-    if (files && files.length > 0) upload(files, folder);
+    if (currentFolder === "root") return;
+    const target = joinSubpath(currentSubpath, folderName);
+    const dropped = await readDropFiles(e);
+    if (dropped.length === 0) return;
+    const items: UploadItem[] = dropped.map((d) => ({
+      file: d.file,
+      subpath: joinSubpath(target, d.relativePath),
+    }));
+    uploadItems(items, currentFolder);
   };
 
   useEffect(() => {
@@ -242,7 +339,45 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [angebotId, currentFolder]);
+  }, [angebotId, currentFolder, currentSubpath]);
+
+  const createSubfolder = async () => {
+    if (currentFolder === "root") return;
+    const name = sanitizeFolderName(newFolderName);
+    if (!name) {
+      toast({ variant: "destructive", title: "Ungültiger Name" });
+      return;
+    }
+    const newSub = joinSubpath(currentSubpath, name);
+    if (subfolders.includes(name)) {
+      toast({ variant: "destructive", title: `„${name}" existiert bereits` });
+      return;
+    }
+    const { data: u } = await supabase.auth.getUser();
+    const { error } = await supabase.from("angebot_ordner_unterordner").insert({
+      angebot_id: angebotId,
+      ordner: currentFolder as AngebotOrdnerEnum,
+      subpath: newSub,
+      created_by: u.user?.id ?? null,
+    });
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    setNewFolderOpen(false);
+    setNewFolderName("");
+    toast({ title: `Ordner „${name}" erstellt` });
+    load();
+  };
+
+  const enterSubfolder = (name: string) => {
+    setCurrentSubpath((p) => joinSubpath(p, name));
+  };
+  const breadcrumbSegments = currentSubpath ? currentSubpath.split("/").filter(Boolean) : [];
+  const goToBreadcrumb = (idx: number) => {
+    if (idx < 0) setCurrentSubpath("");
+    else setCurrentSubpath(breadcrumbSegments.slice(0, idx + 1).join("/"));
+  };
 
   return (
     <div
@@ -275,11 +410,11 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
         }}
       />
 
-      {/* Breadcrumb / Header */}
+      {/* Breadcrumb */}
       <div className="flex items-center gap-2 flex-wrap">
         {currentFolder === "root" ? (
           <div className="flex items-center gap-1.5 text-sm font-semibold">
-            <FolderOpen className="h-4 w-4 text-primary" />
+            <Home className="h-4 w-4 text-muted-foreground" />
             Angebot-Dokumente
           </div>
         ) : (
@@ -288,51 +423,87 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
               variant="outline"
               size="sm"
               className="h-8"
-              onClick={() => setCurrentFolder("root")}
+              onClick={() => {
+                if (currentSubpath) {
+                  setCurrentSubpath(breadcrumbSegments.slice(0, -1).join("/"));
+                } else {
+                  setCurrentFolder("root");
+                }
+              }}
             >
               <ArrowLeft className="h-4 w-4 mr-1" />
               Zurück
             </Button>
-            <div className="flex items-center gap-1 text-sm">
+            <div className="flex items-center gap-1 text-sm flex-wrap">
               <button
                 onClick={() => setCurrentFolder("root")}
-                className="text-muted-foreground hover:text-foreground hover:underline"
+                className="text-muted-foreground hover:text-foreground hover:underline inline-flex items-center gap-1"
               >
+                <Home className="h-3.5 w-3.5" />
                 Dokumente
               </button>
               <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-              <span
-                className="font-semibold"
-                style={{ color: meta(currentFolder).color }}
+              <button
+                onClick={() => setCurrentSubpath("")}
+                className={`hover:underline ${
+                  currentSubpath ? "text-muted-foreground" : "font-semibold"
+                }`}
               >
                 {meta(currentFolder).label}
-              </span>
+              </button>
+              {breadcrumbSegments.map((seg, i) => (
+                <span key={i} className="flex items-center gap-1">
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                  <button
+                    onClick={() => goToBreadcrumb(i)}
+                    className={`hover:underline ${
+                      i === breadcrumbSegments.length - 1
+                        ? "font-semibold"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {seg}
+                  </button>
+                </span>
+              ))}
               <span className="text-xs text-muted-foreground ml-1">
-                ({filtered.length})
+                ({filtered.length + subfolders.length})
               </span>
             </div>
           </>
         )}
 
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
           {currentFolder !== "root" && (
-            <Button onClick={triggerUpload} variant="default" className="h-9">
-              <Upload className="h-4 w-4 mr-2" />
-              Hochladen
-            </Button>
+            <>
+              <Button
+                onClick={() => {
+                  setNewFolderName("");
+                  setNewFolderOpen(true);
+                }}
+                variant="outline"
+                className="h-9"
+              >
+                <FolderPlus className="h-4 w-4 mr-2" />
+                Neuer Ordner
+              </Button>
+              <Button onClick={triggerUpload} variant="default" className="h-9">
+                <Upload className="h-4 w-4 mr-2" />
+                Hochladen
+              </Button>
+            </>
           )}
         </div>
       </div>
 
       {currentFolder === "root" && (
         <div className="text-[11px] text-muted-foreground -mt-1 px-1">
-          Klicke auf einen Ordner oder ziehe Dateien direkt darauf. Auch{" "}
+          Klicke auf einen Ordner, ziehe Dateien oder ganze Ordner darauf. Auch{" "}
           <kbd className="px-1 py-0.5 rounded border bg-muted text-[10px]">Cmd/Strg+V</kbd>{" "}
           aus der Zwischenablage. Max. 50 MB pro Datei.
         </div>
       )}
 
-      {/* Upload-Progress */}
       {uploading && (
         <div className="rounded-md border bg-primary/5 border-primary/20 px-3 py-2 flex items-center gap-2 text-xs">
           <Upload className="h-4 w-4 text-primary animate-pulse shrink-0" />
@@ -345,7 +516,6 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
         </div>
       )}
 
-      {/* Inhalt */}
       {currentFolder === "root" ? (
         <Card>
           <CardContent className="p-0">
@@ -361,11 +531,10 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
                     <FolderRow
                       key={f.key}
                       label={f.label}
-                      color={f.color}
                       count={stats.count}
                       latest={stats.latest}
                       onOpen={() => setCurrentFolder(f.key)}
-                      onDrop={dropOnFolder(f.key)}
+                      onDrop={dropOnTopFolder(f.key)}
                     />
                   );
                 })}
@@ -379,23 +548,55 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
             Lädt…
           </CardContent>
         </Card>
-      ) : filtered.length === 0 ? (
+      ) : filtered.length === 0 && subfolders.length === 0 ? (
         <Card>
           <CardContent className="p-8 text-center space-y-2">
             <FolderOpen className="h-8 w-8 mx-auto text-muted-foreground opacity-50" />
             <div className="text-sm text-muted-foreground">
-              Noch keine Dateien in {meta(currentFolder).label}.
+              Noch leer in {meta(currentFolder).label}
+              {currentSubpath ? ` / ${currentSubpath}` : ""}.
             </div>
             <div className="text-xs text-muted-foreground">
-              Dateien hierher ziehen oder oben rechts „Hochladen" klicken.
+              Dateien oder ganze Ordner hierher ziehen, oder „Neuer Ordner" /
+              „Hochladen" oben rechts.
             </div>
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-3">
-          {filtered.map((d) => (
-            <FileCard key={d.id} d={d} onOpen={() => openFile(d)} onDelete={(e) => remove(d, e)} />
-          ))}
+        <div className="space-y-3">
+          {subfolders.length > 0 && (
+            <Card>
+              <CardContent className="p-0">
+                <ul className="divide-y">
+                  {subfolders.map((name) => {
+                    const st = subfolderStats[name] ?? { count: 0, latest: null };
+                    return (
+                      <FolderRow
+                        key={name}
+                        label={name}
+                        count={st.count}
+                        latest={st.latest}
+                        onOpen={() => enterSubfolder(name)}
+                        onDrop={dropOnSubfolder(name)}
+                      />
+                    );
+                  })}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+          {filtered.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-3">
+              {filtered.map((d) => (
+                <FileCard
+                  key={d.id}
+                  d={d}
+                  onOpen={() => openFile(d)}
+                  onDelete={(e) => remove(d, e)}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -413,20 +614,56 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
           )}
         </DialogContent>
       </Dialog>
+
+      <Dialog open={newFolderOpen} onOpenChange={setNewFolderOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Neuer Ordner</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Input
+              autoFocus
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") createSubfolder();
+              }}
+              placeholder="Ordnername"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Wird angelegt in:{" "}
+              <strong>
+                {meta(currentFolder === "root" ? "angebotsunterlagen" : currentFolder).label}
+                {currentSubpath ? ` / ${currentSubpath}` : ""}
+              </strong>
+            </p>
+          </div>
+          <DialogFooter className="flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setNewFolderOpen(false)}
+              className="flex-1"
+            >
+              Abbrechen
+            </Button>
+            <Button onClick={createSubfolder} className="flex-1">
+              Anlegen
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
 function FolderRow({
   label,
-  color,
   count,
   latest,
   onOpen,
   onDrop,
 }: {
   label: string;
-  color: string;
   count: number;
   latest: string | null;
   onOpen: () => void;
@@ -460,11 +697,14 @@ function FolderRow({
         }
       }}
     >
-      <Folder className="h-5 w-5 shrink-0" style={{ color }} fill={color} fillOpacity={0.15} />
+      <Folder
+        className="h-5 w-5 shrink-0"
+        style={{ color: FOLDER_COLOR }}
+        fill={FOLDER_COLOR}
+        fillOpacity={0.25}
+      />
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium truncate" style={{ color }}>
-          {label}
-        </div>
+        <div className="text-sm font-medium truncate">{label}</div>
         <div className="text-[11px] text-muted-foreground">
           {count === 0
             ? "leer"
@@ -489,7 +729,6 @@ function FileCard({
 }) {
   const [thumb, setThumb] = useState<string | null>(null);
   const isImg = isImage(d.mimetype);
-  const m = meta(d.ordner);
 
   useEffect(() => {
     if (!isImg) return;
@@ -517,11 +756,11 @@ function FileCard({
           ) : (
             <div className="h-full w-full flex flex-col items-center justify-center gap-1 p-2">
               {isPdf(d.mimetype) ? (
-                <FileText className="h-10 w-10" style={{ color: m.color }} />
+                <FileText className="h-10 w-10 text-muted-foreground" />
               ) : (
-                <FileIcon className="h-10 w-10" style={{ color: m.color }} />
+                <FileIcon className="h-10 w-10 text-muted-foreground" />
               )}
-              <div className="text-[10px] uppercase font-bold tracking-wide" style={{ color: m.color }}>
+              <div className="text-[10px] uppercase font-bold tracking-wide text-muted-foreground">
                 {(d.dateiname.split(".").pop() ?? "").slice(0, 4) || "FILE"}
               </div>
             </div>
