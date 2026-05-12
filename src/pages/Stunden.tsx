@@ -48,6 +48,7 @@ import type { Database, StundenStatus } from "@/integrations/supabase/types";
 import { feiertagAt } from "@/lib/feiertage";
 import { ZULAGEN, type ZulageTyp } from "@/lib/zulagen";
 import { localIso } from "@/lib/dateFmt";
+import { autoTaggeld, autoTaggeldReason } from "@/lib/dienstreise";
 
 type Stunde = Database["public"]["Tables"]["stundenbuchungen"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -190,6 +191,7 @@ export default function Stunden() {
   const [fahrstunden, setFahrstunden] = useState<number>(0);
   const [taggeldKurz, setTaggeldKurz] = useState<number>(0);
   const [taggeldLang, setTaggeldLang] = useState<number>(0);
+  const [taggeldManuell, setTaggeldManuell] = useState<boolean>(false);
   const [km, setKm] = useState<number>(0);
   const [notizen, setNotizen] = useState<string>("");
   const [zulageTyp, setZulageTyp] = useState<ZulageTyp | "">("");
@@ -209,6 +211,27 @@ export default function Stunden() {
       ),
     [startZeit, endZeit, hasPause, pauseVon, pauseBis]
   );
+
+  // Auto-Diäten nach Bau-KV § 9 I Z 4 — werden bei !taggeldManuell live gesetzt
+  const autoTagInput = useMemo(
+    () => ({
+      arbeitsstunden: arbeitstundenLive,
+      fahrstunden,
+      inFirma,
+      isFehlzeit: !!fehlzeitTyp,
+    }),
+    [arbeitstundenLive, fahrstunden, inFirma, fehlzeitTyp]
+  );
+  const autoDiaeten = useMemo(() => autoTaggeld(autoTagInput), [autoTagInput]);
+  const autoDiaetenReason = useMemo(
+    () => autoTaggeldReason(autoTagInput),
+    [autoTagInput]
+  );
+  useEffect(() => {
+    if (taggeldManuell) return;
+    setTaggeldKurz(autoDiaeten.kurz);
+    setTaggeldLang(autoDiaeten.lang);
+  }, [autoDiaeten, taggeldManuell]);
 
   // ─── Detektion Modus ───
   useEffect(() => {
@@ -404,6 +427,7 @@ export default function Stunden() {
     setFahrstunden(0);
     setTaggeldKurz(0);
     setTaggeldLang(0);
+    setTaggeldManuell(false);
     setKm(0);
     setNotizen("");
     setZulageTyp("");
@@ -420,6 +444,7 @@ export default function Stunden() {
     setFahrstunden(0);
     setTaggeldKurz(0);
     setTaggeldLang(0);
+    setTaggeldManuell(false);
     setKm(0);
     setNotizen("");
     setZulageTyp("");
@@ -1174,6 +1199,21 @@ export default function Stunden() {
                       className="h-9"
                     />
                   </div>
+                  <div className="col-span-2 flex items-center justify-between pt-1">
+                    <Label className="text-xs font-medium">Diäten / Taggeld</Label>
+                    <label className="text-[11px] flex items-center gap-1.5 cursor-pointer">
+                      <Switch
+                        checked={taggeldManuell}
+                        onCheckedChange={(v) => setTaggeldManuell(!!v)}
+                      />
+                      <span>manuell</span>
+                    </label>
+                  </div>
+                  {!taggeldManuell && (
+                    <div className="col-span-2 -mt-1 text-[11px] text-muted-foreground">
+                      Auto nach Bau-KV § 9: {autoDiaetenReason}
+                    </div>
+                  )}
                   <div>
                     <Label className="text-xs">
                       Taggeld kurz {inFirma && <span className="opacity-60">(Firma → 0)</span>}
@@ -1181,11 +1221,13 @@ export default function Stunden() {
                     <Input
                       inputMode="numeric"
                       type="number"
+                      min={0}
                       step="1"
                       value={inFirma ? 0 : taggeldKurz}
+                      readOnly={!taggeldManuell || inFirma}
                       disabled={inFirma}
-                      onChange={(e) => setTaggeldKurz(Number(e.target.value))}
-                      className="h-9"
+                      onChange={(e) => setTaggeldKurz(Number(e.target.value) || 0)}
+                      className={`h-9 ${!taggeldManuell ? "bg-muted/40" : ""}`}
                     />
                   </div>
                   <div>
@@ -1195,11 +1237,13 @@ export default function Stunden() {
                     <Input
                       inputMode="numeric"
                       type="number"
+                      min={0}
                       step="1"
                       value={inFirma ? 0 : taggeldLang}
+                      readOnly={!taggeldManuell || inFirma}
                       disabled={inFirma}
-                      onChange={(e) => setTaggeldLang(Number(e.target.value))}
-                      className="h-9"
+                      onChange={(e) => setTaggeldLang(Number(e.target.value) || 0)}
+                      className={`h-9 ${!taggeldManuell ? "bg-muted/40" : ""}`}
                     />
                   </div>
                   <div className="col-span-2">

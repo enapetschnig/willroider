@@ -19,6 +19,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { TimePickerInput } from "@/components/TimePickerInput";
 import { localIso } from "@/lib/dateFmt";
+import { autoTaggeld, autoTaggeldReason } from "@/lib/dienstreise";
 import {
   ChevronDown,
   ChevronUp,
@@ -1255,10 +1256,45 @@ function EditBuchungForm({
   const [fahrstunden, setFahrstunden] = useState<number>(Number(row.fahrstunden ?? 0));
   const [taggeldKurz, setTaggeldKurz] = useState<number>(Number(row.taggeld_kurz ?? 0));
   const [taggeldLang, setTaggeldLang] = useState<number>(Number(row.taggeld_lang ?? 0));
+  // Beim Edit: standardmäßig manuell, damit gespeicherter Wert nicht überschrieben wird.
+  const [taggeldManuell, setTaggeldManuell] = useState<boolean>(true);
   const [km, setKm] = useState<number>(Number(row.km_gefahren ?? 0));
   const [zulageTyp, setZulageTyp] = useState<string>(row.zulage_typ ?? "");
   const [zulageStunden, setZulageStunden] = useState<number>(Number(row.zulage_stunden ?? 0));
   const [zulageNotiz, setZulageNotiz] = useState<string>(row.zulage_notiz ?? "");
+
+  // Auto-Diäten (Bau-KV § 9 I Z 4) — synct nur wenn !taggeldManuell
+  const liveArbeit = useMemo(
+    () =>
+      fehlzeitTyp
+        ? 0
+        : calcArbeit(
+            startZeit,
+            endZeit,
+            hasPause ? pauseVon : null,
+            hasPause ? pauseBis : null
+          ),
+    [fehlzeitTyp, startZeit, endZeit, hasPause, pauseVon, pauseBis]
+  );
+  const autoTagInput = useMemo(
+    () => ({
+      arbeitsstunden: liveArbeit,
+      fahrstunden,
+      inFirma,
+      isFehlzeit: !!fehlzeitTyp,
+    }),
+    [liveArbeit, fahrstunden, inFirma, fehlzeitTyp]
+  );
+  const autoDiaeten = useMemo(() => autoTaggeld(autoTagInput), [autoTagInput]);
+  const autoDiaetenReason = useMemo(
+    () => autoTaggeldReason(autoTagInput),
+    [autoTagInput]
+  );
+  useEffect(() => {
+    if (taggeldManuell) return;
+    setTaggeldKurz(autoDiaeten.kurz);
+    setTaggeldLang(autoDiaeten.lang);
+  }, [autoDiaeten, taggeldManuell]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1457,6 +1493,21 @@ function EditBuchungForm({
                 className="h-9"
               />
             </div>
+            <div className="col-span-2 flex items-center justify-between pt-1">
+              <Label className="text-xs font-medium">Diäten / Taggeld</Label>
+              <label className="text-[11px] flex items-center gap-1.5 cursor-pointer">
+                <Switch
+                  checked={taggeldManuell}
+                  onCheckedChange={(v) => setTaggeldManuell(!!v)}
+                />
+                <span>manuell</span>
+              </label>
+            </div>
+            {!taggeldManuell && (
+              <div className="col-span-2 -mt-1 text-[11px] text-muted-foreground">
+                Auto nach Bau-KV § 9: {autoDiaetenReason}
+              </div>
+            )}
             <div>
               <Label className="text-xs">
                 TG kurz {inFirma && <span className="opacity-60">(0)</span>}
@@ -1464,11 +1515,13 @@ function EditBuchungForm({
               <Input
                 inputMode="numeric"
                 type="number"
+                min={0}
                 step="1"
                 disabled={inFirma}
+                readOnly={!taggeldManuell || inFirma}
                 value={inFirma ? 0 : taggeldKurz}
-                onChange={(e) => setTaggeldKurz(Number(e.target.value))}
-                className="h-9"
+                onChange={(e) => setTaggeldKurz(Number(e.target.value) || 0)}
+                className={`h-9 ${!taggeldManuell ? "bg-muted/40" : ""}`}
               />
             </div>
             <div>
@@ -1478,11 +1531,13 @@ function EditBuchungForm({
               <Input
                 inputMode="numeric"
                 type="number"
+                min={0}
                 step="1"
                 disabled={inFirma}
+                readOnly={!taggeldManuell || inFirma}
                 value={inFirma ? 0 : taggeldLang}
-                onChange={(e) => setTaggeldLang(Number(e.target.value))}
-                className="h-9"
+                onChange={(e) => setTaggeldLang(Number(e.target.value) || 0)}
+                className={`h-9 ${!taggeldManuell ? "bg-muted/40" : ""}`}
               />
             </div>
           </div>
