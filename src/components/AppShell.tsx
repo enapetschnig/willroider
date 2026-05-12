@@ -11,6 +11,7 @@ import {
   CalendarRange,
   ShieldCheck,
   BarChart3,
+  Briefcase,
   LogOut,
   Smartphone,
   User as UserIcon,
@@ -42,6 +43,8 @@ const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["all"], end: true },
   { to: "/mein-tag", label: "Mein Tag", icon: ClipboardList, roles: ["all"], end: true },
   { to: "/arbeitsplanung", label: "Arbeitsplanung", icon: CalendarDays, roles: ["admin"], end: true },
+  // /angebote vor /baustellen — Akquise-Pipeline
+  { to: "/angebote", label: "Angebote", icon: Briefcase, roles: ["admin"], end: false },
   // /baustellen darf auch /baustellen/:id markieren
   { to: "/baustellen", label: "Baustellen", icon: Building2, roles: ["all"], end: false },
   { to: "/mitarbeiter", label: "Mitarbeiter & Partien", icon: Users, roles: ["admin"], end: true },

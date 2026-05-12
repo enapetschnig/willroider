@@ -17,6 +17,8 @@ import {
   ArrowRight,
   UserPlus,
   Truck,
+  Briefcase,
+  AlertCircle,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -73,6 +75,7 @@ export default function Dashboard() {
   const [aktiveBaustellen, setAktiveBaustellen] = useState<Baustelle[]>([]);
   const [pendingProfiles, setPendingProfiles] = useState<PendingProfile[]>([]);
   const [pendingCount, setPendingCount] = useState<number>(0);
+  const [angeboteFaellig, setAngeboteFaellig] = useState<number>(0);
   const [heuteEinteilungen, setHeuteEinteilungen] = useState<HeuteEintrag[]>([]);
   const [heuteFehlzeit, setHeuteFehlzeit] = useState<string | null>(null);
 
@@ -234,6 +237,31 @@ export default function Dashboard() {
     };
   }, [isAdmin]);
 
+  useEffect(() => {
+    if (!isAdmin) return;
+    const loadAngebote = async () => {
+      const today = localIso();
+      const { count } = await supabase
+        .from("angebote")
+        .select("id", { count: "exact", head: true })
+        .in("status", ["offen", "in_verhandlung"])
+        .lte("naechste_nachfrage", today);
+      setAngeboteFaellig(count ?? 0);
+    };
+    loadAngebote();
+    const ch = supabase
+      .channel("dashboard-angebote")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "angebote" },
+        loadAngebote
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [isAdmin]);
+
   const fullName = profile ? `${profile.vorname} ${profile.nachname}`.trim() : "";
 
   // Alle Cards einheitlich im Willroider-Rot aus dem Design-Token (--primary)
@@ -350,6 +378,47 @@ export default function Dashboard() {
             <Link to="/mitarbeiter" className="sm:hidden block mt-3">
               <Button className="w-full h-11 bg-amber-600 hover:bg-amber-700 text-white shadow-md">
                 Jetzt freischalten
+                <ArrowRight className="h-4 w-4 ml-1.5" />
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Angebote-Nachfrage-Banner (Admin) */}
+      {isAdmin && angeboteFaellig > 0 && (
+        <Card className="border-2 border-red-400 bg-gradient-to-r from-red-50 to-rose-100 shadow-md">
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex items-start gap-3 sm:gap-4">
+              <div className="relative shrink-0">
+                <div className="h-11 w-11 sm:h-12 sm:w-12 rounded-full bg-red-500 flex items-center justify-center text-white shadow-md">
+                  <Briefcase className="h-5 w-5 sm:h-6 sm:w-6" />
+                </div>
+                <span className="absolute -top-0.5 -right-0.5 h-5 min-w-[20px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-red-50 animate-pulse">
+                  {angeboteFaellig}
+                </span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-base sm:text-lg text-red-950 leading-tight">
+                  {angeboteFaellig === 1
+                    ? "1 Angebot zur Nachfrage fällig"
+                    : `${angeboteFaellig} Angebote zur Nachfrage fällig`}
+                </div>
+                <div className="text-xs sm:text-sm text-red-900 mt-1 flex items-center gap-1.5">
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  Beim Kunden nachfragen, bevor das Angebot „kalt" wird.
+                </div>
+              </div>
+              <Link to="/angebote" className="shrink-0 hidden sm:block">
+                <Button className="bg-red-600 hover:bg-red-700 text-white shadow-md">
+                  Angebote öffnen
+                  <ArrowRight className="h-4 w-4 ml-1.5" />
+                </Button>
+              </Link>
+            </div>
+            <Link to="/angebote" className="sm:hidden block mt-3">
+              <Button className="w-full h-11 bg-red-600 hover:bg-red-700 text-white shadow-md">
+                Angebote öffnen
                 <ArrowRight className="h-4 w-4 ml-1.5" />
               </Button>
             </Link>

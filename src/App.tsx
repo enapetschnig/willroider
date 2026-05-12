@@ -10,6 +10,8 @@ import Dashboard from "@/pages/Dashboard";
 import Arbeitsplanung from "@/pages/Arbeitsplanung";
 import Baustellen from "@/pages/Baustellen";
 import BaustelleDetail from "@/pages/BaustelleDetail";
+import Angebote from "@/pages/Angebote";
+import AngebotDetail from "@/pages/AngebotDetail";
 import Mitarbeiter from "@/pages/Mitarbeiter";
 import Stunden from "@/pages/Stunden";
 import Stundenauswertung from "@/pages/Stundenauswertung";
@@ -37,6 +39,8 @@ const App = () => (
               <Route path="/arbeitsplanung" element={<Arbeitsplanung />} />
               <Route path="/baustellen" element={<Baustellen />} />
               <Route path="/baustellen/:id" element={<BaustelleDetail />} />
+              <Route path="/angebote" element={<Angebote />} />
+              <Route path="/angebote/:id" element={<AngebotDetail />} />
               <Route path="/mitarbeiter" element={<Mitarbeiter />} />
               <Route path="/fahrzeuge" element={<Fahrzeuge />} />
               <Route path="/stunden" element={<Stunden />} />

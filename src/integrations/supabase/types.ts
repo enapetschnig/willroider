@@ -17,6 +17,8 @@ export type BaustellenStatus = 'geplant' | 'aktiv' | 'abgeschlossen' | 'pausiert
 export type StundenStatus = 'offen' | 'zm_freigabe' | 'buero_freigabe' | 'exportiert' | 'abgelehnt';
 export type Wochentyp = 'L' | 'K' | 'F' | 'U';
 export type EvaluierungTyp = 'werkstatt' | 'baustelle' | 'fertigteilmontage' | 'kurz' | 'lang';
+export type AngebotStatus = 'offen' | 'in_verhandlung' | 'angenommen' | 'abgelehnt' | 'zurueckgezogen';
+export type AngebotOrdnerEnum = 'ausschreibungsunterlagen' | 'plaene' | 'subunternehmer' | 'angebotsunterlagen';
 
 export type Database = {
   __InternalSupabase: { PostgrestVersion: '13.0.5' };
@@ -382,6 +384,56 @@ export type Database = {
         Update: Partial<Database['public']['Tables']['bautagebuch']['Row']>;
         Relationships: [];
       };
+      angebote: {
+        Row: {
+          id: string;
+          angebots_nr: string | null;
+          datum_angebot: string | null;
+          bvh_name: string;
+          bauherr: string | null;
+          bauherr_adresse: string | null;
+          baustellen_adresse: string | null;
+          plz: string | null;
+          ort: string | null;
+          kontakt_telefon: string | null;
+          kontakt_email: string | null;
+          wert_euro: number | null;
+          status: AngebotStatus;
+          bearbeiter_id: string | null;
+          naechste_nachfrage: string | null;
+          notizen: string | null;
+          baustelle_id: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['angebote']['Row']> & {
+          bvh_name: string;
+        };
+        Update: Partial<Database['public']['Tables']['angebote']['Row']>;
+        Relationships: [];
+      };
+      angebot_dokumente: {
+        Row: {
+          id: string;
+          angebot_id: string;
+          ordner: AngebotOrdnerEnum;
+          dateiname: string;
+          storage_path: string;
+          mimetype: string | null;
+          groesse: number | null;
+          hochgeladen_von: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['angebot_dokumente']['Row']> & {
+          angebot_id: string;
+          ordner: AngebotOrdnerEnum;
+          dateiname: string;
+          storage_path: string;
+        };
+        Update: Partial<Database['public']['Tables']['angebot_dokumente']['Row']>;
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
     Functions: { [_ in never]: never };
@@ -391,6 +443,8 @@ export type Database = {
       stunden_status: StundenStatus;
       wochentyp: Wochentyp;
       evaluierung_typ: EvaluierungTyp;
+      angebot_status: AngebotStatus;
+      angebot_ordner: AngebotOrdnerEnum;
     };
     CompositeTypes: { [_ in never]: never };
   };
