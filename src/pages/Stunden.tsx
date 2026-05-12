@@ -344,6 +344,38 @@ export default function Stunden() {
     return Array.from(forUserIds)[0] ?? user.id;
   }, [forUserIds, user]);
 
+  // ─── Auto-Vorauswahl Baustelle aus Arbeitsplanungs-Einteilung ───
+  // Lädt für (primärer Mitarbeiter, Datum) die Einteilung mit frühester
+  // Abfahrtszeit und setzt deren Baustelle, sofern der User noch nichts
+  // anderes gewählt hat. URL-Query ?baustelle= bleibt Vorrang.
+  useEffect(() => {
+    if (!user || !primaryUserId || !date) return;
+    const urlBaustelle = new URLSearchParams(window.location.search).get("baustelle");
+    if (urlBaustelle) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("einteilung_mitarbeiter")
+        .select("einteilung:einteilungen!inner(baustelle_id, abfahrtszeit, datum)")
+        .eq("mitarbeiter_id", primaryUserId)
+        .eq("einteilung.datum", date);
+      if (cancelled || error || !data) return;
+      const list = data
+        .map((r: any) => r.einteilung)
+        .filter((e: any) => e && e.baustelle_id)
+        .sort((a: any, b: any) =>
+          (a.abfahrtszeit ?? "99:99").localeCompare(b.abfahrtszeit ?? "99:99")
+        );
+      const first = list[0];
+      if (!first) return;
+      // Nur setzen, wenn aktuell nichts gewählt ist (User-Wahl nicht überschreiben)
+      setBaustelleId((prev) => (prev ? prev : first.baustelle_id));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, primaryUserId, date]);
+
   const statusForDate = useMemo(() => {
     const map = new Map<string, { hours: number; rows: Stunde[] }>();
     rows
