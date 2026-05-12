@@ -49,6 +49,7 @@ import { feiertagAt } from "@/lib/feiertage";
 import { ZULAGEN, type ZulageTyp } from "@/lib/zulagen";
 import { localIso } from "@/lib/dateFmt";
 import { autoTaggeld, autoTaggeldReason } from "@/lib/dienstreise";
+import { MicButton } from "@/components/MicButton";
 
 type Stunde = Database["public"]["Tables"]["stundenbuchungen"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -1372,12 +1373,19 @@ export default function Stunden() {
                   <Label className="text-xs uppercase tracking-wide text-muted-foreground">
                     Tätigkeit (optional)
                   </Label>
-                  <Input
-                    value={taetigkeit}
-                    onChange={(e) => setTaetigkeit(e.target.value)}
-                    placeholder="z.B. Wand-Elemente versetzen"
-                    className="mt-1.5"
-                  />
+                  <div className="flex items-center gap-1.5 mt-1.5">
+                    <Input
+                      value={taetigkeit}
+                      onChange={(e) => setTaetigkeit(e.target.value)}
+                      placeholder="z.B. Wand-Elemente versetzen"
+                      className="flex-1"
+                    />
+                    <MicButton
+                      onText={(t) =>
+                        setTaetigkeit((p) => (p ? `${p} ${t}` : t))
+                      }
+                    />
+                  </div>
                 </div>
               )}
 
@@ -1528,7 +1536,15 @@ export default function Stunden() {
                     />
                   </div>
                   <div className="col-span-2">
-                    <Label className="text-xs">Notizen</Label>
+                    <div className="flex items-center justify-between mb-1">
+                      <Label className="text-xs">Notizen</Label>
+                      <MicButton
+                        onText={(t) =>
+                          setNotizen((p) => (p ? `${p} ${t}` : t))
+                        }
+                        className="h-7 w-7"
+                      />
+                    </div>
                     <Textarea
                       value={notizen}
                       onChange={(e) => setNotizen(e.target.value)}
@@ -1852,7 +1868,14 @@ function EditForm({
       )}
       <div>
         <Label>Tätigkeit</Label>
-        <Input value={taetigkeit} onChange={(e) => setTaetigkeit(e.target.value)} />
+        <div className="flex items-center gap-1.5">
+          <Input
+            value={taetigkeit}
+            onChange={(e) => setTaetigkeit(e.target.value)}
+            className="flex-1"
+          />
+          <MicButton onText={(t) => setTaetigkeit((p) => (p ? `${p} ${t}` : t))} />
+        </div>
       </div>
       {!row.fehlzeit_typ && (
         <div className="space-y-2 pt-2 border-t">

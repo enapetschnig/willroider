@@ -17,10 +17,11 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, ShieldCheck, ShieldAlert, CheckCircle2, Clock, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, ShieldCheck, ShieldAlert, CheckCircle2, Clock, ChevronDown, ChevronUp, Sparkles } from "lucide-react";
 import type { Database, EvaluierungTyp, Json } from "@/integrations/supabase/types";
 import { UNTERWEISUNG_OPTIONS, getUnterweisung, unterweisungLabel } from "@/lib/unterweisungen";
 import { localIso } from "@/lib/dateFmt";
+import { EvaluierungKiDialog } from "@/components/EvaluierungKiDialog";
 
 type Eval = Database["public"]["Tables"]["evaluierungen"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -60,6 +61,7 @@ export default function Evaluierung() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [signatures, setSignatures] = useState<Unterschrift[]>([]);
   const [editing, setEditing] = useState<Partial<Eval> | null>(null);
+  const [kiOpen, setKiOpen] = useState(false);
   const [checklist, setChecklist] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -236,9 +238,15 @@ export default function Evaluierung() {
         description="Werkstatt · Baustelle · Fertigteilmontage – digitale Checklisten gemäß ASchG."
         actions={
           canCreate && (
-            <Button onClick={openNew}>
-              <Plus className="h-4 w-4 mr-2" /> Neue Evaluierung
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => setKiOpen(true)} variant="outline">
+                <Sparkles className="h-4 w-4 mr-2" />
+                Mit KI aus Dokument
+              </Button>
+              <Button onClick={openNew}>
+                <Plus className="h-4 w-4 mr-2" /> Neue Evaluierung
+              </Button>
+            </div>
           )
         }
       />
@@ -509,6 +517,16 @@ export default function Evaluierung() {
           )}
         </DialogContent>
       </Dialog>
+
+      <EvaluierungKiDialog
+        open={kiOpen}
+        onOpenChange={setKiOpen}
+        baustellen={baustellen}
+        onCreated={() => {
+          setKiOpen(false);
+          load();
+        }}
+      />
     </div>
   );
 }
