@@ -43,6 +43,11 @@ import {
   Check,
   Factory,
   MapPin,
+  Hammer,
+  Sun,
+  HeartPulse,
+  CloudRain,
+  UserPlus,
 } from "lucide-react";
 import type { Database, StundenStatus } from "@/integrations/supabase/types";
 import { feiertagAt } from "@/lib/feiertage";
@@ -1082,29 +1087,41 @@ export default function Stunden() {
           {/* Quick-Book Card */}
           <Card>
             <CardContent className="p-4 space-y-4">
-              {/* Mode: Arbeit / Fehlzeit */}
+              {/* Mode: Arbeit / Fehlzeit — große Tap-Targets */}
               <div>
-                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                  {fehlzeitTyp ? "Fehlzeit" : "Was wurde gemacht"}
+                <Label className="text-sm font-semibold flex items-center gap-2">
+                  <span className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-foreground text-background text-xs font-bold">
+                    2
+                  </span>
+                  Was wurde gemacht?
                 </Label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mt-1.5">
-                  <button
-                    onClick={() => setFehlzeitTyp("")}
-                    className={`h-11 rounded-md text-sm font-semibold border-2 transition ${
-                      !fehlzeitTyp
-                        ? "bg-primary text-primary-foreground border-primary shadow-sm ring-2 ring-primary/30"
-                        : "bg-background border-border hover:bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    Arbeit
-                  </button>
+                {/* Arbeit — groß, primary, eigene Reihe */}
+                <button
+                  onClick={() => setFehlzeitTyp("")}
+                  className={`mt-2 w-full h-14 rounded-lg text-base font-semibold border-2 transition flex items-center justify-center gap-2 ${
+                    !fehlzeitTyp
+                      ? "bg-primary text-primary-foreground border-primary shadow-sm ring-2 ring-primary/30"
+                      : "bg-background border-border hover:bg-muted text-muted-foreground"
+                  }`}
+                >
+                  <Hammer className="h-5 w-5" />
+                  Arbeit
+                </button>
+                {/* Fehlzeit-Buttons — 3 Spalten, große Icons + Text */}
+                <div className="grid grid-cols-3 gap-1.5 mt-1.5">
                   {FEHLZEITEN.map((f) => {
                     const active = fehlzeitTyp === f.value;
+                    const Icon =
+                      f.value === "U"
+                        ? Sun
+                        : f.value === "K"
+                        ? HeartPulse
+                        : CloudRain;
                     return (
                       <button
                         key={f.value}
                         onClick={() => setFehlzeitTyp(f.value)}
-                        className={`h-11 rounded-md text-sm font-semibold border-2 transition ${
+                        className={`h-14 rounded-lg text-sm font-semibold border-2 transition flex flex-col items-center justify-center gap-0.5 ${
                           active
                             ? "text-white shadow-sm"
                             : "bg-background border-border hover:bg-muted text-muted-foreground"
@@ -1119,7 +1136,8 @@ export default function Stunden() {
                             : undefined
                         }
                       >
-                        {f.label}
+                        <Icon className="h-5 w-5" />
+                        <span className="text-xs leading-tight">{f.label}</span>
                       </button>
                     );
                   })}
@@ -2072,55 +2090,79 @@ function PersonPicker({
     );
   };
 
+  // Mode für die Anzeige
+  const onlyMe = selectedIds.size <= 1 && selectedIds.has(ownUserId);
+  const multi = selectedIds.size > 1;
+
   return (
     <>
       {/* Compact-Bar */}
       <Card className="border-primary/30">
-        <CardContent className="p-3">
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 flex-1 min-w-0">
-              <Users className="h-4 w-4 text-primary shrink-0" />
-              <span className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground shrink-0">
-                Buchen für
-              </span>
-              <div className="flex items-center gap-1 min-w-0">
-                {visibleAvatars.length > 0 ? (
-                  <div className="flex -space-x-1.5">
-                    {visibleAvatars.map((m) => (
-                      <span
-                        key={m.id}
-                        className="h-6 w-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white border-2 border-background"
-                        style={{ background: partieColor(m) }}
-                        title={`${m.vorname} ${m.nachname}`}
-                      >
-                        {initials(m)}
-                      </span>
-                    ))}
-                    {extraCount > 0 && (
-                      <span className="h-6 w-6 rounded-full flex items-center justify-center text-[9px] font-bold bg-muted-foreground text-background border-2 border-background">
-                        +{extraCount}
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <span className="text-xs text-muted-foreground italic">
-                    niemand ausgewählt
-                  </span>
-                )}
-                <span className="text-sm font-semibold ml-1 truncate">
-                  {focusedLabel}
+        <CardContent className="p-3 space-y-2">
+          {onlyMe ? (
+            // Nur „Mich" — auffälliger CTA-Button + Helper-Text
+            <>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Users className="h-4 w-4 text-primary" />
+                <span>
+                  Buchung für <strong className="text-foreground">dich</strong>
                 </span>
               </div>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 shrink-0"
-              onClick={() => setOpen(true)}
-            >
-              Ändern
-            </Button>
-          </div>
+              <Button
+                onClick={() => setOpen(true)}
+                variant="outline"
+                className="w-full h-11 justify-center border-dashed border-primary/50 hover:bg-primary/5 text-primary font-semibold"
+              >
+                <UserPlus className="h-4 w-4 mr-2" />
+                + Weitere Mitarbeiter
+              </Button>
+              <p className="text-[11px] text-muted-foreground text-center leading-tight">
+                Tipp: Tippe hier, wenn du für andere oder mehrere Mitarbeiter
+                gleichzeitig Stunden eintragen willst.
+              </p>
+            </>
+          ) : (
+            // Mehrere ausgewählt — Avatare prominent + „Auswahl bearbeiten"
+            <>
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-primary shrink-0" />
+                <div className="flex -space-x-1.5">
+                  {visibleAvatars.map((m) => (
+                    <span
+                      key={m.id}
+                      className="h-7 w-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white border-2 border-background"
+                      style={{ background: partieColor(m) }}
+                      title={`${m.vorname} ${m.nachname}`}
+                    >
+                      {initials(m)}
+                    </span>
+                  ))}
+                  {extraCount > 0 && (
+                    <span className="h-7 w-7 rounded-full flex items-center justify-center text-[10px] font-bold bg-muted-foreground text-background border-2 border-background">
+                      +{extraCount}
+                    </span>
+                  )}
+                </div>
+                <span className="text-sm font-semibold ml-1 truncate flex-1">
+                  {focusedLabel}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 shrink-0"
+                  onClick={() => setOpen(true)}
+                >
+                  Bearbeiten
+                </Button>
+              </div>
+              {multi && (
+                <p className="text-[11px] text-muted-foreground">
+                  Du buchst für <strong>{selectedIds.size} Mitarbeiter</strong>{" "}
+                  gleichzeitig — tippen zum Ändern.
+                </p>
+              )}
+            </>
+          )}
         </CardContent>
       </Card>
 
