@@ -17,6 +17,7 @@ export type BaustellenStatus = 'geplant' | 'aktiv' | 'abgeschlossen' | 'pausiert
 export type StundenStatus = 'offen' | 'zm_freigabe' | 'buero_freigabe' | 'exportiert' | 'abgelehnt';
 export type Wochentyp = 'L' | 'K' | 'F' | 'U' | 'BU' | 'BV';
 export type ArbeitszeitModell = 'zimmerei_sommer' | 'fix_40h' | 'individuell';
+export type FahrzeugKategorie = 'anlage' | 'baustelle' | 'bauleiter';
 export type EvaluierungTyp = 'werkstatt' | 'baustelle' | 'fertigteilmontage' | 'kurz' | 'lang';
 export type AngebotStatus = 'offen' | 'in_verhandlung' | 'angenommen' | 'abgelehnt' | 'zurueckgezogen';
 export type AngebotOrdnerEnum = 'ausschreibungsunterlagen' | 'plaene' | 'subunternehmer' | 'angebotsunterlagen';
@@ -125,6 +126,10 @@ export type Database = {
           hat_anhaenger: boolean | null;
           notizen: string | null;
           aktiv: boolean | null;
+          inventar_nr: string | null;
+          kategorie: FahrzeugKategorie;
+          standard_fahrer_id: string | null;
+          standard_fahrer_notiz: string | null;
           created_at: string;
           updated_at: string;
         };

@@ -149,7 +149,13 @@ export default function Arbeitsplanung() {
       supabase.from("baustellen").select("*").order("start_datum", { ascending: true }),
       supabase.from("partien").select("*").order("name"),
       supabase.from("profiles").select("*"),
-      supabase.from("fahrzeuge").select("*").eq("aktiv", true).order("kennzeichen"),
+      // Anlagen (Werkstatt-Maschinen, Stapler) sind nicht für Einteilungen
+      supabase
+        .from("fahrzeuge")
+        .select("*")
+        .eq("aktiv", true)
+        .in("kategorie", ["baustelle", "bauleiter"])
+        .order("inventar_nr"),
     ]);
     setBaustellen((bs.data as Baustelle[]) ?? []);
     setPartien((p.data as Partie[]) ?? []);
@@ -1963,7 +1969,7 @@ function CellPopover({
   const [taetigkeit, setTaetigkeit] = useState("");
   const [selectedFahrzeuge, setSelectedFahrzeuge] = useState<Set<string>>(new Set());
   const [savingDetails, setSavingDetails] = useState(false);
-  // Existierende Werte laden
+  // Existierende Werte laden + Bauleiter-Auto-Vorschlag wenn leer
   useEffect(() => {
     if (!singleEinteilungId) {
       setTaetigkeit("");
@@ -1983,9 +1989,27 @@ function CellPopover({
           .eq("einteilung_id", singleEinteilungId),
       ]);
       setTaetigkeit((e?.taetigkeit as string) ?? "");
-      setSelectedFahrzeuge(new Set((ef ?? []).map((r: any) => r.fahrzeug_id as string)));
+      const existing = new Set(
+        ((ef ?? []) as any[]).map((r) => r.fahrzeug_id as string)
+      );
+      // Auto-Vorschlag: wenn keine Fahrzeuge gesetzt, aber ein
+      // Bauleiter (Worker mit standard_fahrer_id auf einem
+      // bauleiter-Fahrzeug) in den Zellen ist → vorschlagen
+      if (existing.size === 0) {
+        const workerIds = new Set(cells.map((c) => c.workerId));
+        fahrzeuge.forEach((f) => {
+          if (
+            f.kategorie === "bauleiter" &&
+            f.standard_fahrer_id &&
+            workerIds.has(f.standard_fahrer_id)
+          ) {
+            existing.add(f.id);
+          }
+        });
+      }
+      setSelectedFahrzeuge(existing);
     })();
-  }, [singleEinteilungId]);
+  }, [singleEinteilungId, cells, fahrzeuge]);
 
   const saveDetails = async () => {
     if (!singleEinteilungId) return;
