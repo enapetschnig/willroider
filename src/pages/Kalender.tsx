@@ -19,11 +19,34 @@ import type { Database, Wochentyp } from "@/integrations/supabase/types";
 type Row = Database["public"]["Tables"]["arbeitszeitkalender"]["Row"];
 
 const TYPE_LABEL: Record<Wochentyp, string> = {
-  L: "Lang (38,5h)",
+  L: "Lang (42h)",
   K: "Kurz (36h)",
   F: "Feiertag",
   U: "Urlaubswoche",
+  BU: "Betriebsurlaub",
+  BV: "Betriebsversammlung",
 };
+
+type Vorlage = {
+  key: string;
+  label: string;
+  wochentyp: Wochentyp;
+  mo: number;
+  di: number;
+  mi: number;
+  do_: number;
+  fr: number;
+  sa: number;
+  so: number;
+};
+
+const VORLAGEN: Vorlage[] = [
+  { key: "L_42", label: "Lange Woche (42h)", wochentyp: "L", mo: 9, di: 9, mi: 9, do_: 9, fr: 6, sa: 0, so: 0 },
+  { key: "K_36", label: "Kurze Woche (36h)", wochentyp: "K", mo: 9, di: 9, mi: 9, do_: 9, fr: 0, sa: 0, so: 0 },
+  { key: "WINTER_40", label: "Winter 40h Mo-Fr 8h", wochentyp: "L", mo: 8, di: 8, mi: 8, do_: 8, fr: 8, sa: 0, so: 0 },
+  { key: "BU", label: "Betriebsurlaub (0h)", wochentyp: "BU", mo: 0, di: 0, mi: 0, do_: 0, fr: 0, sa: 0, so: 0 },
+  { key: "BV", label: "Betriebsversammlung", wochentyp: "BV", mo: 9, di: 9, mi: 9, do_: 9, fr: 6, sa: 0, so: 0 },
+];
 
 export default function Kalender() {
   const { isAdmin } = useAuth();
@@ -51,6 +74,23 @@ export default function Kalender() {
     } else {
       load();
     }
+  };
+
+  const applyVorlage = async (id: string, vk: string) => {
+    const v = VORLAGEN.find((x) => x.key === vk);
+    if (!v) return;
+    const sum = v.mo + v.di + v.mi + v.do_ + v.fr + v.sa + v.so;
+    await updateRow(id, {
+      wochentyp: v.wochentyp,
+      soll_stunden: sum,
+      soll_mo: v.mo,
+      soll_di: v.di,
+      soll_mi: v.mi,
+      soll_do: v.do_,
+      soll_fr: v.fr,
+      soll_sa: v.sa,
+      soll_so: v.so,
+    } as any);
   };
 
   const ensureYear = async () => {
@@ -214,8 +254,8 @@ export default function Kalender() {
                 <th className="text-left p-2">KW</th>
                 <th className="text-left p-2">Wochentyp</th>
                 <th className="text-left p-2">Soll-Stunden</th>
-                <th className="text-left p-2">Feiertage</th>
-                <th className="text-left p-2">BU-Tage</th>
+                <th className="text-left p-2">Mo–Fr</th>
+                <th className="text-left p-2">Vorlage</th>
                 <th className="text-left p-2">Notizen</th>
               </tr>
             </thead>
@@ -259,28 +299,28 @@ export default function Kalender() {
                       `${Number(r.soll_stunden).toFixed(1)} h`
                     )}
                   </td>
-                  <td className="p-2">
-                    {isAdmin ? (
-                      <Input
-                        defaultValue={r.feiertage ?? ""}
-                        onBlur={(e) => updateRow(r.id, { feiertage: e.target.value || null })}
-                        className="h-8"
-                        placeholder="z.B. Ostermontag"
-                      />
-                    ) : (
-                      r.feiertage ?? "—"
-                    )}
+                  <td className="p-2 text-xs tabular-nums text-muted-foreground whitespace-nowrap">
+                    {[r.soll_mo, r.soll_di, r.soll_mi, r.soll_do, r.soll_fr]
+                      .map((v) => (v == null ? "·" : Number(v).toFixed(0)))
+                      .join(" / ")}
                   </td>
                   <td className="p-2">
-                    {isAdmin ? (
-                      <Input
-                        type="number"
-                        defaultValue={r.bu_tage ?? 0}
-                        onBlur={(e) => updateRow(r.id, { bu_tage: Number(e.target.value) || 0 })}
-                        className="h-8 w-20"
-                      />
-                    ) : (
-                      r.bu_tage ?? 0
+                    {isAdmin && (
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          if (e.target.value) applyVorlage(r.id, e.target.value);
+                          e.target.value = "";
+                        }}
+                        className="h-8 rounded-md border bg-background px-1.5 text-xs"
+                      >
+                        <option value="">— Vorlage —</option>
+                        {VORLAGEN.map((v) => (
+                          <option key={v.key} value={v.key}>
+                            {v.label}
+                          </option>
+                        ))}
+                      </select>
                     )}
                   </td>
                   <td className="p-2">

@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Lock, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
-import type { Database } from "@/integrations/supabase/types";
-import { werktageImMonat } from "@/lib/konten";
+import type { Database, ArbeitszeitModell } from "@/integrations/supabase/types";
+import { monatsSoll, type TagessollKalender } from "@/lib/konten";
 
 type Stunde = Database["public"]["Tables"]["stundenbuchungen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -56,6 +56,7 @@ export function UebersichtTabelle({
   members,
   partien,
   pks,
+  kalender,
   zaSalden,
   urlaubSalden,
   monatsabschluesse,
@@ -66,6 +67,7 @@ export function UebersichtTabelle({
   members: Profile[];
   partien: Partie[];
   pks: PKS[];
+  kalender: Map<string, TagessollKalender>;
   zaSalden: Record<string, number>;
   urlaubSalden: Record<string, number>;
   monatsabschluesse: Record<string, boolean>;
@@ -75,7 +77,6 @@ export function UebersichtTabelle({
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
   const [year, month] = monat.split("-").map(Number);
-  const werktage = useMemo(() => werktageImMonat(year, month), [year, month]);
   const pksById = useMemo(() => new Map(pks.map((p) => [p.profile_id, p])), [pks]);
   const partieById = useMemo(() => new Map(partien.map((p) => [p.id, p])), [partien]);
 
@@ -84,7 +85,8 @@ export function UebersichtTabelle({
       const set = pksById.get(m.id);
       const tagesnorm = Number(set?.tagesnorm_stunden ?? 8);
       const grad = Number(set?.beschaeftigungsgrad ?? 1);
-      const soll = werktage * tagesnorm * grad;
+      const modell = (set?.arbeitszeitmodell as ArbeitszeitModell) ?? "zimmerei_sommer";
+      const soll = monatsSoll(year, month, kalender, modell, tagesnorm, grad);
       const my = stunden.filter((r) => r.mitarbeiter_id === m.id);
       let arbeit = 0,
         firma = 0,
@@ -140,7 +142,7 @@ export function UebersichtTabelle({
         locked: !!monatsabschluesse[m.id],
       };
     });
-  }, [stunden, members, pksById, partieById, werktage, zaSalden, urlaubSalden, monatsabschluesse]);
+  }, [stunden, members, pksById, partieById, year, month, kalender, zaSalden, urlaubSalden, monatsabschluesse]);
 
   const sorted = useMemo(() => {
     const cp = [...rows];

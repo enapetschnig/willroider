@@ -1,7 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import type { Database } from "@/integrations/supabase/types";
-import { werktageImMonat } from "@/lib/konten";
+import type { Database, ArbeitszeitModell } from "@/integrations/supabase/types";
+import { monatsSoll, type TagessollKalender, ladeKalenderMap } from "@/lib/konten";
 
 type Stunde = Database["public"]["Tables"]["stundenbuchungen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -20,18 +20,27 @@ export type PdfInput = {
   baustellen: Baustelle[];
   partie?: Partie | null;
   pks?: PKS | null;
+  kalender?: Map<string, TagessollKalender>;
 };
 
 /** Erstellt einen Stundenzettel als PDF für einen einzelnen Mitarbeiter. */
 export function makeStundenzettelPdf(input: PdfInput): jsPDF {
-  const { monat, rows, member, baustellen, partie, pks } = input;
+  const { monat, rows, member, baustellen, partie, pks, kalender } = input;
   const baustelleById = new Map(baustellen.map((b) => [b.id, b]));
 
   const [year, month] = monat.split("-").map(Number);
-  const werktage = werktageImMonat(year, month);
   const tagesnorm = Number(pks?.tagesnorm_stunden ?? 8);
   const grad = Number(pks?.beschaeftigungsgrad ?? 1);
-  const soll = werktage * tagesnorm * grad;
+  const modell =
+    (pks?.arbeitszeitmodell as ArbeitszeitModell) ?? "zimmerei_sommer";
+  const soll = monatsSoll(
+    year,
+    month,
+    kalender ?? new Map(),
+    modell,
+    tagesnorm,
+    grad
+  );
 
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -234,13 +243,21 @@ export function downloadAlleStundenzettel(inputs: PdfInput[]) {
 }
 
 function redrawInto(doc: jsPDF, input: PdfInput) {
-  const { monat, rows, member, baustellen, partie, pks } = input;
+  const { monat, rows, member, baustellen, partie, pks, kalender } = input;
   const baustelleById = new Map(baustellen.map((b) => [b.id, b]));
   const [year, month] = monat.split("-").map(Number);
-  const werktage = werktageImMonat(year, month);
   const tagesnorm = Number(pks?.tagesnorm_stunden ?? 8);
   const grad = Number(pks?.beschaeftigungsgrad ?? 1);
-  const soll = werktage * tagesnorm * grad;
+  const modell =
+    (pks?.arbeitszeitmodell as ArbeitszeitModell) ?? "zimmerei_sommer";
+  const soll = monatsSoll(
+    year,
+    month,
+    kalender ?? new Map(),
+    modell,
+    tagesnorm,
+    grad
+  );
   const pageWidth = doc.internal.pageSize.getWidth();
   let y = 14;
 

@@ -13,7 +13,13 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { CalendarCheck, Lock, Unlock } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
-import { fmtStunden, werktageImMonat } from "@/lib/konten";
+import {
+  fmtStunden,
+  monatsSoll,
+  ladeKalenderMap,
+  type TagessollKalender,
+} from "@/lib/konten";
+import type { ArbeitszeitModell } from "@/integrations/supabase/types";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Monatsabschluss = Database["public"]["Tables"]["monatsabschluss"]["Row"];
@@ -37,6 +43,9 @@ export function AdminMonatsabschluss() {
   const [abschluss, setAbschluss] = useState<Record<string, Monatsabschluss>>({});
   const [ist, setIst] = useState<Record<string, number>>({});
   const [running, setRunning] = useState(false);
+  const [kalender, setKalender] = useState<Map<string, TagessollKalender>>(
+    new Map()
+  );
 
   const load = async () => {
     const [year, month] = monat.split("-").map(Number);
@@ -77,16 +86,19 @@ export function AdminMonatsabschluss() {
 
   useEffect(() => {
     load();
+    const [yr] = monat.split("-").map(Number);
+    ladeKalenderMap(yr).then(setKalender);
   }, [monat]);
 
   const [year, month] = monat.split("-").map(Number);
-  const werktage = useMemo(() => werktageImMonat(year, month), [year, month]);
 
   const sollFor = (uid: string): number => {
     const s = settings[uid];
     const tagesnorm = Number(s?.tagesnorm_stunden ?? 8);
     const grad = Number(s?.beschaeftigungsgrad ?? 1);
-    return werktage * tagesnorm * grad;
+    const modell =
+      (s?.arbeitszeitmodell as ArbeitszeitModell) ?? "zimmerei_sommer";
+    return monatsSoll(year, month, kalender, modell, tagesnorm, grad);
   };
 
   const offene = profiles.filter((p) => !abschluss[p.id]);
@@ -154,8 +166,7 @@ export function AdminMonatsabschluss() {
             className="h-9 w-[150px] ml-2"
           />
           <span className="text-xs text-muted-foreground">
-            {werktage} Werktage · {profiles.length - offene.length}/
-            {profiles.length} abgeschlossen
+            {profiles.length - offene.length}/{profiles.length} abgeschlossen
           </span>
           <Button
             onClick={closeAll}

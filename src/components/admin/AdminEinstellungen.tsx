@@ -8,6 +8,7 @@ import { Settings, Save } from "lucide-react";
 import type {
   Database,
   UrlaubModell,
+  ArbeitszeitModell,
 } from "@/integrations/supabase/types";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -23,6 +24,7 @@ type Editable = {
   urlaub_stichtag_tag: string;
   urlaub_stichtag_monat: string;
   za_faktor: string;
+  arbeitszeitmodell: ArbeitszeitModell;
 };
 
 const DEFAULT: Omit<Editable, "profile_id"> = {
@@ -34,6 +36,7 @@ const DEFAULT: Omit<Editable, "profile_id"> = {
   urlaub_stichtag_tag: "1",
   urlaub_stichtag_monat: "4",
   za_faktor: "1.00",
+  arbeitszeitmodell: "zimmerei_sommer",
 };
 
 export function AdminEinstellungen() {
@@ -65,6 +68,9 @@ export function AdminEinstellungen() {
           s?.urlaub_stichtag_monat ?? DEFAULT.urlaub_stichtag_monat
         ),
         za_faktor: String(s?.za_faktor ?? DEFAULT.za_faktor),
+        arbeitszeitmodell:
+          (s?.arbeitszeitmodell as ArbeitszeitModell) ??
+          DEFAULT.arbeitszeitmodell,
       };
     });
     setRows(map);
@@ -98,6 +104,7 @@ export function AdminEinstellungen() {
       urlaub_stichtag_tag: Number(r.urlaub_stichtag_tag) || 1,
       urlaub_stichtag_monat: Number(r.urlaub_stichtag_monat) || 4,
       za_faktor: Number(r.za_faktor.replace(",", ".")),
+      arbeitszeitmodell: r.arbeitszeitmodell,
     };
     const { error } = await supabase
       .from("profile_konten_settings")
@@ -131,6 +138,7 @@ export function AdminEinstellungen() {
         urlaub_stichtag_tag: Number(r.urlaub_stichtag_tag) || 1,
         urlaub_stichtag_monat: Number(r.urlaub_stichtag_monat) || 4,
         za_faktor: Number(r.za_faktor.replace(",", ".")),
+        arbeitszeitmodell: r.arbeitszeitmodell,
       }));
     if (updates.length === 0) return;
     const { error } = await supabase
@@ -179,6 +187,7 @@ export function AdminEinstellungen() {
                 <th className="px-2 py-2">Urlaubs-Modell</th>
                 <th className="px-2 py-2">Stichtag T/M</th>
                 <th className="px-2 py-2">ZA-Faktor</th>
+                <th className="px-2 py-2">Arbeitszeit-Modell</th>
                 <th className="px-2 py-2"></th>
               </tr>
             </thead>
@@ -288,6 +297,19 @@ export function AdminEinstellungen() {
                         onChange={(e) => update(p.id, "za_faktor", e.target.value)}
                         className="h-8 w-[70px]"
                       />
+                    </td>
+                    <td className="px-2 py-1">
+                      <select
+                        value={r.arbeitszeitmodell}
+                        onChange={(e) =>
+                          update(p.id, "arbeitszeitmodell", e.target.value as any)
+                        }
+                        className="h-8 w-[150px] rounded-md border bg-background px-1.5 text-xs"
+                      >
+                        <option value="zimmerei_sommer">Wechsel L/K</option>
+                        <option value="fix_40h">Fix 40 h Mo–Fr</option>
+                        <option value="individuell">Individuell (Tagesnorm)</option>
+                      </select>
                     </td>
                     <td className="px-2 py-1">
                       <Button

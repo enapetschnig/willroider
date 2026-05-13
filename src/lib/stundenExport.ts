@@ -1,7 +1,8 @@
 import * as XLSX from "xlsx";
 import type { Database } from "@/integrations/supabase/types";
 import { ZULAGEN } from "@/lib/zulagen";
-import { werktageImMonat } from "@/lib/konten";
+import { monatsSoll, type TagessollKalender } from "@/lib/konten";
+import type { ArbeitszeitModell } from "@/integrations/supabase/types";
 
 type Stunde = Database["public"]["Tables"]["stundenbuchungen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -15,7 +16,8 @@ export type ExportInput = {
   members: Profile[];
   baustellen: Baustelle[];
   partien: Partie[];
-  pks: PKS[]; // pro MA Konto-Einstellungen
+  pks: PKS[];
+  kalender: Map<string, TagessollKalender>;
   zaSalden: Record<string, number>;
   urlaubSalden: Record<string, number>;
 };
@@ -32,7 +34,17 @@ function pauseMin(s: Stunde): number {
 }
 
 export function exportStundenauswertung(input: ExportInput) {
-  const { monat, rows, members, baustellen, partien, pks, zaSalden, urlaubSalden } = input;
+  const {
+    monat,
+    rows,
+    members,
+    baustellen,
+    partien,
+    pks,
+    kalender,
+    zaSalden,
+    urlaubSalden,
+  } = input;
 
   const baustelleById = new Map(baustellen.map((b) => [b.id, b]));
   const partieById = new Map(partien.map((p) => [p.id, p]));
@@ -40,7 +52,6 @@ export function exportStundenauswertung(input: ExportInput) {
   const pksById = new Map(pks.map((p) => [p.profile_id, p]));
 
   const [year, month] = monat.split("-").map(Number);
-  const werktage = werktageImMonat(year, month);
 
   const wb = XLSX.utils.book_new();
 
@@ -50,7 +61,9 @@ export function exportStundenauswertung(input: ExportInput) {
     const set = pksById.get(m.id);
     const tagesnorm = Number(set?.tagesnorm_stunden ?? 8);
     const grad = Number(set?.beschaeftigungsgrad ?? 1);
-    const soll = werktage * tagesnorm * grad;
+    const modell =
+      (set?.arbeitszeitmodell as ArbeitszeitModell) ?? "zimmerei_sommer";
+    const soll = monatsSoll(year, month, kalender, modell, tagesnorm, grad);
     const myRows = rows.filter((r) => r.mitarbeiter_id === m.id);
     let arbeit = 0,
       firma = 0,
@@ -222,7 +235,9 @@ export function exportStundenauswertung(input: ExportInput) {
     const set = pksById.get(m.id);
     const tagesnorm = Number(set?.tagesnorm_stunden ?? 8);
     const grad = Number(set?.beschaeftigungsgrad ?? 1);
-    const soll = werktage * tagesnorm * grad;
+    const modell =
+      (set?.arbeitszeitmodell as ArbeitszeitModell) ?? "zimmerei_sommer";
+    const soll = monatsSoll(year, month, kalender, modell, tagesnorm, grad);
     let sumA = 0,
       sumFa = 0,
       sumFe = 0,

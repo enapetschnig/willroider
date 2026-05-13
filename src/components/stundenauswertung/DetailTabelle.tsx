@@ -8,9 +8,9 @@ import {
   FileText,
   Download as DownloadIcon,
 } from "lucide-react";
-import type { Database } from "@/integrations/supabase/types";
+import type { Database, ArbeitszeitModell } from "@/integrations/supabase/types";
 import { feiertagAt } from "@/lib/feiertage";
-import { werktageImMonat } from "@/lib/konten";
+import { monatsSoll, type TagessollKalender } from "@/lib/konten";
 import { downloadStundenzettel } from "@/lib/stundenPdf";
 
 type Stunde = Database["public"]["Tables"]["stundenbuchungen"]["Row"];
@@ -53,6 +53,7 @@ export function DetailTabelle({
   rows: stunden,
   baustellen,
   pks,
+  kalender,
   zaSaldo,
   monatLocked,
   isAdmin,
@@ -65,6 +66,7 @@ export function DetailTabelle({
   rows: Stunde[];
   baustellen: Baustelle[];
   pks: PKS | null;
+  kalender: Map<string, TagessollKalender>;
   zaSaldo: number;
   monatLocked: boolean;
   isAdmin: boolean;
@@ -87,10 +89,14 @@ export function DetailTabelle({
   );
 
   const [year, month] = monat.split("-").map(Number);
-  const werktage = useMemo(() => werktageImMonat(year, month), [year, month]);
   const tagesnorm = Number(pks?.tagesnorm_stunden ?? 8);
   const grad = Number(pks?.beschaeftigungsgrad ?? 1);
-  const soll = werktage * tagesnorm * grad;
+  const modell =
+    (pks?.arbeitszeitmodell as ArbeitszeitModell) ?? "zimmerei_sommer";
+  const soll = useMemo(
+    () => monatsSoll(year, month, kalender, modell, tagesnorm, grad),
+    [year, month, kalender, modell, tagesnorm, grad]
+  );
 
   const totals = useMemo(() => {
     let arbeit = 0,
@@ -168,6 +174,7 @@ export function DetailTabelle({
                   baustellen,
                   partie,
                   pks,
+                  kalender,
                 })
               }
             >

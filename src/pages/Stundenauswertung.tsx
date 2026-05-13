@@ -42,6 +42,7 @@ import { UebersichtTabelle } from "@/components/stundenauswertung/UebersichtTabe
 import { DetailTabelle } from "@/components/stundenauswertung/DetailTabelle";
 import { BaustellenTabelle } from "@/components/stundenauswertung/BaustellenTabelle";
 import { exportStundenauswertung } from "@/lib/stundenExport";
+import { ladeKalenderMap, type TagessollKalender } from "@/lib/konten";
 
 type PKS = Database["public"]["Tables"]["profile_konten_settings"]["Row"];
 
@@ -96,6 +97,9 @@ export default function Stundenauswertung() {
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [rows, setRows] = useState<Stunde[]>([]);
   const [pks, setPks] = useState<PKS[]>([]);
+  const [kalender, setKalender] = useState<Map<string, TagessollKalender>>(
+    new Map()
+  );
   const [zaSalden, setZaSalden] = useState<Record<string, number>>({});
   const [urlaubSalden, setUrlaubSalden] = useState<Record<string, number>>({});
   const [monatsabschluesse, setMonatsabschluesse] = useState<Record<string, boolean>>({});
@@ -179,6 +183,10 @@ export default function Stundenauswertung() {
       q = q.eq("mitarbeiter_id", user.id);
     }
     q.then(({ data }) => setRows((data as Stunde[]) ?? []));
+
+    // Arbeitszeitkalender für das Jahr laden (für Soll-Berechnung)
+    const year = Number(monat.split("-")[0]);
+    ladeKalenderMap(year).then(setKalender);
 
     // PKS, ZA, Urlaub, Monatsabschluss parallel
     Promise.all([
@@ -296,6 +304,7 @@ export default function Stundenauswertung() {
       baustellen,
       partien,
       pks,
+      kalender,
       zaSalden,
       urlaubSalden,
     });
@@ -425,6 +434,7 @@ export default function Stundenauswertung() {
             members={members}
             partien={partien}
             pks={pks}
+            kalender={kalender}
             zaSalden={zaSalden}
             urlaubSalden={urlaubSalden}
             monatsabschluesse={monatsabschluesse}
@@ -473,6 +483,7 @@ export default function Stundenauswertung() {
                 ? pks.find((p) => p.profile_id === user.id) ?? null
                 : selectedMaPks
             }
+            kalender={kalender}
             zaSaldo={
               mode === "self" && user
                 ? zaSalden[user.id] ?? 0

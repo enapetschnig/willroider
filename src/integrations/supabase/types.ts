@@ -15,7 +15,8 @@ export type AppRole =
 
 export type BaustellenStatus = 'geplant' | 'aktiv' | 'abgeschlossen' | 'pausiert';
 export type StundenStatus = 'offen' | 'zm_freigabe' | 'buero_freigabe' | 'exportiert' | 'abgelehnt';
-export type Wochentyp = 'L' | 'K' | 'F' | 'U';
+export type Wochentyp = 'L' | 'K' | 'F' | 'U' | 'BU' | 'BV';
+export type ArbeitszeitModell = 'zimmerei_sommer' | 'fix_40h' | 'individuell';
 export type EvaluierungTyp = 'werkstatt' | 'baustelle' | 'fertigteilmontage' | 'kurz' | 'lang';
 export type AngebotStatus = 'offen' | 'in_verhandlung' | 'angenommen' | 'abgelehnt' | 'zurueckgezogen';
 export type AngebotOrdnerEnum = 'ausschreibungsunterlagen' | 'plaene' | 'subunternehmer' | 'angebotsunterlagen';
@@ -283,6 +284,13 @@ export type Database = {
           kw: number;
           wochentyp: Wochentyp;
           soll_stunden: number;
+          soll_mo: number | null;
+          soll_di: number | null;
+          soll_mi: number | null;
+          soll_do: number | null;
+          soll_fr: number | null;
+          soll_sa: number | null;
+          soll_so: number | null;
           feiertage: string | null;
           bu_tage: number | null;
           notizen: string | null;
@@ -489,6 +497,7 @@ export type Database = {
           urlaub_stichtag_tag: number | null;
           urlaub_stichtag_monat: number | null;
           za_faktor: number;
+          arbeitszeitmodell: ArbeitszeitModell;
           created_at: string;
           updated_at: string;
         };
