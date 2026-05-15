@@ -1,3 +1,12 @@
+// SMS-Einladung an einen (neuen oder bestehenden) Mitarbeiter.
+// Wird von Frontend (Re-Send-Button in Mitarbeiter-Liste) oder intern von
+// der admin-create-employee Edge Function aufgerufen.
+//
+// Liefert: bei Erfolg HTTP 200 { success: true, twilio_sid }
+//          bei Fehler HTTP 200 { success: false, error: '…' }
+//          (HTTP-200 + success-Flag, damit supabase.functions.invoke
+//          ohne Throw zurückkommt und das Frontend den Fehler sauber anzeigt.)
+
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.79.0';
 
 const corsHeaders = {
@@ -6,142 +15,223 @@ const corsHeaders = {
 };
 
 interface InvitationRequest {
+  /** Telefonnummer in E.164 oder AT-Format (0664…, +43664…). Wird normalisiert. */
   telefonnummer: string;
+  /** Optional: für Logging-Verknüpfung in invitation_logs */
+  profile_id?: string;
+  /** Optional: persönliche Anrede + Magic-Link/Passwort, sonst werden Fallbacks gesetzt */
+  vorname?: string;
+  email?: string;
+  /** Falls vom Aufrufer bereitgestellt (admin-create-employee) — sonst hier generiert */
+  magic_link?: string;
+  /** Initial-Passwort als Backup für SMS (nur Aufruf von admin-create-employee) */
+  initial_password?: string;
+}
+
+/** AT-Phone-Normalisierung — Spiegel von src/lib/phone.ts für die Edge Function. */
+function normalizeAtPhone(input: string | null | undefined): string | null {
+  if (!input) return null;
+  const cleaned = input.trim().replace(/[\s\-()/.]/g, '');
+  if (!cleaned) return null;
+  if (cleaned.startsWith('+')) {
+    const digits = cleaned.slice(1);
+    return /^\d{6,15}$/.test(digits) ? `+${digits}` : null;
+  }
+  if (cleaned.startsWith('00')) {
+    const digits = cleaned.slice(2);
+    return /^\d{6,15}$/.test(digits) ? `+${digits}` : null;
+  }
+  if (cleaned.startsWith('0')) {
+    const digits = cleaned.slice(1);
+    return /^\d{5,14}$/.test(digits) ? `+43${digits}` : null;
+  }
+  if (/^\d{5,14}$/.test(cleaned)) return `+43${cleaned}`;
+  return null;
+}
+
+function composeSmsText(opts: {
+  vorname?: string;
+  magicLink: string;
+  email?: string;
+  initialPassword?: string;
+}): string {
+  const lines: string[] = [];
+  const greeting = opts.vorname ? `Hallo ${opts.vorname},` : 'Hallo,';
+  lines.push(greeting);
+  lines.push('');
+  lines.push('deine Holzbau-Willroider-App ist bereit.');
+  lines.push('');
+  lines.push(`Login: ${opts.magicLink}`);
+  if (opts.email && opts.initialPassword) {
+    lines.push('');
+    lines.push('Falls Link nicht klappt:');
+    lines.push(`Mail: ${opts.email}`);
+    lines.push(`Passwort: ${opts.initialPassword}`);
+  }
+  lines.push('');
+  lines.push('App aufs Handy bringen:');
+  lines.push('iPhone (Safari): Teilen → Zum Home-Bildschirm');
+  lines.push('Android (Chrome): Menü → App installieren');
+  return lines.join('\n');
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    status,
+  });
 }
 
 Deno.serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    console.log('Send invitation function called');
-
-    // Get authorization header
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      throw new Error('No authorization header');
+      return jsonResponse({ success: false, error: 'Kein Authorization-Header' });
     }
 
-    // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get the authenticated user
     const token = authHeader.replace('Bearer ', '');
     const { data: { user }, error: userError } = await supabase.auth.getUser(token);
-    
     if (userError || !user) {
-      console.error('Authentication error:', userError);
-      throw new Error('Unauthorized');
+      console.error('Auth error:', userError);
+      return jsonResponse({ success: false, error: 'Unauthorized' }, 401);
     }
 
-    // Check if user is admin
-    const { data: roleData, error: roleError } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-      .single();
-
-    if (roleError || !roleData || roleData.role !== 'administrator') {
-      console.error('User is not an administrator');
-      throw new Error('Forbidden: Admin access required');
+    // Admin-Check via is_admin_role-RPC (decken alle Admin-Rollen ab:
+    // geschaeftsfuehrung, bauleiter, buero).
+    const { data: isAdmin, error: roleError } = await supabase.rpc('is_admin_role', {
+      _user_id: user.id,
+    });
+    if (roleError || !isAdmin) {
+      console.error('Admin check failed', roleError);
+      return jsonResponse({ success: false, error: 'Forbidden: Admin only' }, 403);
     }
 
-    // Parse request body
-    const { telefonnummer }: InvitationRequest = await req.json();
-    console.log('Processing invitation for:', telefonnummer);
+    const body: InvitationRequest = await req.json();
 
-    // Validate phone number (E.164 format: +43...)
-    if (!telefonnummer || !telefonnummer.match(/^\+43\d{9,13}$/)) {
-      throw new Error('Ungültige Telefonnummer. Bitte Format +43... verwenden');
+    const telefonE164 = normalizeAtPhone(body.telefonnummer);
+    if (!telefonE164) {
+      return jsonResponse({
+        success: false,
+        error: 'Ungültige Telefonnummer. Format z.B. 0664 1234567 oder +43 664 1234567.',
+      });
     }
 
-    // Get Twilio credentials
-    const twilioAccountSid = Deno.env.get('TWILIO_ACCOUNT_SID');
-    const twilioAuthToken = Deno.env.get('TWILIO_AUTH_TOKEN');
-    const twilioPhoneNumber = Deno.env.get('TWILIO_PHONE_NUMBER');
-
-    if (!twilioAccountSid || !twilioAuthToken || !twilioPhoneNumber) {
-      throw new Error('Twilio credentials not configured');
+    // Twilio-Credentials prüfen
+    const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
+    const twilioToken = Deno.env.get('TWILIO_AUTH_TOKEN');
+    const twilioFrom = Deno.env.get('TWILIO_PHONE_NUMBER');
+    if (!twilioSid || !twilioToken || !twilioFrom) {
+      return jsonResponse({
+        success: false,
+        error: 'Twilio-Credentials nicht konfiguriert. Bitte TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER in Supabase-Secrets setzen.',
+      });
     }
 
-    // Generate registration link
     const appUrl = Deno.env.get('APP_URL') || 'https://holzerleben.app';
-    const registrationLink = `${appUrl}/`;
-    
-    // Compose SMS message
-    const smsText = `Willkommen bei Holzerleben! 🌲\n\nBitte registriere dich in unserer neuen App:\n${registrationLink}\n\nLg Mario Wölke`;
 
-    console.log('Sending SMS via Twilio...');
+    // Magic Link: vom Aufrufer übergeben oder hier generieren
+    let magicLink = body.magic_link;
+    let resolvedEmail = body.email;
+    if (!magicLink) {
+      // Email aus profile holen falls nicht im Body und profile_id vorhanden
+      if (!resolvedEmail && body.profile_id) {
+        const { data: p } = await supabase
+          .from('profiles')
+          .select('email, vorname')
+          .eq('id', body.profile_id)
+          .maybeSingle();
+        if (p?.email) resolvedEmail = p.email;
+        if (p?.vorname && !body.vorname) body.vorname = p.vorname;
+      }
+      if (!resolvedEmail) {
+        return jsonResponse({
+          success: false,
+          error: 'Email fehlt — kein Magic-Link generierbar.',
+        });
+      }
+      const { data: linkRes, error: linkErr } = await supabase.auth.admin.generateLink({
+        type: 'magiclink',
+        email: resolvedEmail,
+        options: { redirectTo: `${appUrl}/` },
+      });
+      if (linkErr || !linkRes?.properties?.action_link) {
+        console.error('generateLink error:', linkErr);
+        return jsonResponse({
+          success: false,
+          error: `Magic-Link konnte nicht erstellt werden: ${linkErr?.message ?? 'unbekannt'}`,
+        });
+      }
+      magicLink = linkRes.properties.action_link;
+    }
 
-    // Send SMS via Twilio
-    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Messages.json`;
+    const smsText = composeSmsText({
+      vorname: body.vorname,
+      magicLink,
+      email: resolvedEmail,
+      initialPassword: body.initial_password,
+    });
+
+    // Twilio-Aufruf
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
     const twilioResponse = await fetch(twilioUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Basic ${btoa(`${twilioAccountSid}:${twilioAuthToken}`)}`,
+        Authorization: `Basic ${btoa(`${twilioSid}:${twilioToken}`)}`,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: new URLSearchParams({
-        To: telefonnummer,
-        From: twilioPhoneNumber,
+        To: telefonE164,
+        From: twilioFrom,
         Body: smsText,
       }),
     });
-
     const twilioData = await twilioResponse.json();
-    
+
     if (!twilioResponse.ok) {
-      console.error('Twilio error response:', twilioData);
-      throw new Error(`SMS-Versand fehlgeschlagen: ${JSON.stringify(twilioData)}`);
-    }
-
-    console.log('SMS sent successfully:', twilioData.sid);
-    console.log('Full Twilio response:', twilioData);
-
-    // Log the invitation
-    const { error: logError } = await supabase
-      .from('invitation_logs')
-      .insert({
-        telefonnummer,
+      console.error('Twilio error:', twilioData);
+      // Log als Fehler
+      await supabase.from('invitation_logs').insert({
+        profile_id: body.profile_id ?? null,
+        telefonnummer: telefonE164,
         gesendet_von: user.id,
-        status: 'gesendet',
+        status: 'fehler',
+        fehler: twilioData?.message ?? JSON.stringify(twilioData).slice(0, 500),
+        sms_text: smsText,
       });
-
-    if (logError) {
-      console.error('Error logging invitation:', logError);
-      // Don't fail the request if logging fails
+      return jsonResponse({
+        success: false,
+        error: `SMS-Versand fehlgeschlagen: ${twilioData?.message ?? 'unbekannt'}`,
+      });
     }
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        message: 'SMS erfolgreich gesendet',
-        messageSid: twilioData.sid,
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200,
-      }
-    );
+    // Erfolgreich loggen
+    await supabase.from('invitation_logs').insert({
+      profile_id: body.profile_id ?? null,
+      telefonnummer: telefonE164,
+      gesendet_von: user.id,
+      status: 'gesendet',
+      twilio_sid: twilioData.sid,
+      sms_text: smsText,
+    });
 
+    return jsonResponse({
+      success: true,
+      twilio_sid: twilioData.sid,
+      telefonnummer: telefonE164,
+    });
   } catch (error) {
-    console.error('Error in send-invitation function:', error);
-    
-    const errorMessage = error instanceof Error ? error.message : 'Ein Fehler ist aufgetreten';
-    
-    return new Response(
-      JSON.stringify({
-        success: false,
-        error: errorMessage,
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200,
-      }
-    );
+    console.error('send-invitation error:', error);
+    return jsonResponse({
+      success: false,
+      error: error instanceof Error ? error.message : 'Ein Fehler ist aufgetreten',
+    });
   }
 });

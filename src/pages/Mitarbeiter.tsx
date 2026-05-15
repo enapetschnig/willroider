@@ -26,7 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { CheckCircle2, XCircle, Plus, Edit, Trash2, AlertTriangle } from "lucide-react";
+import { CheckCircle2, XCircle, Plus, Edit, Trash2, AlertTriangle, UserPlus, MessageSquare } from "lucide-react";
 import type { Database, AppRole } from "@/integrations/supabase/types";
 import {
   BAUSTELLEN_ORDNER,
@@ -34,6 +34,8 @@ import {
   type OrdnerKey,
   type Visibility,
 } from "@/lib/baustellenOrdner";
+import { NewMitarbeiterDialog, type CredentialsResult } from "@/components/admin/NewMitarbeiterDialog";
+import { CredentialsResultDialog } from "@/components/admin/CredentialsResultDialog";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
@@ -75,6 +77,42 @@ export default function Mitarbeiter() {
   const [deletingProfile, setDeletingProfile] = useState<Profile | null>(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState<string>("");
   const [deleting, setDeleting] = useState<boolean>(false);
+  const [newOpen, setNewOpen] = useState<boolean>(false);
+  const [credentials, setCredentials] = useState<CredentialsResult | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
+
+  const resendInvite = async (p: Profile) => {
+    if (!p.telefon) {
+      toast({
+        variant: "destructive",
+        title: "Keine Telefonnummer",
+        description: "Erst eine Telefonnummer im Profil hinterlegen.",
+      });
+      return;
+    }
+    if (!window.confirm(`SMS-Einladung an ${p.vorname} ${p.nachname} (${p.telefon}) senden?`)) {
+      return;
+    }
+    setResendingId(p.id);
+    const { data, error } = await supabase.functions.invoke("send-invitation", {
+      body: {
+        profile_id: p.id,
+        telefonnummer: p.telefon,
+        vorname: p.vorname,
+        email: p.email,
+      },
+    });
+    setResendingId(null);
+    if (error || data?.success === false) {
+      toast({
+        variant: "destructive",
+        title: "SMS-Versand fehlgeschlagen",
+        description: data?.error ?? error?.message ?? "Unbekannter Fehler",
+      });
+      return;
+    }
+    toast({ title: "SMS-Einladung gesendet", description: data?.telefonnummer });
+  };
 
   const load = async () => {
     const [profRes, partRes, roleRes] = await Promise.all([
@@ -315,6 +353,21 @@ export default function Mitarbeiter() {
         </TabsList>
 
         <TabsContent value="mitarbeiter">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm text-muted-foreground">
+              {profiles.length} Mitarbeiter
+              {profiles.filter((p) => !p.is_active).length > 0 && (
+                <span className="ml-2">
+                  · {profiles.filter((p) => !p.is_active).length} wartet auf Freischaltung
+                </span>
+              )}
+            </div>
+            <Button onClick={() => setNewOpen(true)} size="sm">
+              <UserPlus className="h-4 w-4 mr-1.5" />
+              Neuer Mitarbeiter
+            </Button>
+          </div>
+
           {/* Mobile: cards */}
           <div className="md:hidden space-y-2">
             {profiles.map((p) => {
@@ -374,6 +427,19 @@ export default function Mitarbeiter() {
                       >
                         {p.is_active ? "Deaktivieren" : "Freischalten"}
                       </Button>
+                      {p.telefon && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-10"
+                          onClick={() => resendInvite(p)}
+                          disabled={resendingId === p.id}
+                          aria-label="SMS-Einladung senden"
+                          title={`SMS-Einladung an ${p.telefon} senden`}
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                        </Button>
+                      )}
                       <Button
                         variant="outline"
                         size="sm"
@@ -485,6 +551,18 @@ export default function Mitarbeiter() {
                           >
                             {p.is_active ? "Deaktivieren" : "Freischalten"}
                           </Button>
+                          {p.telefon && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => resendInvite(p)}
+                              disabled={resendingId === p.id}
+                              aria-label="SMS-Einladung senden"
+                              title={`SMS-Einladung an ${p.telefon} senden`}
+                            >
+                              <MessageSquare className="h-4 w-4" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"
@@ -684,6 +762,23 @@ export default function Mitarbeiter() {
           <OrdnerVisibilitySettings />
         </TabsContent>
       </Tabs>
+
+      {/* Neuer Mitarbeiter — Anlage durch Admin */}
+      <NewMitarbeiterDialog
+        open={newOpen}
+        onClose={() => setNewOpen(false)}
+        partien={partien}
+        onCreated={(result) => {
+          setCredentials(result);
+          load();
+        }}
+      />
+
+      {/* Post-Anlage: Credentials anzeigen */}
+      <CredentialsResultDialog
+        result={credentials}
+        onClose={() => setCredentials(null)}
+      />
 
       {/* Edit profile dialog — Personalanlageblatt 1:1 */}
       <Dialog open={!!editing} onOpenChange={(open) => { if (!open) closeEdit(); }}>
