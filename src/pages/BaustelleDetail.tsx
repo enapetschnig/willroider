@@ -71,6 +71,11 @@ export default function BaustelleDetail() {
   const [kostenDialog, setKostenDialog] = useState(false);
   const [editDialog, setEditDialog] = useState(false);
   const [activeTab, setActiveTab] = useState<string>("dokumente");
+  const [unterschriftStats, setUnterschriftStats] = useState<{
+    total: number;
+    done: number;
+    offen: { id: string; mitarbeiter_id: string; vorname: string; nachname: string }[];
+  }>({ total: 0, done: 0, offen: [] });
 
   const load = async () => {
     if (!id) return;
@@ -105,6 +110,40 @@ export default function BaustelleDetail() {
     } else {
       setPartie(null);
       setTeam([]);
+    }
+
+    // Unterschriften-Stats für die Pflicht-Unterweisung
+    if (baustelle?.pflicht_evaluierung_id) {
+      const { data: unterschriften } = await supabase
+        .from("evaluierung_unterschriften")
+        .select("id, mitarbeiter_id, unterschrift_data")
+        .eq("evaluierung_id", baustelle.pflicht_evaluierung_id);
+      const list = (unterschriften as any[]) ?? [];
+      const offen = list.filter((u) => !u.unterschrift_data);
+      const offenIds = offen.map((u) => u.mitarbeiter_id);
+      let offenWithNames: any[] = [];
+      if (offenIds.length > 0) {
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("id, vorname, nachname")
+          .in("id", offenIds);
+        offenWithNames = offen.map((u) => {
+          const p = (profs as any[])?.find((x) => x.id === u.mitarbeiter_id);
+          return {
+            id: u.id,
+            mitarbeiter_id: u.mitarbeiter_id,
+            vorname: p?.vorname ?? "?",
+            nachname: p?.nachname ?? "",
+          };
+        });
+      }
+      setUnterschriftStats({
+        total: list.length,
+        done: list.length - offen.length,
+        offen: offenWithNames,
+      });
+    } else {
+      setUnterschriftStats({ total: 0, done: 0, offen: [] });
     }
   };
 
@@ -498,9 +537,56 @@ export default function BaustelleDetail() {
                     Pflicht-Unterweisung für die zugeordneten Mitarbeiter
                   </div>
                   {b.pflicht_evaluierung_id ? (
-                    <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-2">
-                      Pflicht-Unterweisung bereits angelegt. Mitarbeiter erhalten beim
-                      App-Öffnen den Sign-Gate.
+                    <div className="space-y-2">
+                      <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-2">
+                        Pflicht-Unterweisung aktiv. Neue Mitarbeiter, die zur
+                        Baustelle eingeteilt werden, bekommen automatisch eine
+                        Unterschrift-Aufforderung.
+                      </div>
+                      {unterschriftStats.total > 0 && (
+                        <>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-semibold">
+                              {unterschriftStats.done} von {unterschriftStats.total}
+                              {" "}haben unterschrieben
+                            </span>
+                            <span className="tabular-nums text-muted-foreground">
+                              {Math.round(
+                                (unterschriftStats.done / unterschriftStats.total) * 100
+                              )}{" "}%
+                            </span>
+                          </div>
+                          <div className="h-2 rounded-full bg-muted overflow-hidden">
+                            <div
+                              className="h-full bg-emerald-500 transition-all"
+                              style={{
+                                width: `${
+                                  unterschriftStats.total > 0
+                                    ? (unterschriftStats.done / unterschriftStats.total) * 100
+                                    : 0
+                                }%`,
+                              }}
+                            />
+                          </div>
+                          {unterschriftStats.offen.length > 0 && (
+                            <div className="text-xs space-y-0.5 pt-1">
+                              <div className="font-semibold text-amber-700">
+                                Noch offen:
+                              </div>
+                              <ul className="flex flex-wrap gap-1">
+                                {unterschriftStats.offen.map((o) => (
+                                  <li
+                                    key={o.id}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-900 text-[11px]"
+                                  >
+                                    {o.vorname} {o.nachname}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   ) : (
                     <div className="flex flex-wrap gap-1.5">

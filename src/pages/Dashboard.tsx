@@ -19,6 +19,7 @@ import {
   Truck,
   Briefcase,
   AlertCircle,
+  ShieldAlert,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -76,6 +77,9 @@ export default function Dashboard() {
   const [pendingProfiles, setPendingProfiles] = useState<PendingProfile[]>([]);
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [angeboteFaellig, setAngeboteFaellig] = useState<number>(0);
+  const [offeneUnterschriften, setOffeneUnterschriften] = useState<
+    { evaluierung_id: string; bvh_name: string; mitarbeiter_id: string; evaluierung_titel: string | null }[]
+  >([]);
   const [heuteEinteilungen, setHeuteEinteilungen] = useState<HeuteEintrag[]>([]);
   const [heuteFehlzeit, setHeuteFehlzeit] = useState<string | null>(null);
 
@@ -262,6 +266,38 @@ export default function Dashboard() {
     };
   }, [isAdmin]);
 
+  // Offene Unterschriften (Polier/Bauleiter sind verantwortlich)
+  useEffect(() => {
+    if (!user) return;
+    const loadUnterschriften = async () => {
+      const { data } = await supabase
+        .from("v_offene_unterschriften" as any)
+        .select("evaluierung_id, bvh_name, mitarbeiter_id, evaluierung_titel")
+        .eq("verantwortlich_id", user.id);
+      // Pro evaluierung + ma deduplizieren (User kann gleichzeitig Polier+Bauleiter sein)
+      const seen = new Set<string>();
+      const unique = ((data as any[]) ?? []).filter((r) => {
+        const k = `${r.evaluierung_id}_${r.mitarbeiter_id}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      setOffeneUnterschriften(unique);
+    };
+    loadUnterschriften();
+    const ch = supabase
+      .channel("dashboard-unterschriften")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "evaluierung_unterschriften" },
+        loadUnterschriften
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [user]);
+
   const fullName = profile ? `${profile.vorname} ${profile.nachname}`.trim() : "";
 
   // Alle Cards einheitlich im Willroider-Rot aus dem Design-Token (--primary)
@@ -419,6 +455,67 @@ export default function Dashboard() {
             <Link to="/angebote" className="sm:hidden block mt-3">
               <Button className="w-full h-11 bg-red-600 hover:bg-red-700 text-white shadow-md">
                 Angebote öffnen
+                <ArrowRight className="h-4 w-4 ml-1.5" />
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Offene Unterschriften — Polier/Bauleiter */}
+      {offeneUnterschriften.length > 0 && (
+        <Card className="border-2 border-amber-400 bg-gradient-to-r from-amber-50 to-amber-100 shadow-md">
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex items-start gap-3 sm:gap-4">
+              <div className="relative shrink-0">
+                <div className="h-11 w-11 sm:h-12 sm:w-12 rounded-full bg-amber-500 flex items-center justify-center text-white shadow-md">
+                  <ShieldAlert className="h-5 w-5 sm:h-6 sm:w-6" />
+                </div>
+                <span className="absolute -top-0.5 -right-0.5 h-5 min-w-[20px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-amber-50 animate-pulse">
+                  {offeneUnterschriften.length}
+                </span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-base sm:text-lg text-amber-950 leading-tight">
+                  {offeneUnterschriften.length === 1
+                    ? "1 offene Unterweisung-Unterschrift"
+                    : `${offeneUnterschriften.length} offene Unterweisung-Unterschriften`}
+                </div>
+                <div className="text-xs sm:text-sm text-amber-900 mt-1">
+                  Mitarbeiter auf deinen Baustellen haben die Pflicht-Unterweisung
+                  noch nicht bestätigt.
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {Array.from(
+                    new Set(offeneUnterschriften.map((u) => u.bvh_name))
+                  )
+                    .slice(0, 5)
+                    .map((bvh) => {
+                      const count = offeneUnterschriften.filter(
+                        (u) => u.bvh_name === bvh
+                      ).length;
+                      return (
+                        <span
+                          key={bvh}
+                          className="inline-flex items-center gap-1.5 bg-white rounded-full px-2.5 py-1 text-xs shadow-sm border border-amber-200"
+                        >
+                          <strong>{bvh}</strong>
+                          <span className="text-muted-foreground">· {count}</span>
+                        </span>
+                      );
+                    })}
+                </div>
+              </div>
+              <Link to="/evaluierung" className="shrink-0 hidden sm:block">
+                <Button className="bg-amber-600 hover:bg-amber-700 text-white shadow-md">
+                  Anzeigen
+                  <ArrowRight className="h-4 w-4 ml-1.5" />
+                </Button>
+              </Link>
+            </div>
+            <Link to="/evaluierung" className="sm:hidden block mt-3">
+              <Button className="w-full h-11 bg-amber-600 hover:bg-amber-700 text-white shadow-md">
+                Anzeigen
                 <ArrowRight className="h-4 w-4 ml-1.5" />
               </Button>
             </Link>
