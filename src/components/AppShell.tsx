@@ -55,12 +55,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { profile, role, isAdmin, canReview, signOut } = useAuth();
   const navigate = useNavigate();
   const [installOpen, setInstallOpen] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
 
   // Auto-show install prompt one time per device (skipped if already installed)
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const isStandalone = window.matchMedia("(display-mode: standalone)").matches;
-    if (isStandalone) return;
+    const standalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (navigator as any).standalone === true;
+    setIsStandalone(standalone);
+    if (standalone) return;
     if (localStorage.getItem("willroider:install-dismissed") === "true") return;
     const t = window.setTimeout(() => setInstallOpen(true), 4000);
     return () => window.clearTimeout(t);
@@ -156,39 +160,58 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
             </div>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <UserIcon className="h-4 w-4 mr-2" />
-                  <span className="hidden sm:inline">{fullName || "Account"}</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>{fullName}</DropdownMenuLabel>
-                {role ? (
-                  <div className="px-2 pb-2 text-xs text-muted-foreground">
-                    {roleLabel[role] ?? role}
-                  </div>
-                ) : null}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    setInstallOpen(true);
-                  }}
+            <div className="flex items-center gap-1.5">
+              {!isStandalone && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setInstallOpen(true)}
+                  title="App auf Startbildschirm installieren"
+                  aria-label="App installieren"
+                  className="px-2.5"
                 >
-                  <Smartphone className="mr-2 h-4 w-4" />
-                  <span>App zum Startbildschirm</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <ChangePasswordDialog />
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout}>
-                  <LogOut className="mr-2 h-4 w-4" />
-                  <span>Abmelden</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  <Smartphone className="h-4 w-4 sm:mr-1.5" />
+                  <span className="hidden sm:inline">App installieren</span>
+                </Button>
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <UserIcon className="h-4 w-4 mr-2" />
+                    <span className="hidden sm:inline">{fullName || "Account"}</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>{fullName}</DropdownMenuLabel>
+                  {role ? (
+                    <div className="px-2 pb-2 text-xs text-muted-foreground">
+                      {roleLabel[role] ?? role}
+                    </div>
+                  ) : null}
+                  {!isStandalone && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={(e) => {
+                          e.preventDefault();
+                          setInstallOpen(true);
+                        }}
+                      >
+                        <Smartphone className="mr-2 h-4 w-4" />
+                        <span>App zum Startbildschirm</span>
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                  <DropdownMenuSeparator />
+                  <ChangePasswordDialog />
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleLogout}>
+                    <LogOut className="mr-2 h-4 w-4" />
+                    <span>Abmelden</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
         </header>
 

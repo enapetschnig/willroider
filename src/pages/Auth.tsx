@@ -83,13 +83,9 @@ export default function Auth() {
     }
 
     await supabase.auth.signOut({ scope: "local" });
-    toast({
-      title: "Registrierung erfolgreich",
-      description:
-        "Ihr Konto wurde angelegt und wartet auf die Freischaltung durch das Büro.",
-    });
-    setIsLogin(true);
+    toast({ title: "Registrierung erfolgreich" });
     setLoading(false);
+    navigate("/registriert");
   };
 
   const handlePasswordReset = async (e: React.FormEvent<HTMLFormElement>) => {

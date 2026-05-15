@@ -13,6 +13,7 @@ import BaustelleDetail from "@/pages/BaustelleDetail";
 import Angebote from "@/pages/Angebote";
 import AngebotDetail from "@/pages/AngebotDetail";
 import Admin from "@/pages/Admin";
+import RegistrierungBestaetigung from "@/pages/RegistrierungBestaetigung";
 import { Navigate } from "react-router-dom";
 import Mitarbeiter from "@/pages/Mitarbeiter";
 import Stunden from "@/pages/Stunden";
@@ -36,6 +37,7 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/auth" element={<Auth />} />
+            <Route path="/registriert" element={<RegistrierungBestaetigung />} />
             <Route element={<ProtectedRoute />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/arbeitsplanung" element={<Arbeitsplanung />} />

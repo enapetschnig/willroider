@@ -23,20 +23,7 @@ export function ProtectedRoute() {
   }
 
   if (profile && !profile.is_active) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
-        <div className="max-w-md text-center space-y-4">
-          <h2 className="text-xl font-semibold">Konto nicht freigeschaltet</h2>
-          <p className="text-sm text-muted-foreground">
-            Ihr Konto wartet auf die Freischaltung durch einen Administrator. Bitte kontaktieren Sie
-            das Büro.
-          </p>
-          <a href="/auth" className="text-primary text-sm hover:underline">
-            Zur Anmeldung
-          </a>
-        </div>
-      </div>
-    );
+    return <Navigate to="/registriert" replace />;
   }
 
   return (
