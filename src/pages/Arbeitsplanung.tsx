@@ -1672,18 +1672,23 @@ function PolierHeader({
           } rounded-full shrink-0`}
           style={{ background: farbe }}
         />
-        <div className={`${isMobile ? "" : "text-xs"} font-bold uppercase flex-1 min-w-0 leading-tight`}>
+        <div
+          className={`${
+            isMobile ? "" : "text-xs"
+          } font-bold uppercase flex-1 min-w-0 leading-tight`}
+          title={partie ? (polier ? `${polier} · ${partie.name}` : partie.name) : polier ?? ""}
+        >
           {polier ? (
-            <span className="flex flex-wrap items-baseline gap-x-1.5">
-              <span className="text-base sm:text-sm">{polier}</span>
+            <div className="flex items-baseline gap-x-1.5 min-w-0">
+              <span className="text-sm truncate min-w-0">{polier}</span>
               {partie && (
-                <span className="text-[10px] font-normal opacity-70 normal-case">
+                <span className="text-[10px] font-normal opacity-70 normal-case truncate shrink min-w-0">
                   · {partie.name}
                 </span>
               )}
-            </span>
+            </div>
           ) : (
-            partie?.name ?? "Ohne Partie"
+            <span className="truncate block">{partie?.name ?? "Ohne Partie"}</span>
           )}
         </div>
         <span className="text-[10px] opacity-70 shrink-0">{bvhCount} BVH</span>
