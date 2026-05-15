@@ -72,6 +72,8 @@ import {
 import { PersonPicker, type Mode } from "@/components/stunden/PersonPicker";
 import { BaustelleCombobox } from "@/components/stunden/BaustelleCombobox";
 import { TimeStepper } from "@/components/stunden/TimeStepper";
+import { TagBlocks } from "@/components/stunden/TagBlocks";
+import { NextBlockSlot } from "@/components/stunden/NextBlockSlot";
 
 type Stunde = Database["public"]["Tables"]["stundenbuchungen"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -886,133 +888,18 @@ export default function Stunden() {
                 })()}
               </div>
 
-              {/* Bereits gebucht heute */}
-              {todayBlocks.length === 0 ? (
-                <div className="border-t pt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                  <Clock className="h-3.5 w-3.5" />
-                  Noch nichts gebucht für diesen Tag.
-                </div>
-              ) : (
-                <div className="border-t pt-3">
-                  <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
-                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                      Schon gebucht
-                    </Label>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      {todaySummary.arbeit > 0 && (
-                        <span className="text-xs font-bold tabular-nums">
-                          {fmtH(todaySummary.arbeit)} Arbeit
-                        </span>
-                      )}
-                      {Array.from(todaySummary.fehlzeit.entries())
-                        .filter(([, h]) => h > 0)
-                        .map(([typ, h]) => (
-                          <span
-                            key={typ}
-                            className={`text-[10px] font-semibold tabular-nums px-1.5 py-0.5 rounded border ${fehlzeitBadgeClass(typ)}`}
-                          >
-                            {fmtH(h)} {fehlzeitLabel(typ)}
-                          </span>
-                        ))}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    {todayBlocks.map((r) => {
-                      const b = baustellen.find((x) => x.id === r.baustelle_id);
-                      const hours = Number(
-                        r.arbeitsstunden ?? r.fehlzeit_stunden ?? 0
-                      );
-                      const isZero = hours <= 0;
-                      return (
-                        <div
-                          key={r.id}
-                          className={`flex items-center gap-2 text-xs rounded px-2 py-1.5 ${
-                            isZero
-                              ? "bg-amber-50 border border-amber-300"
-                              : "bg-muted/40"
-                          }`}
-                        >
-                          {isZero ? (
-                            <span
-                              className="text-amber-700 shrink-0"
-                              title="0 h gebucht — bitte prüfen"
-                            >
-                              <AlertTriangle className="h-3.5 w-3.5" />
-                            </span>
-                          ) : (
-                            <span className="font-bold tabular-nums shrink-0">
-                              {hours.toFixed(2).replace(".", ",")}h
-                            </span>
-                          )}
-                          {r.start_zeit && r.end_zeit && (
-                            <span className="text-muted-foreground tabular-nums shrink-0">
-                              {fmtTime(r.start_zeit)}–{fmtTime(r.end_zeit)}
-                            </span>
-                          )}
-                          {r.fehlzeit_typ ? (
-                            <span
-                              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border shrink-0 ${fehlzeitBadgeClass(r.fehlzeit_typ)}`}
-                            >
-                              {fehlzeitLabel(r.fehlzeit_typ)}
-                            </span>
-                          ) : (
-                            <span className="truncate flex-1">
-                              {r.in_firma
-                                ? b?.bvh_name
-                                  ? `Firma · ${b.bvh_name}`
-                                  : "Firma"
-                                : b?.bvh_name ?? "—"}
-                            </span>
-                          )}
-                          {r.fehlzeit_typ && <span className="flex-1" />}
-                          {isMonthLocked(r.mitarbeiter_id, r.datum) && (
-                            <span
-                              className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 shrink-0"
-                              title="Monat abgeschlossen — Buchung kann nicht mehr geändert werden"
-                            >
-                              gesperrt
-                            </span>
-                          )}
-                          {r.status === "offen" && !isMonthLocked(r.mitarbeiter_id, r.datum) && (
-                            <div className="flex items-center gap-0.5 shrink-0">
-                              <button
-                                onClick={() => setEditing(r)}
-                                className="text-muted-foreground hover:text-primary p-1"
-                                aria-label="Buchung bearbeiten"
-                                title="Bearbeiten"
-                              >
-                                <Edit className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                onClick={() => remove(r.id)}
-                                className="text-muted-foreground hover:text-destructive p-1"
-                                aria-label="Buchung löschen"
-                                title="Löschen"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          )}
-                          {r.status !== "offen" && (
-                            <span
-                              className="text-[9px] uppercase tracking-wide text-muted-foreground shrink-0"
-                              title="Bereits eingereicht — nicht mehr editierbar"
-                            >
-                              {r.status === "zm_freigabe"
-                                ? "ZM"
-                                : r.status === "buero_freigabe"
-                                ? "Büro"
-                                : r.status}
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
             </CardContent>
           </Card>
+
+          {/* Tag-Blöcke: dominante Sicht auf bereits gebuchte Blöcke */}
+          <TagBlocks
+            rows={todayBlocks}
+            baustellen={baustellen}
+            isMonthLocked={isMonthLocked(primaryUserId, date)}
+            isAdmin={isAdmin}
+            onEdit={(r) => setEditing(r)}
+            onDelete={(id) => remove(id)}
+          />
 
           {/* Konflikt-Warnung: Zeitfenster überlappt mit existierender Buchung */}
           {overlappingBlock && (
@@ -1029,100 +916,59 @@ export default function Stunden() {
             </Card>
           )}
 
+          {/* NextBlockSlot: visuelle Brücke zwischen Tagessicht und Form —
+              nur wenn schon ein Arbeits-Block existiert (sonst wäre er redundant zur Form-Überschrift) */}
+          {(() => {
+            const arbeitBlocks = todayBlocks.filter((r) => !r.fehlzeit_typ);
+            if (arbeitBlocks.length === 0) return null;
+            if (editing) return null;
+            if (fehlzeitTyp) return null;
+            const lastEnd = arbeitBlocks
+              .map((r) => r.end_zeit)
+              .filter(Boolean)
+              .sort()
+              .pop() as string | null | undefined;
+            return (
+              <NextBlockSlot
+                blockNr={arbeitBlocks.length + 1}
+                startsAt={lastEnd ?? null}
+              />
+            );
+          })()}
+
           {/* Quick-Book Card */}
           <Card>
             <CardContent className="p-4 space-y-4">
-              {/* Bisher heute (Kontext-Erinnerung beim Eingeben einer weiteren Buchung) */}
-              {todayBlocks.length > 0 && (
-                <div className="rounded-md border bg-muted/30 p-2.5 space-y-1.5">
-                  <div className="flex items-center justify-between gap-2 text-[11px]">
-                    <span className="uppercase tracking-wide font-semibold text-muted-foreground">
-                      Bisher heute
-                    </span>
-                    <span className="flex items-center gap-1.5 flex-wrap justify-end">
-                      {todaySummary.arbeit > 0 && (
-                        <span className="tabular-nums font-bold text-foreground">
-                          {fmtH(todaySummary.arbeit)} Arbeit
-                        </span>
-                      )}
-                      {Array.from(todaySummary.fehlzeit.entries())
-                        .filter(([, h]) => h > 0)
-                        .map(([typ, h]) => (
-                          <span
-                            key={typ}
-                            className={`text-[10px] font-semibold tabular-nums px-1.5 py-0.5 rounded border ${fehlzeitBadgeClass(typ)}`}
-                          >
-                            {fmtH(h)} {fehlzeitLabel(typ)}
-                          </span>
-                        ))}
-                    </span>
-                  </div>
-                  <ul className="space-y-1">
-                    {todayBlocks.slice(0, 3).map((r) => {
-                      const b = baustellen.find((x) => x.id === r.baustelle_id);
-                      const hours = Number(
-                        r.arbeitsstunden ?? r.fehlzeit_stunden ?? 0
-                      );
-                      const isLast =
-                        continuationOf &&
-                        r.end_zeit &&
-                        fmtTime(r.end_zeit) === continuationOf.endZeit;
+              {/* Form-Header: zeigt Block-Position */}
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h3 className="text-base font-bold flex items-center gap-2">
+                  {fehlzeitTyp ? (
+                    <>
+                      <Calendar className="h-4 w-4 text-primary" />
+                      Neue Fehlzeit
+                    </>
+                  ) : (
+                    (() => {
+                      const arbeitCount = todayBlocks.filter((r) => !r.fehlzeit_typ).length;
                       return (
-                        <li
-                          key={r.id}
-                          className={`flex items-center gap-2 text-xs px-2 py-1 rounded ${
-                            isLast ? "bg-primary/10 ring-1 ring-primary/30" : ""
-                          }`}
-                        >
-                          {isLast && (
-                            <span className="text-[9px] uppercase font-bold tracking-wide px-1 rounded bg-primary text-primary-foreground shrink-0">
-                              zuletzt
-                            </span>
-                          )}
-                          {r.start_zeit && r.end_zeit ? (
-                            <span className="tabular-nums text-muted-foreground shrink-0">
-                              {fmtTime(r.start_zeit)}–{fmtTime(r.end_zeit)}
-                            </span>
-                          ) : null}
-                          {r.fehlzeit_typ ? (
-                            <span
-                              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border shrink-0 ${fehlzeitBadgeClass(r.fehlzeit_typ)}`}
-                            >
-                              {fehlzeitLabel(r.fehlzeit_typ)}
-                            </span>
-                          ) : (
-                            <span className="truncate flex-1">
-                              {r.in_firma
-                                ? b?.bvh_name
-                                  ? `Firma · ${b.bvh_name}`
-                                  : "Firma"
-                                : b?.bvh_name ?? "—"}
-                            </span>
-                          )}
-                          {r.fehlzeit_typ && <span className="flex-1" />}
-                          <span className="font-bold tabular-nums shrink-0">
-                            {hours.toFixed(2).replace(".", ",")} h
-                          </span>
-                        </li>
+                        <>
+                          <Plus className="h-4 w-4 text-primary" />
+                          Neuer Block <span className="text-muted-foreground font-normal">(Block {arbeitCount + 1})</span>
+                        </>
                       );
-                    })}
-                    {todayBlocks.length > 3 && (
-                      <li className="text-[10px] text-muted-foreground italic px-2">
-                        +{todayBlocks.length - 3} weitere Buchung
-                        {todayBlocks.length - 3 > 1 ? "en" : ""} oben in der
-                        Übersicht
-                      </li>
-                    )}
-                  </ul>
-                </div>
-              )}
+                    })()
+                  )}
+                </h3>
+                {todayBlocks.filter((r) => !r.fehlzeit_typ).length > 0 && !fehlzeitTyp && (
+                  <span className="text-[11px] text-muted-foreground">
+                    Auf einer anderen Baustelle gearbeitet? Hier eintragen.
+                  </span>
+                )}
+              </div>
 
               {/* Mode: Arbeit / Fehlzeit — große Tap-Targets */}
               <div>
-                <Label className="text-sm font-semibold flex items-center gap-2">
-                  <span className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-foreground text-background text-xs font-bold">
-                    2
-                  </span>
+                <Label className="text-sm font-semibold">
                   Was wurde gemacht?
                 </Label>
                 {/* Arbeit — groß, primary, eigene Reihe */}
@@ -1228,25 +1074,6 @@ export default function Stunden() {
               {/* Arbeit-Mode: Time-Range */}
               {!fehlzeitTyp && (
                 <div className="space-y-3 border-t pt-3">
-                  {/* Anschluss-Banner: zeigt nahtlosen Übergang vom letzten Block */}
-                  {continuationOf && (
-                    <div className="rounded-md border-2 border-primary/40 bg-primary/5 p-2.5 flex items-start gap-2 text-xs">
-                      <span className="h-5 w-5 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-bold shrink-0">
-                        2.
-                      </span>
-                      <div className="flex-1">
-                        <div className="font-semibold text-foreground">
-                          Anschluss-Buchung ab {continuationOf.endZeit}
-                        </div>
-                        <div className="text-muted-foreground mt-0.5">
-                          {continuationOf.bvhName
-                            ? `Direkt nach „${continuationOf.bvhName}" — Pause war im ersten Block.`
-                            : "Direkt nach dem vorigen Block — Pause war schon dort."}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
                   <div className="grid grid-cols-2 gap-2">
                     <TimeStepper label="Startzeit" value={startZeit} onChange={setStartZeit} big />
                     <TimeStepper label="Endzeit" value={endZeit} onChange={setEndZeit} big />
@@ -1602,35 +1429,25 @@ export default function Stunden() {
                 </div>
               )}
 
-              {/* Submit-Buttons */}
-              <div className="flex flex-col sm:flex-row gap-2">
-                <Button onClick={() => submit(false)} className="flex-1 h-12 text-base">
-                  <Plus className="h-5 w-5 mr-2" />
-                  {(() => {
-                    if (continuationOf) return "Fertig — Speichern";
-                    const ma = forUserIds.size;
-                    const days = fehlzeitWorkdays;
-                    if (days > 1 && ma > 1)
-                      return `Für ${ma} MA × ${days} Tage speichern`;
-                    if (days > 1) return `Für ${days} Tage speichern`;
-                    if (ma > 1) return `Für ${ma} Mitarbeiter speichern`;
-                    return "Speichern";
-                  })()}
-                </Button>
-                {!fehlzeitTyp && (
-                  <Button
-                    onClick={() => submit(true)}
-                    variant="outline"
-                    className="flex-1 h-12"
-                    title="Speichern und direkt im Anschluss eine weitere Baustelle buchen"
-                  >
-                    + weitere Baustelle
-                  </Button>
-                )}
-              </div>
-              {!fehlzeitTyp && !continuationOf && (
+              {/* Submit-Button — Auto-Reset für nächsten Block nach Save (nur bei Arbeit) */}
+              <Button
+                onClick={() => submit(!fehlzeitTyp)}
+                className="w-full h-12 text-base"
+              >
+                <Plus className="h-5 w-5 mr-2" />
+                {(() => {
+                  const ma = forUserIds.size;
+                  const days = fehlzeitWorkdays;
+                  if (days > 1 && ma > 1)
+                    return `Für ${ma} MA × ${days} Tage speichern`;
+                  if (days > 1) return `Für ${days} Tage speichern`;
+                  if (ma > 1) return `Für ${ma} Mitarbeiter speichern`;
+                  return "Block speichern";
+                })()}
+              </Button>
+              {!fehlzeitTyp && (
                 <div className="text-[11px] text-muted-foreground text-center -mt-1">
-                  Bei Wechsel auf eine andere Baustelle am selben Tag → „+ weitere Baustelle"
+                  Nach dem Speichern öffnet sich gleich der nächste Block — so kannst du mehrere Baustellen am Tag erfassen.
                 </div>
               )}
             </CardContent>
