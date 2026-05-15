@@ -25,10 +25,13 @@ const fmtH = (n: number) => n.toFixed(2).replace(".", ",");
 const fmtH1 = (n: number) => n.toFixed(1).replace(".", ",");
 
 function pauseDauerMin(s: Stunde): number {
-  if (!s.pause_von || !s.pause_bis) return 0;
-  const [vh, vm] = s.pause_von.slice(0, 5).split(":").map(Number);
-  const [bh, bm] = s.pause_bis.slice(0, 5).split(":").map(Number);
-  return bh * 60 + bm - (vh * 60 + vm);
+  const span = (von: string | null | undefined, bis: string | null | undefined) => {
+    if (!von || !bis) return 0;
+    const [vh, vm] = von.slice(0, 5).split(":").map(Number);
+    const [bh, bm] = bis.slice(0, 5).split(":").map(Number);
+    return Math.max(0, bh * 60 + bm - (vh * 60 + vm));
+  };
+  return span(s.pause_von, s.pause_bis) + span(s.pause_vm_von, s.pause_vm_bis);
 }
 
 function fehlzeitColor(typ: string | null): string {

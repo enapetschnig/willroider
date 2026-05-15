@@ -258,6 +258,8 @@ export type Database = {
           end_zeit: string | null;
           pause_von: string | null;
           pause_bis: string | null;
+          pause_vm_von: string | null;
+          pause_vm_bis: string | null;
           fehlzeit_typ: string | null;
           fehlzeit_stunden: number | null;
           taetigkeit: string | null;

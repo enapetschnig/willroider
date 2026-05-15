@@ -68,7 +68,10 @@ import {
   DEFAULT_END,
   DEFAULT_PAUSE_VON,
   DEFAULT_PAUSE_BIS,
+  DEFAULT_PAUSE_VM_VON,
+  DEFAULT_PAUSE_VM_BIS,
 } from "@/lib/stundenTime";
+import { useSollHoursForDay } from "@/hooks/useSollHoursForDay";
 import { PersonPicker, type Mode } from "@/components/stunden/PersonPicker";
 import { BaustelleCombobox } from "@/components/stunden/BaustelleCombobox";
 import { TimeStepper } from "@/components/stunden/TimeStepper";
@@ -134,6 +137,12 @@ export default function Stunden() {
   const [hasPause, setHasPause] = useState<boolean>(true);
   const [pauseVon, setPauseVon] = useState<string>(DEFAULT_PAUSE_VON);
   const [pauseBis, setPauseBis] = useState<string>(DEFAULT_PAUSE_BIS);
+  // Vormittagspause (Bau-KV: 20 min, unbezahlt — wird wie die Mittagspause abgezogen)
+  const [hasPauseVm, setHasPauseVm] = useState<boolean>(true);
+  const [pauseVmVon, setPauseVmVon] = useState<string>(DEFAULT_PAUSE_VM_VON);
+  const [pauseVmBis, setPauseVmBis] = useState<string>(DEFAULT_PAUSE_VM_BIS);
+  // Wenn User die Endzeit manuell bearbeitet hat, soll Auto-Berechnung nicht überschreiben
+  const [endManuallyEdited, setEndManuallyEdited] = useState<boolean>(false);
 
   // Fehlzeit-Mode hours
   const [fehlzeitHours, setFehlzeitHours] = useState<number>(8);
@@ -167,9 +176,11 @@ export default function Stunden() {
         startZeit,
         endZeit,
         hasPause ? pauseVon : null,
-        hasPause ? pauseBis : null
+        hasPause ? pauseBis : null,
+        hasPauseVm ? pauseVmVon : null,
+        hasPauseVm ? pauseVmBis : null,
       ),
-    [startZeit, endZeit, hasPause, pauseVon, pauseBis]
+    [startZeit, endZeit, hasPause, pauseVon, pauseBis, hasPauseVm, pauseVmVon, pauseVmBis]
   );
 
   // Auto-Diäten nach Bau-KV § 9 I Z 4 — werden bei !taggeldManuell live gesetzt
@@ -424,8 +435,9 @@ export default function Stunden() {
       ? "bg-sky-100 text-sky-900 border-sky-300"
       : "bg-muted text-foreground border-border";
 
-  // Pause: pro Tag nur einmal (vom Lohn her). Wenn der primäre User heute
-  // irgendwo eine Buchung mit pause_von/bis hat, wird der Pause-Toggle gesperrt.
+  // Pausen pro Tag nur einmal (vom Lohn her). Wenn der primäre User heute
+  // irgendwo eine Buchung mit pause_von/bis bzw. pause_vm_von/bis hat, wird der
+  // jeweilige Pause-Toggle gesperrt.
   const pauseAlreadyBookedToday = useMemo(() => {
     const blockWithPause = todayBlocks.find((r) => r.pause_von && r.pause_bis);
     if (!blockWithPause) return null;
@@ -435,15 +447,67 @@ export default function Stunden() {
     };
   }, [todayBlocks]);
 
-  // Pause-Toggle automatisch ausschalten, wenn am Tag schon eine gebucht wurde
+  const pauseVmAlreadyBookedToday = useMemo(() => {
+    const blockWithVm = todayBlocks.find((r) => r.pause_vm_von && r.pause_vm_bis);
+    if (!blockWithVm) return null;
+    return {
+      von: fmtTime(blockWithVm.pause_vm_von),
+      bis: fmtTime(blockWithVm.pause_vm_bis),
+    };
+  }, [todayBlocks]);
+
+  // Pause-Toggles automatisch ausschalten, wenn am Tag schon eine gebucht wurde
   useEffect(() => {
     if (pauseAlreadyBookedToday && hasPause) setHasPause(false);
   }, [pauseAlreadyBookedToday]);
+  useEffect(() => {
+    if (pauseVmAlreadyBookedToday && hasPauseVm) setHasPauseVm(false);
+  }, [pauseVmAlreadyBookedToday]);
 
   // Continuation-State zurücksetzen, wenn Datum oder primärer User wechselt
   useEffect(() => {
     setContinuationOf(null);
+    setEndManuallyEdited(false);
   }, [date, primaryUserId]);
+
+  // ─── Soll-Stunden für (primärer Mitarbeiter, Tag) laden — Basis für Auto-Endzeit ───
+  const { sollHours } = useSollHoursForDay(primaryUserId, date);
+
+  // ─── Auto-Endzeit-Berechnung ───
+  // end = start + (soll - bereits_gebuchte_Stunden) + Pausen-Dauer (falls Pausen aktiv)
+  // Wenn User die Endzeit manuell editiert hat: nicht überschreiben.
+  useEffect(() => {
+    if (fehlzeitTyp) return; // Bei Fehlzeit ohne Auto-Endzeit
+    if (endManuallyEdited) return;
+    if (!sollHours || sollHours <= 0) return; // Freier Tag → bei Default lassen
+    const alreadyWorked = todayBlocks
+      .filter((r) => !r.fehlzeit_typ)
+      .reduce((acc, r) => acc + Number(r.arbeitsstunden ?? 0), 0);
+    const remaining = Math.max(0, sollHours - alreadyWorked);
+    if (remaining <= 0) return;
+    const startMin = timeToMin(startZeit);
+    const pauseMin = hasPause ? Math.max(0, timeToMin(pauseBis) - timeToMin(pauseVon)) : 0;
+    const pauseVmMin = hasPauseVm
+      ? Math.max(0, timeToMin(pauseVmBis) - timeToMin(pauseVmVon))
+      : 0;
+    const endMin = startMin + Math.round(remaining * 60) + pauseMin + pauseVmMin;
+    const newEnd = minToTime(Math.min(23 * 60 + 45, endMin));
+    if (newEnd !== endZeit) {
+      setEndZeit(newEnd);
+    }
+  }, [
+    sollHours,
+    startZeit,
+    hasPause,
+    pauseVon,
+    pauseBis,
+    hasPauseVm,
+    pauseVmVon,
+    pauseVmBis,
+    todayBlocks,
+    fehlzeitTyp,
+    endManuallyEdited,
+  ]);
 
   // ─── Konflikt-Warnung: gleicher Mitarbeiter + Zeitfenster überschneidet sich ───
   // (Mehrere Buchungen pro Tag sind erlaubt — auch auf gleicher Baustelle —
@@ -473,6 +537,10 @@ export default function Stunden() {
     setHasPause(true);
     setPauseVon(DEFAULT_PAUSE_VON);
     setPauseBis(DEFAULT_PAUSE_BIS);
+    setHasPauseVm(true);
+    setPauseVmVon(DEFAULT_PAUSE_VM_VON);
+    setPauseVmBis(DEFAULT_PAUSE_VM_BIS);
+    setEndManuallyEdited(false);
   };
 
   const fullReset = () => {
@@ -513,9 +581,16 @@ export default function Stunden() {
     if (lastBlock?.end_zeit) {
       const newStart = fmtTime(lastBlock.end_zeit) || DEFAULT_START;
       setStartZeit(newStart);
-      // Default-Ende: Anschluss + 4h, lässt sich sofort anpassen
+      // Default-Ende: Anschluss + 4h. Wird durch Auto-Endzeit-Effekt überschrieben,
+      // sobald sollHours geladen ist.
       setEndZeit(shiftTime(newStart, 4 * 60));
-      setHasPause(false); // Pause war ja schon im ersten Block
+      setEndManuallyEdited(false);
+      // Pausen-Toggles: Lockout-Effekte greifen automatisch, wenn die letzte Buchung
+      // Pause/VM-Pause enthielt — wir setzen hier provisorisch auf false damit kein
+      // Doppel-Eintrag entsteht. Wenn der User in der ersten Buchung KEINE Pause
+      // gebucht hat, kann er die jetzt nachholen (Toggle wieder einschalten).
+      setHasPause(false);
+      setHasPauseVm(false);
       setContinuationOf({
         bvhName: lastBaustelleName ?? null,
         endZeit: newStart,
@@ -583,6 +658,8 @@ export default function Stunden() {
     const sEnd = isFehlzeit ? null : snap15(endZeit);
     const sPauseVon = !isFehlzeit && hasPause ? snap15(pauseVon) : null;
     const sPauseBis = !isFehlzeit && hasPause ? snap15(pauseBis) : null;
+    const sPauseVmVon = !isFehlzeit && hasPauseVm ? snap15(pauseVmVon) : null;
+    const sPauseVmBis = !isFehlzeit && hasPauseVm ? snap15(pauseVmBis) : null;
 
     let arbeit = 0;
     if (!isFehlzeit) {
@@ -594,11 +671,19 @@ export default function Stunden() {
         const pv = timeToMin(sPauseVon!);
         const pb = timeToMin(sPauseBis!);
         if (pb <= pv) {
-          toast({ variant: "destructive", title: "Pause-Ende muss nach Pause-Beginn liegen." });
+          toast({ variant: "destructive", title: "Mittagspause-Ende muss nach -Beginn liegen." });
           return;
         }
       }
-      arbeit = calcArbeitsstunden(sStart, sEnd, sPauseVon, sPauseBis);
+      if (hasPauseVm) {
+        const pv = timeToMin(sPauseVmVon!);
+        const pb = timeToMin(sPauseVmBis!);
+        if (pb <= pv) {
+          toast({ variant: "destructive", title: "Vormittagspause-Ende muss nach -Beginn liegen." });
+          return;
+        }
+      }
+      arbeit = calcArbeitsstunden(sStart, sEnd, sPauseVon, sPauseBis, sPauseVmVon, sPauseVmBis);
       if (arbeit <= 0) {
         toast({ variant: "destructive", title: "Arbeitszeit ist 0 — bitte prüfen." });
         return;
@@ -672,6 +757,8 @@ export default function Stunden() {
       end_zeit: sEnd,
       pause_von: sPauseVon,
       pause_bis: sPauseBis,
+      pause_vm_von: sPauseVmVon,
+      pause_vm_bis: sPauseVmBis,
       arbeitsstunden: isFehlzeit ? 0 : arbeit,
       fahrstunden,
       taggeld_kurz: !isFehlzeit && inFirma ? 0 : taggeldKurz,
@@ -1076,20 +1163,71 @@ export default function Stunden() {
                 <div className="space-y-3 border-t pt-3">
                   <div className="grid grid-cols-2 gap-2">
                     <TimeStepper label="Startzeit" value={startZeit} onChange={setStartZeit} big />
-                    <TimeStepper label="Endzeit" value={endZeit} onChange={setEndZeit} big />
+                    <TimeStepper
+                      label="Endzeit"
+                      value={endZeit}
+                      onChange={(v) => {
+                        setEndManuallyEdited(true);
+                        setEndZeit(v);
+                      }}
+                      big
+                    />
                   </div>
 
-                  {/* Pause-Sektion: gesperrt wenn am Tag schon eine gebucht ist */}
+                  {/* Vormittagspause: 20 min, unbezahlt — pro Tag nur 1× */}
+                  {pauseVmAlreadyBookedToday ? (
+                    <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2.5 flex items-start gap-2 text-xs">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <div className="font-semibold text-emerald-900">
+                          Vormittagspause heute schon gebucht
+                        </div>
+                        <div className="text-emerald-800 mt-0.5">
+                          {pauseVmAlreadyBookedToday.von}–{pauseVmAlreadyBookedToday.bis} im vorherigen
+                          Block — keine zweite VM-Pause nötig.
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 pt-1">
+                        <Switch
+                          checked={hasPauseVm}
+                          onCheckedChange={setHasPauseVm}
+                          id="has_pause_vm"
+                        />
+                        <Label htmlFor="has_pause_vm" className="text-sm cursor-pointer">
+                          Vormittagspause (≈ 20 min)
+                        </Label>
+                      </div>
+                      {hasPauseVm && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <TimeStepper
+                            label="VM-Pause von"
+                            value={pauseVmVon}
+                            onChange={setPauseVmVon}
+                          />
+                          <TimeStepper
+                            label="VM-Pause bis"
+                            value={pauseVmBis}
+                            onChange={setPauseVmBis}
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Mittagspause: 30 min, unbezahlt — pro Tag nur 1× */}
                   {pauseAlreadyBookedToday ? (
                     <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2.5 flex items-start gap-2 text-xs">
                       <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
                       <div className="flex-1">
                         <div className="font-semibold text-emerald-900">
-                          Pause heute schon gebucht
+                          Mittagspause heute schon gebucht
                         </div>
                         <div className="text-emerald-800 mt-0.5">
                           {pauseAlreadyBookedToday.von}–{pauseAlreadyBookedToday.bis} im vorherigen
-                          Block — keine zweite Pause nötig.
+                          Block — keine zweite Mittagspause nötig.
                         </div>
                       </div>
                     </div>
@@ -1102,19 +1240,19 @@ export default function Stunden() {
                           id="has_pause"
                         />
                         <Label htmlFor="has_pause" className="text-sm cursor-pointer">
-                          Pause angeben
+                          Mittagspause (≈ 30 min)
                         </Label>
                       </div>
 
                       {hasPause && (
                         <div className="grid grid-cols-2 gap-2">
                           <TimeStepper
-                            label="Pause von"
+                            label="Mittagspause von"
                             value={pauseVon}
                             onChange={setPauseVon}
                           />
                           <TimeStepper
-                            label="Pause bis"
+                            label="Mittagspause bis"
                             value={pauseBis}
                             onChange={setPauseBis}
                           />
@@ -1150,10 +1288,16 @@ export default function Stunden() {
                     </div>
                     <div className="text-[10px] text-muted-foreground text-right">
                       {fmtTime(startZeit)}–{fmtTime(endZeit)}
+                      {hasPauseVm && (
+                        <>
+                          <br />
+                          VM {fmtTime(pauseVmVon)}–{fmtTime(pauseVmBis)}
+                        </>
+                      )}
                       {hasPause && (
                         <>
                           <br />
-                          Pause {fmtTime(pauseVon)}–{fmtTime(pauseBis)}
+                          Mittag {fmtTime(pauseVon)}–{fmtTime(pauseBis)}
                         </>
                       )}
                     </div>
@@ -1630,6 +1774,15 @@ function EditForm({
   const [hasPause, setHasPause] = useState<boolean>(!!row.pause_von && !!row.pause_bis);
   const [pauseVon, setPauseVon] = useState<string>(fmtTime(row.pause_von) || DEFAULT_PAUSE_VON);
   const [pauseBis, setPauseBis] = useState<string>(fmtTime(row.pause_bis) || DEFAULT_PAUSE_BIS);
+  const [hasPauseVm, setHasPauseVm] = useState<boolean>(
+    !!row.pause_vm_von && !!row.pause_vm_bis,
+  );
+  const [pauseVmVon, setPauseVmVon] = useState<string>(
+    fmtTime(row.pause_vm_von) || DEFAULT_PAUSE_VM_VON,
+  );
+  const [pauseVmBis, setPauseVmBis] = useState<string>(
+    fmtTime(row.pause_vm_bis) || DEFAULT_PAUSE_VM_BIS,
+  );
   const [hours, setHours] = useState<number>(
     Number(row.arbeitsstunden ?? row.fehlzeit_stunden ?? 0)
   );
@@ -1653,11 +1806,15 @@ function EditForm({
       const sEnd = snap15(endZeit);
       const sPV = hasPause ? snap15(pauseVon) : null;
       const sPB = hasPause ? snap15(pauseBis) : null;
+      const sPVMV = hasPauseVm ? snap15(pauseVmVon) : null;
+      const sPVMB = hasPauseVm ? snap15(pauseVmBis) : null;
       update.start_zeit = sStart;
       update.end_zeit = sEnd;
       update.pause_von = sPV;
       update.pause_bis = sPB;
-      arbeit = calcArbeitsstunden(sStart, sEnd, sPV, sPB);
+      update.pause_vm_von = sPVMV;
+      update.pause_vm_bis = sPVMB;
+      arbeit = calcArbeitsstunden(sStart, sEnd, sPV, sPB, sPVMV, sPVMB);
       update.arbeitsstunden = arbeit;
     } else {
       arbeit = hours;
@@ -1707,13 +1864,23 @@ function EditForm({
             <TimeStepper label="Ende" value={endZeit} onChange={setEndZeit} />
           </div>
           <div className="flex items-center gap-2">
+            <Switch checked={hasPauseVm} onCheckedChange={setHasPauseVm} />
+            <Label>Vormittagspause</Label>
+          </div>
+          {hasPauseVm && (
+            <div className="grid grid-cols-2 gap-2">
+              <TimeStepper label="VM-Pause von" value={pauseVmVon} onChange={setPauseVmVon} />
+              <TimeStepper label="VM-Pause bis" value={pauseVmBis} onChange={setPauseVmBis} />
+            </div>
+          )}
+          <div className="flex items-center gap-2">
             <Switch checked={hasPause} onCheckedChange={setHasPause} />
-            <Label>Pause</Label>
+            <Label>Mittagspause</Label>
           </div>
           {hasPause && (
             <div className="grid grid-cols-2 gap-2">
-              <TimeStepper label="Pause von" value={pauseVon} onChange={setPauseVon} />
-              <TimeStepper label="Pause bis" value={pauseBis} onChange={setPauseBis} />
+              <TimeStepper label="Mittagspause von" value={pauseVon} onChange={setPauseVon} />
+              <TimeStepper label="Mittagspause bis" value={pauseBis} onChange={setPauseBis} />
             </div>
           )}
           <div className="text-xs text-muted-foreground">
@@ -1724,7 +1891,9 @@ function EditForm({
                   startZeit,
                   endZeit,
                   hasPause ? pauseVon : null,
-                  hasPause ? pauseBis : null
+                  hasPause ? pauseBis : null,
+                  hasPauseVm ? pauseVmVon : null,
+                  hasPauseVm ? pauseVmBis : null
                 )
               )}
             </strong>

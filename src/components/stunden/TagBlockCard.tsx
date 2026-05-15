@@ -123,10 +123,15 @@ export function TagBlockCard({
             </div>
           )}
 
-          {/* Zeile 3: Pause + Tätigkeit */}
+          {/* Zeile 3: Pausen + Tätigkeit */}
+          {!isFehlzeit && row.pause_vm_von && row.pause_vm_bis && (
+            <div className="text-[11px] text-muted-foreground mt-0.5">
+              VM-Pause {fmtTime(row.pause_vm_von)}–{fmtTime(row.pause_vm_bis)}
+            </div>
+          )}
           {!isFehlzeit && row.pause_von && row.pause_bis && (
             <div className="text-[11px] text-muted-foreground mt-0.5">
-              Pause {fmtTime(row.pause_von)}–{fmtTime(row.pause_bis)}
+              Mittag {fmtTime(row.pause_von)}–{fmtTime(row.pause_bis)}
             </div>
           )}
           {row.taetigkeit && (
