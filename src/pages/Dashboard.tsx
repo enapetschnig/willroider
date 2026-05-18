@@ -20,6 +20,7 @@ import {
   Briefcase,
   AlertCircle,
   ShieldAlert,
+  FileText,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 import { BerichteHintCard } from "@/components/dashboard/BerichteHintCard";
@@ -336,6 +337,15 @@ export default function Dashboard() {
       desc: "Übersicht aller Baustellen",
       cta: "Baustellen öffnen",
       icon: Building2,
+      show: true,
+      color: WILLROIDER_RED,
+    },
+    {
+      to: "/berichte",
+      label: "Berichte",
+      desc: "Bautagesberichte & Regieberichte",
+      cta: "Berichte öffnen",
+      icon: FileText,
       show: true,
       color: WILLROIDER_RED,
     },

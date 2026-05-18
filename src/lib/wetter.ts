@@ -57,6 +57,37 @@ function heuteIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * Geocode AT-Adresse via Nominatim (OpenStreetMap, kostenlos, kein API-Key).
+ * Liefert null wenn Adresse leer / Nominatim erfolglos.
+ * Aufrufer sollte das Ergebnis in `baustellen.koordinaten_lat/lng` cachen,
+ * damit nicht jedesmal neu angefragt wird (Nominatim erlaubt max. 1 req/sec).
+ */
+export async function geocodeAdresse(
+  strasse: string | null | undefined,
+  plz: string | null | undefined,
+  ort: string | null | undefined,
+): Promise<{ lat: number; lng: number } | null> {
+  const parts = [strasse, plz, ort].map((s) => (s ?? "").trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+  const q = parts.join(", ");
+  const url =
+    `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=at` +
+    `&q=${encodeURIComponent(q)}`;
+  try {
+    const res = await fetch(url, { headers: { "Accept-Language": "de" } });
+    if (!res.ok) return null;
+    const arr = await res.json();
+    if (!Array.isArray(arr) || arr.length === 0) return null;
+    const lat = Number(arr[0].lat);
+    const lng = Number(arr[0].lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchWetterFuerTag(
   lat: number,
   lng: number,

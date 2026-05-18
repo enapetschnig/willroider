@@ -65,7 +65,7 @@ import {
   uebernehmeVorausfuellung,
   pruefeZeiterfassungNeuer,
 } from "@/hooks/useBerichtVorausfuellung";
-import { fetchWetterFuerTag } from "@/lib/wetter";
+import { fetchWetterFuerTag, geocodeAdresse } from "@/lib/wetter";
 import { compressImage } from "@/lib/imageCompress";
 import { readFotoMeta } from "@/lib/exif";
 import { generateAndUploadBerichtPdf } from "@/lib/berichtPdf";
@@ -123,6 +123,44 @@ export default function BerichtDetail() {
     ).then(setZeiterfassungNeuer);
   }, [bericht?.bericht.id, bericht?.bericht.zeiterfassung_quelle_am]);
 
+  // Auto-Vorausfüllung beim ersten Öffnen — Hook MUSS vor Early-Returns stehen
+  // (Rules of Hooks); Null-Check + Bedingungen im Effect-Body.
+  useEffect(() => {
+    if (!bericht) return;
+    const b0 = bericht.bericht;
+    if (
+      b0.status !== "entwurf" ||
+      b0.zeiterfassung_quelle_am ||
+      bericht.mitarbeiter.length > 0 ||
+      bericht.taetigkeiten.length > 0
+    ) {
+      return;
+    }
+    setBusy(true);
+    (async () => {
+      try {
+        const r = await ladeVorausfuellung(b0.baustelle_id, b0.datum);
+        await uebernehmeVorausfuellung(b0.id, r);
+        toast({
+          title:
+            r.mitarbeiter.length > 0
+              ? `${r.mitarbeiter.length} Mitarbeiter aus Zeiterfassung übernommen`
+              : "Keine Zeiterfassung gefunden — manuell ergänzen",
+        });
+        refetch();
+      } catch (e) {
+        toast({
+          variant: "destructive",
+          title: "Fehler",
+          description: (e as Error).message,
+        });
+      } finally {
+        setBusy(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bericht?.bericht.id]);
+
   if (isLoading) {
     return (
       <Card>
@@ -155,7 +193,7 @@ export default function BerichtDetail() {
   const istRegie = b.typ === "regiebericht";
   const sb = STATUS_BADGE[b.status];
 
-  // ─── Erst-Vorausfüllung wenn noch nie geladen ─────────────────────────
+  // Manueller "Daten neu übernehmen" Trigger (vom Reload-Banner)
   const erstvorausfuellen = async () => {
     setBusy(true);
     try {
@@ -178,19 +216,6 @@ export default function BerichtDetail() {
       setBusy(false);
     }
   };
-
-  useEffect(() => {
-    // Auto-Vorausfüllung nur beim ersten Öffnen wenn keine Daten + entwurf
-    if (
-      b.status === "entwurf" &&
-      !b.zeiterfassung_quelle_am &&
-      bericht.mitarbeiter.length === 0 &&
-      bericht.taetigkeiten.length === 0
-    ) {
-      erstvorausfuellen();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [b.id]);
 
   return (
     <div className="space-y-4 max-w-3xl mx-auto">
@@ -412,27 +437,49 @@ function WetterCard({
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
 
-  const fetchWetter = async () => {
-    if (!baustelle?.koordinaten_lat || !baustelle?.koordinaten_lng) {
-      toast({
-        variant: "destructive",
-        title: "Koordinaten fehlen",
-        description: "Baustelle hat keine GPS-Koordinaten. Bitte manuell eintragen.",
-      });
-      return;
-    }
+  /**
+   * Holt Wetter. Wenn Baustelle keine GPS-Koord. hat, wird zuerst per
+   * Nominatim die Adresse geocoded und die Koord. zur Baustelle persistiert.
+   * `silent=true` unterdrückt Toasts (für Auto-Fetch).
+   */
+  const fetchWetter = async (silent = false) => {
+    if (!baustelle) return;
+    let lat = baustelle.koordinaten_lat;
+    let lng = baustelle.koordinaten_lng;
     setLoading(true);
     try {
-      const w = await fetchWetterFuerTag(
-        baustelle.koordinaten_lat,
-        baustelle.koordinaten_lng,
-        bericht.datum,
-      );
+      if (lat == null || lng == null) {
+        const geo = await geocodeAdresse(
+          baustelle.baustellen_adresse,
+          baustelle.plz,
+          baustelle.ort,
+        );
+        if (!geo) {
+          if (!silent) {
+            toast({
+              variant: "destructive",
+              title: "Adresse konnte nicht geocoded werden",
+              description: "Bitte Adresse oder GPS-Koordinaten an der Baustelle pflegen.",
+            });
+          }
+          return;
+        }
+        lat = geo.lat;
+        lng = geo.lng;
+        // Cache die Koordinaten in der Baustelle für die nächste Anfrage.
+        await supabase
+          .from("baustellen")
+          .update({ koordinaten_lat: lat, koordinaten_lng: lng })
+          .eq("id", baustelle.id);
+      }
+      const w = await fetchWetterFuerTag(lat, lng, bericht.datum);
       if (!w) {
-        toast({
-          variant: "destructive",
-          title: "Wetter konnte nicht geladen werden",
-        });
+        if (!silent) {
+          toast({
+            variant: "destructive",
+            title: "Wetter konnte nicht geladen werden",
+          });
+        }
         return;
       }
       onSave({
@@ -442,21 +489,24 @@ function WetterCard({
         niederschlag_mm: w.niederschlag_mm,
         wetter_quelle: w.quelle,
       });
-      toast({ title: "Wetter geladen" });
+      if (!silent) toast({ title: "Wetter geladen" });
     } finally {
       setLoading(false);
     }
   };
 
-  // Beim ersten Öffnen + wenn noch kein Wetter: auto-fetch (best effort)
+  // Beim ersten Öffnen + wenn noch kein Wetter: auto-fetch (silent, best effort)
   useEffect(() => {
     if (
       kannEditieren &&
       !bericht.wetter_beschreibung &&
-      baustelle?.koordinaten_lat &&
-      baustelle?.koordinaten_lng
+      baustelle &&
+      // mindestens GPS oder Adresse muss vorhanden sein
+      (baustelle.koordinaten_lat != null ||
+        baustelle.baustellen_adresse ||
+        baustelle.ort)
     ) {
-      fetchWetter();
+      fetchWetter(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baustelle?.id]);
@@ -477,19 +527,26 @@ function WetterCard({
             <Button
               size="sm"
               variant="outline"
-              onClick={fetchWetter}
-              disabled={loading || !baustelle?.koordinaten_lat}
+              onClick={() => fetchWetter(false)}
+              disabled={
+                loading ||
+                (baustelle?.koordinaten_lat == null &&
+                  !baustelle?.baustellen_adresse &&
+                  !baustelle?.ort)
+              }
             >
               {loading && <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />}
               <RefreshCw className="h-3 w-3 mr-1.5" /> Aus Open-Meteo laden
             </Button>
           )}
         </div>
-        {!baustelle?.koordinaten_lat && (
-          <div className="text-[11px] text-muted-foreground">
-            Baustelle hat keine GPS-Koordinaten — Wetter manuell eintragen.
-          </div>
-        )}
+        {baustelle?.koordinaten_lat == null &&
+          !baustelle?.baustellen_adresse &&
+          !baustelle?.ort && (
+            <div className="text-[11px] text-muted-foreground">
+              Baustelle hat weder GPS-Koordinaten noch Adresse — Wetter manuell eintragen.
+            </div>
+          )}
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
           <div className="space-y-1 sm:col-span-2">
             <Label className="text-xs">Beschreibung</Label>
