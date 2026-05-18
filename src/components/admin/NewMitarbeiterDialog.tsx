@@ -44,7 +44,8 @@ const todayIso = () => {
 
 export interface CredentialsResult {
   user_id: string;
-  email: string;
+  telefon: string;
+  email: string | null;
   initial_password: string;
   magic_link: string | null;
   sms_status: "sent" | "skipped" | "error";
@@ -119,7 +120,7 @@ export function NewMitarbeiterDialog({
   }, [open]);
 
   const telefonNorm = telefon.trim() ? normalizeAtPhone(telefon) : null;
-  const telefonValid = !telefon.trim() || telefonNorm !== null;
+  const telefonValid = telefonNorm !== null;
 
   const emailValid =
     !email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
@@ -188,7 +189,8 @@ export function NewMitarbeiterDialog({
 
     const result: CredentialsResult = {
       user_id: data.user_id,
-      email: data.email,
+      telefon: data.telefon ?? telefonNorm!,
+      email: data.email ?? null,
       initial_password: data.initial_password,
       magic_link: data.magic_link ?? null,
       sms_status: data.sms_status ?? "skipped",
@@ -254,36 +256,17 @@ export function NewMitarbeiterDialog({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="nm-email">E-Mail (optional)</Label>
-                <Input
-                  id="nm-email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="email"
-                  placeholder="leer = Platzhalter wird automatisch generiert"
-                />
-                {!email.trim() && (
-                  <div className="text-[11px] text-muted-foreground">
-                    Wird intern auf …@intern.willroider.app gesetzt. Login funktioniert
-                    weiter über Magic Link aus der SMS oder über E-Mail + Initial-Passwort.
-                  </div>
-                )}
-                {email.trim() && !emailValid && (
-                  <div className="text-[11px] text-destructive">Ungültiges E-Mail-Format</div>
-                )}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="nm-tel">Telefon (0664… oder +43…)</Label>
+                <Label htmlFor="nm-tel">Telefon *</Label>
                 <Input
                   id="nm-tel"
                   type="tel"
                   value={telefon}
                   onChange={(e) => setTelefon(e.target.value)}
+                  required
                   placeholder="z.B. 0664 1234567"
                   autoComplete="tel"
                 />
-                {telefon.trim() && (
+                {telefon.trim() ? (
                   <div
                     className={`text-[11px] ${
                       telefonNorm ? "text-emerald-700" : "text-destructive"
@@ -293,6 +276,25 @@ export function NewMitarbeiterDialog({
                       ? `→ wird gespeichert als ${telefonNorm}`
                       : "Ungültiges Format"}
                   </div>
+                ) : (
+                  <div className="text-[11px] text-muted-foreground">
+                    Wird zum Anmelden verwendet — Mitarbeiter erhält 6-stelligen
+                    SMS-Code, kein E-Mail-Konto nötig.
+                  </div>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="nm-email">E-Mail (optional)</Label>
+                <Input
+                  id="nm-email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  placeholder="Nur eingeben, falls echte E-Mail vorhanden"
+                />
+                {email.trim() && !emailValid && (
+                  <div className="text-[11px] text-destructive">Ungültiges E-Mail-Format</div>
                 )}
               </div>
               <div className="space-y-1.5 sm:col-span-2">
@@ -471,14 +473,13 @@ export function NewMitarbeiterDialog({
                 id="nm-sms"
                 checked={sendSms}
                 onCheckedChange={setSendSms}
-                disabled={!telefonNorm}
               />
               <div className="flex-1">
                 <Label htmlFor="nm-sms" className="text-sm cursor-pointer">
                   SMS-Einladung sofort senden
                 </Label>
                 <div className="text-[11px] text-muted-foreground">
-                  Enthält Login-Link + Backup-Passwort + Install-Anleitung. Erfordert Telefonnummer.
+                  Enthält Login-Anleitung + Backup-Passwort + Install-Hinweis.
                 </div>
               </div>
             </div>

@@ -1,14 +1,18 @@
 // Admin-Anlage eines Mitarbeiter-Kontos. Erstellt:
-// 1. auth.users-Eintrag mit Initial-Passwort + email_confirmed
+// 1. auth.users-Eintrag (mit Telefon-Pflicht + optional Email + Initial-Passwort)
 // 2. profile (über handle_new_user-Trigger; danach via Service-Role ergänzt)
 // 3. user_roles (Trigger setzt 'mitarbeiter' — wenn andere Rolle gewünscht: ersetzen)
 // 4. profile_konten_settings
 // 5. optional initial urlaubs_buchungen / za_buchungen (Saldo zum Eintritt)
-// 6. Magic Link via supabase.auth.admin.generateLink()
-// 7. optional SMS-Einladung via Twilio (inline, mit Magic Link + Backup-Passwort)
+// 6. Magic Link via supabase.auth.admin.generateLink() — nur wenn Email vorhanden
+// 7. SMS-Einladung via Twilio (inline): bei Email → Magic Link, sonst Telefon-OTP-
+//    Anleitung. Initial-Passwort als Backup immer mit drin.
 //
 // Sicherheits-Gates: nur is_admin_role darf aufrufen. Bei jedem Fehler nach
 // createUser wird der angelegte User wieder gelöscht (Rollback).
+//
+// VORAUSSETZUNG für Telefon-OTP-Login: Supabase Auth → Providers → Phone
+// muss aktiviert + mit Twilio (gleiche Creds wie unten) konfiguriert sein.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.79.0';
 
@@ -24,8 +28,8 @@ interface CreateEmployeeRequest {
   // Stammdaten
   vorname: string;
   nachname: string;
-  email?: string;            // optional: wenn leer, wird Platzhalter generiert
-  telefon?: string;
+  telefon: string;          // PFLICHT — wird normalisiert auf E.164
+  email?: string;           // optional, echte Mail
   geburtsdatum?: string;
   // Rolle + Partie
   rolle: AppRole;
@@ -71,32 +75,9 @@ function normalizeAtPhone(input: string | null | undefined): string | null {
   return null;
 }
 
-/**
- * Erzeugt ein 10-stelliges Initial-Passwort, das auch per Stimme oder Hand
- * gut lesbar ist (keine 0/O, 1/l/I-Verwechslungen).
- */
 function generateReadablePassword(length = 10): string {
   const chars = 'abcdefghkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const arr = new Uint32Array(length);
-  crypto.getRandomValues(arr);
-  return Array.from(arr, (n) => chars[n % chars.length]).join('');
-}
-
-/** Slugifiziert vorname/nachname für synthetische Emails — nur ASCII-Buchstaben. */
-function slug(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')   // Diakritika entfernen (Müller → muller)
-    .replace(/ß/g, 'ss')
-    .replace(/[^a-z0-9]+/g, '')
-    .slice(0, 24) || 'user';
-}
-
-/** 4-Zeichen-Suffix damit gleiche Namen nicht kollidieren. */
-function randomSuffix(): string {
-  const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
-  const arr = new Uint32Array(4);
   crypto.getRandomValues(arr);
   return Array.from(arr, (n) => chars[n % chars.length]).join('');
 }
@@ -152,39 +133,46 @@ Deno.serve(async (req) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(eintrittsdatum)) return jsonResponse({ error: 'Eintrittsdatum ungültig (YYYY-MM-DD)' }, 400);
   if (!ALLOWED_ROLES.includes(rolle)) return jsonResponse({ error: 'Ungültige Rolle' }, 400);
 
-  // Synthetische Platzhalter-Email wenn keine eingegeben wurde. Wird in auth.users
-  // gespeichert (Pflichtfeld dort), in profiles.email gespiegelt und kann zur Not
-  // als Login zusammen mit Initial-Passwort verwendet werden.
-  const email = emailInput || `${slug(vorname)}.${slug(nachname)}.${randomSuffix()}@intern.willroider.app`;
-  const emailWasSynthetic = !emailInput;
+  const telefonE164 = normalizeAtPhone(body.telefon);
+  if (!telefonE164) {
+    return jsonResponse({
+      error: 'Telefonnummer ist Pflicht und muss als 0664… oder +43… eingegeben sein.',
+    }, 400);
+  }
 
   const arbeitszeitmodell: Arbeitszeitmodell =
     ALLOWED_AZ_MODELLE.includes(body.arbeitszeitmodell as Arbeitszeitmodell)
       ? (body.arbeitszeitmodell as Arbeitszeitmodell)
       : 'zimmerei_sommer';
 
-  const telefonE164 = body.telefon ? normalizeAtPhone(body.telefon) : null;
-  if (body.telefon && !telefonE164) {
-    return jsonResponse({ error: 'Telefon konnte nicht als E.164 normalisiert werden' }, 400);
-  }
-
   // ─── Auth-User erstellen ───────────────────────────────────────────────
   const initialPassword = generateReadablePassword(10);
 
-  const { data: authCreated, error: createError } = await supabase.auth.admin.createUser({
-    email,
+  const createParams: any = {
+    phone: telefonE164,
+    phone_confirm: true,
     password: initialPassword,
-    email_confirm: true,
     user_metadata: { vorname, nachname, admin_created: true },
-  });
+  };
+  if (emailInput) {
+    createParams.email = emailInput;
+    createParams.email_confirm = true;
+  }
+
+  const { data: authCreated, error: createError } = await supabase.auth.admin.createUser(createParams);
   if (createError || !authCreated?.user) {
     const msg = createError?.message ?? 'createUser fehlgeschlagen';
-    return jsonResponse({ error: msg.includes('already') ? 'E-Mail bereits vergeben' : msg }, 400);
+    const hint = msg.toLowerCase().includes('phone')
+      ? 'Telefonnummer schon vergeben oder Supabase Phone-Auth nicht aktiviert.'
+      : msg.toLowerCase().includes('email')
+      ? 'E-Mail bereits vergeben'
+      : msg;
+    return jsonResponse({ error: hint }, 400);
   }
 
   const newUserId = authCreated.user.id;
 
-  // ─── Rollback-Helper (löscht User wenn nachfolgende Inserts schiefgehen) ─
+  // ─── Rollback-Helper ───────────────────────────────────────────────────
   const rollbackAndFail = async (err: string) => {
     console.error('rollback after create:', err);
     try {
@@ -195,14 +183,16 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: err }, 500);
   };
 
-  // ─── Profile-Felder ergänzen (Trigger handle_new_user hat das Grundgerüst) ─
+  // ─── Profile-Felder ergänzen ────────────────────────────────────────────
   const profileUpdate: Record<string, unknown> = {
     telefon: telefonE164,
     geburtsdatum: body.geburtsdatum || null,
     partie_id: body.partie_id ?? null,
     is_partieleiter: body.is_partieleiter ?? false,
-    is_active: true, // Admin hat angelegt → sofort aktiv
+    is_active: true,
   };
+  if (emailInput) profileUpdate.email = emailInput;
+
   const { error: profileErr } = await supabase
     .from('profiles')
     .update(profileUpdate)
@@ -211,7 +201,6 @@ Deno.serve(async (req) => {
 
   // ─── Rolle korrigieren falls != 'mitarbeiter' ───────────────────────────
   if (rolle !== 'mitarbeiter') {
-    // Trigger hat user_roles(user_id, 'mitarbeiter') angelegt → ersetzen
     await supabase.from('user_roles').delete().eq('user_id', newUserId);
     const { error: roleInsertErr } = await supabase
       .from('user_roles')
@@ -230,7 +219,7 @@ Deno.serve(async (req) => {
   });
   if (kontenErr) return rollbackAndFail(`Konto-Settings: ${kontenErr.message}`);
 
-  // ─── Initial-Urlaubssaldo ──────────────────────────────────────────────
+  // ─── Initial-Saldi ─────────────────────────────────────────────────────
   const initialUrlaubTage = Number(body.initial_urlaub_tage ?? 0);
   if (initialUrlaubTage > 0) {
     const { error: ubErr } = await supabase.from('urlaubs_buchungen').insert({
@@ -244,14 +233,13 @@ Deno.serve(async (req) => {
     if (ubErr) return rollbackAndFail(`Urlaubs-Initial: ${ubErr.message}`);
   }
 
-  // ─── Initial-ZA-Saldo ──────────────────────────────────────────────────
   const initialZaStunden = Number(body.initial_za_stunden ?? 0);
   if (initialZaStunden !== 0) {
     const { error: zaErr } = await supabase.from('za_buchungen').insert({
       mitarbeiter_id: newUserId,
       art: 'initial',
       stunden: initialZaStunden,
-      wirksam_am: eintrittsdatum,          // Pflichtfeld in za_buchungen
+      wirksam_am: eintrittsdatum,
       monat: eintrittsdatum.slice(0, 7),
       notiz: 'Initial-Saldo bei Mitarbeiter-Anlage',
       erstellt_von: user.id,
@@ -259,30 +247,29 @@ Deno.serve(async (req) => {
     if (zaErr) return rollbackAndFail(`ZA-Initial: ${zaErr.message}`);
   }
 
-  // ─── Magic Link generieren ──────────────────────────────────────────────
-  const appUrl = Deno.env.get('APP_URL') || 'https://holzerleben.app';
+  // ─── Magic Link generieren (nur wenn Email vorhanden) ─────────────────
+  const appUrl = Deno.env.get('APP_URL') || 'https://willroider.app';
   let magicLink: string | null = null;
-  try {
-    const { data: linkRes, error: linkErr } = await supabase.auth.admin.generateLink({
-      type: 'magiclink',
-      email,
-      options: { redirectTo: `${appUrl}/` },
-    });
-    if (linkErr) {
-      console.error('generateLink error:', linkErr);
-    } else {
-      magicLink = linkRes?.properties?.action_link ?? null;
+  if (emailInput) {
+    try {
+      const { data: linkRes, error: linkErr } = await supabase.auth.admin.generateLink({
+        type: 'magiclink',
+        email: emailInput,
+        options: { redirectTo: `${appUrl}/` },
+      });
+      if (linkErr) console.error('generateLink error:', linkErr);
+      else magicLink = linkRes?.properties?.action_link ?? null;
+    } catch (e) {
+      console.error('generateLink threw:', e);
     }
-  } catch (e) {
-    console.error('generateLink threw:', e);
   }
 
-  // ─── SMS senden (optional) ─────────────────────────────────────────────
+  // ─── SMS senden ────────────────────────────────────────────────────────
   let smsStatus: 'sent' | 'skipped' | 'error' = 'skipped';
   let smsError: string | null = null;
   let twilioSid: string | null = null;
 
-  if (body.send_sms_invite && telefonE164 && magicLink) {
+  if (body.send_sms_invite) {
     const twilioSid_env = Deno.env.get('TWILIO_ACCOUNT_SID');
     const twilioToken = Deno.env.get('TWILIO_AUTH_TOKEN');
     const twilioFrom = Deno.env.get('TWILIO_PHONE_NUMBER');
@@ -291,21 +278,25 @@ Deno.serve(async (req) => {
       smsStatus = 'error';
       smsError = 'Twilio-Credentials nicht konfiguriert';
     } else {
-      const smsLines = [
-        `Hallo ${vorname},`,
-        '',
-        'deine Holzbau-Willroider-App ist bereit.',
-        '',
-        `Login: ${magicLink}`,
-        '',
-        'Falls Link nicht klappt:',
-        `Mail: ${email}`,
-        `Passwort: ${initialPassword}`,
-        '',
-        'App aufs Handy bringen:',
-        'iPhone (Safari): Teilen → Zum Home-Bildschirm',
-        'Android (Chrome): Menü → App installieren',
-      ];
+      // SMS-Template: bei Email → Magic-Link-Variante, sonst Telefon-OTP-Anleitung
+      const smsLines: string[] = [];
+      smsLines.push(`Hallo ${vorname},`, '', 'deine Holzbau-Willroider-App ist bereit.');
+      if (magicLink) {
+        smsLines.push('', `Sofort-Login: ${magicLink}`);
+        smsLines.push('', 'Falls Link nicht klappt:');
+        smsLines.push(`• App-Login mit Telefon ${telefonE164} → Code anfordern`);
+        smsLines.push(`• Oder mit E-Mail ${emailInput} + Passwort ${initialPassword}`);
+      } else {
+        smsLines.push('', 'So loggst du dich ein:');
+        smsLines.push(`1. App öffnen: ${appUrl}/auth?phone=${encodeURIComponent(telefonE164)}`);
+        smsLines.push('2. "Code anfordern" tippen');
+        smsLines.push('3. Du bekommst einen 6-stelligen Code');
+        smsLines.push('4. Code eingeben → fertig');
+        smsLines.push('', `Backup-Passwort (Telefon + Passwort): ${initialPassword}`);
+      }
+      smsLines.push('', 'App aufs Handy bringen:');
+      smsLines.push('iPhone (Safari): Teilen → Zum Home-Bildschirm');
+      smsLines.push('Android (Chrome): Menü → App installieren');
       const smsText = smsLines.join('\n');
 
       try {
@@ -349,19 +340,13 @@ Deno.serve(async (req) => {
         smsError = e instanceof Error ? e.message : 'Unbekannter Fehler';
       }
     }
-  } else if (body.send_sms_invite && !telefonE164) {
-    smsStatus = 'error';
-    smsError = 'Telefon fehlt';
-  } else if (body.send_sms_invite && !magicLink) {
-    smsStatus = 'error';
-    smsError = 'Magic Link konnte nicht erstellt werden';
   }
 
   return jsonResponse({
     success: true,
     user_id: newUserId,
-    email,
-    email_was_synthetic: emailWasSynthetic,
+    telefon: telefonE164,
+    email: emailInput || null,
     initial_password: initialPassword,
     magic_link: magicLink,
     sms_status: smsStatus,

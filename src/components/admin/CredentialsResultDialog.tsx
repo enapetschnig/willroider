@@ -10,7 +10,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Check, Copy, MessageSquare, AlertTriangle, ShieldCheck } from "lucide-react";
+import {
+  Check,
+  Copy,
+  MessageSquare,
+  AlertTriangle,
+  ShieldCheck,
+  Phone,
+  Mail,
+} from "lucide-react";
 import type { CredentialsResult } from "./NewMitarbeiterDialog";
 
 export function CredentialsResultDialog({
@@ -48,7 +56,7 @@ export function CredentialsResultDialog({
           </DialogTitle>
           <DialogDescription>
             {result &&
-              `${result.vorname} ${result.nachname} wurde angelegt. Die folgenden Daten werden nur jetzt einmalig angezeigt — sie sollten auch in der SMS angekommen sein.`}
+              `${result.vorname} ${result.nachname} wurde angelegt. Diese Daten werden nur jetzt einmalig angezeigt — sie sollten auch in der SMS angekommen sein.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -74,7 +82,7 @@ export function CredentialsResultDialog({
                   <>
                     <strong>SMS gesendet</strong>
                     <div className="mt-0.5">
-                      Der Mitarbeiter erhält in Kürze eine SMS mit Login-Link.
+                      Mitarbeiter erhält in Kürze die Einladung mit Login-Anleitung.
                     </div>
                   </>
                 )}
@@ -98,24 +106,48 @@ export function CredentialsResultDialog({
               </div>
             </div>
 
-            {/* Email */}
+            {/* Login-Anleitung */}
+            <div className="rounded-md border bg-muted/40 p-3 space-y-1.5 text-xs">
+              <div className="font-semibold text-foreground">
+                So loggt sich der Mitarbeiter ein:
+              </div>
+              <ol className="space-y-0.5 list-decimal list-inside text-muted-foreground">
+                <li>
+                  App öffnen → Tab <strong className="text-foreground">„Telefon"</strong>
+                </li>
+                <li>
+                  Nummer{" "}
+                  <strong className="text-foreground tabular-nums">{result.telefon}</strong>{" "}
+                  eingeben
+                </li>
+                <li>„Code per SMS anfordern"</li>
+                <li>6-stelligen Code aus zweiter SMS eingeben → eingeloggt</li>
+              </ol>
+              <div className="text-[11px] text-muted-foreground pt-1">
+                Falls SMS-Code nicht ankommt: „Mit Passwort anmelden" + Initial-Passwort
+                unten.
+              </div>
+            </div>
+
+            {/* Telefon */}
             <div className="space-y-1">
-              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                E-Mail
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                <Phone className="h-3 w-3" />
+                Telefon (Login)
               </div>
               <div className="flex items-center gap-2">
-                <code className="flex-1 px-2 py-1.5 bg-muted rounded text-sm font-mono break-all">
-                  {result.email}
+                <code className="flex-1 px-2 py-1.5 bg-muted rounded text-sm font-mono tabular-nums">
+                  {result.telefon}
                 </code>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => copy("email", result.email)}
+                  onClick={() => copy("telefon", result.telefon)}
                   className="h-9 w-9 p-0 shrink-0"
-                  aria-label="E-Mail kopieren"
+                  aria-label="Telefon kopieren"
                 >
-                  {copied === "email" ? (
+                  {copied === "telefon" ? (
                     <Check className="h-4 w-4 text-emerald-600" />
                   ) : (
                     <Copy className="h-4 w-4" />
@@ -127,7 +159,7 @@ export function CredentialsResultDialog({
             {/* Initial-Passwort */}
             <div className="space-y-1">
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
-                <span>Initial-Passwort</span>
+                <span>Initial-Passwort (Backup)</span>
                 <Badge variant="outline" className="text-[9px] h-4 px-1.5">
                   einmalig
                 </Badge>
@@ -152,16 +184,45 @@ export function CredentialsResultDialog({
                 </Button>
               </div>
               <div className="text-[11px] text-muted-foreground">
-                Wird nach Schließen nicht mehr angezeigt. Bei Bedarf jetzt kopieren oder
-                aufschreiben.
+                Wird nach Schließen nicht mehr angezeigt. Sicherheits-Backup für den Fall,
+                dass keine SMS ankommt.
               </div>
             </div>
 
-            {/* Magic Link (optional, kopierbar — falls SMS nicht ankommt) */}
+            {/* Email (nur wenn vorhanden) */}
+            {result.email && (
+              <div className="space-y-1">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                  <Mail className="h-3 w-3" />
+                  E-Mail
+                </div>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 px-2 py-1.5 bg-muted rounded text-sm font-mono break-all">
+                    {result.email}
+                  </code>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => copy("email", result.email!)}
+                    className="h-9 w-9 p-0 shrink-0"
+                    aria-label="E-Mail kopieren"
+                  >
+                    {copied === "email" ? (
+                      <Check className="h-4 w-4 text-emerald-600" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Magic Link (nur wenn Email vorhanden) */}
             {result.magic_link && (
               <div className="space-y-1">
                 <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                  Login-Link (alternativ)
+                  Sofort-Login-Link (alternativ)
                 </div>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 px-2 py-1.5 bg-muted rounded text-[11px] font-mono break-all truncate">
