@@ -16,6 +16,7 @@ import {
   LogOut,
   Smartphone,
   User as UserIcon,
+  FileText,
 } from "lucide-react";
 import { InstallPromptDialog } from "./InstallPromptDialog";
 import { useAuth } from "@/contexts/AuthContext";
@@ -48,6 +49,7 @@ const NAV: NavItem[] = [
   { to: "/baustellen", label: "Baustellen", icon: Building2, roles: ["all"], end: false },
   { to: "/stunden", label: "Zeiterfassung", icon: Clock, roles: ["all"], end: true },
   { to: "/stunden/auswertung", label: "Auswertung", icon: BarChart3, roles: ["review"], end: true },
+  { to: "/berichte", label: "Berichte", icon: FileText, roles: ["all"], end: false },
   { to: "/admin", label: "Verwaltung", icon: Settings, roles: ["admin"], end: false },
 ];
 

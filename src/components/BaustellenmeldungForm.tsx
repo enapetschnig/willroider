@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -56,6 +57,9 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
     initial?.anzahl_mitarbeiter != null ? String(initial.anzahl_mitarbeiter) : ""
   );
   const [bautraeger, setBautraeger] = useState<boolean>(initial?.bautraeger === true);
+  const [besonderesAugenmerk, setBesonderesAugenmerk] = useState<string>(
+    (initial as any)?.besonderes_augenmerk ?? "",
+  );
 
   useEffect(() => {
     supabase
@@ -90,6 +94,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
       auftragssumme: auftragssumme ? Number(auftragssumme) : null,
       anzahl_mitarbeiter: anzahlMitarbeiter ? Number(anzahlMitarbeiter) : null,
       bautraeger,
+      besonderes_augenmerk: besonderesAugenmerk.trim() || null,
       created_by: user?.id ?? null,
       ...(initial?.id ? {} : { status: "geplant" }),
     };
@@ -296,6 +301,17 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
             Bauvorhaben wird als <strong>Bauträger</strong> ausgeführt
           </Label>
         </div>
+        <Field
+          label="Besonderes Augenmerk"
+          hint={'Wird dem Polier beim Bericht-Schreiben als Warnkarte oben angezeigt (z.B. „Vorsicht, schwacher Holzboden im 2. OG").'}
+        >
+          <Textarea
+            value={besonderesAugenmerk}
+            onChange={(e) => setBesonderesAugenmerk(e.target.value)}
+            rows={2}
+            placeholder="Hinweis, der bei jedem Bericht oben sichtbar wird"
+          />
+        </Field>
       </div>
 
       <div
@@ -316,11 +332,20 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+  hint,
+}: {
+  label: string;
+  children: React.ReactNode;
+  hint?: string;
+}) {
   return (
     <div>
       <Label className="text-xs uppercase tracking-wide text-muted-foreground">{label}</Label>
       <div className="mt-1">{children}</div>
+      {hint && <div className="text-[11px] text-muted-foreground mt-1">{hint}</div>}
     </div>
   );
 }

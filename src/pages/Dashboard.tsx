@@ -22,6 +22,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
+import { BerichteHintCard } from "@/components/dashboard/BerichteHintCard";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 
@@ -360,6 +361,9 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {/* Berichte-Hint (Polier: heutige Berichte, Bauleiter: zu prüfen) */}
+      <BerichteHintCard />
+
       {/* Neue-Anmeldungen-Banner (Admin) — bewusst ganz oben, vor dem Greeting */}
       {isAdmin && pendingCount > 0 && (
         <Card className="border-2 border-amber-500 bg-gradient-to-r from-amber-50 to-amber-100 shadow-md ring-2 ring-amber-500/20">

@@ -18,6 +18,8 @@ import { Navigate } from "react-router-dom";
 import Mitarbeiter from "@/pages/Mitarbeiter";
 import Stunden from "@/pages/Stunden";
 import Stundenauswertung from "@/pages/Stundenauswertung";
+import Berichte from "@/pages/Berichte";
+import BerichtDetail from "@/pages/BerichtDetail";
 import Kalender from "@/pages/Kalender";
 import Evaluierung from "@/pages/Evaluierung";
 import Fahrzeuge from "@/pages/Fahrzeuge";
@@ -53,6 +55,8 @@ const App = () => (
               <Route path="/evaluierung" element={<Navigate to="/admin?tab=evaluierung" replace />} />
               <Route path="/stunden" element={<Stunden />} />
               <Route path="/stunden/auswertung" element={<Stundenauswertung />} />
+              <Route path="/berichte" element={<Berichte />} />
+              <Route path="/berichte/:id" element={<BerichtDetail />} />
               <Route path="/mein-tag" element={<MeinTag />} />
             </Route>
             <Route path="*" element={<NotFound />} />
