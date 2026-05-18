@@ -224,6 +224,7 @@ Deno.serve(async (req) => {
       mitarbeiter_id: newUserId,
       art: 'initial',
       stunden: initialZaStunden,
+      wirksam_am: eintrittsdatum,          // Pflichtfeld in za_buchungen
       monat: eintrittsdatum.slice(0, 7),
       notiz: 'Initial-Saldo bei Mitarbeiter-Anlage',
       erstellt_von: user.id,
