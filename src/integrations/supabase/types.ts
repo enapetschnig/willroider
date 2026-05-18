@@ -28,6 +28,16 @@ export type UrlaubsBuchungArt =
 export type ZaBuchungArt =
   | 'initial' | 'monatsabschluss' | 'zeitausgleich_genommen'
   | 'korrektur' | 'auszahlung';
+
+// Zeiterfassung-Redesign (Phase A)
+export type TagStatus = 'baustelle' | 'firma' | 'krank' | 'urlaub' | 'schlechtwetter' | 'feiertag';
+export type BuchungStatus =
+  | 'erfasst'
+  | 'ma_bestaetigt'
+  | 'zm_freigabe'
+  | 'buero_freigabe'
+  | 'exportiert'
+  | 'abgelehnt';
 export type UrlaubModell = 'fix_datum' | 'eintrittsdatum' | 'monatlich';
 
 export type Database = {
@@ -579,6 +589,158 @@ export type Database = {
         Update: Partial<Database['public']['Tables']['monatsabschluss']['Row']>;
         Relationships: [];
       };
+      taetigkeiten_stamm: {
+        Row: {
+          id: string;
+          bezeichnung: string;
+          sort_order: number;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['taetigkeiten_stamm']['Row']> & {
+          bezeichnung: string;
+        };
+        Update: Partial<Database['public']['Tables']['taetigkeiten_stamm']['Row']>;
+        Relationships: [];
+      };
+      zulagen_typen: {
+        Row: {
+          id: string;
+          bezeichnung: string;
+          sort_order: number;
+          is_active: boolean;
+          ermoeglicht_stunden_split: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['zulagen_typen']['Row']> & {
+          bezeichnung: string;
+        };
+        Update: Partial<Database['public']['Tables']['zulagen_typen']['Row']>;
+        Relationships: [];
+      };
+      mitarbeiter_zulagen: {
+        Row: {
+          mitarbeiter_id: string;
+          zulagen_typ_id: string;
+          created_at: string;
+        };
+        Insert: {
+          mitarbeiter_id: string;
+          zulagen_typ_id: string;
+        };
+        Update: Partial<Database['public']['Tables']['mitarbeiter_zulagen']['Row']>;
+        Relationships: [];
+      };
+      pausen_config: {
+        Row: {
+          typ: 'vormittag' | 'mittag';
+          dauer_minuten: number;
+          default_aktiv: boolean;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['pausen_config']['Row']> & {
+          typ: 'vormittag' | 'mittag';
+          dauer_minuten: number;
+        };
+        Update: Partial<Database['public']['Tables']['pausen_config']['Row']>;
+        Relationships: [];
+      };
+      arbeitszeit_limits: {
+        Row: {
+          id: number;
+          max_netto_pro_tag: number;
+          max_brutto_pro_tag: number;
+          arbeitsbeginn_default: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['arbeitszeit_limits']['Row']>;
+        Update: Partial<Database['public']['Tables']['arbeitszeit_limits']['Row']>;
+        Relationships: [];
+      };
+      stunden_tage: {
+        Row: {
+          id: string;
+          mitarbeiter_id: string;
+          datum: string;
+          tag_status: TagStatus;
+          netto_stunden: number;
+          vm_pause: boolean;
+          mittag_pause: boolean;
+          arbeitsbeginn: string | null;
+          anmerkung: string | null;
+          status: BuchungStatus;
+          erfasst_von: string | null;
+          bestaetigt_am: string | null;
+          freigegeben_zm_id: string | null;
+          freigegeben_zm_am: string | null;
+          freigegeben_buero_id: string | null;
+          freigegeben_buero_am: string | null;
+          abgelehnt_grund: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['stunden_tage']['Row']> & {
+          mitarbeiter_id: string;
+          datum: string;
+          tag_status: TagStatus;
+        };
+        Update: Partial<Database['public']['Tables']['stunden_tage']['Row']>;
+        Relationships: [];
+      };
+      stunden_taetigkeiten: {
+        Row: {
+          id: string;
+          stunden_tag_id: string;
+          position: number;
+          taetigkeit_id: string | null;
+          taetigkeit_freitext: string | null;
+          baustelle_id: string | null;
+          stunden: number;
+          notiz: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['stunden_taetigkeiten']['Row']> & {
+          stunden_tag_id: string;
+          stunden: number;
+        };
+        Update: Partial<Database['public']['Tables']['stunden_taetigkeiten']['Row']>;
+        Relationships: [];
+      };
+      stunden_zulagen: {
+        Row: {
+          id: string;
+          stunden_tag_id: string;
+          zulagen_typ_id: string;
+          stunden: number | null;
+          notiz: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['stunden_zulagen']['Row']> & {
+          stunden_tag_id: string;
+          zulagen_typ_id: string;
+        };
+        Update: Partial<Database['public']['Tables']['stunden_zulagen']['Row']>;
+        Relationships: [];
+      };
+      stunden_fahrt: {
+        Row: {
+          stunden_tag_id: string;
+          fahrtgeld_eur: number;
+          privat_pkw: boolean;
+          km_gefahren: number | null;
+          taggeld_kurz: number;
+          taggeld_lang: number;
+          taggeld_manuell: boolean;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['stunden_fahrt']['Row']> & {
+          stunden_tag_id: string;
+        };
+        Update: Partial<Database['public']['Tables']['stunden_fahrt']['Row']>;
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
     Functions: { [_ in never]: never };
@@ -590,6 +752,8 @@ export type Database = {
       evaluierung_typ: EvaluierungTyp;
       angebot_status: AngebotStatus;
       angebot_ordner: AngebotOrdnerEnum;
+      tag_status: TagStatus;
+      buchung_status: BuchungStatus;
     };
     CompositeTypes: { [_ in never]: never };
   };
