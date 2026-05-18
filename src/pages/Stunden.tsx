@@ -113,6 +113,13 @@ interface TaetigkeitsZeile {
   baustelle_id: string | null;
   notiz: string;
   stundenPerMa: Record<string, number>;
+  proMaModus: boolean;       // false = "alle gleich" (Default), true = pro MA individuell
+}
+
+interface ZulageEintrag {
+  stundenPerMa: Record<string, number | null>;   // null = alle Netto-Stunden des MA
+  notiz: string;
+  proMaModus: boolean;
 }
 
 interface MatrixForm {
@@ -122,7 +129,7 @@ interface MatrixForm {
   mittagPause: boolean;
   arbeitsbeginn: string | null;
   anmerkung: string;
-  zulagenSelected: Map<string, { stunden: number | null; notiz: string }>;
+  zulagenSelected: Map<string, ZulageEintrag>;
   fahrt: SaveFahrt | null;
   fehlzeitStunden: number;
   fehlzeitBis: string;
@@ -138,6 +145,7 @@ function emptyForm(): MatrixForm {
         baustelle_id: null,
         notiz: "",
         stundenPerMa: {},
+        proMaModus: false,
       },
     ],
     vmPause: true,
@@ -149,6 +157,13 @@ function emptyForm(): MatrixForm {
     fehlzeitStunden: 8,
     fehlzeitBis: "",
   };
+}
+
+/** True wenn alle MA in stundenPerMa den gleichen Wert haben (oder leer). */
+function alleGleich<T>(rec: Record<string, T>, userIds: string[]): boolean {
+  if (userIds.length <= 1) return true;
+  const first = rec[userIds[0]];
+  return userIds.every((id) => rec[id] === first);
 }
 
 export default function Stunden() {
@@ -221,6 +236,25 @@ export default function Stunden() {
   const { data: taetigkeitenStamm = [] } = useTaetigkeitenStamm();
   const { data: zulagenTypen = [] } = useZulagenTypen();
   const { data: erlaubteZulagenIds = [] } = useMitarbeiterZulagen(primaryUserId);
+
+  // Union der Zulagen-Berechtigungen aller ausgewählten MA — bei Polier-Bulk
+  // werden alle Zulagen gezeigt, die mindestens 1 MA erhalten darf. Beim Save
+  // wird pro MA gefiltert.
+  const { data: erlaubteZulagenUnion = [] } = useQuery({
+    queryKey: ["mitarbeiter_zulagen_union", Array.from(forUserIds)],
+    queryFn: async () => {
+      const ids = Array.from(forUserIds);
+      if (ids.length === 0) return [];
+      const { data } = await supabase
+        .from("mitarbeiter_zulagen")
+        .select("zulagen_typ_id")
+        .in("mitarbeiter_id", ids);
+      return Array.from(new Set((data ?? []).map((r: any) => r.zulagen_typ_id)));
+    },
+    enabled: forUserIds.size > 0,
+  });
+  const verfuegbareZulagenIds =
+    forUserIds.size > 1 ? erlaubteZulagenUnion : erlaubteZulagenIds;
   const { data: pausen } = usePausenConfig();
   const { data: limits } = useArbeitszeitLimits();
   const { sollHours: primarySoll } = useSollHoursForDay(primaryUserId, date);
@@ -279,61 +313,92 @@ export default function Stunden() {
     }));
   }, [pausen]);
 
-  // Wenn user wechselt forUserIds → für neuen User stundenPerMa initialisieren mit 0
+  // Wenn user wechselt forUserIds → für neuen User stundenPerMa initialisieren
   useEffect(() => {
-    setForm((f) => ({
-      ...f,
-      taetigkeiten: f.taetigkeiten.map((t) => {
-        const next: Record<string, number> = {};
-        for (const uid of forUserIds) {
-          next[uid] = t.stundenPerMa[uid] ?? 0;
-        }
-        return { ...t, stundenPerMa: next };
-      }),
-    }));
+    setForm((f) => {
+      const userIds = Array.from(forUserIds);
+      return {
+        ...f,
+        taetigkeiten: f.taetigkeiten.map((t) => {
+          // Bei "alle gleich" neuen MA mit dem Standard-Wert befüllen
+          const standardWert = userIds.find((id) => t.stundenPerMa[id] !== undefined)
+            ? t.stundenPerMa[userIds.find((id) => t.stundenPerMa[id] !== undefined)!]
+            : 0;
+          const next: Record<string, number> = {};
+          for (const uid of userIds) {
+            next[uid] = t.stundenPerMa[uid] ?? (t.proMaModus ? 0 : standardWert);
+          }
+          return { ...t, stundenPerMa: next };
+        }),
+        zulagenSelected: new Map(
+          Array.from(f.zulagenSelected.entries()).map(([typId, z]) => {
+            const next: Record<string, number | null> = {};
+            const standardWert =
+              userIds.find((id) => z.stundenPerMa[id] !== undefined) !== undefined
+                ? z.stundenPerMa[userIds.find((id) => z.stundenPerMa[id] !== undefined)!]
+                : null;
+            for (const uid of userIds) {
+              next[uid] =
+                z.stundenPerMa[uid] !== undefined
+                  ? z.stundenPerMa[uid]
+                  : z.proMaModus
+                  ? 0
+                  : standardWert;
+            }
+            return [typId, { ...z, stundenPerMa: next }];
+          }),
+        ),
+      };
+    });
   }, [forUserIds]);
 
   // Bei Datums-/User-Wechsel: bestehenden Eintrag des primaryUsers laden
   useEffect(() => {
+    const userIds = Array.from(forUserIds);
     if (!aktuellerEigenerTag) {
       // Form reset wenn auf neuen Tag ohne Daten
-      setForm((f) => ({
+      setForm(() => ({
         ...emptyForm(),
         vmPause: pausen?.vm.default_aktiv ?? true,
         mittagPause: pausen?.mittag.default_aktiv ?? true,
-        // Init stundenPerMa für alle selektierten Users
+        // Init stundenPerMa für alle selektierten Users mit 0 (alle gleich)
         taetigkeiten: [
           {
             taetigkeit_id: null,
             taetigkeit_freitext: "",
             baustelle_id: null,
             notiz: "",
-            stundenPerMa: Object.fromEntries(Array.from(forUserIds).map((uid) => [uid, 0])),
+            stundenPerMa: Object.fromEntries(userIds.map((uid) => [uid, 0])),
+            proMaModus: false,
           },
         ],
       }));
       return;
     }
-    // Bestehender Tag: Form aus Daten füllen (nur für den primary user)
+    // Bestehender Tag: Form aus Daten füllen
     const t = aktuellerEigenerTag;
-    const tStunden = (uid: string, idx: number, defaultVal: number) =>
+    // Bei Single-MA-Bearbeitung: Daten gehören dem primary user.
+    // Wir initialisieren alle anderen User mit 0 (für Bulk-Add nach Edit).
+    const tStunden = (uid: string, defaultVal: number) =>
       uid === primaryUserId ? defaultVal : 0;
     setForm({
       tagStatus: t.tag.tag_status,
       taetigkeiten:
         t.taetigkeiten.length > 0
-          ? t.taetigkeiten.map((tt, idx) => ({
-              taetigkeit_id: tt.taetigkeit_id,
-              taetigkeit_freitext: tt.taetigkeit_freitext ?? "",
-              baustelle_id: tt.baustelle_id,
-              notiz: tt.notiz ?? "",
-              stundenPerMa: Object.fromEntries(
-                Array.from(forUserIds).map((uid) => [
-                  uid,
-                  tStunden(uid, idx, Number(tt.stunden)),
-                ]),
-              ),
-            }))
+          ? t.taetigkeiten.map((tt) => {
+              const stundenPerMa = Object.fromEntries(
+                userIds.map((uid) => [uid, tStunden(uid, Number(tt.stunden))]),
+              );
+              return {
+                taetigkeit_id: tt.taetigkeit_id,
+                taetigkeit_freitext: tt.taetigkeit_freitext ?? "",
+                baustelle_id: tt.baustelle_id,
+                notiz: tt.notiz ?? "",
+                stundenPerMa,
+                // Auto-Detect: bei Single-MA-Edit immer "alle gleich" (kein Multi-MA-Konflikt)
+                proMaModus: userIds.length > 1 && !alleGleich(stundenPerMa, userIds),
+              };
+            })
           : [
               {
                 taetigkeit_id: null,
@@ -341,11 +406,14 @@ export default function Stunden() {
                 baustelle_id: null,
                 notiz: "",
                 stundenPerMa: Object.fromEntries(
-                  Array.from(forUserIds).map((uid) => [
+                  userIds.map((uid) => [
                     uid,
                     uid === primaryUserId ? Number(t.tag.netto_stunden) : 0,
                   ]),
                 ),
+                proMaModus:
+                  userIds.length > 1 &&
+                  userIds.some((u) => u !== primaryUserId),
               },
             ],
       vmPause: t.tag.vm_pause,
@@ -353,10 +421,21 @@ export default function Stunden() {
       arbeitsbeginn: t.tag.arbeitsbeginn?.slice(0, 5) ?? null,
       anmerkung: t.tag.anmerkung ?? "",
       zulagenSelected: new Map(
-        t.zulagen.map((z) => [
-          z.zulagen_typ_id,
-          { stunden: z.stunden ?? null, notiz: z.notiz ?? "" },
-        ]),
+        t.zulagen.map((z) => {
+          // Beim Laden: Zulage gehörte nur dem primary user (Single-Tag)
+          // Andere selektierte MA kriegen den gleichen Wert (alle gleich-Default)
+          const stundenPerMa = Object.fromEntries(
+            userIds.map((uid) => [uid, z.stunden ?? null]),
+          );
+          return [
+            z.zulagen_typ_id,
+            {
+              stundenPerMa,
+              notiz: z.notiz ?? "",
+              proMaModus: false,
+            },
+          ];
+        }),
       ),
       fahrt: t.fahrt
         ? {
@@ -399,9 +478,6 @@ export default function Stunden() {
     }
     return map;
   }, [form.taetigkeiten, form.fehlzeitStunden, forUserIds, isArbeit]);
-
-  const summeProTaetigkeit = (zeile: TaetigkeitsZeile) =>
-    Array.from(forUserIds).reduce((s, uid) => s + Number(zeile.stundenPerMa[uid] ?? 0), 0);
 
   const tagZeitenForMa = (uid: string) =>
     berechneTagZeiten({
@@ -524,9 +600,14 @@ export default function Stunden() {
           const zulagen: SaveZulage[] = isArbeit
             ? Array.from(form.zulagenSelected.entries())
                 .filter(([typId]) => erlaubteZulagenForUid.has(typId))
+                // Skip wenn MA explizit 0 hat (= "keine Zulage für diesen MA")
+                .filter(([, val]) => {
+                  const v = val.stundenPerMa[uid];
+                  return v !== 0;
+                })
                 .map(([typId, val]) => ({
                   zulagen_typ_id: typId,
-                  stunden: val.stunden,
+                  stunden: val.stundenPerMa[uid] ?? null,
                   notiz: val.notiz.trim() || null,
                 }))
             : [];
@@ -596,6 +677,7 @@ export default function Stunden() {
               stundenPerMa: Object.fromEntries(
                 Array.from(forUserIds).map((uid) => [uid, 0]),
               ),
+              proMaModus: false,
             },
           ],
         });
@@ -917,15 +999,16 @@ export default function Stunden() {
           )}
 
           {/* Zulagen */}
-          {isArbeit && erlaubteZulagenIds.length > 0 && (
+          {isArbeit && verfuegbareZulagenIds.length > 0 && (
             <div className="space-y-2 border-t pt-3">
-              <Label className="text-sm font-semibold">Zulagen (gilt für alle mit Berechtigung)</Label>
+              <Label className="text-sm font-semibold">Zulagen</Label>
               <div className="flex flex-wrap gap-1.5">
                 {zulagenTypen
-                  .filter((z) => erlaubteZulagenIds.includes(z.id))
+                  .filter((z) => verfuegbareZulagenIds.includes(z.id))
                   .map((z) => {
                     const sel = form.zulagenSelected.get(z.id);
                     const active = !!sel;
+                    const primaryVal = sel?.stundenPerMa[primaryUserId];
                     return (
                       <button
                         key={z.id}
@@ -934,7 +1017,14 @@ export default function Stunden() {
                           setForm((f) => {
                             const next = new Map(f.zulagenSelected);
                             if (next.has(z.id)) next.delete(z.id);
-                            else next.set(z.id, { stunden: null, notiz: "" });
+                            else
+                              next.set(z.id, {
+                                stundenPerMa: Object.fromEntries(
+                                  Array.from(forUserIds).map((uid) => [uid, null]),
+                                ),
+                                notiz: "",
+                                proMaModus: false,
+                              });
                             return { ...f, zulagenSelected: next };
                           })
                         }
@@ -945,8 +1035,8 @@ export default function Stunden() {
                         }`}
                       >
                         {z.bezeichnung}
-                        {active && sel?.stunden != null && (
-                          <span className="ml-1">· {sel.stunden}h</span>
+                        {active && primaryVal != null && (
+                          <span className="ml-1">· {primaryVal}h</span>
                         )}
                       </button>
                     );
@@ -956,29 +1046,20 @@ export default function Stunden() {
                 const z = zulagenTypen.find((x) => x.id === typId);
                 if (!z?.ermoeglicht_stunden_split) return null;
                 return (
-                  <div key={typId} className="flex items-center gap-2 text-xs">
-                    <span className="w-24">{z.bezeichnung}:</span>
-                    <Input
-                      type="number"
-                      step={0.25}
-                      min={0}
-                      value={val.stunden ?? ""}
-                      onChange={(e) =>
-                        setForm((f) => {
-                          const next = new Map(f.zulagenSelected);
-                          const cur = next.get(typId)!;
-                          next.set(typId, {
-                            ...cur,
-                            stunden: e.target.value === "" ? null : Number(e.target.value),
-                          });
-                          return { ...f, zulagenSelected: next };
-                        })
-                      }
-                      placeholder="alle Std"
-                      className="h-8 w-32 text-right"
-                    />
-                    <span className="text-muted-foreground">h (leer = alle)</span>
-                  </div>
+                  <ZulageEditor
+                    key={typId}
+                    bezeichnung={z.bezeichnung}
+                    eintrag={val}
+                    selectedMa={selectedMaList}
+                    primaryUserId={primaryUserId}
+                    onChange={(updated) =>
+                      setForm((f) => {
+                        const next = new Map(f.zulagenSelected);
+                        next.set(typId, updated);
+                        return { ...f, zulagenSelected: next };
+                      })
+                    }
+                  />
                 );
               })}
             </div>
@@ -1076,6 +1157,7 @@ function MatrixEditor({
         baustelle_id: taetigkeiten[taetigkeiten.length - 1]?.baustelle_id ?? null,
         notiz: "",
         stundenPerMa: Object.fromEntries(selectedMa.map((m) => [m.id, 0])),
+        proMaModus: false,
       },
     ]);
   };
@@ -1092,6 +1174,32 @@ function MatrixEditor({
       ...next[idx],
       stundenPerMa: { ...next[idx].stundenPerMa, [uid]: Math.max(0, val || 0) },
     };
+    onChange(next);
+  };
+
+  /** Setzt den gleichen Wert für ALLE MA — wird im "alle gleich"-Modus aufgerufen. */
+  const setStundenAlle = (idx: number, val: number) => {
+    const next = [...taetigkeiten];
+    const sper: Record<string, number> = {};
+    for (const m of selectedMa) sper[m.id] = Math.max(0, val || 0);
+    next[idx] = { ...next[idx], stundenPerMa: sper };
+    onChange(next);
+  };
+
+  /** Aktiviert pro-MA-Modus. */
+  const enableProMa = (idx: number) => {
+    const next = [...taetigkeiten];
+    next[idx] = { ...next[idx], proMaModus: true };
+    onChange(next);
+  };
+
+  /** Deaktiviert pro-MA-Modus + setzt alle MA auf den Max-Wert. */
+  const disableProMa = (idx: number) => {
+    const next = [...taetigkeiten];
+    const max = Math.max(0, ...selectedMa.map((m) => Number(next[idx].stundenPerMa[m.id] ?? 0)));
+    const sper: Record<string, number> = {};
+    for (const m of selectedMa) sper[m.id] = max;
+    next[idx] = { ...next[idx], stundenPerMa: sper, proMaModus: false };
     onChange(next);
   };
 
@@ -1160,33 +1268,65 @@ function MatrixEditor({
               big
             />
           )}
-          {isMulti && (
-            // Multi-MA: Zellen pro MA
-            <div className="space-y-1">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                Stunden pro Mitarbeiter
+          {isMulti && !t.proMaModus && (
+            // Multi-MA "alle gleich": ein großer Stepper + Helper-Text + Link
+            <div className="space-y-1.5">
+              <StundenZelle
+                value={t.stundenPerMa[selectedMa[0].id] ?? 0}
+                onChange={(v) => setStundenAlle(idx, v)}
+                big
+              />
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-muted-foreground">
+                  ↳ für alle {selectedMa.length} Mitarbeiter
+                </span>
+                <button
+                  type="button"
+                  onClick={() => enableProMa(idx)}
+                  className="text-primary hover:underline font-medium"
+                >
+                  Pro Mitarbeiter unterschiedlich →
+                </button>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                {selectedMa.map((m) => (
-                  <div
-                    key={m.id}
-                    className="flex items-center gap-1.5 bg-background border rounded p-1.5"
-                  >
-                    <span className="text-[11px] font-medium truncate flex-1">
-                      {m.vorname}
-                    </span>
+            </div>
+          )}
+          {isMulti && t.proMaModus && (
+            // Multi-MA differenziert: vertikale Liste pro MA
+            <div className="space-y-1.5">
+              {selectedMa.map((m) => (
+                <div
+                  key={m.id}
+                  className="flex items-center gap-2 bg-background border rounded-md p-2"
+                >
+                  <span className="text-sm font-medium truncate w-20 sm:w-24 shrink-0">
+                    {m.vorname}
+                  </span>
+                  <div className="flex-1 flex items-center justify-end">
                     <StundenZelle
                       value={t.stundenPerMa[m.id] ?? 0}
                       onChange={(v) => setStunden(idx, m.id, v)}
                     />
                   </div>
-                ))}
-              </div>
-              <div className="text-[10px] text-muted-foreground text-right">
-                Σ {fmtHNum(
-                  selectedMa.reduce((s, m) => s + Number(t.stundenPerMa[m.id] ?? 0), 0),
-                )}{" "}
-                h
+                </div>
+              ))}
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-muted-foreground tabular-nums">
+                  Σ{" "}
+                  {fmtHNum(
+                    selectedMa.reduce(
+                      (s, m) => s + Number(t.stundenPerMa[m.id] ?? 0),
+                      0,
+                    ),
+                  )}{" "}
+                  h
+                </span>
+                <button
+                  type="button"
+                  onClick={() => disableProMa(idx)}
+                  className="text-primary hover:underline font-medium"
+                >
+                  ← Alle gleich machen
+                </button>
               </div>
             </div>
           )}
@@ -1259,6 +1399,153 @@ function StundenZelle({
           h
         </span>
       )}
+    </div>
+  );
+}
+
+// ─── ZulageEditor (alle gleich / pro MA) ────────────────────────────────
+
+function ZulageEditor({
+  bezeichnung,
+  eintrag,
+  selectedMa,
+  primaryUserId,
+  onChange,
+}: {
+  bezeichnung: string;
+  eintrag: ZulageEintrag;
+  selectedMa: Profile[];
+  primaryUserId: string;
+  onChange: (next: ZulageEintrag) => void;
+}) {
+  const isMulti = selectedMa.length > 1;
+  const userIds = selectedMa.map((m) => m.id);
+  const primaryVal = eintrag.stundenPerMa[primaryUserId] ?? null;
+
+  const setStundenAlle = (v: number | null) => {
+    const sper: Record<string, number | null> = {};
+    for (const uid of userIds) sper[uid] = v;
+    onChange({ ...eintrag, stundenPerMa: sper });
+  };
+  const setStundenPerMa = (uid: string, v: number | null) => {
+    onChange({
+      ...eintrag,
+      stundenPerMa: { ...eintrag.stundenPerMa, [uid]: v },
+    });
+  };
+  const enableProMa = () => onChange({ ...eintrag, proMaModus: true });
+  const disableProMa = () => {
+    const numVals = userIds
+      .map((uid) => eintrag.stundenPerMa[uid])
+      .filter((x): x is number => typeof x === "number");
+    const newVal: number | null = numVals.length > 0 ? Math.max(...numVals) : null;
+    const sper: Record<string, number | null> = {};
+    for (const uid of userIds) sper[uid] = newVal;
+    onChange({ ...eintrag, stundenPerMa: sper, proMaModus: false });
+  };
+
+  return (
+    <div className="rounded-md border p-2.5 bg-muted/20 space-y-2">
+      <div className="text-sm font-semibold">{bezeichnung}</div>
+      {!isMulti && (
+        <ZulagenStundenInput
+          value={primaryVal}
+          onChange={(v) => setStundenPerMa(primaryUserId, v)}
+        />
+      )}
+      {isMulti && !eintrag.proMaModus && (
+        <div className="space-y-1.5">
+          <ZulagenStundenInput value={primaryVal} onChange={setStundenAlle} />
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-muted-foreground">
+              ↳ für alle {userIds.length} Mitarbeiter (leer = alle Std)
+            </span>
+            <button
+              type="button"
+              onClick={enableProMa}
+              className="text-primary hover:underline font-medium"
+            >
+              Pro MA unterschiedlich →
+            </button>
+          </div>
+        </div>
+      )}
+      {isMulti && eintrag.proMaModus && (
+        <div className="space-y-1.5">
+          {selectedMa.map((m) => (
+            <div
+              key={m.id}
+              className="flex items-center gap-2 bg-background border rounded-md p-2"
+            >
+              <span className="text-sm font-medium truncate w-20 sm:w-24 shrink-0">
+                {m.vorname}
+              </span>
+              <div className="flex-1 flex items-center justify-end">
+                <ZulagenStundenInput
+                  value={eintrag.stundenPerMa[m.id] ?? null}
+                  onChange={(v) => setStundenPerMa(m.id, v)}
+                />
+              </div>
+            </div>
+          ))}
+          <div className="flex items-center justify-end text-[11px]">
+            <button
+              type="button"
+              onClick={disableProMa}
+              className="text-primary hover:underline font-medium"
+            >
+              ← Alle gleich machen
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ZulagenStundenInput({
+  value,
+  onChange,
+}: {
+  value: number | null;
+  onChange: (v: number | null) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        className="h-9 w-9 shrink-0"
+        onClick={() => {
+          const cur = value ?? 0;
+          onChange(Math.max(0, +(cur - 0.25).toFixed(2)));
+        }}
+      >
+        <Minus className="h-4 w-4" />
+      </Button>
+      <Input
+        type="number"
+        step={0.25}
+        min={0}
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+        placeholder="alle"
+        className="h-9 w-20 text-center text-sm font-semibold tabular-nums"
+      />
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        className="h-9 w-9 shrink-0"
+        onClick={() => {
+          const cur = value ?? 0;
+          onChange(+(cur + 0.25).toFixed(2));
+        }}
+      >
+        <Plus className="h-4 w-4" />
+      </Button>
+      <span className="text-xs text-muted-foreground ml-1">h</span>
     </div>
   );
 }
