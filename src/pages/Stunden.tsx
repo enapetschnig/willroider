@@ -31,6 +31,8 @@ import {
   Minus,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Hammer,
   Sun,
   HeartPulse,
@@ -73,7 +75,7 @@ import {
   type SaveZulage,
   type SaveFahrt,
 } from "@/hooks/useStundenTag";
-import { useSollHoursForDay } from "@/hooks/useSollHoursForDay";
+import { useSollHoursForDayBulk } from "@/hooks/useSollHoursForDayBulk";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -171,6 +173,7 @@ export default function Stunden() {
   const { toast } = useToast();
 
   const [date, setDate] = useState<string>(todayIso);
+  const [tageOffenMobile, setTageOffenMobile] = useState(false);
   const [polierPartie, setPolierPartie] = useState<Partie | null>(null);
   const [allPartien, setAllPartien] = useState<Partie[]>([]);
   const [allMembers, setAllMembers] = useState<Profile[]>([]);
@@ -257,7 +260,7 @@ export default function Stunden() {
     forUserIds.size > 1 ? erlaubteZulagenUnion : erlaubteZulagenIds;
   const { data: pausen } = usePausenConfig();
   const { data: limits } = useArbeitszeitLimits();
-  const { sollHours: primarySoll } = useSollHoursForDay(primaryUserId, date);
+  const { sollPerMa } = useSollHoursForDayBulk(Array.from(forUserIds), date);
 
   // Status-Map fürs Picker-UI (zeigt pro MA „4,5h" wenn schon was gebucht)
   const memberIds = useMemo(
@@ -461,6 +464,13 @@ export default function Stunden() {
       .map((id) => (id === user?.id ? (profile as any as Profile) : allMembers.find((m) => m.id === id)))
       .filter(Boolean) as Profile[];
   }, [forUserIds, allMembers, profile, user]);
+
+  // MA mit bereits gebuchten Stunden an diesem Tag (für Konflikt-Banner)
+  const konflikte = useMemo(() => {
+    return selectedMaList
+      .map((m) => ({ ma: m, h: statusForDateMap.get(m.id)?.hours ?? 0 }))
+      .filter((x) => x.h > 0);
+  }, [selectedMaList, statusForDateMap]);
 
   // Netto pro MA + tagZeiten + Soll
   const arbeitsbeginnEffective =
@@ -717,8 +727,15 @@ export default function Stunden() {
     });
   };
 
+  const submitLabel =
+    forUserIds.size > 1
+      ? `Für ${forUserIds.size} Mitarbeiter speichern`
+      : aktuellerEigenerTag
+      ? "Änderungen speichern"
+      : "Tag speichern";
+
   return (
-    <div className="space-y-4 max-w-3xl mx-auto">
+    <div className="space-y-4 max-w-3xl mx-auto pb-24 lg:pb-0">
       <PageHeader title="Stundenerfassung" />
 
       {/* Personen-Picker — nur für Polier/Admin */}
@@ -738,6 +755,32 @@ export default function Stunden() {
           onSearchChange={setMemberSearch}
           date={date}
         />
+      )}
+
+      {/* Konflikt-Banner — wenn selektierte MA an dem Tag schon Stunden haben */}
+      {konflikte.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-1.5">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-700 shrink-0" />
+            <span className="text-sm font-semibold text-amber-900">
+              {konflikte.length === 1
+                ? "1 Mitarbeiter hat an diesem Tag bereits Stunden"
+                : `${konflikte.length} Mitarbeiter haben an diesem Tag bereits Stunden`}
+            </span>
+          </div>
+          <ul className="text-xs text-amber-900 pl-6 space-y-0.5">
+            {konflikte.map(({ ma, h }) => (
+              <li key={ma.id} className="tabular-nums">
+                <span className="font-medium">{ma.vorname} {ma.nachname}:</span>{" "}
+                {fmtH(h)}
+              </li>
+            ))}
+          </ul>
+          <div className="text-[11px] text-amber-800 pl-6">
+            Beim Speichern werden offene Einträge überschrieben — bereits bestätigte
+            oder freigegebene Tage werden übersprungen.
+          </div>
+        </div>
       )}
 
       {/* Datum */}
@@ -790,44 +833,57 @@ export default function Stunden() {
         </CardContent>
       </Card>
 
-      {/* Eigene Tage-Liste (kompakt, der Polier sieht eigene Buchungen) */}
+      {/* Eigene Tage-Liste — auf Mobile per Default zu, auf Desktop offen */}
       {tageList.length > 0 && (
         <Card>
           <CardContent className="p-3 space-y-1.5">
-            <div className="text-xs font-semibold uppercase text-muted-foreground">
-              Meine letzten Tage
-            </div>
-            {tageList.slice(0, 5).map((t) => (
-              <div
-                key={t.tag.id}
-                className="flex items-center gap-2 text-xs rounded px-2 py-1.5 bg-muted/40"
-              >
-                <span className="font-bold tabular-nums shrink-0">
-                  {fmtH(Number(t.tag.netto_stunden))}
-                </span>
-                <span className="text-muted-foreground tabular-nums shrink-0">
-                  {new Date(t.tag.datum).toLocaleDateString("de-AT", {
-                    weekday: "short",
-                    day: "2-digit",
-                    month: "2-digit",
-                  })}
-                </span>
-                <Badge variant="outline" className="text-[10px]">
-                  {STATUS_LABELS[t.tag.tag_status]}
-                </Badge>
-                <span className="flex-1" />
-                {t.tag.status === "erfasst" && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 w-7 p-0 text-destructive"
-                    onClick={() => onDeleteTag(t.tag.id)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+            <button
+              type="button"
+              onClick={() => setTageOffenMobile((v) => !v)}
+              className="w-full flex items-center justify-between text-xs font-semibold uppercase text-muted-foreground lg:cursor-default"
+            >
+              <span>Meine letzten Tage ({tageList.length})</span>
+              <span className="lg:hidden">
+                {tageOffenMobile ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
                 )}
-              </div>
-            ))}
+              </span>
+            </button>
+            <div className={tageOffenMobile ? "space-y-1.5" : "space-y-1.5 hidden lg:block"}>
+              {tageList.slice(0, 5).map((t) => (
+                <div
+                  key={t.tag.id}
+                  className="flex items-center gap-2 text-xs rounded px-2 py-1.5 bg-muted/40"
+                >
+                  <span className="font-bold tabular-nums shrink-0">
+                    {fmtH(Number(t.tag.netto_stunden))}
+                  </span>
+                  <span className="text-muted-foreground tabular-nums shrink-0">
+                    {new Date(t.tag.datum).toLocaleDateString("de-AT", {
+                      weekday: "short",
+                      day: "2-digit",
+                      month: "2-digit",
+                    })}
+                  </span>
+                  <Badge variant="outline" className="text-[10px]">
+                    {STATUS_LABELS[t.tag.tag_status]}
+                  </Badge>
+                  <span className="flex-1" />
+                  {t.tag.status === "erfasst" && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 w-7 p-0 text-destructive"
+                      onClick={() => onDeleteTag(t.tag.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}
@@ -1104,8 +1160,7 @@ export default function Stunden() {
               selectedMa={selectedMaList}
               summenProMa={summenProMa}
               isArbeit={isArbeit}
-              primaryUserId={primaryUserId}
-              primarySoll={primarySoll}
+              sollPerMa={sollPerMa}
               vmPause={form.vmPause}
               mittagPause={form.mittagPause}
               pausen={pausen}
@@ -1114,17 +1169,28 @@ export default function Stunden() {
             />
           )}
 
-          {/* Submit */}
-          <Button onClick={submit} disabled={busy} className="w-full h-12 text-base">
+          {/* Submit — auf Desktop sichtbar, auf Mobile durch Sticky-Bar ersetzt */}
+          <Button
+            onClick={submit}
+            disabled={busy}
+            className="w-full h-12 text-base hidden lg:flex"
+          >
             {busy && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            {forUserIds.size > 1
-              ? `Für ${forUserIds.size} Mitarbeiter speichern`
-              : aktuellerEigenerTag
-              ? "Änderungen speichern"
-              : "Tag speichern"}
+            {submitLabel}
           </Button>
         </CardContent>
       </Card>
+
+      {/* Mobile Sticky Submit-Bar — sitzt direkt über der Bottom-Nav (h-14 ≈ 56px) */}
+      <div
+        className="lg:hidden fixed left-0 right-0 z-20 px-3 py-2 bg-card border-t shadow-lg"
+        style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 56px)" }}
+      >
+        <Button onClick={submit} disabled={busy} className="w-full h-12 text-base">
+          {busy && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+          {submitLabel}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -1670,8 +1736,7 @@ function ZusammenfassungCard({
   selectedMa,
   summenProMa,
   isArbeit,
-  primaryUserId,
-  primarySoll,
+  sollPerMa,
   vmPause,
   mittagPause,
   pausen,
@@ -1681,8 +1746,7 @@ function ZusammenfassungCard({
   selectedMa: Profile[];
   summenProMa: Map<string, number>;
   isArbeit: boolean;
-  primaryUserId: string;
-  primarySoll: number;
+  sollPerMa: Map<string, number>;
   vmPause: boolean;
   mittagPause: boolean;
   pausen: { vm: any; mittag: any } | undefined;
@@ -1708,7 +1772,7 @@ function ZusammenfassungCard({
               arbeitsbeginn,
             })
           : null;
-        const soll = m.id === primaryUserId ? primarySoll : 0;
+        const soll = sollPerMa.get(m.id) ?? 0;
         const ueber = z ? ueberstundenForTag(z, soll) : { diff: 0, istUeberstunde: false };
         const azg = z && limits
           ? pruefArbeitszeitGesetz(z, {
@@ -1736,7 +1800,7 @@ function ZusammenfassungCard({
                 </span>
               </>
             )}
-            {m.id === primaryUserId && soll > 0 && (
+            {soll > 0 && (
               <span
                 className={
                   ueber.diff > 0
