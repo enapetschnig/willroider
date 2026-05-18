@@ -121,10 +121,13 @@ export function NewMitarbeiterDialog({
   const telefonNorm = telefon.trim() ? normalizeAtPhone(telefon) : null;
   const telefonValid = !telefon.trim() || telefonNorm !== null;
 
+  const emailValid =
+    !email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
   const canSubmit =
     !!vorname.trim() &&
     !!nachname.trim() &&
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) &&
+    emailValid &&
     !!eintrittsdatum &&
     telefonValid &&
     !loading;
@@ -147,7 +150,7 @@ export function NewMitarbeiterDialog({
       body: {
         vorname: vorname.trim(),
         nachname: nachname.trim(),
-        email: email.trim().toLowerCase(),
+        email: email.trim().toLowerCase() || undefined,
         telefon: telefonNorm || undefined,
         geburtsdatum: geburtsdatum || undefined,
         rolle,
@@ -251,15 +254,24 @@ export function NewMitarbeiterDialog({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="nm-email">E-Mail *</Label>
+                <Label htmlFor="nm-email">E-Mail (optional)</Label>
                 <Input
                   id="nm-email"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  required
                   autoComplete="email"
+                  placeholder="leer = Platzhalter wird automatisch generiert"
                 />
+                {!email.trim() && (
+                  <div className="text-[11px] text-muted-foreground">
+                    Wird intern auf …@intern.willroider.app gesetzt. Login funktioniert
+                    weiter über Magic Link aus der SMS oder über E-Mail + Initial-Passwort.
+                  </div>
+                )}
+                {email.trim() && !emailValid && (
+                  <div className="text-[11px] text-destructive">Ungültiges E-Mail-Format</div>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="nm-tel">Telefon (0664… oder +43…)</Label>

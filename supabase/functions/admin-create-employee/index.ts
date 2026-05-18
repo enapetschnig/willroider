@@ -24,7 +24,7 @@ interface CreateEmployeeRequest {
   // Stammdaten
   vorname: string;
   nachname: string;
-  email: string;
+  email?: string;            // optional: wenn leer, wird Platzhalter generiert
   telefon?: string;
   geburtsdatum?: string;
   // Rolle + Partie
@@ -82,6 +82,25 @@ function generateReadablePassword(length = 10): string {
   return Array.from(arr, (n) => chars[n % chars.length]).join('');
 }
 
+/** Slugifiziert vorname/nachname für synthetische Emails — nur ASCII-Buchstaben. */
+function slug(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')   // Diakritika entfernen (Müller → muller)
+    .replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9]+/g, '')
+    .slice(0, 24) || 'user';
+}
+
+/** 4-Zeichen-Suffix damit gleiche Namen nicht kollidieren. */
+function randomSuffix(): string {
+  const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
+  const arr = new Uint32Array(4);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, (n) => chars[n % chars.length]).join('');
+}
+
 const ALLOWED_ROLES: AppRole[] = [
   'geschaeftsfuehrung',
   'bauleiter',
@@ -122,14 +141,22 @@ Deno.serve(async (req) => {
 
   const vorname = (body.vorname ?? '').trim();
   const nachname = (body.nachname ?? '').trim();
-  const email = (body.email ?? '').trim().toLowerCase();
+  const emailInput = (body.email ?? '').trim().toLowerCase();
   const eintrittsdatum = (body.eintrittsdatum ?? '').trim();
   const rolle = body.rolle as AppRole;
 
   if (!vorname || !nachname) return jsonResponse({ error: 'Vorname und Nachname sind Pflicht' }, 400);
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonResponse({ error: 'Ungültige E-Mail' }, 400);
+  if (emailInput && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput)) {
+    return jsonResponse({ error: 'Ungültige E-Mail' }, 400);
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(eintrittsdatum)) return jsonResponse({ error: 'Eintrittsdatum ungültig (YYYY-MM-DD)' }, 400);
   if (!ALLOWED_ROLES.includes(rolle)) return jsonResponse({ error: 'Ungültige Rolle' }, 400);
+
+  // Synthetische Platzhalter-Email wenn keine eingegeben wurde. Wird in auth.users
+  // gespeichert (Pflichtfeld dort), in profiles.email gespiegelt und kann zur Not
+  // als Login zusammen mit Initial-Passwort verwendet werden.
+  const email = emailInput || `${slug(vorname)}.${slug(nachname)}.${randomSuffix()}@intern.willroider.app`;
+  const emailWasSynthetic = !emailInput;
 
   const arbeitszeitmodell: Arbeitszeitmodell =
     ALLOWED_AZ_MODELLE.includes(body.arbeitszeitmodell as Arbeitszeitmodell)
@@ -334,6 +361,7 @@ Deno.serve(async (req) => {
     success: true,
     user_id: newUserId,
     email,
+    email_was_synthetic: emailWasSynthetic,
     initial_password: initialPassword,
     magic_link: magicLink,
     sms_status: smsStatus,
