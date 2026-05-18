@@ -1,15 +1,16 @@
 /**
- * Stunden-Tagesblatt-Erfassung (Phase A des Zeiterfassung-Redesigns).
+ * Stundenerfassung im Gasser-Matrix-Pattern.
  *
- * Eingabe pro Tag (ein Eintrag pro Mitarbeiter × Tag):
- * - Tag-Status: Baustelle / Firma / Krank / Urlaub / Schlechtwetter
- * - Netto-Stunden (das was wirklich gearbeitet wurde)
- * - Pausen-Toggles VM + Mittag (Dauer aus Stammdaten, werden ADDIERT)
- * - 1..N Tätigkeitszeilen mit Baustelle + Stunden + Notiz
- * - Optional Zulagen mit Stunden-Split
- * - Polier: zusätzlich Fahrtgeld + KM + Taggeld
+ * Matrix:
+ *   Zeilen = Tätigkeiten (jeweils mit Baustelle + Notiz)
+ *   Spalten = ausgewählte Mitarbeiter (1 im Self-Modus, N im Polier-Bulk)
+ *   Zellen = Stunden für (MA, Tätigkeit)
  *
- * Live-Preview zeigt Netto / Brutto / Von-Bis / Soll / Überstunden.
+ * Pausen + Zulagen + Fahrt sind global pro Tag.
+ * Tag-Status (Baustelle/Firma/Krank/Urlaub/SW) gilt für alle selektierten MA.
+ * Netto-Stunden pro MA = Summe der Stunden in seiner Spalte.
+ *
+ * Mobile-Fallback bei N>1 MA: pro Tätigkeit eine Card mit MA-Inputs vertikal.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -22,6 +23,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -43,11 +45,12 @@ import {
   Tag,
   Calendar,
 } from "lucide-react";
-import type { Database, TagStatus, BuchungStatus } from "@/integrations/supabase/types";
+import type { Database, TagStatus } from "@/integrations/supabase/types";
 import { feiertagAt } from "@/lib/feiertage";
 import { localIso } from "@/lib/dateFmt";
 import { MicButton } from "@/components/MicButton";
 import { BaustelleCombobox } from "@/components/stunden/BaustelleCombobox";
+import { PersonPicker, type Mode } from "@/components/stunden/PersonPicker";
 import {
   berechneTagZeiten,
   pruefArbeitszeitGesetz,
@@ -69,7 +72,6 @@ import {
   type SaveTaetigkeit,
   type SaveZulage,
   type SaveFahrt,
-  type StundenTagFull,
 } from "@/hooks/useStundenTag";
 import { useSollHoursForDay } from "@/hooks/useSollHoursForDay";
 
@@ -85,7 +87,6 @@ const STATUS_LABELS: Record<TagStatus, string> = {
   schlechtwetter: "Schlechtwetter",
   feiertag: "Feiertag",
 };
-
 const STATUS_ICONS = {
   baustelle: Hammer,
   firma: Factory,
@@ -94,7 +95,6 @@ const STATUS_ICONS = {
   schlechtwetter: CloudRain,
   feiertag: Calendar,
 };
-
 const STATUS_COLORS: Record<TagStatus, string> = {
   baustelle: "bg-primary text-primary-foreground border-primary",
   firma: "bg-blue-500 text-white border-blue-500",
@@ -103,47 +103,50 @@ const STATUS_COLORS: Record<TagStatus, string> = {
   schlechtwetter: "bg-sky-500 text-white border-sky-500",
   feiertag: "bg-violet-500 text-white border-violet-500",
 };
-
 const STATUS_OPTIONS: TagStatus[] = ["baustelle", "firma", "krank", "urlaub", "schlechtwetter"];
 
 const todayIso = () => localIso();
 
-interface FormState {
-  editingId: string | null;
+interface TaetigkeitsZeile {
+  taetigkeit_id: string | null;
+  taetigkeit_freitext: string;
+  baustelle_id: string | null;
+  notiz: string;
+  stundenPerMa: Record<string, number>;
+}
+
+interface MatrixForm {
   tagStatus: TagStatus;
-  nettoStunden: number;
+  taetigkeiten: TaetigkeitsZeile[];
   vmPause: boolean;
   mittagPause: boolean;
   arbeitsbeginn: string | null;
   anmerkung: string;
-  taetigkeiten: TaetigkeitZeileState[];
   zulagenSelected: Map<string, { stunden: number | null; notiz: string }>;
   fahrt: SaveFahrt | null;
+  fehlzeitStunden: number;
   fehlzeitBis: string;
 }
 
-interface TaetigkeitZeileState {
-  taetigkeit_id: string | null;
-  taetigkeit_freitext: string;
-  baustelle_id: string | null;
-  stunden: number;
-  notiz: string;
-}
-
-function emptyForm(initialStatus: TagStatus = "baustelle"): FormState {
+function emptyForm(): MatrixForm {
   return {
-    editingId: null,
-    tagStatus: initialStatus,
-    nettoStunden: 8,
+    tagStatus: "baustelle",
+    taetigkeiten: [
+      {
+        taetigkeit_id: null,
+        taetigkeit_freitext: "",
+        baustelle_id: null,
+        notiz: "",
+        stundenPerMa: {},
+      },
+    ],
     vmPause: true,
     mittagPause: true,
     arbeitsbeginn: null,
     anmerkung: "",
-    taetigkeiten: [
-      { taetigkeit_id: null, taetigkeit_freitext: "", baustelle_id: null, stunden: 0, notiz: "" },
-    ],
     zulagenSelected: new Map(),
     fahrt: null,
+    fehlzeitStunden: 8,
     fehlzeitBis: "",
   };
 }
@@ -152,18 +155,19 @@ export default function Stunden() {
   const { user, profile, isAdmin } = useAuth();
   const { toast } = useToast();
 
-  // Datum + Personen
   const [date, setDate] = useState<string>(todayIso);
-  const [primaryUserId, setPrimaryUserId] = useState<string>("");
   const [polierPartie, setPolierPartie] = useState<Partie | null>(null);
+  const [allPartien, setAllPartien] = useState<Partie[]>([]);
   const [allMembers, setAllMembers] = useState<Profile[]>([]);
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
+  const [forUserIds, setForUserIds] = useState<Set<string>>(new Set());
+  const [memberSearch, setMemberSearch] = useState<string>("");
 
   useEffect(() => {
-    if (user) setPrimaryUserId(user.id);
+    if (user) setForUserIds(new Set([user.id]));
   }, [user]);
 
-  // Polier-Partie / Member laden
+  // Polier-Partie / Members
   useEffect(() => {
     if (!user) return;
     (async () => {
@@ -175,12 +179,12 @@ export default function Stunden() {
       setPolierPartie((p as Partie) ?? null);
 
       if (isAdmin) {
-        const { data: members } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("is_active", true)
-          .order("nachname");
+        const [{ data: members }, { data: partien }] = await Promise.all([
+          supabase.from("profiles").select("*").eq("is_active", true).order("nachname"),
+          supabase.from("partien").select("*").order("name"),
+        ]);
         setAllMembers((members as Profile[]) ?? []);
+        setAllPartien((partien as Partie[]) ?? []);
       } else if (p) {
         const { data: members } = await supabase
           .from("profiles")
@@ -189,15 +193,15 @@ export default function Stunden() {
           .eq("is_active", true)
           .order("nachname");
         setAllMembers((members as Profile[]) ?? []);
+        setAllPartien([p as Partie]);
       }
     })();
   }, [user, isAdmin]);
 
-  // Baustellen laden
+  // Baustellen
   useEffect(() => {
     (async () => {
-      const partieFilter =
-        polierPartie?.id ?? (profile as any)?.partie_id ?? null;
+      const partieFilter = polierPartie?.id ?? (profile as any)?.partie_id ?? null;
       let q = supabase
         .from("baustellen")
         .select("*")
@@ -209,85 +213,145 @@ export default function Stunden() {
     })();
   }, [polierPartie, profile, isAdmin]);
 
-  // Stammdaten
+  const mode: Mode = isAdmin ? "admin" : polierPartie ? "polier" : "self";
+  const hasPicker = mode !== "self";
+  const istPolier = !!polierPartie;
+  const primaryUserId = user?.id ?? "";
+
   const { data: taetigkeitenStamm = [] } = useTaetigkeitenStamm();
   const { data: zulagenTypen = [] } = useZulagenTypen();
   const { data: erlaubteZulagenIds = [] } = useMitarbeiterZulagen(primaryUserId);
   const { data: pausen } = usePausenConfig();
   const { data: limits } = useArbeitszeitLimits();
-  const { sollHours } = useSollHoursForDay(primaryUserId, date);
+  const { sollHours: primarySoll } = useSollHoursForDay(primaryUserId, date);
 
-  // Tag-Liste (letzte 30 Tage des primary user)
+  // Status-Map fürs Picker-UI (zeigt pro MA „4,5h" wenn schon was gebucht)
+  const memberIds = useMemo(
+    () => Array.from(new Set([user?.id, ...allMembers.map((m) => m.id)].filter(Boolean) as string[])),
+    [user, allMembers],
+  );
+  const { data: statusForDateMap = new Map<string, { hours: number }>() } = useQuery({
+    queryKey: ["stunden_status_for_date", date, memberIds],
+    queryFn: async () => {
+      if (memberIds.length === 0) return new Map<string, { hours: number }>();
+      const { data } = await supabase
+        .from("stunden_tage")
+        .select("mitarbeiter_id, netto_stunden")
+        .eq("datum", date)
+        .in("mitarbeiter_id", memberIds);
+      const map = new Map<string, { hours: number }>();
+      (data ?? []).forEach((r: any) => {
+        const cur = map.get(r.mitarbeiter_id) ?? { hours: 0 };
+        cur.hours += Number(r.netto_stunden ?? 0);
+        map.set(r.mitarbeiter_id, cur);
+      });
+      return map;
+    },
+    enabled: !!date && memberIds.length > 0,
+  });
+
+  // Eigene Tage-Liste oben
   const fromDate = useMemo(() => {
     const d = new Date();
     d.setDate(d.getDate() - 30);
     return localIso(d);
   }, []);
-
-  const { data: tageList = [], isLoading: tageLoading, refetch: refetchTage } =
-    useStundenTageList({
-      fromDate,
-      mitarbeiterIds: primaryUserId ? [primaryUserId] : [],
-      enabled: !!primaryUserId,
-    });
-
-  // Tag des aktuellen Datums (falls schon vorhanden → Edit-Mode)
-  const aktuellerTag = useMemo(
+  const { data: tageList = [], refetch: refetchTage } = useStundenTageList({
+    fromDate,
+    mitarbeiterIds: primaryUserId ? [primaryUserId] : [],
+    enabled: !!primaryUserId,
+  });
+  const aktuellerEigenerTag = useMemo(
     () => tageList.find((t) => t.tag.datum === date),
     [tageList, date],
   );
 
-  // Form-State
-  const [form, setForm] = useState<FormState>(() =>
-    emptyForm(pausen?.vm.default_aktiv && pausen?.mittag.default_aktiv ? "baustelle" : "baustelle"),
-  );
+  // ─── Form-State ─────────────────────────────────────────────────────
+  const [form, setForm] = useState<MatrixForm>(() => emptyForm());
 
-  // Form an Pausen-Defaults anpassen sobald geladen
+  // Form-Reset auf Pausen-Defaults sobald geladen
   useEffect(() => {
     if (!pausen) return;
     setForm((f) => ({
       ...f,
-      vmPause: f.editingId ? f.vmPause : pausen.vm.default_aktiv,
-      mittagPause: f.editingId ? f.mittagPause : pausen.mittag.default_aktiv,
+      vmPause: pausen.vm.default_aktiv,
+      mittagPause: pausen.mittag.default_aktiv,
     }));
   }, [pausen]);
 
-  // Wenn ein bestehender Tag existiert für das Datum → in Form laden (Edit-Mode)
+  // Wenn user wechselt forUserIds → für neuen User stundenPerMa initialisieren mit 0
   useEffect(() => {
-    if (!aktuellerTag) {
+    setForm((f) => ({
+      ...f,
+      taetigkeiten: f.taetigkeiten.map((t) => {
+        const next: Record<string, number> = {};
+        for (const uid of forUserIds) {
+          next[uid] = t.stundenPerMa[uid] ?? 0;
+        }
+        return { ...t, stundenPerMa: next };
+      }),
+    }));
+  }, [forUserIds]);
+
+  // Bei Datums-/User-Wechsel: bestehenden Eintrag des primaryUsers laden
+  useEffect(() => {
+    if (!aktuellerEigenerTag) {
+      // Form reset wenn auf neuen Tag ohne Daten
       setForm((f) => ({
         ...emptyForm(),
         vmPause: pausen?.vm.default_aktiv ?? true,
         mittagPause: pausen?.mittag.default_aktiv ?? true,
+        // Init stundenPerMa für alle selektierten Users
+        taetigkeiten: [
+          {
+            taetigkeit_id: null,
+            taetigkeit_freitext: "",
+            baustelle_id: null,
+            notiz: "",
+            stundenPerMa: Object.fromEntries(Array.from(forUserIds).map((uid) => [uid, 0])),
+          },
+        ],
       }));
       return;
     }
-    const t = aktuellerTag;
+    // Bestehender Tag: Form aus Daten füllen (nur für den primary user)
+    const t = aktuellerEigenerTag;
+    const tStunden = (uid: string, idx: number, defaultVal: number) =>
+      uid === primaryUserId ? defaultVal : 0;
     setForm({
-      editingId: t.tag.id,
       tagStatus: t.tag.tag_status,
-      nettoStunden: Number(t.tag.netto_stunden),
+      taetigkeiten:
+        t.taetigkeiten.length > 0
+          ? t.taetigkeiten.map((tt, idx) => ({
+              taetigkeit_id: tt.taetigkeit_id,
+              taetigkeit_freitext: tt.taetigkeit_freitext ?? "",
+              baustelle_id: tt.baustelle_id,
+              notiz: tt.notiz ?? "",
+              stundenPerMa: Object.fromEntries(
+                Array.from(forUserIds).map((uid) => [
+                  uid,
+                  tStunden(uid, idx, Number(tt.stunden)),
+                ]),
+              ),
+            }))
+          : [
+              {
+                taetigkeit_id: null,
+                taetigkeit_freitext: "",
+                baustelle_id: null,
+                notiz: "",
+                stundenPerMa: Object.fromEntries(
+                  Array.from(forUserIds).map((uid) => [
+                    uid,
+                    uid === primaryUserId ? Number(t.tag.netto_stunden) : 0,
+                  ]),
+                ),
+              },
+            ],
       vmPause: t.tag.vm_pause,
       mittagPause: t.tag.mittag_pause,
       arbeitsbeginn: t.tag.arbeitsbeginn?.slice(0, 5) ?? null,
       anmerkung: t.tag.anmerkung ?? "",
-      taetigkeiten: t.taetigkeiten.length > 0
-        ? t.taetigkeiten.map((tt) => ({
-            taetigkeit_id: tt.taetigkeit_id,
-            taetigkeit_freitext: tt.taetigkeit_freitext ?? "",
-            baustelle_id: tt.baustelle_id,
-            stunden: Number(tt.stunden),
-            notiz: tt.notiz ?? "",
-          }))
-        : [
-            {
-              taetigkeit_id: null,
-              taetigkeit_freitext: "",
-              baustelle_id: null,
-              stunden: Number(t.tag.netto_stunden),
-              notiz: "",
-            },
-          ],
       zulagenSelected: new Map(
         t.zulagen.map((z) => [
           z.zulagen_typ_id,
@@ -304,90 +368,87 @@ export default function Stunden() {
             taggeld_manuell: t.fahrt.taggeld_manuell,
           }
         : null,
+      fehlzeitStunden: 8,
       fehlzeitBis: "",
     });
-  }, [aktuellerTag, pausen]);
-
-  // Sync Tätigkeits-Summe ↔ Netto bei 1 Zeile
-  useEffect(() => {
-    if (form.tagStatus !== "baustelle" && form.tagStatus !== "firma") return;
-    if (form.taetigkeiten.length === 1) {
-      setForm((f) => ({
-        ...f,
-        taetigkeiten: [{ ...f.taetigkeiten[0], stunden: f.nettoStunden }],
-      }));
-    }
-  }, [form.nettoStunden, form.taetigkeiten.length, form.tagStatus]);
-
-  // Live-Zeiten berechnen
-  const arbeitsbeginnEffective =
-    form.arbeitsbeginn || limits?.arbeitsbeginn_default?.slice(0, 5) || "07:00";
-  const tagZeiten = useMemo(
-    () =>
-      berechneTagZeiten({
-        nettoStunden: form.nettoStunden,
-        vmPause: form.vmPause,
-        mittagPause: form.mittagPause,
-        pausenConfig: {
-          vmDauerMin: pausen?.vm.dauer_minuten ?? 20,
-          mittagDauerMin: pausen?.mittag.dauer_minuten ?? 30,
-        },
-        arbeitsbeginn: arbeitsbeginnEffective,
-      }),
-    [form.nettoStunden, form.vmPause, form.mittagPause, pausen, arbeitsbeginnEffective],
-  );
-
-  const ueber = useMemo(
-    () => ueberstundenForTag(tagZeiten, sollHours),
-    [tagZeiten, sollHours],
-  );
-
-  const azgCheck = useMemo(
-    () =>
-      limits
-        ? pruefArbeitszeitGesetz(tagZeiten, {
-            maxNettoProTag: limits.max_netto_pro_tag,
-            maxBruttoProTag: limits.max_brutto_pro_tag,
-            arbeitsbeginnDefault: limits.arbeitsbeginn_default,
-          })
-        : { ok: true },
-    [tagZeiten, limits],
-  );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aktuellerEigenerTag?.tag.id, primaryUserId]);
 
   const isArbeit = form.tagStatus === "baustelle" || form.tagStatus === "firma";
+  const selectedMaList = useMemo(() => {
+    const ids = Array.from(forUserIds);
+    // Self zuerst, Rest nach Nachname
+    return ids
+      .map((id) => (id === user?.id ? (profile as any as Profile) : allMembers.find((m) => m.id === id)))
+      .filter(Boolean) as Profile[];
+  }, [forUserIds, allMembers, profile, user]);
 
-  // Stunden-Summen-Check
-  const taetigkeitenSumme = useMemo(
-    () => form.taetigkeiten.reduce((a, t) => a + (Number(t.stunden) || 0), 0),
-    [form.taetigkeiten],
-  );
-  const taetigkeitenMismatch =
-    isArbeit && form.taetigkeiten.length > 1 && Math.abs(taetigkeitenSumme - form.nettoStunden) > 0.01;
+  // Netto pro MA + tagZeiten + Soll
+  const arbeitsbeginnEffective =
+    form.arbeitsbeginn || limits?.arbeitsbeginn_default?.slice(0, 5) || "07:00";
+  const summenProMa = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const uid of forUserIds) {
+      let s = 0;
+      if (isArbeit) {
+        for (const t of form.taetigkeiten) s += Number(t.stundenPerMa[uid] ?? 0);
+      } else {
+        s = form.fehlzeitStunden;
+      }
+      map.set(uid, Math.round(s * 100) / 100);
+    }
+    return map;
+  }, [form.taetigkeiten, form.fehlzeitStunden, forUserIds, isArbeit]);
+
+  const summeProTaetigkeit = (zeile: TaetigkeitsZeile) =>
+    Array.from(forUserIds).reduce((s, uid) => s + Number(zeile.stundenPerMa[uid] ?? 0), 0);
+
+  const tagZeitenForMa = (uid: string) =>
+    berechneTagZeiten({
+      nettoStunden: summenProMa.get(uid) ?? 0,
+      vmPause: isArbeit ? form.vmPause : false,
+      mittagPause: isArbeit ? form.mittagPause : false,
+      pausenConfig: {
+        vmDauerMin: pausen?.vm.dauer_minuten ?? 20,
+        mittagDauerMin: pausen?.mittag.dauer_minuten ?? 30,
+      },
+      arbeitsbeginn: arbeitsbeginnEffective,
+    });
 
   const saveMut = useSaveStundenTag();
   const deleteMut = useDeleteStundenTag();
+  const [busy, setBusy] = useState(false);
 
-  // Submit
+  // ─── Submit ──────────────────────────────────────────────────────────
   const submit = async () => {
-    if (!primaryUserId) {
-      toast({ variant: "destructive", title: "Kein Mitarbeiter ausgewählt" });
-      return;
-    }
-    if (!azgCheck.ok) {
-      if (!window.confirm(`${azgCheck.meldung}\n\nTrotzdem speichern?`)) return;
-    }
-    if (taetigkeitenMismatch) {
-      toast({
-        variant: "destructive",
-        title: "Stunden-Summe stimmt nicht",
-        description: `Tätigkeiten ergeben ${fmtHNum(taetigkeitenSumme)}h, aber Netto = ${fmtHNum(
-          form.nettoStunden,
-        )}h. Bitte angleichen.`,
-      });
+    if (forUserIds.size === 0) {
+      toast({ variant: "destructive", title: "Niemand ausgewählt" });
       return;
     }
 
-    // Mehrtages-Fehlzeit: mehrere Tage erzeugen
+    // AZG-Check pro MA — bei Überschreitung Confirm
+    if (limits && isArbeit) {
+      const violations: string[] = [];
+      for (const ma of selectedMaList) {
+        const z = tagZeitenForMa(ma.id);
+        const ok = pruefArbeitszeitGesetz(z, {
+          maxNettoProTag: limits.max_netto_pro_tag,
+          maxBruttoProTag: limits.max_brutto_pro_tag,
+          arbeitsbeginnDefault: limits.arbeitsbeginn_default,
+        });
+        if (!ok.ok) violations.push(`${ma.vorname} ${ma.nachname}: ${ok.meldung}`);
+      }
+      if (violations.length > 0) {
+        if (
+          !window.confirm(
+            `Arbeitszeit-Grenze überschritten:\n${violations.join("\n")}\n\nTrotzdem speichern?`,
+          )
+        )
+          return;
+      }
+    }
+
+    // Daten für Multi-Tages-Fehlzeit
     const dates: string[] = [date];
     if (!isArbeit && form.fehlzeitBis && form.fehlzeitBis > date) {
       let cur = new Date(date + "T00:00:00");
@@ -400,77 +461,152 @@ export default function Stunden() {
         cur.setDate(cur.getDate() + 1);
       }
       if (dates.length === 0) {
-        toast({
-          variant: "destructive",
-          title: "Keine Werktage im Zeitraum",
-        });
+        toast({ variant: "destructive", title: "Keine Werktage im Zeitraum" });
         return;
       }
     }
 
+    setBusy(true);
+    let savedCount = 0;
+    let skippedCount = 0;
+    const errors: string[] = [];
+
     try {
+      // Bestehende Einträge laden um zu wissen welche zu upserten + welche zu überspringen
       for (const dt of dates) {
-        const taetigkeiten: SaveTaetigkeit[] = isArbeit
-          ? form.taetigkeiten.map((t, idx) => ({
-              position: idx + 1,
-              taetigkeit_id: t.taetigkeit_id,
-              taetigkeit_freitext: t.taetigkeit_id ? null : t.taetigkeit_freitext.trim() || null,
-              baustelle_id: t.baustelle_id,
-              stunden: t.stunden || form.nettoStunden,
-              notiz: t.notiz.trim() || null,
-            }))
-          : [];
+        const { data: existing } = await supabase
+          .from("stunden_tage")
+          .select("id, mitarbeiter_id, status")
+          .eq("datum", dt)
+          .in("mitarbeiter_id", Array.from(forUserIds));
+        const existingMap = new Map<string, { id: string; status: string }>();
+        (existing ?? []).forEach((r: any) =>
+          existingMap.set(r.mitarbeiter_id, { id: r.id, status: r.status }),
+        );
 
-        const zulagen: SaveZulage[] = isArbeit
-          ? Array.from(form.zulagenSelected.entries()).map(([typId, val]) => ({
-              zulagen_typ_id: typId,
-              stunden: val.stunden,
-              notiz: val.notiz.trim() || null,
-            }))
-          : [];
+        for (const uid of forUserIds) {
+          const ma = selectedMaList.find((m) => m.id === uid);
+          const maName = ma ? `${ma.vorname} ${ma.nachname}` : "MA";
+          const existingEntry = existingMap.get(uid);
 
-        await saveMut.mutateAsync({
-          id: dates.length === 1 ? form.editingId ?? undefined : undefined,
-          mitarbeiter_id: primaryUserId,
-          datum: dt,
-          tag_status: form.tagStatus,
-          netto_stunden: form.nettoStunden,
-          vm_pause: isArbeit ? form.vmPause : false,
-          mittag_pause: isArbeit ? form.mittagPause : false,
-          arbeitsbeginn: form.arbeitsbeginn,
-          anmerkung: form.anmerkung.trim() || null,
-          taetigkeiten,
-          zulagen,
-          fahrt: isArbeit ? form.fahrt : null,
-        });
+          // Bereits bestätigt/freigegeben → überspringen
+          if (existingEntry && existingEntry.status !== "erfasst") {
+            toast({
+              title: `${maName} übersprungen`,
+              description: `Tag ${dt} bereits ${existingEntry.status}`,
+            });
+            skippedCount++;
+            continue;
+          }
+
+          const nettoFuerMa = isArbeit
+            ? form.taetigkeiten.reduce((s, t) => s + Number(t.stundenPerMa[uid] ?? 0), 0)
+            : form.fehlzeitStunden;
+          // MA ohne Stunden bei Arbeit → überspringen
+          if (isArbeit && nettoFuerMa === 0) {
+            skippedCount++;
+            continue;
+          }
+
+          // Zulagen: nur die, die der MA erhalten darf
+          let erlaubteZulagenForUid: Set<string>;
+          if (uid === primaryUserId) {
+            erlaubteZulagenForUid = new Set(erlaubteZulagenIds);
+          } else {
+            const { data: zRows } = await supabase
+              .from("mitarbeiter_zulagen")
+              .select("zulagen_typ_id")
+              .eq("mitarbeiter_id", uid);
+            erlaubteZulagenForUid = new Set(
+              (zRows ?? []).map((r: any) => r.zulagen_typ_id),
+            );
+          }
+          const zulagen: SaveZulage[] = isArbeit
+            ? Array.from(form.zulagenSelected.entries())
+                .filter(([typId]) => erlaubteZulagenForUid.has(typId))
+                .map(([typId, val]) => ({
+                  zulagen_typ_id: typId,
+                  stunden: val.stunden,
+                  notiz: val.notiz.trim() || null,
+                }))
+            : [];
+
+          const taetigkeitenForUid: SaveTaetigkeit[] = isArbeit
+            ? form.taetigkeiten
+                .filter((t) => Number(t.stundenPerMa[uid] ?? 0) > 0)
+                .map((t, idx) => ({
+                  position: idx + 1,
+                  taetigkeit_id: t.taetigkeit_id,
+                  taetigkeit_freitext: t.taetigkeit_id
+                    ? null
+                    : t.taetigkeit_freitext.trim() || null,
+                  baustelle_id: t.baustelle_id,
+                  stunden: Number(t.stundenPerMa[uid]),
+                  notiz: t.notiz.trim() || null,
+                }))
+            : [];
+
+          try {
+            await saveMut.mutateAsync({
+              id: dates.length === 1 ? existingEntry?.id : undefined,
+              mitarbeiter_id: uid,
+              datum: dt,
+              tag_status: form.tagStatus,
+              netto_stunden: nettoFuerMa,
+              vm_pause: isArbeit ? form.vmPause : false,
+              mittag_pause: isArbeit ? form.mittagPause : false,
+              arbeitsbeginn: form.arbeitsbeginn,
+              anmerkung: form.anmerkung.trim() || null,
+              taetigkeiten: taetigkeitenForUid,
+              zulagen,
+              fahrt: uid === primaryUserId && istPolier && isArbeit ? form.fahrt : null,
+            });
+            savedCount++;
+          } catch (e) {
+            errors.push(`${maName}: ${(e as Error).message}`);
+          }
+        }
       }
 
+      const total = savedCount + skippedCount + errors.length;
       toast({
-        title: dates.length > 1
-          ? `${dates.length} Tage gespeichert`
-          : form.editingId
-          ? "Tag aktualisiert"
-          : "Tag gespeichert",
+        title:
+          errors.length > 0
+            ? `${savedCount} von ${total} gespeichert`
+            : skippedCount > 0
+            ? `${savedCount} gespeichert · ${skippedCount} übersprungen`
+            : `${savedCount} ${savedCount === 1 ? "Eintrag" : "Einträge"} gespeichert`,
+        description: errors.length > 0 ? errors.join(", ") : undefined,
+        variant: errors.length > 0 ? "destructive" : undefined,
       });
+
       refetchTage();
-      // Form auf nächsten Tag reset
-      setForm({
-        ...emptyForm(),
-        vmPause: pausen?.vm.default_aktiv ?? true,
-        mittagPause: pausen?.mittag.default_aktiv ?? true,
-      });
-      // Datum +1 Tag, ausser bei Edit
-      if (dates.length === 1 && !form.editingId) {
-        const next = new Date(date);
-        next.setDate(next.getDate() + 1);
-        setDate(localIso(next));
+      // Form-Reset auf Standardwerte für den nächsten Tag (außer wir editieren grad)
+      if (!aktuellerEigenerTag) {
+        setForm({
+          ...emptyForm(),
+          vmPause: pausen?.vm.default_aktiv ?? true,
+          mittagPause: pausen?.mittag.default_aktiv ?? true,
+          taetigkeiten: [
+            {
+              taetigkeit_id: null,
+              taetigkeit_freitext: "",
+              baustelle_id: null,
+              notiz: "",
+              stundenPerMa: Object.fromEntries(
+                Array.from(forUserIds).map((uid) => [uid, 0]),
+              ),
+            },
+          ],
+        });
+        if (dates.length === 1) {
+          const next = new Date(date);
+          next.setDate(next.getDate() + 1);
+          setDate(localIso(next));
+        }
       }
-    } catch (e) {
-      toast({
-        variant: "destructive",
-        title: "Fehler beim Speichern",
-        description: (e as Error).message,
-      });
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -490,13 +626,39 @@ export default function Stunden() {
     setDate(localIso(nd));
   };
 
-  const isPolier = !!polierPartie;
+  const togglePerson = (uid: string) => {
+    setForUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
+      return next;
+    });
+  };
 
   return (
-    <div className="space-y-4 max-w-2xl mx-auto">
+    <div className="space-y-4 max-w-3xl mx-auto">
       <PageHeader title="Stundenerfassung" />
 
-      {/* Datums-Navigation */}
+      {/* Personen-Picker — nur für Polier/Admin */}
+      {hasPicker && user && (
+        <PersonPicker
+          mode={mode}
+          partie={polierPartie}
+          partien={allPartien}
+          members={allMembers}
+          selectedIds={forUserIds}
+          onToggle={togglePerson}
+          onSetSelection={setForUserIds}
+          ownUserId={user.id}
+          ownProfile={profile as any}
+          statusForDate={statusForDateMap}
+          search={memberSearch}
+          onSearchChange={setMemberSearch}
+          date={date}
+        />
+      )}
+
+      {/* Datum */}
       <Card>
         <CardContent className="p-4 space-y-3">
           <div className="flex items-center gap-2">
@@ -546,37 +708,69 @@ export default function Stunden() {
         </CardContent>
       </Card>
 
-      {/* Tage-Liste (letzte 30 Tage) */}
-      <TageListe
-        tage={tageList}
-        loading={tageLoading}
-        baustellen={baustellen}
-        taetigkeitenStamm={taetigkeitenStamm}
-        zulagenTypen={zulagenTypen}
-        pausen={pausen}
-        limits={limits}
-        onEditDate={(d) => setDate(d)}
-        onDeleteTag={onDeleteTag}
-      />
+      {/* Eigene Tage-Liste (kompakt, der Polier sieht eigene Buchungen) */}
+      {tageList.length > 0 && (
+        <Card>
+          <CardContent className="p-3 space-y-1.5">
+            <div className="text-xs font-semibold uppercase text-muted-foreground">
+              Meine letzten Tage
+            </div>
+            {tageList.slice(0, 5).map((t) => (
+              <div
+                key={t.tag.id}
+                className="flex items-center gap-2 text-xs rounded px-2 py-1.5 bg-muted/40"
+              >
+                <span className="font-bold tabular-nums shrink-0">
+                  {fmtH(Number(t.tag.netto_stunden))}
+                </span>
+                <span className="text-muted-foreground tabular-nums shrink-0">
+                  {new Date(t.tag.datum).toLocaleDateString("de-AT", {
+                    weekday: "short",
+                    day: "2-digit",
+                    month: "2-digit",
+                  })}
+                </span>
+                <Badge variant="outline" className="text-[10px]">
+                  {STATUS_LABELS[t.tag.tag_status]}
+                </Badge>
+                <span className="flex-1" />
+                {t.tag.status === "erfasst" && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 w-7 p-0 text-destructive"
+                    onClick={() => onDeleteTag(t.tag.id)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Eingabe-Form */}
       <Card>
         <CardContent className="p-4 space-y-4">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <h3 className="text-base font-bold flex items-center gap-2">
-              {form.editingId ? (
-                <>
-                  <Edit className="h-4 w-4 text-primary" />
-                  Tag bearbeiten
-                </>
-              ) : (
-                <>
-                  <Plus className="h-4 w-4 text-primary" />
-                  Tag erfassen
-                </>
-              )}
-            </h3>
-          </div>
+          <h3 className="text-base font-bold flex items-center gap-2">
+            {aktuellerEigenerTag ? (
+              <>
+                <Edit className="h-4 w-4 text-primary" />
+                Tag bearbeiten
+              </>
+            ) : (
+              <>
+                <Plus className="h-4 w-4 text-primary" />
+                Tag erfassen
+              </>
+            )}
+            {forUserIds.size > 1 && (
+              <Badge variant="outline" className="ml-auto">
+                {forUserIds.size} Mitarbeiter
+              </Badge>
+            )}
+          </h3>
 
           {/* Status-Bar */}
           <div>
@@ -604,63 +798,88 @@ export default function Stunden() {
             </div>
           </div>
 
-          {/* Netto-Stunden */}
-          <div className="space-y-2 border-t pt-3">
-            <Label className="text-sm font-semibold">
-              {isArbeit ? "Tatsächlich gearbeitet" : "Stunden"}
-            </Label>
-            <div className="flex items-stretch gap-2">
-              <Button
-                variant="outline"
-                className="h-12 w-12 shrink-0"
-                onClick={() =>
-                  setForm((f) => ({ ...f, nettoStunden: Math.max(0, +(f.nettoStunden - 0.25).toFixed(2)) }))
-                }
-              >
-                <Minus className="h-5 w-5" />
-              </Button>
-              <Input
-                type="number"
-                step={0.25}
-                min={0}
-                value={form.nettoStunden}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, nettoStunden: Math.max(0, Number(e.target.value) || 0) }))
-                }
-                className="h-12 text-center text-xl font-bold tabular-nums"
-              />
-              <span className="h-12 flex items-center px-2 text-sm font-medium text-muted-foreground">h</span>
-              <Button
-                variant="outline"
-                className="h-12 w-12 shrink-0"
-                onClick={() => setForm((f) => ({ ...f, nettoStunden: +(f.nettoStunden + 0.25).toFixed(2) }))}
-              >
-                <Plus className="h-5 w-5" />
-              </Button>
-            </div>
-            {isArbeit && (
-              <div className="grid grid-cols-4 gap-1.5">
-                {[8, 9, 9.5, 10].map((q) => (
-                  <Button
-                    key={q}
-                    variant="outline"
-                    size="sm"
-                    className="h-9"
-                    onClick={() => setForm((f) => ({ ...f, nettoStunden: q }))}
-                  >
-                    {fmtHNum(q)} h
-                  </Button>
-                ))}
-              </div>
-            )}
-          </div>
+          {/* Matrix (bei Arbeit) */}
+          {isArbeit && (
+            <MatrixEditor
+              taetigkeiten={form.taetigkeiten}
+              selectedMa={selectedMaList}
+              taetigkeitenStamm={taetigkeitenStamm}
+              baustellen={baustellen}
+              onChange={(neue) => setForm((f) => ({ ...f, taetigkeiten: neue }))}
+              summenProMa={summenProMa}
+            />
+          )}
 
-          {/* Pausen-Toggles (nur Arbeit) */}
+          {/* Fehlzeit-Eingabe */}
+          {!isArbeit && (
+            <div className="space-y-2 border-t pt-3">
+              <Label className="text-sm font-semibold">Stunden pro Tag</Label>
+              <div className="flex items-stretch gap-2">
+                <Button
+                  variant="outline"
+                  className="h-12 w-12 shrink-0"
+                  onClick={() =>
+                    setForm((f) => ({
+                      ...f,
+                      fehlzeitStunden: Math.max(0, +(f.fehlzeitStunden - 0.25).toFixed(2)),
+                    }))
+                  }
+                >
+                  <Minus className="h-5 w-5" />
+                </Button>
+                <Input
+                  type="number"
+                  step={0.25}
+                  min={0}
+                  value={form.fehlzeitStunden}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      fehlzeitStunden: Math.max(0, Number(e.target.value) || 0),
+                    }))
+                  }
+                  className="h-12 text-center text-xl font-bold tabular-nums"
+                />
+                <span className="h-12 flex items-center px-2 text-sm font-medium text-muted-foreground">
+                  h
+                </span>
+                <Button
+                  variant="outline"
+                  className="h-12 w-12 shrink-0"
+                  onClick={() =>
+                    setForm((f) => ({
+                      ...f,
+                      fehlzeitStunden: +(f.fehlzeitStunden + 0.25).toFixed(2),
+                    }))
+                  }
+                >
+                  <Plus className="h-5 w-5" />
+                </Button>
+              </div>
+              <div className="space-y-1 pt-2">
+                <Label className="text-sm">Bis-Datum (optional, für Mehrtages-Fehlzeit)</Label>
+                <Input
+                  type="date"
+                  min={date}
+                  value={form.fehlzeitBis}
+                  onChange={(e) => setForm((f) => ({ ...f, fehlzeitBis: e.target.value }))}
+                  className="h-10"
+                />
+                {form.fehlzeitBis && form.fehlzeitBis > date && (
+                  <div className="text-[11px] text-muted-foreground">
+                    Wochenenden und Feiertage werden übersprungen.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Pausen (nur Arbeit, global pro Tag) */}
           {isArbeit && pausen && (
             <div className="space-y-2 border-t pt-3">
               <Label className="text-sm font-semibold flex items-center gap-1.5">
                 <Coffee className="h-4 w-4 text-primary" />
-                Pausen (werden zur Anwesenheit dazu addiert)
+                Pausen (werden auf die Anwesenheit aufgeschlagen)
               </Label>
               <div className="grid sm:grid-cols-2 gap-2">
                 <label
@@ -688,168 +907,19 @@ export default function Stunden() {
                   />
                   <span className="text-sm">
                     Mittagspause{" "}
-                    <span className="text-muted-foreground">({pausen.mittag.dauer_minuten} min)</span>
+                    <span className="text-muted-foreground">
+                      ({pausen.mittag.dauer_minuten} min)
+                    </span>
                   </span>
                 </label>
               </div>
             </div>
           )}
 
-          {/* Tätigkeiten (nur Arbeit) */}
-          {isArbeit && (
-            <div className="space-y-2 border-t pt-3">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm font-semibold flex items-center gap-1.5">
-                  <Tag className="h-4 w-4 text-primary" />
-                  Tätigkeiten
-                </Label>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() =>
-                    setForm((f) => ({
-                      ...f,
-                      taetigkeiten: [
-                        ...f.taetigkeiten,
-                        {
-                          taetigkeit_id: null,
-                          taetigkeit_freitext: "",
-                          baustelle_id: f.taetigkeiten[f.taetigkeiten.length - 1]?.baustelle_id ?? null,
-                          stunden: 0,
-                          notiz: "",
-                        },
-                      ],
-                    }))
-                  }
-                >
-                  <Plus className="h-3.5 w-3.5 mr-1" /> Tätigkeit
-                </Button>
-              </div>
-              {form.taetigkeiten.map((t, idx) => (
-                <div key={idx} className="rounded-md border p-2.5 space-y-2 bg-muted/20">
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={t.taetigkeit_id ?? ""}
-                      onChange={(e) =>
-                        setForm((f) => {
-                          const next = [...f.taetigkeiten];
-                          next[idx] = { ...next[idx], taetigkeit_id: e.target.value || null };
-                          return { ...f, taetigkeiten: next };
-                        })
-                      }
-                      className="h-10 flex-1 rounded-md border bg-background px-3 text-sm"
-                    >
-                      <option value="">— Tätigkeit wählen —</option>
-                      {taetigkeitenStamm.map((tt) => (
-                        <option key={tt.id} value={tt.id}>
-                          {tt.bezeichnung}
-                        </option>
-                      ))}
-                    </select>
-                    {form.taetigkeiten.length > 1 && (
-                      <>
-                        <Input
-                          type="number"
-                          step={0.25}
-                          min={0}
-                          value={t.stunden}
-                          onChange={(e) =>
-                            setForm((f) => {
-                              const next = [...f.taetigkeiten];
-                              next[idx] = { ...next[idx], stunden: Number(e.target.value) || 0 };
-                              return { ...f, taetigkeiten: next };
-                            })
-                          }
-                          className="h-10 w-20 text-right"
-                        />
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-destructive"
-                          onClick={() =>
-                            setForm((f) => ({
-                              ...f,
-                              taetigkeiten: f.taetigkeiten.filter((_, i) => i !== idx),
-                            }))
-                          }
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                  {!t.taetigkeit_id && (
-                    <Input
-                      placeholder="Oder Freitext (z.B. Spengler-Arbeit)"
-                      value={t.taetigkeit_freitext}
-                      onChange={(e) =>
-                        setForm((f) => {
-                          const next = [...f.taetigkeiten];
-                          next[idx] = { ...next[idx], taetigkeit_freitext: e.target.value };
-                          return { ...f, taetigkeiten: next };
-                        })
-                      }
-                      className="h-9 text-sm"
-                    />
-                  )}
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1">
-                      <BaustelleCombobox
-                        baustellen={baustellen}
-                        value={t.baustelle_id ?? ""}
-                        onChange={(v) =>
-                          setForm((f) => {
-                            const next = [...f.taetigkeiten];
-                            next[idx] = { ...next[idx], baustelle_id: v || null };
-                            return { ...f, taetigkeiten: next };
-                          })
-                        }
-                        allowClear={form.tagStatus === "firma"}
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Input
-                      placeholder="Notiz (optional)"
-                      value={t.notiz}
-                      onChange={(e) =>
-                        setForm((f) => {
-                          const next = [...f.taetigkeiten];
-                          next[idx] = { ...next[idx], notiz: e.target.value };
-                          return { ...f, taetigkeiten: next };
-                        })
-                      }
-                      className="h-9 text-sm flex-1"
-                    />
-                    <MicButton
-                      onText={(text) =>
-                        setForm((f) => {
-                          const next = [...f.taetigkeiten];
-                          next[idx] = {
-                            ...next[idx],
-                            notiz: next[idx].notiz ? `${next[idx].notiz} ${text}` : text,
-                          };
-                          return { ...f, taetigkeiten: next };
-                        })
-                      }
-                      className="h-9 w-9"
-                    />
-                  </div>
-                </div>
-              ))}
-              {taetigkeitenMismatch && (
-                <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
-                  Tätigkeiten ergeben <strong>{fmtHNum(taetigkeitenSumme)} h</strong>, aber Netto-
-                  Eingabe ist <strong>{fmtHNum(form.nettoStunden)} h</strong>. Bitte angleichen.
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Zulagen */}
           {isArbeit && erlaubteZulagenIds.length > 0 && (
             <div className="space-y-2 border-t pt-3">
-              <Label className="text-sm font-semibold">Zulagen</Label>
+              <Label className="text-sm font-semibold">Zulagen (gilt für alle mit Berechtigung)</Label>
               <div className="flex flex-wrap gap-1.5">
                 {zulagenTypen
                   .filter((z) => erlaubteZulagenIds.includes(z.id))
@@ -875,7 +945,7 @@ export default function Stunden() {
                         }`}
                       >
                         {z.bezeichnung}
-                        {active && sel?.stunden !== null && sel?.stunden !== undefined && (
+                        {active && sel?.stunden != null && (
                           <span className="ml-1">· {sel.stunden}h</span>
                         )}
                       </button>
@@ -892,7 +962,6 @@ export default function Stunden() {
                       type="number"
                       step={0.25}
                       min={0}
-                      max={form.nettoStunden}
                       value={val.stunden ?? ""}
                       onChange={(e) =>
                         setForm((f) => {
@@ -905,7 +974,7 @@ export default function Stunden() {
                           return { ...f, zulagenSelected: next };
                         })
                       }
-                      placeholder={`alle ${fmtHNum(form.nettoStunden)} h`}
+                      placeholder="alle Std"
                       className="h-8 w-32 text-right"
                     />
                     <span className="text-muted-foreground">h (leer = alle)</span>
@@ -915,38 +984,21 @@ export default function Stunden() {
             </div>
           )}
 
-          {/* Fahrt (nur Polier) */}
-          {isArbeit && isPolier && (
+          {/* Fahrt nur für Polier-Self */}
+          {isArbeit && istPolier && forUserIds.has(primaryUserId) && (
             <FahrtSection
               fahrt={form.fahrt}
               setFahrt={(fahrt) => setForm((f) => ({ ...f, fahrt }))}
-              baustelle={baustellen.find((b) => b.id === form.taetigkeiten[0]?.baustelle_id) ?? null}
+              baustelle={
+                baustellen.find((b) => b.id === form.taetigkeiten[0]?.baustelle_id) ?? null
+              }
             />
-          )}
-
-          {/* Fehlzeit: Bis-Datum */}
-          {!isArbeit && (
-            <div className="space-y-2 border-t pt-3">
-              <Label className="text-sm">Bis-Datum (optional, für Mehrtages-Fehlzeit)</Label>
-              <Input
-                type="date"
-                min={date}
-                value={form.fehlzeitBis}
-                onChange={(e) => setForm((f) => ({ ...f, fehlzeitBis: e.target.value }))}
-                className="h-10"
-              />
-              {form.fehlzeitBis && form.fehlzeitBis > date && (
-                <div className="text-[11px] text-muted-foreground">
-                  Wochenenden und Feiertage werden übersprungen — pro Werktag wird ein Eintrag erzeugt.
-                </div>
-              )}
-            </div>
           )}
 
           {/* Anmerkung */}
           <div className="space-y-1 border-t pt-3">
             <Label className="text-sm">Anmerkung (optional)</Label>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-start gap-1.5">
               <Textarea
                 value={form.anmerkung}
                 onChange={(e) => setForm((f) => ({ ...f, anmerkung: e.target.value }))}
@@ -955,93 +1007,263 @@ export default function Stunden() {
               />
               <MicButton
                 onText={(text) =>
-                  setForm((f) => ({ ...f, anmerkung: f.anmerkung ? `${f.anmerkung} ${text}` : text }))
+                  setForm((f) => ({
+                    ...f,
+                    anmerkung: f.anmerkung ? `${f.anmerkung} ${text}` : text,
+                  }))
                 }
                 className="h-9 w-9"
               />
             </div>
           </div>
 
-          {/* Live-Preview */}
-          {isArbeit && (
-            <div className="rounded-lg border bg-primary/5 border-primary/20 p-3 space-y-1.5">
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div>
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    Tatsächlich gearbeitet
-                  </div>
-                  <div className="text-xl font-bold tabular-nums text-primary">
-                    {fmtH(tagZeiten.nettoArbeit)}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    Anwesenheit
-                  </div>
-                  <div className="text-xl font-bold tabular-nums">
-                    {fmtH(tagZeiten.bruttoAnwesenheit)}
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center justify-between text-xs text-muted-foreground border-t border-primary/20 pt-1.5">
-                <span className="tabular-nums">
-                  {tagZeiten.von} – {tagZeiten.bis}
-                </span>
-                <span>
-                  Soll: {fmtH(sollHours)}
-                  {ueber.diff !== 0 && (
-                    <span className={ueber.diff > 0 ? "text-emerald-700 ml-1.5" : "text-amber-700 ml-1.5"}>
-                      ({ueber.diff > 0 ? "+" : ""}
-                      {fmtH(Math.abs(ueber.diff))} {ueber.diff > 0 ? "Überstunden" : "fehlend"})
-                    </span>
-                  )}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Arbeitszeit-Warnung */}
-          {!azgCheck.ok && (
-            <div className="rounded-md border-2 border-destructive bg-destructive/5 p-3 flex items-start gap-2 text-xs">
-              <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-              <div>
-                <strong className="text-destructive">Arbeitszeit-Grenze überschritten</strong>
-                <div className="text-foreground mt-0.5">{azgCheck.meldung}</div>
-              </div>
-            </div>
+          {/* Zusammenfassung pro MA */}
+          {selectedMaList.length > 0 && (
+            <ZusammenfassungCard
+              selectedMa={selectedMaList}
+              summenProMa={summenProMa}
+              isArbeit={isArbeit}
+              primaryUserId={primaryUserId}
+              primarySoll={primarySoll}
+              vmPause={form.vmPause}
+              mittagPause={form.mittagPause}
+              pausen={pausen}
+              arbeitsbeginn={arbeitsbeginnEffective}
+              limits={limits}
+            />
           )}
 
           {/* Submit */}
-          <Button
-            onClick={submit}
-            disabled={saveMut.isPending}
-            className="w-full h-12 text-base"
-          >
-            {saveMut.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            {form.editingId ? "Änderungen speichern" : "Tag speichern"}
+          <Button onClick={submit} disabled={busy} className="w-full h-12 text-base">
+            {busy && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            {forUserIds.size > 1
+              ? `Für ${forUserIds.size} Mitarbeiter speichern`
+              : aktuellerEigenerTag
+              ? "Änderungen speichern"
+              : "Tag speichern"}
           </Button>
-          {form.editingId && (
-            <Button
-              variant="outline"
-              onClick={() =>
-                setForm({
-                  ...emptyForm(),
-                  vmPause: pausen?.vm.default_aktiv ?? true,
-                  mittagPause: pausen?.mittag.default_aktiv ?? true,
-                })
-              }
-              className="w-full"
-            >
-              Eingaben verwerfen
-            </Button>
-          )}
         </CardContent>
       </Card>
     </div>
   );
 }
 
-// ─── Fahrt-Section (nur Polier) ────────────────────────────────────────────
+// ─── Matrix-Editor ──────────────────────────────────────────────────────
+
+function MatrixEditor({
+  taetigkeiten,
+  selectedMa,
+  taetigkeitenStamm,
+  baustellen,
+  onChange,
+  summenProMa,
+}: {
+  taetigkeiten: TaetigkeitsZeile[];
+  selectedMa: Profile[];
+  taetigkeitenStamm: Database["public"]["Tables"]["taetigkeiten_stamm"]["Row"][];
+  baustellen: Baustelle[];
+  onChange: (neue: TaetigkeitsZeile[]) => void;
+  summenProMa: Map<string, number>;
+}) {
+  const isMulti = selectedMa.length > 1;
+
+  const addZeile = () => {
+    onChange([
+      ...taetigkeiten,
+      {
+        taetigkeit_id: null,
+        taetigkeit_freitext: "",
+        baustelle_id: taetigkeiten[taetigkeiten.length - 1]?.baustelle_id ?? null,
+        notiz: "",
+        stundenPerMa: Object.fromEntries(selectedMa.map((m) => [m.id, 0])),
+      },
+    ]);
+  };
+
+  const updateZeile = (idx: number, patch: Partial<TaetigkeitsZeile>) => {
+    const next = [...taetigkeiten];
+    next[idx] = { ...next[idx], ...patch };
+    onChange(next);
+  };
+
+  const setStunden = (idx: number, uid: string, val: number) => {
+    const next = [...taetigkeiten];
+    next[idx] = {
+      ...next[idx],
+      stundenPerMa: { ...next[idx].stundenPerMa, [uid]: Math.max(0, val || 0) },
+    };
+    onChange(next);
+  };
+
+  const removeZeile = (idx: number) => {
+    onChange(taetigkeiten.filter((_, i) => i !== idx));
+  };
+
+  return (
+    <div className="space-y-2 border-t pt-3">
+      <div className="flex items-center justify-between">
+        <Label className="text-sm font-semibold flex items-center gap-1.5">
+          <Tag className="h-4 w-4 text-primary" />
+          Tätigkeiten
+        </Label>
+        <Button size="sm" variant="outline" onClick={addZeile}>
+          <Plus className="h-3.5 w-3.5 mr-1" /> Tätigkeit
+        </Button>
+      </div>
+
+      {taetigkeiten.map((t, idx) => (
+        <div key={idx} className="rounded-md border p-2.5 space-y-2 bg-muted/20">
+          {/* Tätigkeit + Baustelle */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={t.taetigkeit_id ?? ""}
+              onChange={(e) => updateZeile(idx, { taetigkeit_id: e.target.value || null })}
+              className="h-10 flex-1 min-w-0 rounded-md border bg-background px-2 text-sm"
+            >
+              <option value="">— Tätigkeit wählen —</option>
+              {taetigkeitenStamm.map((tt) => (
+                <option key={tt.id} value={tt.id}>
+                  {tt.bezeichnung}
+                </option>
+              ))}
+            </select>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive shrink-0 h-8 w-8 p-0"
+              onClick={() => removeZeile(idx)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+          {!t.taetigkeit_id && (
+            <Input
+              placeholder="Oder Freitext"
+              value={t.taetigkeit_freitext}
+              onChange={(e) => updateZeile(idx, { taetigkeit_freitext: e.target.value })}
+              className="h-9 text-sm"
+            />
+          )}
+          <BaustelleCombobox
+            baustellen={baustellen}
+            value={t.baustelle_id ?? ""}
+            onChange={(v) => updateZeile(idx, { baustelle_id: v || null })}
+            allowClear
+          />
+
+          {/* Stunden-Eingabe */}
+          {!isMulti && selectedMa[0] && (
+            // Single-MA: ein Stunden-Feld
+            <StundenZelle
+              value={t.stundenPerMa[selectedMa[0].id] ?? 0}
+              onChange={(v) => setStunden(idx, selectedMa[0].id, v)}
+              big
+            />
+          )}
+          {isMulti && (
+            // Multi-MA: Zellen pro MA
+            <div className="space-y-1">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                Stunden pro Mitarbeiter
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                {selectedMa.map((m) => (
+                  <div
+                    key={m.id}
+                    className="flex items-center gap-1.5 bg-background border rounded p-1.5"
+                  >
+                    <span className="text-[11px] font-medium truncate flex-1">
+                      {m.vorname}
+                    </span>
+                    <StundenZelle
+                      value={t.stundenPerMa[m.id] ?? 0}
+                      onChange={(v) => setStunden(idx, m.id, v)}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="text-[10px] text-muted-foreground text-right">
+                Σ {fmtHNum(
+                  selectedMa.reduce((s, m) => s + Number(t.stundenPerMa[m.id] ?? 0), 0),
+                )}{" "}
+                h
+              </div>
+            </div>
+          )}
+
+          {/* Notiz */}
+          <Input
+            placeholder="Notiz (optional)"
+            value={t.notiz}
+            onChange={(e) => updateZeile(idx, { notiz: e.target.value })}
+            className="h-9 text-sm"
+          />
+        </div>
+      ))}
+
+      {isMulti && (
+        <div className="bg-primary/5 border border-primary/20 rounded-md p-2 text-xs flex items-center justify-between flex-wrap gap-1">
+          <span className="font-semibold">Netto pro Mitarbeiter:</span>
+          {selectedMa.map((m) => (
+            <span key={m.id} className="tabular-nums">
+              <strong>{m.vorname}</strong>: {fmtH(summenProMa.get(m.id) ?? 0)}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StundenZelle({
+  value,
+  onChange,
+  big = false,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  big?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        className={big ? "h-12 w-12 shrink-0" : "h-7 w-7 shrink-0 p-0"}
+        onClick={() => onChange(Math.max(0, +(value - 0.25).toFixed(2)))}
+      >
+        <Minus className={big ? "h-5 w-5" : "h-3 w-3"} />
+      </Button>
+      <Input
+        type="number"
+        step={0.25}
+        min={0}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value) || 0)}
+        className={`${big ? "h-12 text-xl font-bold" : "h-7 text-sm"} text-center tabular-nums ${
+          big ? "" : "w-14"
+        }`}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        className={big ? "h-12 w-12 shrink-0" : "h-7 w-7 shrink-0 p-0"}
+        onClick={() => onChange(+(value + 0.25).toFixed(2))}
+      >
+        <Plus className={big ? "h-5 w-5" : "h-3 w-3"} />
+      </Button>
+      {big && (
+        <span className="h-12 flex items-center px-1 text-sm font-medium text-muted-foreground">
+          h
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ─── FahrtSection (Polier-Self) ────────────────────────────────────────
 
 function FahrtSection({
   fahrt,
@@ -1053,7 +1275,6 @@ function FahrtSection({
   baustelle: Baustelle | null;
 }) {
   const enabled = !!fahrt;
-
   const toggle = () => {
     if (enabled) setFahrt(null);
     else
@@ -1066,14 +1287,13 @@ function FahrtSection({
         taggeld_manuell: false,
       });
   };
-
   return (
     <div className="space-y-2 border-t pt-3">
       <div className="flex items-center gap-2">
         <Switch checked={enabled} onCheckedChange={toggle} />
         <Label className="text-sm font-semibold flex items-center gap-1.5 cursor-pointer">
           <Car className="h-4 w-4 text-primary" />
-          Fahrt & Diäten (Polier)
+          Fahrt &amp; Diäten (Polier)
         </Label>
       </div>
       {enabled && fahrt && (
@@ -1102,12 +1322,12 @@ function FahrtSection({
                 checked={fahrt.privat_pkw}
                 onCheckedChange={(v) => setFahrt({ ...fahrt, privat_pkw: v })}
               />
-              <Label className="text-xs cursor-pointer">Mit Privat-PKW gefahren</Label>
+              <Label className="text-xs cursor-pointer">Privat-PKW</Label>
             </div>
           </div>
           {fahrt.privat_pkw && (
             <div className="space-y-1">
-              <Label className="text-xs">Kilometer gefahren</Label>
+              <Label className="text-xs">Kilometer</Label>
               <Input
                 type="number"
                 step={1}
@@ -1125,7 +1345,7 @@ function FahrtSection({
           )}
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
-              <Label className="text-xs">Taggeld kurz (× )</Label>
+              <Label className="text-xs">Taggeld kurz</Label>
               <Input
                 type="number"
                 step={1}
@@ -1138,7 +1358,7 @@ function FahrtSection({
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Taggeld lang (× )</Label>
+              <Label className="text-xs">Taggeld lang</Label>
               <Input
                 type="number"
                 step={1}
@@ -1157,179 +1377,106 @@ function FahrtSection({
   );
 }
 
-// ─── Tage-Liste ────────────────────────────────────────────────────────────
+// ─── ZusammenfassungCard ────────────────────────────────────────────────
 
-const STATUS_BADGE: Record<BuchungStatus, { label: string; cls: string }> = {
-  erfasst: { label: "Erfasst", cls: "bg-blue-100 text-blue-900 border-blue-300" },
-  ma_bestaetigt: { label: "Bestätigt", cls: "bg-emerald-100 text-emerald-900 border-emerald-300" },
-  zm_freigabe: { label: "ZM frei", cls: "bg-purple-100 text-purple-900 border-purple-300" },
-  buero_freigabe: { label: "Büro frei", cls: "bg-orange-100 text-orange-900 border-orange-300" },
-  exportiert: { label: "Exportiert", cls: "bg-gray-300 text-gray-900 border-gray-400" },
-  abgelehnt: { label: "Abgelehnt", cls: "bg-red-100 text-red-900 border-red-300" },
-};
-
-function TageListe({
-  tage,
-  loading,
-  baustellen,
-  taetigkeitenStamm,
-  zulagenTypen,
+function ZusammenfassungCard({
+  selectedMa,
+  summenProMa,
+  isArbeit,
+  primaryUserId,
+  primarySoll,
+  vmPause,
+  mittagPause,
   pausen,
+  arbeitsbeginn,
   limits,
-  onEditDate,
-  onDeleteTag,
 }: {
-  tage: StundenTagFull[];
-  loading: boolean;
-  baustellen: Baustelle[];
-  taetigkeitenStamm: Database["public"]["Tables"]["taetigkeiten_stamm"]["Row"][];
-  zulagenTypen: Database["public"]["Tables"]["zulagen_typen"]["Row"][];
+  selectedMa: Profile[];
+  summenProMa: Map<string, number>;
+  isArbeit: boolean;
+  primaryUserId: string;
+  primarySoll: number;
+  vmPause: boolean;
+  mittagPause: boolean;
   pausen: { vm: any; mittag: any } | undefined;
-  limits: any;
-  onEditDate: (date: string) => void;
-  onDeleteTag: (id: string) => void;
+  arbeitsbeginn: string;
+  limits:
+    | { max_netto_pro_tag: number; max_brutto_pro_tag: number; arbeitsbeginn_default: string }
+    | undefined;
 }) {
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="p-4 flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Lade Tage…
-        </CardContent>
-      </Card>
-    );
-  }
-  if (tage.length === 0) {
-    return (
-      <Card className="border-dashed">
-        <CardContent className="p-4 text-center text-sm text-muted-foreground">
-          Noch keine Tage erfasst.
-        </CardContent>
-      </Card>
-    );
-  }
   return (
-    <Card>
-      <CardContent className="p-3 sm:p-4 space-y-2">
-        <div className="text-sm font-semibold">Letzte 30 Tage</div>
-        <div className="space-y-1.5">
-          {tage.map((t) => {
-            const zeiten = pausen
-              ? berechneTagZeiten({
-                  nettoStunden: Number(t.tag.netto_stunden),
-                  vmPause: t.tag.vm_pause,
-                  mittagPause: t.tag.mittag_pause,
-                  pausenConfig: {
-                    vmDauerMin: pausen.vm.dauer_minuten,
-                    mittagDauerMin: pausen.mittag.dauer_minuten,
-                  },
-                  arbeitsbeginn:
-                    t.tag.arbeitsbeginn?.slice(0, 5) ||
-                    limits?.arbeitsbeginn_default?.slice(0, 5) ||
-                    "07:00",
-                })
-              : null;
-            const isArbeit =
-              t.tag.tag_status === "baustelle" || t.tag.tag_status === "firma";
-            const statusBadge = STATUS_BADGE[t.tag.status];
-            const canEdit = t.tag.status === "erfasst" || t.tag.status === "ma_bestaetigt";
-            return (
-              <div
-                key={t.tag.id}
-                className="rounded-md border p-2.5 flex items-start gap-2 bg-card hover:bg-muted/20 transition"
+    <div className="rounded-lg border bg-primary/5 border-primary/20 p-3 space-y-1.5">
+      <div className="text-[11px] font-semibold uppercase text-primary">Zusammenfassung</div>
+      {selectedMa.map((m) => {
+        const netto = summenProMa.get(m.id) ?? 0;
+        const z = pausen
+          ? berechneTagZeiten({
+              nettoStunden: netto,
+              vmPause: isArbeit ? vmPause : false,
+              mittagPause: isArbeit ? mittagPause : false,
+              pausenConfig: {
+                vmDauerMin: pausen.vm.dauer_minuten,
+                mittagDauerMin: pausen.mittag.dauer_minuten,
+              },
+              arbeitsbeginn,
+            })
+          : null;
+        const soll = m.id === primaryUserId ? primarySoll : 0;
+        const ueber = z ? ueberstundenForTag(z, soll) : { diff: 0, istUeberstunde: false };
+        const azg = z && limits
+          ? pruefArbeitszeitGesetz(z, {
+              maxNettoProTag: limits.max_netto_pro_tag,
+              maxBruttoProTag: limits.max_brutto_pro_tag,
+              arbeitsbeginnDefault: limits.arbeitsbeginn_default,
+            })
+          : { ok: true as const };
+        return (
+          <div
+            key={m.id}
+            className="flex items-center gap-2 flex-wrap text-xs border-t border-primary/10 pt-1.5 first:border-0 first:pt-0"
+          >
+            <span className="font-semibold w-28 truncate">
+              {m.vorname} {m.nachname[0] ?? ""}.
+            </span>
+            <span className="tabular-nums font-bold">{fmtH(netto)}</span>
+            {z && isArbeit && (
+              <>
+                <span className="text-muted-foreground tabular-nums">
+                  Anwesenheit {fmtH(z.bruttoAnwesenheit)}
+                </span>
+                <span className="text-muted-foreground tabular-nums">
+                  {z.von}–{z.bis}
+                </span>
+              </>
+            )}
+            {m.id === primaryUserId && soll > 0 && (
+              <span
+                className={
+                  ueber.diff > 0
+                    ? "text-emerald-700 tabular-nums"
+                    : ueber.diff < 0
+                    ? "text-amber-700 tabular-nums"
+                    : "text-muted-foreground tabular-nums"
+                }
               >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-semibold tabular-nums">
-                      {new Date(t.tag.datum).toLocaleDateString("de-AT", {
-                        weekday: "short",
-                        day: "2-digit",
-                        month: "2-digit",
-                      })}
-                    </span>
-                    <Badge variant="outline" className="text-[10px] capitalize">
-                      {STATUS_LABELS[t.tag.tag_status]}
-                    </Badge>
-                    <Badge variant="outline" className={`text-[10px] ${statusBadge.cls}`}>
-                      {statusBadge.label}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                    {isArbeit && zeiten ? (
-                      <>
-                        <span className="font-semibold text-foreground tabular-nums">
-                          {fmtH(zeiten.nettoArbeit)}
-                        </span>
-                        <span>·</span>
-                        <span className="tabular-nums">
-                          {zeiten.von} – {zeiten.bis} ({fmtH(zeiten.bruttoAnwesenheit)})
-                        </span>
-                      </>
-                    ) : (
-                      <span className="font-semibold text-foreground">
-                        {fmtH(Number(t.tag.netto_stunden))}
-                      </span>
-                    )}
-                  </div>
-                  {isArbeit && t.taetigkeiten.length > 0 && (
-                    <div className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                      {t.taetigkeiten
-                        .map((tt) => {
-                          const stammName =
-                            taetigkeitenStamm.find((s) => s.id === tt.taetigkeit_id)?.bezeichnung ??
-                            tt.taetigkeit_freitext ??
-                            "—";
-                          const bvh = baustellen.find((b) => b.id === tt.baustelle_id)?.bvh_name;
-                          return bvh ? `${stammName} (${bvh})` : stammName;
-                        })
-                        .join(" · ")}
-                    </div>
-                  )}
-                  {t.zulagen.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {t.zulagen.map((z) => {
-                        const typ = zulagenTypen.find((x) => x.id === z.zulagen_typ_id);
-                        return (
-                          <span
-                            key={z.id}
-                            className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200"
-                          >
-                            {typ?.bezeichnung ?? "Zulage"}
-                            {z.stunden !== null && ` · ${z.stunden}h`}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  {canEdit && (
-                    <>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 w-8 p-0"
-                        onClick={() => onEditDate(t.tag.datum)}
-                        title="Bearbeiten"
-                      >
-                        <Edit className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10"
-                        onClick={() => onDeleteTag(t.tag.id)}
-                        title="Löschen"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
+                Soll {fmtH(soll)}
+                {ueber.diff !== 0 && (
+                  <>
+                    {" "}
+                    ({ueber.diff > 0 ? "+" : "−"}
+                    {fmtHNum(Math.abs(ueber.diff))})
+                  </>
+                )}
+              </span>
+            )}
+            {!azg.ok && (
+              <Badge variant="outline" className="text-[10px] bg-destructive/10 border-destructive text-destructive">
+                <AlertTriangle className="h-3 w-3 mr-1" /> {azg.meldung}
+              </Badge>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }

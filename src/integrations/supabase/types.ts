@@ -176,6 +176,9 @@ export type Database = {
           notizen: string | null;
           bautraeger: boolean | null;
           pflicht_evaluierung_id: string | null;
+          besonderes_augenmerk: string | null;
+          fahrtgeld_pauschale_eur: number;
+          entfernung_km: number | null;
           created_by: string | null;
           created_at: string;
           updated_at: string;
