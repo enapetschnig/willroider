@@ -36,6 +36,76 @@ import {
 } from "@/lib/baustellenOrdner";
 import { NewMitarbeiterDialog, type CredentialsResult } from "@/components/admin/NewMitarbeiterDialog";
 import { CredentialsResultDialog } from "@/components/admin/CredentialsResultDialog";
+import {
+  useZulagenTypen,
+  useMitarbeiterZulagen,
+  useMitarbeiterZulagenMutation,
+} from "@/hooks/useStammdatenStunden";
+
+function MaZulagenSection({ mitarbeiterId }: { mitarbeiterId: string }) {
+  const { toast } = useToast();
+  const { data: alleZulagen = [] } = useZulagenTypen({ onlyActive: true });
+  const { data: erlaubt = [] } = useMitarbeiterZulagen(mitarbeiterId);
+  const mut = useMitarbeiterZulagenMutation();
+  const erlaubtSet = new Set(erlaubt);
+
+  const toggle = async (zulageId: string) => {
+    const next = new Set(erlaubt);
+    if (next.has(zulageId)) next.delete(zulageId);
+    else next.add(zulageId);
+    try {
+      await mut.mutateAsync({
+        mitarbeiter_id: mitarbeiterId,
+        zulagen_typ_ids: Array.from(next),
+      });
+    } catch (e) {
+      toast({ variant: "destructive", title: "Fehler", description: (e as Error).message });
+    }
+  };
+
+  if (alleZulagen.length === 0) {
+    return (
+      <section className="space-y-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground border-b pb-1">
+          Erlaubte Zulagen
+        </h3>
+        <div className="text-xs text-muted-foreground italic">
+          Keine Zulagen konfiguriert. Im Admin → Stunden-Stammdaten anlegen.
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="space-y-3">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground border-b pb-1">
+        Erlaubte Zulagen
+      </h3>
+      <p className="text-[11px] text-muted-foreground -mt-1">
+        Welche Zulagen darf dieser Mitarbeiter im Tageserfassungs-Form auswählen?
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {alleZulagen.map((z) => {
+          const active = erlaubtSet.has(z.id);
+          return (
+            <button
+              key={z.id}
+              type="button"
+              onClick={() => toggle(z.id)}
+              className={`text-xs px-2.5 py-1.5 rounded-full border transition ${
+                active
+                  ? "bg-primary/10 border-primary text-primary"
+                  : "bg-background border-border text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {z.bezeichnung}
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
@@ -1088,6 +1158,9 @@ export default function Mitarbeiter() {
                   </div>
                 </div>
               </section>
+
+              {/* Erlaubte Zulagen */}
+              <MaZulagenSection mitarbeiterId={editing.id} />
 
               <DialogFooter className="sticky bottom-0 bg-card pt-3 border-t">
                 <Button type="button" variant="outline" onClick={closeEdit}>

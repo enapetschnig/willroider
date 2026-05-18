@@ -12,6 +12,7 @@ import {
   Hourglass,
   Settings,
   LayoutDashboard,
+  Clock,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { AdminUebersicht } from "@/components/admin/AdminUebersicht";
@@ -19,6 +20,7 @@ import { AdminUrlaubsKonten } from "@/components/admin/AdminUrlaubsKonten";
 import { AdminZaKonten } from "@/components/admin/AdminZaKonten";
 import { AdminMonatsabschluss } from "@/components/admin/AdminMonatsabschluss";
 import { AdminEinstellungen } from "@/components/admin/AdminEinstellungen";
+import { AdminStammdatenStunden } from "@/components/admin/AdminStammdatenStunden";
 import Mitarbeiter from "@/pages/Mitarbeiter";
 import Kalender from "@/pages/Kalender";
 import Fahrzeuge from "@/pages/Fahrzeuge";
@@ -29,6 +31,7 @@ type TabKey =
   | "mitarbeiter"
   | "urlaub"
   | "za"
+  | "stunden_stamm"
   | "monatsabschluss"
   | "kalender"
   | "fahrzeuge"
@@ -40,6 +43,7 @@ const TABS: { key: TabKey; label: string; icon: typeof Users }[] = [
   { key: "mitarbeiter", label: "Mitarbeiter & Partien", icon: Users },
   { key: "urlaub", label: "Urlaubs-Konten", icon: Sun },
   { key: "za", label: "ZA-Konten", icon: Hourglass },
+  { key: "stunden_stamm", label: "Stunden-Stammdaten", icon: Clock },
   { key: "monatsabschluss", label: "Monatsabschluss", icon: CalendarCheck },
   { key: "kalender", label: "Arbeitszeitkalender", icon: CalendarRange },
   { key: "fahrzeuge", label: "Fahrzeuge", icon: Truck },
@@ -98,6 +102,7 @@ export default function Admin() {
         {tab === "mitarbeiter" && <Mitarbeiter />}
         {tab === "urlaub" && <AdminUrlaubsKonten />}
         {tab === "za" && <AdminZaKonten />}
+        {tab === "stunden_stamm" && <AdminStammdatenStunden />}
         {tab === "monatsabschluss" && <AdminMonatsabschluss />}
         {tab === "kalender" && <Kalender />}
         {tab === "fahrzeuge" && <Fahrzeuge />}
