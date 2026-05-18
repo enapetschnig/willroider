@@ -38,6 +38,10 @@ export type BuchungStatus =
   | 'buero_freigabe'
   | 'exportiert'
   | 'abgelehnt';
+
+// Berichte
+export type BerichtTyp = 'bautagesbericht' | 'regiebericht';
+export type BerichtStatus = 'entwurf' | 'eingereicht' | 'freigegeben' | 'archiviert';
 export type UrlaubModell = 'fix_datum' | 'eintrittsdatum' | 'monatlich';
 
 export type Database = {
@@ -741,6 +745,125 @@ export type Database = {
         Update: Partial<Database['public']['Tables']['stunden_fahrt']['Row']>;
         Relationships: [];
       };
+      berichte: {
+        Row: {
+          id: string;
+          baustelle_id: string;
+          datum: string;
+          typ: BerichtTyp;
+          status: BerichtStatus;
+          erfasst_von: string | null;
+          eingereicht_am: string | null;
+          freigegeben_von: string | null;
+          freigegeben_am: string | null;
+          archiviert_am: string | null;
+          wetter_beschreibung: string | null;
+          temperatur_min: number | null;
+          temperatur_max: number | null;
+          niederschlag_mm: number | null;
+          wetter_quelle: string | null;
+          freitext_besonderheiten: string | null;
+          zeiterfassung_quelle_am: string | null;
+          pdf_dokument_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['berichte']['Row']> & {
+          baustelle_id: string;
+          datum: string;
+          typ: BerichtTyp;
+        };
+        Update: Partial<Database['public']['Tables']['berichte']['Row']>;
+        Relationships: [];
+      };
+      bericht_mitarbeiter: {
+        Row: {
+          id: string;
+          bericht_id: string;
+          mitarbeiter_id: string;
+          position: number;
+          stunden_netto: number;
+          taetigkeit_notiz: string | null;
+          aus_zeiterfassung: boolean;
+        };
+        Insert: Partial<Database['public']['Tables']['bericht_mitarbeiter']['Row']> & {
+          bericht_id: string;
+          mitarbeiter_id: string;
+        };
+        Update: Partial<Database['public']['Tables']['bericht_mitarbeiter']['Row']>;
+        Relationships: [];
+      };
+      bericht_taetigkeiten: {
+        Row: {
+          id: string;
+          bericht_id: string;
+          position: number;
+          taetigkeit_id: string | null;
+          bezeichnung: string;
+          summe_stunden: number;
+          notiz: string | null;
+          aus_zeiterfassung: boolean;
+        };
+        Insert: Partial<Database['public']['Tables']['bericht_taetigkeiten']['Row']> & {
+          bericht_id: string;
+          bezeichnung: string;
+        };
+        Update: Partial<Database['public']['Tables']['bericht_taetigkeiten']['Row']>;
+        Relationships: [];
+      };
+      bericht_aufmass: {
+        Row: {
+          id: string;
+          bericht_id: string;
+          position: number;
+          beschreibung: string;
+          menge: number | null;
+          einheit: string | null;
+          notiz: string | null;
+        };
+        Insert: Partial<Database['public']['Tables']['bericht_aufmass']['Row']> & {
+          bericht_id: string;
+          beschreibung: string;
+        };
+        Update: Partial<Database['public']['Tables']['bericht_aufmass']['Row']>;
+        Relationships: [];
+      };
+      bericht_fotos: {
+        Row: {
+          id: string;
+          bericht_id: string;
+          dokument_id: string;
+          aufmass_position_id: string | null;
+          position: number;
+          bildunterschrift: string | null;
+          geo_lat: number | null;
+          geo_lng: number | null;
+          aufgenommen_am: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['bericht_fotos']['Row']> & {
+          bericht_id: string;
+          dokument_id: string;
+        };
+        Update: Partial<Database['public']['Tables']['bericht_fotos']['Row']>;
+        Relationships: [];
+      };
+      bericht_aenderungen: {
+        Row: {
+          id: string;
+          bericht_id: string;
+          autor_id: string | null;
+          zeitpunkt: string;
+          art: string;
+          details: string | null;
+        };
+        Insert: Partial<Database['public']['Tables']['bericht_aenderungen']['Row']> & {
+          bericht_id: string;
+          art: string;
+        };
+        Update: Partial<Database['public']['Tables']['bericht_aenderungen']['Row']>;
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
     Functions: { [_ in never]: never };
@@ -754,6 +877,8 @@ export type Database = {
       angebot_ordner: AngebotOrdnerEnum;
       tag_status: TagStatus;
       buchung_status: BuchungStatus;
+      bericht_typ: BerichtTyp;
+      bericht_status: BerichtStatus;
     };
     CompositeTypes: { [_ in never]: never };
   };
