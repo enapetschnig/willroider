@@ -135,7 +135,9 @@ export function useSetBerichtStatus() {
   });
 }
 
-/** Erstellt oder findet einen Bericht für (baustelle, datum, typ). */
+/** Erstellt oder findet einen Bericht für (baustelle, datum, typ).
+ *  Race-sicher: bei UNIQUE-Konflikt (zwei User gleichzeitig) wird der bestehende
+ *  Eintrag nachträglich gelesen. */
 export async function findeOderErstelleBericht(
   baustelleId: string,
   datum: string,
@@ -161,6 +163,18 @@ export async function findeOderErstelleBericht(
     })
     .select("id")
     .single();
-  if (error) throw error;
-  return { id: data.id, created: true };
+  if (!error) return { id: data.id, created: true };
+
+  // 23505 = unique_violation — anderer User war schneller. Bestehenden lesen.
+  if ((error as any).code === "23505") {
+    const { data: again } = await supabase
+      .from("berichte")
+      .select("id")
+      .eq("baustelle_id", baustelleId)
+      .eq("datum", datum)
+      .eq("typ", typ)
+      .maybeSingle();
+    if (again) return { id: again.id, created: false };
+  }
+  throw error;
 }

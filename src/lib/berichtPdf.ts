@@ -37,6 +37,26 @@ export interface BerichtPdfInput {
   fotos: { signedUrl: string; bildunterschrift?: string | null }[];
 }
 
+/**
+ * jsPDF.addImage akzeptiert keine plain HTTP-URLs — wir holen das Bild
+ * als Blob und wandeln es in eine dataURL um.
+ */
+async function fetchAsDataUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
 /** Erzeugt das PDF-Dokument. */
 export async function makeBerichtPdf(input: BerichtPdfInput): Promise<jsPDF> {
   const { bericht, baustelle, polier, mitarbeiter, taetigkeiten, aufmass, fotos } = input;
@@ -195,6 +215,14 @@ export async function makeBerichtPdf(input: BerichtPdfInput): Promise<jsPDF> {
 
   // ─── Fotos ─────────────────────────────────────────────────────────
   if (fotos.length > 0) {
+    // Vor-Fetch: alle Fotos als dataURL holen (jsPDF kann keine externen URLs)
+    const fotoData = await Promise.all(
+      fotos.map(async (f) => ({
+        dataUrl: await fetchAsDataUrl(f.signedUrl),
+        bildunterschrift: f.bildunterschrift ?? null,
+      })),
+    );
+
     if (y > PAGE_H - 70) {
       doc.addPage();
       y = MARGIN;
@@ -209,32 +237,51 @@ export async function makeBerichtPdf(input: BerichtPdfInput): Promise<jsPDF> {
     const gap = 4;
     const cellW = (PAGE_W - 2 * MARGIN - gap * (cols - 1)) / cols;
     const cellH = cellW * 0.7;
+    const cellGesamtH = cellH + 10; // Bild + Bildunterschriften-Zeile
+    const startY = y;
 
-    for (let i = 0; i < fotos.length; i++) {
+    for (let i = 0; i < fotoData.length; i++) {
       const col = i % cols;
-      const row = Math.floor(i / cols);
+      const rowInPage = Math.floor(i / cols);
       const x = MARGIN + col * (cellW + gap);
-      const yCell = y + row * (cellH + 10);
+      let yCell = startY + rowInPage * cellGesamtH;
+
+      // Seitenumbruch wenn unten kein Platz
       if (yCell + cellH > PAGE_H - MARGIN) {
         doc.addPage();
         y = MARGIN;
-        // Restart Row-Berechnung für die neue Seite
-        const newRow = Math.floor((i - 0) / cols);
-        // Pragmatisch: einfacher Sprung — wir starten ab MARGIN ohne weitere Cells diese Seite
-        doc.addImage(fotos[i].signedUrl, "JPEG", MARGIN, y, cellW, cellH, undefined, "FAST");
-        if (fotos[i].bildunterschrift) {
-          doc.text(fotos[i].bildunterschrift!, MARGIN, y + cellH + 4, { maxWidth: cellW });
+        // Neue Seite — Anker zurücksetzen
+        yCell = y;
+        // Position auf der neuen Seite: Spalten-0 (egal welcher col i ist)
+        const f = fotoData[i];
+        if (f.dataUrl) {
+          try {
+            doc.addImage(f.dataUrl, "JPEG", MARGIN, yCell, cellW, cellH, undefined, "FAST");
+          } catch {
+            doc.text("(Foto konnte nicht geladen werden)", MARGIN, yCell + cellH / 2);
+          }
+        } else {
+          doc.text("(Foto konnte nicht geladen werden)", MARGIN, yCell + cellH / 2);
+        }
+        if (f.bildunterschrift) {
+          doc.text(f.bildunterschrift, MARGIN, yCell + cellH + 4, { maxWidth: cellW });
         }
         y += cellH + 12;
         continue;
       }
-      try {
-        doc.addImage(fotos[i].signedUrl, "JPEG", x, yCell, cellW, cellH, undefined, "FAST");
-        if (fotos[i].bildunterschrift) {
-          doc.text(fotos[i].bildunterschrift!, x, yCell + cellH + 4, { maxWidth: cellW });
+
+      const f = fotoData[i];
+      if (f.dataUrl) {
+        try {
+          doc.addImage(f.dataUrl, "JPEG", x, yCell, cellW, cellH, undefined, "FAST");
+        } catch {
+          doc.text("(Foto konnte nicht geladen werden)", x, yCell + cellH / 2);
         }
-      } catch {
+      } else {
         doc.text("(Foto konnte nicht geladen werden)", x, yCell + cellH / 2);
+      }
+      if (f.bildunterschrift) {
+        doc.text(f.bildunterschrift, x, yCell + cellH + 4, { maxWidth: cellW });
       }
     }
   }
