@@ -232,6 +232,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               ? { to: "/arbeitsplanung", label: "Plan", icon: CalendarDays, end: false }
               : { to: "/mein-tag", label: "Heute", icon: ClipboardList, end: false },
             { to: "/stunden", label: "Stunden", icon: Clock, end: false },
+            { to: "/berichte", label: "Berichte", icon: FileText, end: false },
             { to: "/baustellen", label: "Baustellen", icon: Building2, end: false },
           ].map((item) => (
             <NavLink

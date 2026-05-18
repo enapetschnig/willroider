@@ -23,7 +23,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { FileText, Plus, Building2, FileCheck2, Loader2, ChevronRight } from "lucide-react";
+import { FileText, Plus, Building2, FileCheck2, Loader2, ChevronRight, Hammer, ClipboardList } from "lucide-react";
 import type { Database, BerichtStatus, BerichtTyp } from "@/integrations/supabase/types";
 import { useBerichteList } from "@/hooks/useBerichte";
 import { findeOderErstelleBericht } from "@/hooks/useBericht";
@@ -58,11 +58,15 @@ export default function Berichte() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [openNeu, setOpenNeu] = useState(false);
 
+  // Tab-State: default Bautagesbericht. Wird im URL-Param gespiegelt.
+  const aktiverTyp: BerichtTyp =
+    (params.get("typ") as BerichtTyp) === "regiebericht" ? "regiebericht" : "bautagesbericht";
+
   const filter = {
     fromDate: params.get("from") ?? daysAgo(30),
     toDate: params.get("to") ?? todayIso(),
     status: (params.get("status") as BerichtStatus) || undefined,
-    typ: (params.get("typ") as BerichtTyp) || undefined,
+    typ: aktiverTyp,
     baustelleId: params.get("baustelle") ?? undefined,
   };
   const { data: berichte = [], isLoading } = useBerichteList(filter);
@@ -107,14 +111,43 @@ export default function Berichte() {
         title="Berichte"
         actions={
           <Button onClick={() => setOpenNeu(true)}>
-            <Plus className="h-4 w-4 mr-1.5" /> Neuer Bericht
+            <Plus className="h-4 w-4 mr-1.5" />
+            {aktiverTyp === "bautagesbericht" ? "Neuer Bautagesbericht" : "Neuer Regiebericht"}
           </Button>
         }
       />
 
+      {/* Typ-Tabs — bewusste Wahl als Erstes */}
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => setFilter("typ", "bautagesbericht")}
+          className={`h-14 rounded-lg border-2 text-base font-semibold flex items-center justify-center gap-2 transition ${
+            aktiverTyp === "bautagesbericht"
+              ? "bg-primary text-primary-foreground border-primary shadow-sm"
+              : "bg-card border-border text-muted-foreground hover:bg-muted"
+          }`}
+        >
+          <Hammer className="h-5 w-5" />
+          Bautagesbericht
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilter("typ", "regiebericht")}
+          className={`h-14 rounded-lg border-2 text-base font-semibold flex items-center justify-center gap-2 transition ${
+            aktiverTyp === "regiebericht"
+              ? "bg-primary text-primary-foreground border-primary shadow-sm"
+              : "bg-card border-border text-muted-foreground hover:bg-muted"
+          }`}
+        >
+          <ClipboardList className="h-5 w-5" />
+          Regiebericht
+        </button>
+      </div>
+
       {/* Filter */}
       <Card>
-        <CardContent className="p-4 grid sm:grid-cols-5 gap-2">
+        <CardContent className="p-4 grid sm:grid-cols-4 gap-2">
           <div className="space-y-1">
             <Label className="text-xs">Von</Label>
             <Input
@@ -132,18 +165,6 @@ export default function Berichte() {
               onChange={(e) => setFilter("to", e.target.value)}
               className="h-9"
             />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Typ</Label>
-            <select
-              value={filter.typ ?? ""}
-              onChange={(e) => setFilter("typ", e.target.value || null)}
-              className="h-9 w-full rounded-md border bg-background px-2 text-sm"
-            >
-              <option value="">alle</option>
-              <option value="bautagesbericht">Bautagesbericht</option>
-              <option value="regiebericht">Regiebericht</option>
-            </select>
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Status</Label>
@@ -243,6 +264,7 @@ export default function Berichte() {
         open={openNeu}
         onClose={() => setOpenNeu(false)}
         baustellen={baustellen}
+        typ={aktiverTyp}
       />
     </div>
   );
@@ -254,23 +276,23 @@ function NeuerBerichtDialog({
   open,
   onClose,
   baustellen,
+  typ,
 }: {
   open: boolean;
   onClose: () => void;
   baustellen: Baustelle[];
+  typ: BerichtTyp;
 }) {
   const { toast } = useToast();
   const navigate = useNavigate();
   const [datum, setDatum] = useState(todayIso());
   const [baustelleId, setBaustelleId] = useState("");
-  const [typ, setTyp] = useState<BerichtTyp>("bautagesbericht");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (open) {
       setDatum(todayIso());
       setBaustelleId("");
-      setTyp("bautagesbericht");
     }
   }, [open]);
 
@@ -302,11 +324,11 @@ function NeuerBerichtDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileCheck2 className="h-5 w-5 text-primary" />
-            Neuer Bericht
+            Neuer {typ === "bautagesbericht" ? "Bautagesbericht" : "Regiebericht"}
           </DialogTitle>
           <DialogDescription>
-            Wenn für Tag + Baustelle + Typ schon ein Bericht existiert, wird der vorhandene
-            geöffnet — kein Duplikat.
+            Datum + Baustelle wählen. Wenn für diese Kombination schon ein Bericht existiert,
+            wird der vorhandene geöffnet — kein Duplikat.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-3">
@@ -335,33 +357,6 @@ function NeuerBerichtDialog({
                 </option>
               ))}
             </select>
-          </div>
-          <div className="space-y-1">
-            <Label>Typ</Label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setTyp("bautagesbericht")}
-                className={`h-11 rounded-md border-2 text-sm font-semibold transition ${
-                  typ === "bautagesbericht"
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "border-border bg-background text-muted-foreground"
-                }`}
-              >
-                Bautagesbericht
-              </button>
-              <button
-                type="button"
-                onClick={() => setTyp("regiebericht")}
-                className={`h-11 rounded-md border-2 text-sm font-semibold transition ${
-                  typ === "regiebericht"
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "border-border bg-background text-muted-foreground"
-                }`}
-              >
-                Regiebericht
-              </button>
-            </div>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
