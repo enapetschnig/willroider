@@ -3,6 +3,7 @@ import { Link, NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   CalendarDays,
+  ClipboardCheck,
   ClipboardList,
   Building2,
   Users,
@@ -44,7 +45,8 @@ type NavItem = {
 const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["all"], end: true },
   { to: "/mein-tag", label: "Mein Tag", icon: ClipboardList, roles: ["all"], end: true },
-  { to: "/arbeitsplanung", label: "Arbeitsplanung", icon: CalendarDays, roles: ["admin"], end: true },
+  { to: "/arbeitsplanung", label: "Jahresplanung", icon: CalendarDays, roles: ["admin"], end: true },
+  { to: "/tagesplanung", label: "Tagesplanung", icon: ClipboardCheck, roles: ["admin"], end: true },
   { to: "/angebote", label: "Angebote", icon: Briefcase, roles: ["admin"], end: false },
   { to: "/baustellen", label: "Baustellen", icon: Building2, roles: ["all"], end: false },
   { to: "/stunden", label: "Zeiterfassung", icon: Clock, roles: ["all"], end: true },

@@ -16,7 +16,15 @@ import {
   Hourglass,
   CheckCircle2,
   Loader2,
+  Phone,
+  Camera,
+  AlertTriangle,
+  Truck,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { findeOderErstelleBericht } from "@/hooks/useBericht";
+import { werktagePlus } from "@/lib/feiertage";
+import { UrlaubAntraegeCard } from "@/components/UrlaubAntragDialog";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
 import { fmtStunden, fmtTage } from "@/lib/konten";
@@ -30,6 +38,401 @@ import { berechneTagZeiten, fmtH } from "@/lib/zeiterfassung";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
+
+/**
+ * Heute-Karte: zeigt dem MA seine konkrete heutige Einteilung
+ * (Baustelle, Fahrzeug, Polier) — sobald die Tagesplanung freigegeben ist.
+ * Wenn keine Freigabe vorliegt, fällt sie auf den letzten freigegebenen Tag zurück.
+ */
+function HeuteEinteilungCard({ userId }: { userId: string }) {
+  const { toast } = useToast();
+  const navigate = useNavigate();
+  const today = localIso();
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<{
+    datum: string;
+    isFreigegeben: boolean;
+    isToday: boolean;
+    baustelle: Baustelle | null;
+    taetigkeit: string | null;
+    abfahrtszeit: string | null;
+    treffpunkt: string | null;
+    fahrzeuge: { kennzeichen: string }[];
+    polier: { vorname: string; nachname: string; telefon: string | null } | null;
+    einteilungId: string | null;
+  } | null>(null);
+
+  const lade = async () => {
+    setLoading(true);
+    // Strategie: erst heute, sonst letzten freigegebenen Tag suchen
+    const datumKandidaten: string[] = [today];
+    const { data: letzte } = await supabase
+      .from("tagesplanung_freigaben")
+      .select("datum")
+      .lte("datum", today)
+      .order("datum", { ascending: false })
+      .limit(3);
+    (letzte ?? []).forEach((r: any) => {
+      if (!datumKandidaten.includes(r.datum)) datumKandidaten.push(r.datum);
+    });
+
+    for (const datum of datumKandidaten) {
+      const { data: frei } = await supabase
+        .from("tagesplanung_freigaben")
+        .select("datum")
+        .eq("datum", datum)
+        .maybeSingle();
+      if (datum !== today && !frei) continue;
+
+      const { data: ems } = await supabase
+        .from("einteilung_mitarbeiter")
+        .select("einteilung_id, einteilung:einteilungen!inner(datum,baustelle_id,taetigkeit,abfahrtszeit,treffpunkt)")
+        .eq("mitarbeiter_id", userId)
+        .eq("einteilung.datum", datum);
+      if (!ems || ems.length === 0) {
+        // an diesem Tag keine Einteilung für den MA → nächsten Kandidat
+        if (datum === today) {
+          // heute keine Einteilung, aber heute IST der Tag → trotzdem Ergebnis zurück
+          setData({
+            datum,
+            isFreigegeben: !!frei,
+            isToday: true,
+            baustelle: null,
+            taetigkeit: null,
+            abfahrtszeit: null,
+            treffpunkt: null,
+            fahrzeuge: [],
+            polier: null,
+            einteilungId: null,
+          });
+          setLoading(false);
+          return;
+        }
+        continue;
+      }
+      const em = ems[0] as any;
+      const einteilung = em.einteilung;
+      const [{ data: bs }, { data: efs }] = await Promise.all([
+        einteilung.baustelle_id
+          ? supabase.from("baustellen").select("*").eq("id", einteilung.baustelle_id).maybeSingle()
+          : Promise.resolve({ data: null }),
+        supabase
+          .from("einteilung_fahrzeuge")
+          .select("fahrzeug:fahrzeuge(kennzeichen)")
+          .eq("einteilung_id", em.einteilung_id),
+      ]);
+      const baustelle = (bs as Baustelle) ?? null;
+      let polier: { vorname: string; nachname: string; telefon: string | null } | null = null;
+      if (baustelle?.partie_id) {
+        const { data: p } = await supabase
+          .from("partien")
+          .select("partieleiter:profiles!partien_partieleiter_id_fkey(vorname,nachname,telefon)")
+          .eq("id", baustelle.partie_id)
+          .maybeSingle();
+        polier = ((p as any)?.partieleiter as any) ?? null;
+      }
+      setData({
+        datum,
+        isFreigegeben: !!frei,
+        isToday: datum === today,
+        baustelle,
+        taetigkeit: einteilung.taetigkeit,
+        abfahrtszeit: einteilung.abfahrtszeit,
+        treffpunkt: einteilung.treffpunkt,
+        fahrzeuge: (efs ?? []).map((e: any) => e.fahrzeug).filter(Boolean),
+        polier,
+        einteilungId: em.einteilung_id,
+      });
+      setLoading(false);
+      return;
+    }
+    setData(null);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    lade();
+    const channel = supabase
+      .channel("mein-tag-heute")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tagesplanung_freigaben" },
+        () => lade(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "einteilung_mitarbeiter" },
+        () => lade(),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="p-6 flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Lade heutige Einteilung…
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!data) {
+    return (
+      <Card className="border-amber-300 bg-amber-50">
+        <CardContent className="p-4 flex items-center gap-2">
+          <AlertTriangle className="h-5 w-5 text-amber-700 shrink-0" />
+          <span className="text-sm text-amber-900">
+            Für heute ist noch kein Plan freigegeben.
+          </span>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const fotoUpload = async () => {
+    if (!data.baustelle) return;
+    try {
+      const r = await findeOderErstelleBericht(data.baustelle.id, today, "bautagesbericht");
+      navigate(`/berichte/${r.id}`);
+    } catch (e) {
+      toast({ variant: "destructive", title: "Fehler", description: (e as Error).message });
+    }
+  };
+
+  const mapsUrl = data.baustelle
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+        [data.baustelle.baustellen_adresse, data.baustelle.plz, data.baustelle.ort]
+          .filter(Boolean)
+          .join(", "),
+      )}`
+    : null;
+
+  return (
+    <Card className="border-primary/30 bg-primary/5">
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="text-xs uppercase tracking-wide text-primary font-semibold">
+            {data.isToday ? "Heute" : `Plan vom ${data.datum}`}
+          </div>
+          {!data.isFreigegeben && (
+            <Badge variant="outline" className="bg-amber-50 border-amber-300 text-amber-900 text-[10px]">
+              <AlertTriangle className="h-3 w-3 mr-1" /> Noch in Bearbeitung
+            </Badge>
+          )}
+        </div>
+
+        {data.baustelle ? (
+          <>
+            <div className="flex items-start gap-2">
+              <Building2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <div className="text-base font-bold leading-tight">
+                  {data.baustelle.bvh_name}
+                </div>
+                {data.baustelle.kostenstelle && (
+                  <div className="text-[11px] text-muted-foreground">
+                    KS {data.baustelle.kostenstelle}
+                  </div>
+                )}
+              </div>
+            </div>
+            {data.taetigkeit && (
+              <div className="text-sm italic pl-7">{data.taetigkeit}</div>
+            )}
+            <div className="grid grid-cols-2 gap-2 pl-7 text-sm">
+              {data.fahrzeuge.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <Truck className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span className="font-medium">
+                    {data.fahrzeuge.map((f) => f.kennzeichen).join(", ")}
+                  </span>
+                </div>
+              )}
+              {data.abfahrtszeit && (
+                <div className="flex items-center gap-1.5">
+                  <ClockIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span className="font-medium">Ab {data.abfahrtszeit.slice(0, 5)}</span>
+                </div>
+              )}
+              {data.treffpunkt && (
+                <div className="flex items-center gap-1.5 col-span-2">
+                  <MapPin className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span>{data.treffpunkt}</span>
+                </div>
+              )}
+            </div>
+
+            {data.polier && (
+              <div className="border-t border-primary/15 pt-2 flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-1.5 text-sm">
+                  <Users className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span>
+                    Polier:{" "}
+                    <span className="font-medium">
+                      {data.polier.vorname} {data.polier.nachname}
+                    </span>
+                  </span>
+                </div>
+                {data.polier.telefon && (
+                  <a
+                    href={`tel:${data.polier.telefon}`}
+                    className="inline-flex items-center gap-1 text-sm bg-primary text-primary-foreground px-3 py-1.5 rounded-md font-medium hover:opacity-90"
+                  >
+                    <Phone className="h-4 w-4" /> Anrufen
+                  </a>
+                )}
+              </div>
+            )}
+
+            <div className="flex gap-2 flex-wrap pt-1">
+              {mapsUrl && (
+                <a
+                  href={mapsUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm bg-background border rounded-md px-3 py-1.5 hover:bg-muted"
+                >
+                  <Navigation className="h-4 w-4" /> In Maps öffnen
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={fotoUpload}
+                className="inline-flex items-center gap-1.5 text-sm bg-background border rounded-md px-3 py-1.5 hover:bg-muted"
+              >
+                <Camera className="h-4 w-4" /> Foto hochladen
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="text-sm text-muted-foreground italic">
+            Heute keine Baustellen-Einteilung. Verwaltung kontaktieren.
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Nächste 14 Werktage — Kompakt-Liste der freigegebenen Einteilungen. */
+function VorschauCard({ userId }: { userId: string }) {
+  const [eintraege, setEintraege] = useState<
+    { datum: string; isFreigegeben: boolean; bvh: string | null; taetigkeit: string | null }[]
+  >([]);
+  const [loading, setLoading] = useState(true);
+
+  const lade = async () => {
+    setLoading(true);
+    const today = localIso();
+    const tage = werktagePlus(today, 14);
+    const von = tage[0];
+    const bis = tage[tage.length - 1];
+
+    const [{ data: frei }, { data: ems }] = await Promise.all([
+      supabase.from("tagesplanung_freigaben").select("datum").gte("datum", von).lte("datum", bis),
+      supabase
+        .from("einteilung_mitarbeiter")
+        .select(
+          "einteilung:einteilungen!inner(datum,taetigkeit,baustelle:baustellen(bvh_name))",
+        )
+        .eq("mitarbeiter_id", userId)
+        .gte("einteilung.datum", von)
+        .lte("einteilung.datum", bis),
+    ]);
+
+    const freiSet = new Set((frei ?? []).map((r: any) => r.datum));
+    const emByDate = new Map<string, { bvh: string | null; taetigkeit: string | null }>();
+    (ems ?? []).forEach((e: any) => {
+      const ei = e.einteilung;
+      if (!ei) return;
+      emByDate.set(ei.datum, {
+        bvh: ei.baustelle?.bvh_name ?? null,
+        taetigkeit: ei.taetigkeit ?? null,
+      });
+    });
+
+    const result = tage
+      .filter((t) => t !== today) // Heute zeigt die HeuteEinteilungCard
+      .slice(0, 10)
+      .map((datum) => ({
+        datum,
+        isFreigegeben: freiSet.has(datum),
+        ...(emByDate.get(datum) ?? { bvh: null, taetigkeit: null }),
+      }));
+
+    setEintraege(result);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    lade();
+    const channel = supabase
+      .channel("mein-tag-vorschau")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tagesplanung_freigaben" },
+        () => lade(),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  if (loading || eintraege.length === 0) return null;
+
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-2">
+        <div className="text-xs font-semibold uppercase text-muted-foreground">
+          Nächste 14 Tage
+        </div>
+        <div className="space-y-1.5">
+          {eintraege.map((e) => {
+            const d = new Date(e.datum + "T00:00:00");
+            const dStr = d.toLocaleDateString("de-AT", {
+              weekday: "short",
+              day: "2-digit",
+              month: "2-digit",
+            });
+            return (
+              <div
+                key={e.datum}
+                className="flex items-center gap-2 text-sm px-2 py-1.5 rounded bg-muted/30"
+              >
+                <span className="font-bold tabular-nums w-20 shrink-0">{dStr}</span>
+                {e.isFreigegeben ? (
+                  e.bvh ? (
+                    <>
+                      <span className="flex-1 truncate font-medium">{e.bvh}</span>
+                      {e.taetigkeit && (
+                        <span className="text-xs italic text-muted-foreground truncate">
+                          {e.taetigkeit}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="italic text-muted-foreground">Keine Einteilung</span>
+                  )
+                ) : (
+                  <span className="italic text-amber-700 text-xs">
+                    Plan noch nicht freigegeben
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 /**
  * Karte für die Tage, die Bestätigung des Mitarbeiters brauchen.
@@ -288,8 +691,17 @@ export default function MeinTag() {
         description={fmtDate}
       />
 
+      {/* Heutige Einteilung aus Tagesplanung */}
+      <HeuteEinteilungCard userId={user!.id} />
+
       {/* Tage zu bestätigen */}
       <BestaetigungsCard userId={user!.id} />
+
+      {/* Nächste 14 Tage */}
+      <VorschauCard userId={user!.id} />
+
+      {/* Urlaubsanträge */}
+      <UrlaubAntraegeCard userId={user!.id} />
 
       {/* Partie-Banner */}
       {partie && (

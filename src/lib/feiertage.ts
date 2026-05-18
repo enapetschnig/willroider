@@ -85,6 +85,43 @@ export function feiertagAt(iso: string): FeiertagInfo | null {
   return getCachedYear(year).get(iso) ?? null;
 }
 
+/** True wenn Datum ein Werktag ist (Mo–Fr und kein Feiertag in Kärnten). */
+export function isWerktag(date: Date | string): boolean {
+  const iso = typeof date === "string" ? date.slice(0, 10) : isoFromDate(date);
+  const d = typeof date === "string" ? new Date(iso + "T00:00:00") : date;
+  const wd = d.getDay();
+  if (wd === 0 || wd === 6) return false;
+  return !feiertagAt(iso);
+}
+
+/** Liefert das Datum des nächsten Werktags NACH dem gegebenen Datum. */
+export function naechsterWerktag(date: Date | string): Date {
+  const d =
+    typeof date === "string" ? new Date(date.slice(0, 10) + "T00:00:00") : new Date(date);
+  do {
+    d.setDate(d.getDate() + 1);
+  } while (!isWerktag(d));
+  return d;
+}
+
+/** Liefert die ISO-Daten der nächsten N Werktage ab `startIso` (inklusive). */
+export function werktagePlus(startIso: string, anzahl: number): string[] {
+  const result: string[] = [];
+  const d = new Date(startIso.slice(0, 10) + "T00:00:00");
+  while (result.length < anzahl) {
+    if (isWerktag(d)) result.push(isoFromDate(d));
+    d.setDate(d.getDate() + 1);
+  }
+  return result;
+}
+
+function isoFromDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 /** Alle Feiertage zwischen zwei ISO-Daten (inklusive). */
 export function feiertageInRange(fromIso: string, toIso: string): { iso: string; info: FeiertagInfo }[] {
   const from = new Date(fromIso);

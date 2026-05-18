@@ -14,6 +14,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Sun, Trash2, RotateCcw, Plus } from "lucide-react";
+import { AdminUrlaubsantraegeCard } from "@/components/UrlaubAntragDialog";
 import type { Database, UrlaubsBuchungArt } from "@/integrations/supabase/types";
 import { fmtTage, URLAUB_ART_LABEL } from "@/lib/konten";
 import { localIso } from "@/lib/dateFmt";
@@ -85,6 +86,9 @@ export function AdminUrlaubsKonten() {
 
   return (
     <div className="space-y-3">
+      {/* Offene Urlaubsanträge */}
+      <AdminUrlaubsantraegeCard />
+
       <Card>
         <CardContent className="p-3 flex items-center gap-2 flex-wrap">
           <Sun className="h-4 w-4 text-amber-500" />

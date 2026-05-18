@@ -43,6 +43,7 @@ export type BuchungStatus =
 export type BerichtTyp = 'bautagesbericht' | 'regiebericht';
 export type BerichtStatus = 'entwurf' | 'eingereicht' | 'freigegeben' | 'archiviert';
 export type UrlaubModell = 'fix_datum' | 'eintrittsdatum' | 'monatlich';
+export type UrlaubsantragStatus = 'offen' | 'genehmigt' | 'abgelehnt' | 'storniert';
 
 export type Database = {
   __InternalSupabase: { PostgrestVersion: '13.0.5' };
@@ -222,6 +223,7 @@ export type Database = {
           created_by: string | null;
           created_at: string;
           updated_at: string;
+          manuell_geaendert: boolean;
         };
         Insert: Partial<Database['public']['Tables']['einteilungen']['Row']> & { datum: string };
         Update: Partial<Database['public']['Tables']['einteilungen']['Row']>;
@@ -252,6 +254,7 @@ export type Database = {
           abwesend: boolean | null;
           abwesenheitsgrund: string | null;
           created_at: string;
+          manuell_geaendert: boolean;
         };
         Insert: Partial<Database['public']['Tables']['einteilung_mitarbeiter']['Row']> & {
           einteilung_id: string;
@@ -865,6 +868,40 @@ export type Database = {
           art: string;
         };
         Update: Partial<Database['public']['Tables']['bericht_aenderungen']['Row']>;
+        Relationships: [];
+      };
+      tagesplanung_freigaben: {
+        Row: {
+          datum: string;
+          freigegeben_am: string;
+          freigegeben_von: string | null;
+          notiz: string | null;
+        };
+        Insert: Partial<Database['public']['Tables']['tagesplanung_freigaben']['Row']> & {
+          datum: string;
+        };
+        Update: Partial<Database['public']['Tables']['tagesplanung_freigaben']['Row']>;
+        Relationships: [];
+      };
+      urlaubsantraege: {
+        Row: {
+          id: string;
+          mitarbeiter_id: string;
+          von: string;
+          bis: string;
+          arbeitstage: number | null;
+          kommentar: string | null;
+          status: UrlaubsantragStatus;
+          eingereicht_am: string;
+          entschieden_von: string | null;
+          entschieden_am: string | null;
+        };
+        Insert: Partial<Database['public']['Tables']['urlaubsantraege']['Row']> & {
+          mitarbeiter_id: string;
+          von: string;
+          bis: string;
+        };
+        Update: Partial<Database['public']['Tables']['urlaubsantraege']['Row']>;
         Relationships: [];
       };
     };
