@@ -6,13 +6,152 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { Building2, MapPin, Navigation, Clock as ClockIcon, Users, Sun, Hourglass } from "lucide-react";
+import {
+  Building2,
+  MapPin,
+  Navigation,
+  Clock as ClockIcon,
+  Users,
+  Sun,
+  Hourglass,
+  CheckCircle2,
+  Loader2,
+} from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
 import { fmtStunden, fmtTage } from "@/lib/konten";
+import { useToast } from "@/hooks/use-toast";
+import {
+  useStundenTageList,
+  useSetStundenStatus,
+} from "@/hooks/useStundenTag";
+import { usePausenConfig, useArbeitszeitLimits } from "@/hooks/useStammdatenStunden";
+import { berechneTagZeiten, fmtH } from "@/lib/zeiterfassung";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
+
+/**
+ * Karte für die Tage, die Bestätigung des Mitarbeiters brauchen.
+ * Zeigt status='erfasst' der letzten 14 Tage.
+ */
+function BestaetigungsCard({ userId }: { userId: string }) {
+  const { toast } = useToast();
+  const { data: pausen } = usePausenConfig();
+  const { data: limits } = useArbeitszeitLimits();
+  const fromDate = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 14);
+    return localIso(d);
+  })();
+  const { data: tage = [], isLoading, refetch } = useStundenTageList({
+    fromDate,
+    mitarbeiterIds: [userId],
+  });
+  const mut = useSetStundenStatus();
+  const offen = tage.filter((t) => t.tag.status === "erfasst");
+
+  if (isLoading || offen.length === 0) return null;
+
+  const bestaetigeAlle = async () => {
+    try {
+      await mut.mutateAsync({
+        ids: offen.map((t) => t.tag.id),
+        newStatus: "ma_bestaetigt",
+      });
+      toast({ title: `${offen.length} Tag(e) bestätigt` });
+      refetch();
+    } catch (e) {
+      toast({ variant: "destructive", title: "Fehler", description: (e as Error).message });
+    }
+  };
+
+  const bestaetigeEinen = async (id: string) => {
+    try {
+      await mut.mutateAsync({ ids: [id], newStatus: "ma_bestaetigt" });
+      toast({ title: "Tag bestätigt" });
+      refetch();
+    } catch (e) {
+      toast({ variant: "destructive", title: "Fehler", description: (e as Error).message });
+    }
+  };
+
+  return (
+    <Card className="border-amber-300 bg-amber-50">
+      <CardContent className="p-3 sm:p-4 space-y-2.5">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="font-semibold text-amber-900 flex items-center gap-1.5">
+            <CheckCircle2 className="h-4 w-4" />
+            {offen.length} Tag{offen.length === 1 ? "" : "e"} warten auf deine Bestätigung
+          </div>
+          {offen.length > 1 && (
+            <Button
+              size="sm"
+              onClick={bestaetigeAlle}
+              disabled={mut.isPending}
+              className="bg-amber-600 hover:bg-amber-700"
+            >
+              {mut.isPending && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+              Alle bestätigen
+            </Button>
+          )}
+        </div>
+        <div className="space-y-1.5">
+          {offen.map((t) => {
+            const isArbeit =
+              t.tag.tag_status === "baustelle" || t.tag.tag_status === "firma";
+            const zeiten =
+              isArbeit && pausen
+                ? berechneTagZeiten({
+                    nettoStunden: Number(t.tag.netto_stunden),
+                    vmPause: t.tag.vm_pause,
+                    mittagPause: t.tag.mittag_pause,
+                    pausenConfig: {
+                      vmDauerMin: pausen.vm.dauer_minuten,
+                      mittagDauerMin: pausen.mittag.dauer_minuten,
+                    },
+                    arbeitsbeginn:
+                      t.tag.arbeitsbeginn?.slice(0, 5) ||
+                      limits?.arbeitsbeginn_default?.slice(0, 5) ||
+                      "07:00",
+                  })
+                : null;
+            return (
+              <div
+                key={t.tag.id}
+                className="rounded-md border border-amber-200 bg-white p-2.5 flex items-center gap-2"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold">
+                    {new Date(t.tag.datum).toLocaleDateString("de-AT", {
+                      weekday: "short",
+                      day: "2-digit",
+                      month: "2-digit",
+                    })}{" "}
+                    · {fmtH(Number(t.tag.netto_stunden))}
+                  </div>
+                  {zeiten && (
+                    <div className="text-[11px] text-muted-foreground tabular-nums">
+                      {zeiten.von} – {zeiten.bis} ({fmtH(zeiten.bruttoAnwesenheit)} Anwesenheit)
+                    </div>
+                  )}
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => bestaetigeEinen(t.tag.id)}
+                  disabled={mut.isPending}
+                  className="bg-amber-600 hover:bg-amber-700 shrink-0"
+                >
+                  Passt!
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function MeinTag() {
   const { user, profile } = useAuth();
@@ -148,6 +287,9 @@ export default function MeinTag() {
         title={`Hallo ${profile.vorname}!`}
         description={fmtDate}
       />
+
+      {/* Tage zu bestätigen */}
+      <BestaetigungsCard userId={user!.id} />
 
       {/* Partie-Banner */}
       {partie && (

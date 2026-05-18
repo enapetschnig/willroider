@@ -21,6 +21,7 @@ import { AdminZaKonten } from "@/components/admin/AdminZaKonten";
 import { AdminMonatsabschluss } from "@/components/admin/AdminMonatsabschluss";
 import { AdminEinstellungen } from "@/components/admin/AdminEinstellungen";
 import { AdminStammdatenStunden } from "@/components/admin/AdminStammdatenStunden";
+import { AdminStundenFreigabe } from "@/components/admin/AdminStundenFreigabe";
 import Mitarbeiter from "@/pages/Mitarbeiter";
 import Kalender from "@/pages/Kalender";
 import Fahrzeuge from "@/pages/Fahrzeuge";
@@ -31,6 +32,7 @@ type TabKey =
   | "mitarbeiter"
   | "urlaub"
   | "za"
+  | "stunden_freigabe"
   | "stunden_stamm"
   | "monatsabschluss"
   | "kalender"
@@ -43,6 +45,7 @@ const TABS: { key: TabKey; label: string; icon: typeof Users }[] = [
   { key: "mitarbeiter", label: "Mitarbeiter & Partien", icon: Users },
   { key: "urlaub", label: "Urlaubs-Konten", icon: Sun },
   { key: "za", label: "ZA-Konten", icon: Hourglass },
+  { key: "stunden_freigabe", label: "Stunden-Freigabe", icon: Clock },
   { key: "stunden_stamm", label: "Stunden-Stammdaten", icon: Clock },
   { key: "monatsabschluss", label: "Monatsabschluss", icon: CalendarCheck },
   { key: "kalender", label: "Arbeitszeitkalender", icon: CalendarRange },
@@ -102,6 +105,7 @@ export default function Admin() {
         {tab === "mitarbeiter" && <Mitarbeiter />}
         {tab === "urlaub" && <AdminUrlaubsKonten />}
         {tab === "za" && <AdminZaKonten />}
+        {tab === "stunden_freigabe" && <AdminStundenFreigabe />}
         {tab === "stunden_stamm" && <AdminStammdatenStunden />}
         {tab === "monatsabschluss" && <AdminMonatsabschluss />}
         {tab === "kalender" && <Kalender />}
