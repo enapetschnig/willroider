@@ -76,6 +76,7 @@ import {
   type SaveFahrt,
 } from "@/hooks/useStundenTag";
 import { useSollHoursForDayBulk } from "@/hooks/useSollHoursForDayBulk";
+import { getBaustellenForMaToday } from "@/lib/tagesplanung";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -261,6 +262,41 @@ export default function Stunden() {
   const { data: pausen } = usePausenConfig();
   const { data: limits } = useArbeitszeitLimits();
   const { sollPerMa } = useSollHoursForDayBulk(Array.from(forUserIds), date);
+
+  // Tagesplanung-Baustelle des primary user für das ausgewählte Datum (für Vorauswahl)
+  const [tagesplanungBaustelleId, setTagesplanungBaustelleId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!primaryUserId || !date) {
+      setTagesplanungBaustelleId(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const eint = await getBaustellenForMaToday(primaryUserId, date);
+      if (!cancelled) {
+        setTagesplanungBaustelleId(eint[0]?.baustelle_id ?? null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [primaryUserId, date]);
+
+  // Default-Setter: wenn Tagesplanung-Baustelle bekannt und Form-Tätigkeit
+  // noch keine Baustelle hat → vorbelegen. Bestehende Werte bleiben unberührt.
+  useEffect(() => {
+    if (!tagesplanungBaustelleId) return;
+    setForm((f) => {
+      const tNeu = f.taetigkeiten.map((t, i) =>
+        i === 0 && t.baustelle_id == null
+          ? { ...t, baustelle_id: tagesplanungBaustelleId }
+          : t,
+      );
+      // Nur updaten wenn sich was geändert hat (Vermeide Render-Loop)
+      const changed = tNeu.some((t, i) => t !== f.taetigkeiten[i]);
+      return changed ? { ...f, taetigkeiten: tNeu } : f;
+    });
+  }, [tagesplanungBaustelleId]);
 
   // Status-Map fürs Picker-UI (zeigt pro MA „4,5h" wenn schon was gebucht)
   const memberIds = useMemo(
@@ -945,6 +981,7 @@ export default function Stunden() {
               baustellen={baustellen}
               onChange={(neue) => setForm((f) => ({ ...f, taetigkeiten: neue }))}
               summenProMa={summenProMa}
+              tagesplanungBaustelleId={tagesplanungBaustelleId}
             />
           )}
 
@@ -1204,6 +1241,7 @@ function MatrixEditor({
   baustellen,
   onChange,
   summenProMa,
+  tagesplanungBaustelleId,
 }: {
   taetigkeiten: TaetigkeitsZeile[];
   selectedMa: Profile[];
@@ -1211,6 +1249,7 @@ function MatrixEditor({
   baustellen: Baustelle[];
   onChange: (neue: TaetigkeitsZeile[]) => void;
   summenProMa: Map<string, number>;
+  tagesplanungBaustelleId: string | null;
 }) {
   const isMulti = selectedMa.length > 1;
 
@@ -1318,12 +1357,20 @@ function MatrixEditor({
               className="h-9 text-sm"
             />
           )}
-          <BaustelleCombobox
-            baustellen={baustellen}
-            value={t.baustelle_id ?? ""}
-            onChange={(v) => updateZeile(idx, { baustelle_id: v || null })}
-            allowClear
-          />
+          <div className="space-y-1">
+            <BaustelleCombobox
+              baustellen={baustellen}
+              value={t.baustelle_id ?? ""}
+              onChange={(v) => updateZeile(idx, { baustelle_id: v || null })}
+              allowClear
+            />
+            {tagesplanungBaustelleId &&
+              t.baustelle_id === tagesplanungBaustelleId && (
+                <div className="text-[10px] inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 w-fit">
+                  <Tag className="h-2.5 w-2.5" /> aus Tagesplanung
+                </div>
+              )}
+          </div>
 
           {/* Stunden-Eingabe */}
           {!isMulti && selectedMa[0] && (

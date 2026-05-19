@@ -55,6 +55,13 @@ import {
   X,
   Copy,
   Eye,
+  ClipboardList,
+  Users,
+  HeartPulse,
+  Sun,
+  CloudRain,
+  ArrowRight,
+  Building2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -99,6 +106,7 @@ export default function Tagesplanung() {
   const { user, isAdmin } = useAuth();
   const { toast } = useToast();
   const [datum, setDatum] = useState<string>(todayIso());
+  const [view, setView] = useState<"baustellen" | "mitarbeiter">("baustellen");
   const { data: plan, isLoading } = useTagesplanung(datum);
 
   const baustellen = useMemo(() => {
@@ -236,6 +244,61 @@ export default function Tagesplanung() {
       .update({ einteilung_id: neueEinteilungId, manuell_geaendert: true })
       .eq("id", emId);
     await setManuellFlag(neueEinteilungId);
+  }
+
+  /** Entfernt einen MA aus allen heutigen Einteilungen. */
+  async function removeMaFromAllEinteilungenForToday(maId: string) {
+    const einteilungIds = (plan?.einteilungen ?? []).map((e) => e.einteilung.id);
+    if (einteilungIds.length === 0) return;
+    await supabase
+      .from("einteilung_mitarbeiter")
+      .delete()
+      .eq("mitarbeiter_id", maId)
+      .in("einteilung_id", einteilungIds);
+  }
+
+  /** Zuteilung: MA in eine Baustelle für heute einteilen. Legt Einteilung an
+   *  wenn (datum, baustelle) noch keine existiert; sonst MA dort einfügen.
+   *  Entfernt vorher alte Zuteilungen des MA für heute (atomarer Wechsel). */
+  async function assignMaToBaustelle(maId: string, baustelleId: string) {
+    // 1) Existiert bereits Einteilung für (datum, baustelle)?
+    const { data: ex } = await supabase
+      .from("einteilungen")
+      .select("id")
+      .eq("datum", datum)
+      .eq("baustelle_id", baustelleId)
+      .maybeSingle();
+
+    let einteilungId = ex?.id as string | undefined;
+    if (!einteilungId) {
+      const { data: neu, error } = await supabase
+        .from("einteilungen")
+        .insert({
+          datum,
+          baustelle_id: baustelleId,
+          manuell_geaendert: true,
+          created_by: user?.id ?? null,
+        })
+        .select("id")
+        .single();
+      if (error || !neu) {
+        toast({ variant: "destructive", title: "Fehler", description: error?.message });
+        return;
+      }
+      einteilungId = neu.id;
+    } else {
+      await setManuellFlag(einteilungId);
+    }
+
+    // 2) MA aus eventuellen anderen heutigen Einteilungen entfernen
+    await removeMaFromAllEinteilungenForToday(maId);
+
+    // 3) In neue Einteilung einfügen
+    await supabase.from("einteilung_mitarbeiter").insert({
+      einteilung_id: einteilungId,
+      mitarbeiter_id: maId,
+      manuell_geaendert: true,
+    });
   }
 
   async function saveSonstigeHinweise(text: string) {
@@ -484,10 +547,44 @@ export default function Tagesplanung() {
         </div>
       </div>
 
-      {/* Word-Layout-Block — mit DndContext für MA-Drag&Drop zwischen Zeilen */}
+      {/* Tab-Switch zwischen Baustellen-Sicht und Mitarbeiter-Sicht */}
+      <div className="flex items-center gap-2 print:hidden">
+        <Button
+          variant={view === "baustellen" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setView("baustellen")}
+          className="flex-1 sm:flex-none"
+        >
+          <ClipboardList className="h-4 w-4 mr-1.5" /> Baustellen
+        </Button>
+        <Button
+          variant={view === "mitarbeiter" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setView("mitarbeiter")}
+          className="flex-1 sm:flex-none"
+        >
+          <Users className="h-4 w-4 mr-1.5" /> Alle Mitarbeiter
+        </Button>
+      </div>
+
+      {/* Mitarbeiter-Sicht (nur sichtbar wenn view='mitarbeiter') */}
+      {view === "mitarbeiter" && (
+        <div className="print:hidden">
+          <MitarbeiterSicht
+            plan={plan ?? null}
+            alleBaustellen={allBaustellen}
+            partienById={Object.fromEntries((plan?.partien ?? []).map((p) => [p.id, p]))}
+            onAssign={assignMaToBaustelle}
+            onRemove={removeMaFromAllEinteilungenForToday}
+          />
+        </div>
+      )}
+
+      {/* Word-Layout-Block — mit DndContext für MA-Drag&Drop zwischen Zeilen.
+          Auf Bildschirm nur sichtbar wenn view='baustellen', beim Drucken IMMER sichtbar. */}
       <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <div
-        className="bg-white p-6 sm:p-8 border print:border-0 print:p-0 mx-auto"
+        className={`bg-white p-6 sm:p-8 border print:border-0 print:p-0 mx-auto ${view === "mitarbeiter" ? "hidden print:block" : ""}`}
         style={{
           fontFamily: '"Times New Roman", Times, serif',
           maxWidth: "210mm",
@@ -824,6 +921,319 @@ function EinteilungsZeile({
         </div>
       </td>
     </tr>
+  );
+}
+
+// ─── Mitarbeiter-zentrierte Sicht ─────────────────────────────────────
+
+function MitarbeiterSicht({
+  plan,
+  alleBaustellen,
+  partienById,
+  onAssign,
+  onRemove,
+}: {
+  plan: ReturnType<typeof useTagesplanung>["data"] extends infer T ? T | null : null;
+  alleBaustellen: Baustelle[];
+  partienById: Record<string, Database["public"]["Tables"]["partien"]["Row"]>;
+  onAssign: (maId: string, baustelleId: string) => Promise<void>;
+  onRemove: (maId: string) => Promise<void>;
+}) {
+  if (!plan) return null;
+
+  // Eingeteilte MA: maId -> { ma, einteilung, baustelle }
+  type MaZeile = {
+    ma: Profile;
+    einteilungId: string | null;
+    baustelle: Baustelle | null;
+  };
+  const eingeteilt: MaZeile[] = [];
+  const eingeteiltIds = new Set<string>();
+  for (const e of plan.einteilungen) {
+    for (const m of e.mitarbeiter) {
+      if (m.profil && !eingeteiltIds.has(m.profil.id)) {
+        eingeteiltIds.add(m.profil.id);
+        eingeteilt.push({ ma: m.profil, einteilungId: e.einteilung.id, baustelle: e.baustelle });
+      }
+    }
+  }
+
+  const abwesendIds = new Set(plan.abwesende.map((a) => a.ma.id));
+  const nichtEingeteilt: MaZeile[] = plan.alleMa
+    .filter((m) => !eingeteiltIds.has(m.id) && !abwesendIds.has(m.id))
+    .map((m) => ({ ma: m, einteilungId: null, baustelle: null }));
+
+  // Eingeteilte nach Baustelle gruppieren
+  const groupedByBaustelle = new Map<string, { baustelle: Baustelle | null; rows: MaZeile[] }>();
+  for (const z of eingeteilt) {
+    const key = z.baustelle?.id ?? "ohne-baustelle";
+    if (!groupedByBaustelle.has(key))
+      groupedByBaustelle.set(key, { baustelle: z.baustelle, rows: [] });
+    groupedByBaustelle.get(key)!.rows.push(z);
+  }
+  const groupList = Array.from(groupedByBaustelle.values()).sort((a, b) =>
+    (a.baustelle?.bvh_name ?? "zzz").localeCompare(b.baustelle?.bvh_name ?? "zzz"),
+  );
+
+  // Heutige Baustellen (für den Picker — Quick-Aktionen)
+  const heutigeBaustellen = plan.einteilungen
+    .map((e) => e.baustelle)
+    .filter((b): b is Baustelle => !!b);
+  const heutigeBaustellenWithCounts = heutigeBaustellen.map((b) => ({
+    baustelle: b,
+    anzahl: plan.einteilungen.find((e) => e.baustelle?.id === b.id)?.mitarbeiter.length ?? 0,
+  }));
+
+  const partieDot = (maId: string) => {
+    const ma = plan.alleMa.find((p) => p.id === maId);
+    const partie = ma?.partie_id ? partienById[ma.partie_id] : null;
+    return (
+      <span
+        className="inline-block h-2.5 w-2.5 rounded-full shrink-0"
+        style={{ background: partie?.farbcode ?? "#cbd5e1" }}
+        title={partie?.name ?? "ohne Partie"}
+      />
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Stats */}
+      <Card>
+        <CardContent className="p-3 flex flex-wrap items-center gap-3 text-sm">
+          <div className="flex items-center gap-1.5">
+            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            <span className="font-bold tabular-nums">{eingeteilt.length}</span>
+            <span className="text-muted-foreground">eingeteilt</span>
+          </div>
+          <span className="text-muted-foreground">·</span>
+          <div className="flex items-center gap-1.5">
+            <AlertTriangle className="h-4 w-4 text-amber-600" />
+            <span className="font-bold tabular-nums">{nichtEingeteilt.length}</span>
+            <span className="text-muted-foreground">nicht eingeteilt</span>
+          </div>
+          <span className="text-muted-foreground">·</span>
+          <div className="flex items-center gap-1.5">
+            <HeartPulse className="h-4 w-4 text-red-500" />
+            <span className="font-bold tabular-nums">{plan.abwesende.length}</span>
+            <span className="text-muted-foreground">abwesend</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Nicht eingeteilt */}
+      {nichtEingeteilt.length > 0 && (
+        <Card className="border-amber-300">
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-center gap-1.5 text-sm font-semibold text-amber-900">
+              <AlertTriangle className="h-4 w-4" />
+              Nicht eingeteilt heute ({nichtEingeteilt.length})
+            </div>
+            <div className="divide-y divide-amber-100">
+              {nichtEingeteilt.map((z) => (
+                <div key={z.ma.id} className="flex items-center gap-2 py-1.5">
+                  {partieDot(z.ma.id)}
+                  <span className="font-medium text-sm flex-1 min-w-0 truncate">
+                    {z.ma.nachname} {z.ma.vorname}
+                  </span>
+                  <BaustellenPickerPopover
+                    label="→ Baustelle wählen"
+                    alleBaustellen={alleBaustellen}
+                    heutigeBaustellen={heutigeBaustellenWithCounts}
+                    onPick={(bsId) => onAssign(z.ma.id, bsId)}
+                    onRemove={null}
+                  />
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Eingeteilt (nach Baustelle gruppiert) */}
+      {eingeteilt.length > 0 && (
+        <Card>
+          <CardContent className="p-3 space-y-3">
+            <div className="text-sm font-semibold">
+              Eingeteilt ({eingeteilt.length})
+            </div>
+            <div className="space-y-3">
+              {groupList.map((g) => (
+                <div key={g.baustelle?.id ?? "x"}>
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground border-b pb-1 mb-1">
+                    <Building2 className="h-3.5 w-3.5" />
+                    {g.baustelle?.bvh_name ?? "Ohne Baustelle"}
+                    {g.baustelle?.kostenstelle && (
+                      <span className="font-normal italic">
+                        · {g.baustelle.kostenstelle}
+                      </span>
+                    )}
+                    <span className="font-normal ml-auto">
+                      {g.rows.length} MA
+                    </span>
+                  </div>
+                  <div className="divide-y divide-border/60">
+                    {g.rows.map((z) => (
+                      <div key={z.ma.id} className="flex items-center gap-2 py-1.5">
+                        {partieDot(z.ma.id)}
+                        <span className="text-sm flex-1 min-w-0 truncate">
+                          {z.ma.nachname} {z.ma.vorname}
+                        </span>
+                        <BaustellenPickerPopover
+                          label="ändern"
+                          alleBaustellen={alleBaustellen}
+                          heutigeBaustellen={heutigeBaustellenWithCounts.filter(
+                            (h) => h.baustelle.id !== g.baustelle?.id,
+                          )}
+                          onPick={(bsId) => onAssign(z.ma.id, bsId)}
+                          onRemove={() => onRemove(z.ma.id)}
+                          compact
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Abwesend */}
+      {plan.abwesende.length > 0 && (
+        <Card>
+          <CardContent className="p-3 space-y-2">
+            <div className="text-sm font-semibold">
+              Abwesend ({plan.abwesende.length})
+            </div>
+            <div className="divide-y">
+              {plan.abwesende.map((a) => (
+                <div key={a.ma.id} className="flex items-center gap-2 py-1.5 text-sm">
+                  {partieDot(a.ma.id)}
+                  <span className="flex-1 min-w-0 truncate">
+                    {a.ma.nachname} {a.ma.vorname}
+                  </span>
+                  <span className="text-xs italic text-muted-foreground inline-flex items-center gap-1">
+                    {a.status === "urlaub" && <Sun className="h-3.5 w-3.5" />}
+                    {a.status === "krank" && <HeartPulse className="h-3.5 w-3.5" />}
+                    {a.status === "schlechtwetter" && <CloudRain className="h-3.5 w-3.5" />}
+                    {a.status === "urlaub" && "Urlaub"}
+                    {a.status === "krank" && "Krank"}
+                    {a.status === "schlechtwetter" && "Schlechtwetter"}
+                    {a.bis && ` bis ${new Date(a.bis).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit" })}`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── Baustellen-Picker Popover für MA-Sicht ───────────────────────────
+
+function BaustellenPickerPopover({
+  label,
+  alleBaustellen,
+  heutigeBaustellen,
+  onPick,
+  onRemove,
+  compact = false,
+}: {
+  label: string;
+  alleBaustellen: Baustelle[];
+  heutigeBaustellen: { baustelle: Baustelle; anzahl: number }[];
+  onPick: (baustelleId: string) => Promise<void> | void;
+  onRemove: (() => Promise<void> | void) | null;
+  compact?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const handlePick = async (bsId: string) => {
+    await onPick(bsId);
+    setOpen(false);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          size="sm"
+          variant={compact ? "ghost" : "outline"}
+          className={compact ? "h-7 text-xs" : "h-8 text-xs"}
+        >
+          {label}
+          <ArrowRight className="h-3 w-3 ml-1" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-2" align="end">
+        <div className="space-y-2">
+          {heutigeBaustellen.length > 0 && (
+            <div className="space-y-0.5">
+              <div className="text-[10px] uppercase text-muted-foreground px-1">
+                Heutige Einteilungen
+              </div>
+              {heutigeBaustellen.map((h) => (
+                <button
+                  key={h.baustelle.id}
+                  type="button"
+                  onClick={() => handlePick(h.baustelle.id)}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted text-sm text-left"
+                >
+                  <Plus className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span className="flex-1 truncate">{h.baustelle.bvh_name}</span>
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {h.anzahl} MA
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="space-y-0.5">
+            <div className="text-[10px] uppercase text-muted-foreground px-1">
+              Alle Baustellen
+            </div>
+            <div className="max-h-48 overflow-y-auto">
+              {alleBaustellen
+                .filter((b) => !heutigeBaustellen.some((h) => h.baustelle.id === b.id))
+                .map((b) => (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => handlePick(b.id)}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted text-sm text-left"
+                  >
+                    <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span className="flex-1 truncate">{b.bvh_name}</span>
+                    {b.kostenstelle && (
+                      <span className="text-[10px] italic text-muted-foreground">
+                        {b.kostenstelle}
+                      </span>
+                    )}
+                  </button>
+                ))}
+            </div>
+          </div>
+          {onRemove && (
+            <div className="border-t pt-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  await onRemove();
+                  setOpen(false);
+                }}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-red-50 text-sm text-left text-red-700"
+              >
+                <X className="h-3.5 w-3.5 shrink-0" />
+                Aus Einteilung entfernen
+              </button>
+            </div>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 

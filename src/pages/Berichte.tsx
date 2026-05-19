@@ -26,6 +26,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { FileText, Plus, Building2, FileCheck2, Loader2, ChevronRight, Hammer, ClipboardList } from "lucide-react";
 import type { Database, BerichtStatus, BerichtTyp } from "@/integrations/supabase/types";
 import { useBerichteList } from "@/hooks/useBerichte";
+import { getBaustellenForMaToday } from "@/lib/tagesplanung";
 import { findeOderErstelleBericht } from "@/hooks/useBericht";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -296,6 +297,23 @@ function NeuerBerichtDialog({
     }
   }, [open]);
 
+  // Vorauswahl der Baustelle aus der Tagesplanung des Polier/Admin für das gewählte Datum
+  useEffect(() => {
+    if (!open || !datum) return;
+    let cancelled = false;
+    (async () => {
+      const { data: u } = await supabase.auth.getUser();
+      if (!u.user?.id) return;
+      const eint = await getBaustellenForMaToday(u.user.id, datum);
+      if (!cancelled && eint[0]?.baustelle_id) {
+        setBaustelleId((cur) => cur || eint[0].baustelle_id);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, datum]);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!baustelleId) return;
@@ -357,6 +375,11 @@ function NeuerBerichtDialog({
                 </option>
               ))}
             </select>
+            {baustelleId && (
+              <div className="text-[10px] text-muted-foreground italic">
+                Aus Tagesplanung vorausgewählt — kannst du frei ändern.
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
