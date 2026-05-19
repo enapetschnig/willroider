@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   DndContext,
   DragOverlay,
@@ -105,9 +106,31 @@ function moveDate(iso: string, days: number): string {
 export default function Tagesplanung() {
   const { user, isAdmin } = useAuth();
   const { toast } = useToast();
+  const qc = useQueryClient();
   const [datum, setDatum] = useState<string>(todayIso());
   const [view, setView] = useState<"baustellen" | "mitarbeiter">("baustellen");
   const { data: plan, isLoading } = useTagesplanung(datum);
+
+  /** Direkt nach jeder Mutation aufrufen — invalidiert den useTagesplanung-Cache
+   *  damit das UI sofort die neuen Daten zeigt (ohne auf Realtime zu warten). */
+  const refresh = () => qc.invalidateQueries({ queryKey: ["tagesplan", datum] });
+
+  /** Setzt manuell_geaendert=true mit silent-Fail. Wenn die Spalte (noch) nicht
+   *  existiert (Schema-Cache veraltet oder Migration nicht durchgelaufen), wird
+   *  der Fehler stillschweigend ignoriert — die App funktioniert trotzdem. */
+  async function markManuell(
+    table: "einteilungen" | "einteilung_mitarbeiter",
+    id: string,
+  ) {
+    try {
+      await supabase
+        .from(table)
+        .update({ manuell_geaendert: true } as any)
+        .eq("id", id);
+    } catch {
+      /* ignore — Spalte fehlt oder Schema-Cache veraltet */
+    }
+  }
 
   const baustellen = useMemo(() => {
     // alle aktiven/geplanten Baustellen für „Einteilung hinzufügen"-Dialog
@@ -147,18 +170,13 @@ export default function Tagesplanung() {
 
   // ─── Mutationen ─────────────────────────────────────────────────────────
 
-  async function setManuellFlag(einteilungId: string) {
-    await supabase
-      .from("einteilungen")
-      .update({ manuell_geaendert: true })
-      .eq("id", einteilungId);
-  }
-
   async function updateTaetigkeit(einteilungId: string, val: string) {
     await supabase
       .from("einteilungen")
-      .update({ taetigkeit: val || null, manuell_geaendert: true })
+      .update({ taetigkeit: val || null })
       .eq("id", einteilungId);
+    await markManuell("einteilungen", einteilungId);
+    refresh();
   }
 
   async function updateFahrzeuge(einteilungId: string, fahrzeugIds: string[]) {
@@ -172,24 +190,36 @@ export default function Tagesplanung() {
         })),
       );
     }
-    await setManuellFlag(einteilungId);
+    await markManuell("einteilungen", einteilungId);
+    refresh();
   }
 
   async function addMitarbeiter(einteilungId: string, maIds: string[]) {
     if (maIds.length === 0) return;
-    await supabase.from("einteilung_mitarbeiter").insert(
-      maIds.map((mid) => ({
-        einteilung_id: einteilungId,
-        mitarbeiter_id: mid,
-        manuell_geaendert: true,
-      })),
-    );
-    await setManuellFlag(einteilungId);
+    const { data: inserted, error } = await supabase
+      .from("einteilung_mitarbeiter")
+      .insert(
+        maIds.map((mid) => ({
+          einteilung_id: einteilungId,
+          mitarbeiter_id: mid,
+        })),
+      )
+      .select("id");
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    await markManuell("einteilungen", einteilungId);
+    for (const r of inserted ?? []) {
+      await markManuell("einteilung_mitarbeiter", (r as any).id);
+    }
+    refresh();
   }
 
   async function removeMitarbeiter(emId: string, einteilungId: string) {
     await supabase.from("einteilung_mitarbeiter").delete().eq("id", emId);
-    await setManuellFlag(einteilungId);
+    await markManuell("einteilungen", einteilungId);
+    refresh();
   }
 
   async function addEinteilung(input: {
@@ -204,7 +234,6 @@ export default function Tagesplanung() {
         datum,
         baustelle_id: input.baustelle_id,
         taetigkeit: input.taetigkeit || null,
-        manuell_geaendert: true,
         created_by: user?.id ?? null,
       })
       .select("id")
@@ -213,14 +242,20 @@ export default function Tagesplanung() {
       toast({ variant: "destructive", title: "Fehler", description: error?.message });
       return;
     }
+    await markManuell("einteilungen", e.id);
     if (input.mitarbeiterIds.length > 0) {
-      await supabase.from("einteilung_mitarbeiter").insert(
-        input.mitarbeiterIds.map((mid) => ({
-          einteilung_id: e.id,
-          mitarbeiter_id: mid,
-          manuell_geaendert: true,
-        })),
-      );
+      const { data: emInserted } = await supabase
+        .from("einteilung_mitarbeiter")
+        .insert(
+          input.mitarbeiterIds.map((mid) => ({
+            einteilung_id: e.id,
+            mitarbeiter_id: mid,
+          })),
+        )
+        .select("id");
+      for (const r of emInserted ?? []) {
+        await markManuell("einteilung_mitarbeiter", (r as any).id);
+      }
     }
     if (input.fahrzeugIds.length > 0) {
       await supabase.from("einteilung_fahrzeuge").insert(
@@ -230,20 +265,24 @@ export default function Tagesplanung() {
         })),
       );
     }
+    refresh();
   }
 
   async function deleteEinteilung(einteilungId: string) {
     if (!window.confirm("Diese Einteilung wirklich entfernen?")) return;
     await supabase.from("einteilungen").delete().eq("id", einteilungId);
+    refresh();
   }
 
   /** Bewegt eine einteilung_mitarbeiter-Zeile in eine andere Einteilung. */
   async function moveMitarbeiter(emId: string, neueEinteilungId: string) {
     await supabase
       .from("einteilung_mitarbeiter")
-      .update({ einteilung_id: neueEinteilungId, manuell_geaendert: true })
+      .update({ einteilung_id: neueEinteilungId })
       .eq("id", emId);
-    await setManuellFlag(neueEinteilungId);
+    await markManuell("einteilung_mitarbeiter", emId);
+    await markManuell("einteilungen", neueEinteilungId);
+    refresh();
   }
 
   /** Entfernt einen MA aus allen heutigen Einteilungen. */
@@ -255,6 +294,7 @@ export default function Tagesplanung() {
       .delete()
       .eq("mitarbeiter_id", maId)
       .in("einteilung_id", einteilungIds);
+    refresh();
   }
 
   /** Zuteilung: MA in eine Baustelle für heute einteilen. Legt Einteilung an
@@ -276,7 +316,6 @@ export default function Tagesplanung() {
         .insert({
           datum,
           baustelle_id: baustelleId,
-          manuell_geaendert: true,
           created_by: user?.id ?? null,
         })
         .select("id")
@@ -286,19 +325,32 @@ export default function Tagesplanung() {
         return;
       }
       einteilungId = neu.id;
-    } else {
-      await setManuellFlag(einteilungId);
+    }
+    await markManuell("einteilungen", einteilungId);
+
+    // 2) MA aus eventuellen anderen heutigen Einteilungen entfernen (ohne Refresh dazwischen)
+    const altEinteilungIds = (plan?.einteilungen ?? []).map((e) => e.einteilung.id);
+    if (altEinteilungIds.length > 0) {
+      await supabase
+        .from("einteilung_mitarbeiter")
+        .delete()
+        .eq("mitarbeiter_id", maId)
+        .in("einteilung_id", altEinteilungIds);
     }
 
-    // 2) MA aus eventuellen anderen heutigen Einteilungen entfernen
-    await removeMaFromAllEinteilungenForToday(maId);
-
     // 3) In neue Einteilung einfügen
-    await supabase.from("einteilung_mitarbeiter").insert({
-      einteilung_id: einteilungId,
-      mitarbeiter_id: maId,
-      manuell_geaendert: true,
-    });
+    const { data: inserted } = await supabase
+      .from("einteilung_mitarbeiter")
+      .insert({
+        einteilung_id: einteilungId,
+        mitarbeiter_id: maId,
+      })
+      .select("id")
+      .single();
+    if (inserted) {
+      await markManuell("einteilung_mitarbeiter", (inserted as any).id);
+    }
+    refresh();
   }
 
   async function saveSonstigeHinweise(text: string) {
@@ -311,6 +363,7 @@ export default function Tagesplanung() {
       },
       { onConflict: "datum" },
     );
+    refresh();
   }
 
   /** Kopiert alle Einteilungen vom letzten Werktag (oder Vortag) auf den aktuellen Tag.
@@ -418,6 +471,7 @@ export default function Tagesplanung() {
       title: `${saved} Einteilungen übernommen`,
       description: skipped > 0 ? `${skipped} übersprungen (existieren bereits)` : undefined,
     });
+    refresh();
   }
 
   async function freigeben() {
@@ -435,6 +489,7 @@ export default function Tagesplanung() {
       return;
     }
     toast({ title: "Plan für " + fmtHeaderDatum(datum) + " freigegeben" });
+    refresh();
   }
 
   const freigegeben = !!plan?.freigabe;

@@ -289,6 +289,14 @@ export default function Arbeitsplanung() {
 
   const workerGroups = useMemo(() => {
     const groups: { partie: Partie | null; members: Profile[] }[] = [];
+    // "Ohne Partie"-Gruppe ganz oben, wenn ungeleisteten MA existieren
+    // (sichtbar bei Filter "alle" oder "ohne")
+    if (
+      unassignedMembers.length > 0 &&
+      (filterPartie === "alle" || filterPartie === "ohne")
+    ) {
+      groups.push({ partie: null, members: unassignedMembers });
+    }
     const filtered =
       filterPartie === "alle"
         ? partien
@@ -300,7 +308,7 @@ export default function Arbeitsplanung() {
       if (members.length > 0) groups.push({ partie: p, members });
     });
     return groups;
-  }, [partien, membersByPartie, filterPartie]);
+  }, [partien, membersByPartie, unassignedMembers, filterPartie]);
 
   const activeBaustellen = useMemo(
     () => baustellen.filter((b) => b.status === "aktiv" || b.status === "geplant"),
@@ -1882,41 +1890,49 @@ function MemberActionPopover({
   onAssign: (memberId: string, newPartieId: string | null) => void;
   children: React.ReactNode;
 }) {
-  const otherPartien = allPartien.filter((p) => p.id !== partie?.id);
   return (
     <Popover>
       <PopoverTrigger asChild>{children}</PopoverTrigger>
       <PopoverContent align="start" className="w-60 p-2">
         <div className="text-xs font-semibold mb-2 px-1">
           {member.vorname} {member.nachname}
-          {partie && (
+          {partie ? (
             <span className="ml-1.5 font-normal text-muted-foreground">
               · {partie.name}
             </span>
+          ) : (
+            <span className="ml-1.5 font-normal text-amber-700 italic">
+              · ohne Partie
+            </span>
           )}
         </div>
-        {otherPartien.length > 0 && (
-          <>
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground px-1 pb-1">
-              In andere Partie verschieben
-            </div>
-            <div className="space-y-0.5 mb-1">
-              {otherPartien.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => onAssign(member.id, p.id)}
-                  className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted flex items-center gap-2"
-                >
-                  <span
-                    className="h-2.5 w-2.5 rounded-full shrink-0"
-                    style={{ background: p.farbcode }}
-                  />
-                  {p.name}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
+        <div className="text-[10px] uppercase tracking-wide text-muted-foreground px-1 pb-1">
+          {partie ? "In andere Partie verschieben" : "Partie zuordnen"}
+        </div>
+        <div className="space-y-0.5 mb-1">
+          {allPartien.map((p) => {
+            const isCurrent = p.id === partie?.id;
+            return (
+              <button
+                key={p.id}
+                onClick={() => !isCurrent && onAssign(member.id, p.id)}
+                disabled={isCurrent}
+                className={`w-full text-left text-xs px-2 py-1.5 rounded flex items-center gap-2 ${
+                  isCurrent ? "bg-muted/60 cursor-default" : "hover:bg-muted"
+                }`}
+              >
+                <span
+                  className="h-2.5 w-2.5 rounded-full shrink-0"
+                  style={{ background: p.farbcode }}
+                />
+                <span className="flex-1">{p.name}</span>
+                {isCurrent && (
+                  <span className="text-emerald-600 font-bold">✓</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
         {partie && (
           <button
             onClick={() => onAssign(member.id, null)}
