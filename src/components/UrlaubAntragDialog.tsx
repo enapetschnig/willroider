@@ -342,10 +342,12 @@ export function AdminUrlaubsantraegeCard() {
         );
       }
       // Bestehende Einträge auf 'urlaub' überschreiben (nur falls status='erfasst')
+      // WICHTIG: netto_stunden=0 setzen, sonst bleibt eine alte Arbeitszeit-Buchung
+      // erhalten obwohl der Tag jetzt als Urlaub gilt.
       if (existing && existing.length > 0) {
         await supabase
           .from("stunden_tage")
-          .update({ tag_status: "urlaub" })
+          .update({ tag_status: "urlaub", netto_stunden: 0 })
           .eq("mitarbeiter_id", a.mitarbeiter_id)
           .in("datum", werktageInRange)
           .eq("status", "erfasst");

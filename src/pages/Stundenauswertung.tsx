@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   ChevronLeft,
@@ -79,6 +80,7 @@ function monatRange(monat: string) {
 }
 
 export default function Stundenauswertung() {
+  const { toast } = useToast();
   const { user, isAdmin } = useAuth();
   const [monat, setMonat] = useState(currentMonth());
   const [members, setMembers] = useState<Profile[]>([]);
@@ -185,11 +187,13 @@ export default function Stundenauswertung() {
     setMonat(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
   };
 
-  const exportCsv = () => {
+  const exportCsv = async () => {
     const lines: string[] = [];
     lines.push(
       "Mitarbeiter;Datum;Status;Netto;Brutto;Von;Bis;Anwesenheit (min);Anmerkung;Workflow",
     );
+    // IDs aller buero_freigabe-Tage sammeln — diese werden nach Export auf 'exportiert' gesetzt
+    const idsZuExportieren: string[] = [];
     for (const { ma, list } of byMa) {
       for (const t of list) {
         const isArbeit = t.tag.tag_status === "baustelle" || t.tag.tag_status === "firma";
@@ -223,6 +227,9 @@ export default function Stundenauswertung() {
             STATUS_BADGE[t.tag.status].label,
           ].join(";"),
         );
+        if (t.tag.status === "buero_freigabe") {
+          idsZuExportieren.push(t.tag.id);
+        }
       }
     }
     const csv = lines.join("\n");
@@ -233,6 +240,32 @@ export default function Stundenauswertung() {
     a.download = `stundenauswertung_${monat}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+
+    // Nach erfolgreichem Export: buero_freigabe-Tage auf 'exportiert' setzen
+    if (idsZuExportieren.length > 0) {
+      if (
+        window.confirm(
+          `${idsZuExportieren.length} freigegebene Tage als „exportiert" markieren?\n` +
+            `(Verhindert Doppel-Export beim nächsten Mal)`,
+        )
+      ) {
+        const { error } = await supabase
+          .from("stunden_tage")
+          .update({ status: "exportiert" })
+          .in("id", idsZuExportieren);
+        if (error) {
+          toast({
+            variant: "destructive",
+            title: "Status-Update fehlgeschlagen",
+            description: error.message,
+          });
+        } else {
+          toast({
+            title: `${idsZuExportieren.length} Tage als „exportiert" markiert`,
+          });
+        }
+      }
+    }
   };
 
   return (

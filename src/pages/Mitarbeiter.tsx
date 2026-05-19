@@ -201,6 +201,23 @@ export default function Mitarbeiter() {
 
   useEffect(() => {
     load();
+    // Realtime: bei jeder Mutation an profiles oder partien neu laden
+    const ch = supabase
+      .channel("mitarbeiter-liste")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "profiles" },
+        () => load(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "partien" },
+        () => load(),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
   }, []);
 
   const openEdit = async (p: Profile) => {

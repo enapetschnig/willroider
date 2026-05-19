@@ -104,6 +104,26 @@ export function AdminMonatsabschluss() {
   const offene = profiles.filter((p) => !abschluss[p.id]);
 
   const closeAll = async () => {
+    // Validierung: alle offenen Tage im Monat müssen mindestens 'buero_freigabe' haben
+    const fromDate = `${monat}-01`;
+    const toDateD = new Date(fromDate);
+    toDateD.setMonth(toDateD.getMonth() + 1);
+    toDateD.setDate(0);
+    const toDate = toDateD.toISOString().slice(0, 10);
+    const { count: ungesichert } = await supabase
+      .from("stunden_tage")
+      .select("id", { count: "exact", head: true })
+      .gte("datum", fromDate)
+      .lte("datum", toDate)
+      .in("status", ["erfasst", "ma_bestaetigt", "zm_freigabe"]);
+    if (ungesichert && ungesichert > 0) {
+      toast({
+        variant: "destructive",
+        title: "Monat kann nicht abgeschlossen werden",
+        description: `${ungesichert} Tag(e) sind noch nicht im Status „Büro-Freigabe" oder „Exportiert". Bitte erst freigeben/exportieren.`,
+      });
+      return;
+    }
     if (!confirm(`Monat ${monat} für ${offene.length} Mitarbeiter abschließen?`))
       return;
     setRunning(true);

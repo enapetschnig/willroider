@@ -8,6 +8,8 @@ import { Key } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
+const MIN_PASSWORD_LENGTH = 8;
+
 export default function ChangePasswordDialog() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -18,6 +20,7 @@ export default function ChangePasswordDialog() {
     setLoading(true);
 
     const formData = new FormData(e.currentTarget);
+    const currentPassword = formData.get("current-password") as string;
     const newPassword = formData.get("new-password") as string;
     const confirmPassword = formData.get("confirm-password") as string;
 
@@ -31,14 +34,33 @@ export default function ChangePasswordDialog() {
       return;
     }
 
-    if (newPassword.length < 6) {
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
       toast({
         variant: "destructive",
         title: "Passwort zu kurz",
-        description: "Das Passwort muss mindestens 6 Zeichen lang sein.",
+        description: `Das Passwort muss mindestens ${MIN_PASSWORD_LENGTH} Zeichen lang sein.`,
       });
       setLoading(false);
       return;
+    }
+
+    // Aktuelles Passwort verifizieren: re-auth mit der aktuellen User-Email
+    const { data: u } = await supabase.auth.getUser();
+    const email = u.user?.email;
+    if (email && currentPassword) {
+      const { error: reauthErr } = await supabase.auth.signInWithPassword({
+        email,
+        password: currentPassword,
+      });
+      if (reauthErr) {
+        toast({
+          variant: "destructive",
+          title: "Aktuelles Passwort falsch",
+          description: "Bitte überprüfe deine Eingabe.",
+        });
+        setLoading(false);
+        return;
+      }
     }
 
     const { error } = await supabase.auth.updateUser({
@@ -77,10 +99,20 @@ export default function ChangePasswordDialog() {
         <DialogHeader>
           <DialogTitle>Passwort ändern</DialogTitle>
           <DialogDescription>
-            Geben Sie Ihr neues Passwort ein. Es muss mindestens 6 Zeichen lang sein.
+            Aktuelles Passwort bestätigen + neues Passwort eingeben (min. {MIN_PASSWORD_LENGTH} Zeichen).
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleChangePassword} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="current-password">Aktuelles Passwort</Label>
+            <Input
+              id="current-password"
+              name="current-password"
+              type="password"
+              required
+              autoComplete="current-password"
+            />
+          </div>
           <div className="space-y-2">
             <Label htmlFor="new-password">Neues Passwort</Label>
             <Input
@@ -88,8 +120,9 @@ export default function ChangePasswordDialog() {
               name="new-password"
               type="password"
               required
-              minLength={6}
-              placeholder="Mindestens 6 Zeichen"
+              minLength={MIN_PASSWORD_LENGTH}
+              placeholder={`Mindestens ${MIN_PASSWORD_LENGTH} Zeichen`}
+              autoComplete="new-password"
             />
           </div>
           <div className="space-y-2">
@@ -99,8 +132,9 @@ export default function ChangePasswordDialog() {
               name="confirm-password"
               type="password"
               required
-              minLength={6}
+              minLength={MIN_PASSWORD_LENGTH}
               placeholder="Passwort wiederholen"
+              autoComplete="new-password"
             />
           </div>
           <div className="flex gap-2 pt-2">

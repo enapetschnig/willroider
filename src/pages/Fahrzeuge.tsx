@@ -107,7 +107,19 @@ export default function Fahrzeuge() {
 
   const remove = async (id: string) => {
     if (!confirm("Fahrzeug wirklich löschen?")) return;
-    await supabase.from("fahrzeuge").delete().eq("id", id);
+    const { error } = await supabase.from("fahrzeuge").delete().eq("id", id);
+    if (error) {
+      // Häufigster Grund: FK-Constraint via einteilung_fahrzeuge
+      toast({
+        variant: "destructive",
+        title: "Löschen nicht möglich",
+        description: error.message.includes("foreign key")
+          ? "Fahrzeug wird in Einteilungen verwendet — erst aus allen Einteilungen entfernen."
+          : error.message,
+      });
+      return;
+    }
+    toast({ title: "Fahrzeug gelöscht" });
     load();
   };
 
