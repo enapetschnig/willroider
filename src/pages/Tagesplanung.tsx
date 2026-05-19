@@ -64,7 +64,11 @@ import {
   CloudRain,
   ArrowRight,
   Building2,
+  Download,
+  Share2,
 } from "lucide-react";
+import { makeTagesplanungPdf } from "@/lib/tagesplanungPdf";
+import { teilenOderDownload, downloadDatei } from "@/lib/teilen";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -513,6 +517,48 @@ export default function Tagesplanung() {
     }
   }
 
+  function pdfFilename(): string {
+    return `Arbeitseinteilung_${datum}.pdf`;
+  }
+  function pdfTeilenText(): string {
+    return `Arbeitseinteilung ${fmtHeaderDatum(datum)}`;
+  }
+
+  /** Lädt die Tagesplanung als PDF herunter. */
+  function downloadPdf() {
+    if (!plan) {
+      toast({ variant: "destructive", title: "Plan noch nicht geladen" });
+      return;
+    }
+    const doc = makeTagesplanungPdf(plan);
+    const blob = doc.output("blob");
+    downloadDatei(blob, pdfFilename());
+    toast({ title: "PDF heruntergeladen" });
+  }
+
+  /** Teilt die PDF via Share-API (Mobile) oder Download + WhatsApp Web (Desktop). */
+  async function teilePdf() {
+    if (!plan) {
+      toast({ variant: "destructive", title: "Plan noch nicht geladen" });
+      return;
+    }
+    const doc = makeTagesplanungPdf(plan);
+    const blob = doc.output("blob");
+    const ok = await teilenOderDownload({
+      blob,
+      filename: pdfFilename(),
+      text: pdfTeilenText(),
+    });
+    if (ok) {
+      toast({ title: "Geteilt" });
+    } else {
+      toast({
+        title: "PDF heruntergeladen",
+        description: "WhatsApp Web wurde geöffnet — PDF einfach ins Chat-Fenster ziehen.",
+      });
+    }
+  }
+
   async function freigeben() {
     const { error } = await supabase.from("tagesplanung_freigaben").upsert(
       {
@@ -624,6 +670,17 @@ export default function Tagesplanung() {
             disabled={copyBusy}
           >
             <Copy className="h-4 w-4 mr-1.5" /> Plan vom Vortag
+          </Button>
+          <Button variant="outline" size="sm" onClick={downloadPdf}>
+            <Download className="h-4 w-4 mr-1.5" /> PDF
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={teilePdf}
+            className="border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100"
+          >
+            <Share2 className="h-4 w-4 mr-1.5" /> WhatsApp
           </Button>
           <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="h-4 w-4 mr-1.5" /> Drucken
