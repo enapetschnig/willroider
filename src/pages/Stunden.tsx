@@ -1025,21 +1025,6 @@ export default function Stunden() {
             )}
           </h3>
 
-          {/* Vorausfüllungs-Hinweis (nur wenn Tagesplanung Daten liefert) */}
-          {!aktuellerEigenerTag &&
-            tagesplanungBaustelleId &&
-            form.tagStatus === "baustelle" && (
-              <div className="flex items-start gap-2 bg-primary/5 border border-primary/20 rounded-md px-3 py-2 text-xs">
-                <span className="text-base leading-none">ⓘ</span>
-                <div>
-                  <span className="font-medium">Werte aus Tagesplanung & Soll vorausgefüllt.</span>{" "}
-                  <span className="text-muted-foreground">
-                    Prüfen, ggf. anpassen — dann unten speichern.
-                  </span>
-                </div>
-              </div>
-            )}
-
           {/* Status-Bar */}
           <div>
             <Label className="text-sm font-semibold">Was war an dem Tag?</Label>
@@ -1452,57 +1437,28 @@ function MatrixEditor({
             </Button>
           </div>
           {!t.taetigkeit_id && (
-            <div className="space-y-1">
-              <Input
-                placeholder="Oder Freitext"
-                value={t.taetigkeit_freitext}
-                onChange={(e) => updateZeile(idx, { taetigkeit_freitext: e.target.value })}
-                className="h-9 text-sm"
-              />
-              {idx === 0 &&
-                tagesplanungTaetigkeit &&
-                t.taetigkeit_freitext.trim() === tagesplanungTaetigkeit.trim() && (
-                  <div className="text-[10px] inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 w-fit">
-                    <Tag className="h-2.5 w-2.5" /> aus Tagesplanung
-                  </div>
-                )}
-            </div>
-          )}
-          <div className="space-y-1">
-            <BaustelleCombobox
-              baustellen={baustellen}
-              value={t.baustelle_id ?? ""}
-              onChange={(v) => updateZeile(idx, { baustelle_id: v || null })}
-              allowClear
+            <Input
+              placeholder="Oder Freitext"
+              value={t.taetigkeit_freitext}
+              onChange={(e) => updateZeile(idx, { taetigkeit_freitext: e.target.value })}
+              className="h-9 text-sm"
             />
-            {tagesplanungBaustelleId &&
-              t.baustelle_id === tagesplanungBaustelleId && (
-                <div className="text-[10px] inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 w-fit">
-                  <Tag className="h-2.5 w-2.5" /> aus Tagesplanung
-                </div>
-              )}
-          </div>
+          )}
+          <BaustelleCombobox
+            baustellen={baustellen}
+            value={t.baustelle_id ?? ""}
+            onChange={(v) => updateZeile(idx, { baustelle_id: v || null })}
+            allowClear
+          />
 
           {/* Stunden-Eingabe */}
           {!isMulti && selectedMa[0] && (
             // Single-MA: ein Stunden-Feld
-            <div className="space-y-1">
-              <StundenZelle
-                value={t.stundenPerMa[selectedMa[0].id] ?? 0}
-                onChange={(v) => setStunden(idx, selectedMa[0].id, v)}
-                big
-              />
-              {idx === 0 &&
-                Number(t.stundenPerMa[selectedMa[0].id] ?? 0) > 0 &&
-                Math.abs(
-                  Number(t.stundenPerMa[selectedMa[0].id] ?? 0) -
-                    (sollPerMa.get(selectedMa[0].id) ?? 0),
-                ) < 0.01 && (
-                  <div className="text-[10px] inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 w-fit">
-                    <Tag className="h-2.5 w-2.5" /> aus Soll vorausgefüllt
-                  </div>
-                )}
-            </div>
+            <StundenZelle
+              value={t.stundenPerMa[selectedMa[0].id] ?? 0}
+              onChange={(v) => setStunden(idx, selectedMa[0].id, v)}
+              big
+            />
           )}
           {isMulti && !t.proMaModus && (
             // Multi-MA "alle gleich": ein großer Stepper + Helper-Text + Link
@@ -1512,19 +1468,6 @@ function MatrixEditor({
                 onChange={(v) => setStundenAlle(idx, v)}
                 big
               />
-              {idx === 0 &&
-                (() => {
-                  const v = Number(t.stundenPerMa[selectedMa[0].id] ?? 0);
-                  const sollFirst = sollPerMa.get(selectedMa[0].id) ?? 0;
-                  if (v > 0 && Math.abs(v - sollFirst) < 0.01) {
-                    return (
-                      <div className="text-[10px] inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 w-fit">
-                        <Tag className="h-2.5 w-2.5" /> aus Soll vorausgefüllt
-                      </div>
-                    );
-                  }
-                  return null;
-                })()}
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-muted-foreground">
                   ↳ für alle {selectedMa.length} Mitarbeiter
