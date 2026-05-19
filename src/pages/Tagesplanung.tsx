@@ -28,6 +28,7 @@ import {
 } from "@dnd-kit/core";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -274,13 +275,44 @@ export default function Tagesplanung() {
     refresh();
   }
 
-  /** Bewegt eine einteilung_mitarbeiter-Zeile in eine andere Einteilung. */
+  /** Bewegt eine einteilung_mitarbeiter-Zeile in eine andere Einteilung.
+   *  Prüft vorher, ob der MA in der Ziel-Einteilung schon existiert — dann wird
+   *  die Quell-Zeile gelöscht (statt UNIQUE-Constraint-Verletzung). */
   async function moveMitarbeiter(emId: string, neueEinteilungId: string) {
-    await supabase
+    // 1) Welcher MA ist das? Existiert er schon in der Ziel-Einteilung?
+    const { data: source } = await supabase
       .from("einteilung_mitarbeiter")
-      .update({ einteilung_id: neueEinteilungId })
-      .eq("id", emId);
-    await markManuell("einteilung_mitarbeiter", emId);
+      .select("mitarbeiter_id, einteilung_id")
+      .eq("id", emId)
+      .maybeSingle();
+    if (!source) {
+      refresh();
+      return;
+    }
+    if (source.einteilung_id === neueEinteilungId) {
+      // Drop auf gleiche Einteilung → no-op
+      return;
+    }
+    const { data: existsInTarget } = await supabase
+      .from("einteilung_mitarbeiter")
+      .select("id")
+      .eq("einteilung_id", neueEinteilungId)
+      .eq("mitarbeiter_id", source.mitarbeiter_id)
+      .maybeSingle();
+    if (existsInTarget) {
+      // MA ist schon in der Ziel-Einteilung → einfach Quell-Zeile löschen
+      await supabase.from("einteilung_mitarbeiter").delete().eq("id", emId);
+    } else {
+      const { error } = await supabase
+        .from("einteilung_mitarbeiter")
+        .update({ einteilung_id: neueEinteilungId })
+        .eq("id", emId);
+      if (error) {
+        toast({ variant: "destructive", title: "Fehler", description: error.message });
+        return;
+      }
+      await markManuell("einteilung_mitarbeiter", emId);
+    }
     await markManuell("einteilungen", neueEinteilungId);
     refresh();
   }
@@ -368,7 +400,11 @@ export default function Tagesplanung() {
 
   /** Kopiert alle Einteilungen vom letzten Werktag (oder Vortag) auf den aktuellen Tag.
    *  Skippt MA, die heute krank/Urlaub/SW haben — die werden in der Sonderfälle-Sektion gezeigt. */
+  const [copyBusy, setCopyBusy] = useState(false);
   async function uebernehmePlanVomVortag() {
+    if (copyBusy) return;
+    setCopyBusy(true);
+    try {
     // Letzten Werktag mit Einteilungen finden (max. 7 Tage zurück)
     let quellDatum: string | null = null;
     let einteilungenVomQuell: any[] = [];
@@ -472,6 +508,9 @@ export default function Tagesplanung() {
       description: skipped > 0 ? `${skipped} übersprungen (existieren bereits)` : undefined,
     });
     refresh();
+    } finally {
+      setCopyBusy(false);
+    }
   }
 
   async function freigeben() {
@@ -578,7 +617,12 @@ export default function Tagesplanung() {
           </Button>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={uebernehmePlanVomVortag}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={uebernehmePlanVomVortag}
+            disabled={copyBusy}
+          >
             <Copy className="h-4 w-4 mr-1.5" /> Plan vom Vortag
           </Button>
           <Button variant="outline" size="sm" onClick={() => window.print()}>

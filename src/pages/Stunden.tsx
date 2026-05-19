@@ -23,7 +23,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -173,6 +173,7 @@ function alleGleich<T>(rec: Record<string, T>, userIds: string[]): boolean {
 export default function Stunden() {
   const { user, profile, isAdmin } = useAuth();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const [date, setDate] = useState<string>(todayIso);
   const [tageOffenMobile, setTageOffenMobile] = useState(false);
@@ -583,6 +584,11 @@ export default function Stunden() {
   const [busy, setBusy] = useState(false);
   const [detailsOffen, setDetailsOffen] = useState(false);
 
+  // Bei Datum-Wechsel: detailsOffen zurücksetzen (Schnellbuchung wieder anbieten)
+  useEffect(() => {
+    setDetailsOffen(false);
+  }, [date]);
+
   /** Schnellbuchung: für jeden selektierten MA mit Tagesplanung-Einteilung
    *  wird ein stunden_tage-Eintrag erstellt mit:
    *    - tag_status='baustelle', netto_stunden=Soll
@@ -703,6 +709,7 @@ export default function Stunden() {
         variant: errors.length > 0 ? "destructive" : undefined,
       });
       refetchTage();
+      queryClient.invalidateQueries({ queryKey: ["stunden_status_for_date"] });
       if (saved > 0) {
         const next = new Date(date);
         next.setDate(next.getDate() + 1);
@@ -845,29 +852,30 @@ export default function Stunden() {
                 }))
             : [];
 
-          // Auto-Taggeld pro MA aus brutto-Anwesenheit berechnen
+          // Auto-Taggeld pro MA aus brutto-Anwesenheit berechnen.
+          // WICHTIG: bestehende Polier-Fahrtdaten (Fahrtgeld/km) gehen NICHT verloren
+          // wenn der Status nicht 'baustelle' ist — sie bleiben erhalten (nur Taggeld=0).
           const isPolierSelf = uid === primaryUserId && istPolier && isArbeit;
           const polierFahrt = isPolierSelf ? form.fahrt : null;
           let fahrtToSave: SaveFahrt | null = null;
-          if (isArbeit && form.tagStatus === "baustelle") {
+          if (polierFahrt?.taggeld_manuell) {
+            // Manueller Override → behalte exakt was Polier eingetragen hat
+            fahrtToSave = polierFahrt;
+          } else if (isArbeit) {
             const tagZ = tagZeitenForMa(uid);
             const brutto = tagZ?.bruttoAnwesenheit ?? 0;
-            // Wenn Polier-Self mit taggeld_manuell=true → behalte manuelle Werte
-            if (polierFahrt?.taggeld_manuell) {
-              fahrtToSave = polierFahrt;
-            } else {
-              const auto = berechneTaggeld(brutto, form.tagStatus);
-              // Fahrt-Eintrag nur wenn was zu speichern ist (Taggeld > 0 oder Polier-Fahrtdaten)
-              if (auto.kurz > 0 || auto.lang > 0 || polierFahrt) {
-                fahrtToSave = {
-                  fahrtgeld_eur: polierFahrt?.fahrtgeld_eur ?? 0,
-                  privat_pkw: polierFahrt?.privat_pkw ?? false,
-                  km_gefahren: polierFahrt?.km_gefahren ?? null,
-                  taggeld_kurz: auto.kurz,
-                  taggeld_lang: auto.lang,
-                  taggeld_manuell: false,
-                };
-              }
+            // Auto-Taggeld: nur bei baustelle > 0, sonst 0
+            const auto = berechneTaggeld(brutto, form.tagStatus);
+            // Fahrt-Eintrag wenn Taggeld > 0 ODER Polier-Fahrtdaten existieren
+            if (auto.kurz > 0 || auto.lang > 0 || polierFahrt) {
+              fahrtToSave = {
+                fahrtgeld_eur: polierFahrt?.fahrtgeld_eur ?? 0,
+                privat_pkw: polierFahrt?.privat_pkw ?? false,
+                km_gefahren: polierFahrt?.km_gefahren ?? null,
+                taggeld_kurz: auto.kurz,
+                taggeld_lang: auto.lang,
+                taggeld_manuell: false,
+              };
             }
           }
           try {
@@ -905,6 +913,7 @@ export default function Stunden() {
       });
 
       refetchTage();
+      queryClient.invalidateQueries({ queryKey: ["stunden_status_for_date"] });
       // Form-Reset auf Standardwerte für den nächsten Tag (außer wir editieren grad)
       if (!aktuellerEigenerTag) {
         setForm({

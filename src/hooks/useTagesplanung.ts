@@ -186,6 +186,11 @@ export function useTagesplanung(datum: string) {
         { event: "*", schema: "public", table: "stunden_tage", filter: `datum=eq.${datum}` },
         () => qc.invalidateQueries({ queryKey: ["tagesplan", datum] }),
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "urlaubsantraege" },
+        () => qc.invalidateQueries({ queryKey: ["tagesplan", datum] }),
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);

@@ -915,7 +915,16 @@ export default function Arbeitsplanung() {
         if (!ok) {
           // Nur die NICHT-manuellen anwenden
           cells = cells.filter((c) => !assignments.get(cellKey(c.workerId, c.iso))?.manuell);
-          if (cells.length === 0) return;
+          if (cells.length === 0) {
+            toast({
+              title: "Keine Änderung",
+              description:
+                "Alle ausgewählten Tage sind in der Tagesplanung manuell angepasst — nichts überschrieben.",
+            });
+            setSelection(new Set());
+            setPopover(null);
+            return;
+          }
         }
       }
     }
