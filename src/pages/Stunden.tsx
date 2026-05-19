@@ -582,143 +582,6 @@ export default function Stunden() {
   const saveMut = useSaveStundenTag();
   const deleteMut = useDeleteStundenTag();
   const [busy, setBusy] = useState(false);
-  const [detailsOffen, setDetailsOffen] = useState(false);
-
-  // Bei Datum-Wechsel: detailsOffen zurücksetzen (Schnellbuchung wieder anbieten)
-  useEffect(() => {
-    setDetailsOffen(false);
-  }, [date]);
-
-  /** Schnellbuchung: für jeden selektierten MA mit Tagesplanung-Einteilung
-   *  wird ein stunden_tage-Eintrag erstellt mit:
-   *    - tag_status='baustelle', netto_stunden=Soll
-   *    - 1 Tätigkeitszeile (baustelle aus Tagesplanung, stunden=Soll)
-   *    - Pausen aus Config
-   *    - Auto-Taggeld (kurz/lang)
-   *    - status='ma_bestaetigt' (Polier hat selbst gebucht)
-   *  MA ohne Tagesplanung oder mit Soll=0 werden übersprungen.
-   */
-  const submitSchnellbuchung = async () => {
-    if (forUserIds.size === 0) {
-      toast({ variant: "destructive", title: "Niemand ausgewählt" });
-      return;
-    }
-    setBusy(true);
-    let saved = 0;
-    let skipped = 0;
-    const errors: string[] = [];
-    try {
-      const { data: existing } = await supabase
-        .from("stunden_tage")
-        .select("id, mitarbeiter_id, status")
-        .eq("datum", date)
-        .in("mitarbeiter_id", Array.from(forUserIds));
-      const existingMap = new Map<string, { id: string; status: string }>();
-      (existing ?? []).forEach((r: any) =>
-        existingMap.set(r.mitarbeiter_id, { id: r.id, status: r.status }),
-      );
-
-      for (const uid of forUserIds) {
-        const tp = tagesplanungPerMa.get(uid);
-        const soll = sollPerMa.get(uid) ?? 0;
-        const ma = selectedMaList.find((m) => m.id === uid);
-        const maName = ma ? `${ma.vorname} ${ma.nachname}` : "MA";
-
-        if (!tp || soll <= 0) {
-          skipped++;
-          continue;
-        }
-        const ex = existingMap.get(uid);
-        if (ex && ex.status !== "erfasst") {
-          toast({
-            title: `${maName} übersprungen`,
-            description: `Tag bereits ${ex.status}`,
-          });
-          skipped++;
-          continue;
-        }
-
-        // Brutto-Anwesenheit für Taggeld
-        const tagZ = berechneTagZeiten({
-          nettoStunden: soll,
-          vmPause: pausen?.vm.default_aktiv ?? true,
-          mittagPause: pausen?.mittag.default_aktiv ?? true,
-          pausenConfig: {
-            vmDauerMin: pausen?.vm.dauer_minuten ?? 20,
-            mittagDauerMin: pausen?.mittag.dauer_minuten ?? 30,
-          },
-          arbeitsbeginn:
-            form.arbeitsbeginn || limits?.arbeitsbeginn_default?.slice(0, 5) || "07:00",
-        });
-        const auto = berechneTaggeld(tagZ.bruttoAnwesenheit, "baustelle");
-
-        try {
-          await saveMut.mutateAsync({
-            id: ex?.id,
-            mitarbeiter_id: uid,
-            datum: date,
-            tag_status: "baustelle",
-            netto_stunden: soll,
-            vm_pause: pausen?.vm.default_aktiv ?? true,
-            mittag_pause: pausen?.mittag.default_aktiv ?? true,
-            arbeitsbeginn: form.arbeitsbeginn,
-            anmerkung: null,
-            taetigkeiten: [
-              {
-                position: 1,
-                taetigkeit_id: null,
-                taetigkeit_freitext: tp.taetigkeit?.trim() || null,
-                baustelle_id: tp.baustelle_id,
-                stunden: soll,
-                notiz: null,
-              },
-            ],
-            zulagen: [],
-            fahrt:
-              auto.kurz > 0 || auto.lang > 0
-                ? {
-                    fahrtgeld_eur: 0,
-                    privat_pkw: false,
-                    km_gefahren: null,
-                    taggeld_kurz: auto.kurz,
-                    taggeld_lang: auto.lang,
-                    taggeld_manuell: false,
-                  }
-                : null,
-          });
-          // Status auf 'ma_bestaetigt' setzen (Polier hat selbst gebucht)
-          await supabase
-            .from("stunden_tage")
-            .update({ status: "ma_bestaetigt" })
-            .eq("mitarbeiter_id", uid)
-            .eq("datum", date);
-          saved++;
-        } catch (e) {
-          errors.push(`${maName}: ${(e as Error).message}`);
-        }
-      }
-      const total = saved + skipped + errors.length;
-      toast({
-        title:
-          errors.length > 0
-            ? `${saved} von ${total} gespeichert`
-            : skipped > 0
-            ? `${saved} gespeichert · ${skipped} übersprungen`
-            : `${saved} ${saved === 1 ? "Tag" : "Tage"} gespeichert und bestätigt`,
-        description: errors.length > 0 ? errors.join(", ") : undefined,
-        variant: errors.length > 0 ? "destructive" : undefined,
-      });
-      refetchTage();
-      queryClient.invalidateQueries({ queryKey: ["stunden_status_for_date"] });
-      if (saved > 0) {
-        const next = new Date(date);
-        next.setDate(next.getDate() + 1);
-        setDate(localIso(next));
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
 
   // ─── Submit ──────────────────────────────────────────────────────────
   const submit = async () => {
@@ -770,6 +633,8 @@ export default function Stunden() {
     setBusy(true);
     let savedCount = 0;
     let skippedCount = 0;
+    let taggeldKurzCount = 0;
+    let taggeldLangCount = 0;
     const errors: string[] = [];
 
     try {
@@ -894,6 +759,10 @@ export default function Stunden() {
               fahrt: fahrtToSave,
             });
             savedCount++;
+            if (fahrtToSave) {
+              taggeldKurzCount += fahrtToSave.taggeld_kurz;
+              taggeldLangCount += fahrtToSave.taggeld_lang;
+            }
           } catch (e) {
             errors.push(`${maName}: ${(e as Error).message}`);
           }
@@ -901,13 +770,17 @@ export default function Stunden() {
       }
 
       const total = savedCount + skippedCount + errors.length;
+      const taggeldParts: string[] = [];
+      if (taggeldKurzCount > 0) taggeldParts.push(`${taggeldKurzCount}× Taggeld kurz`);
+      if (taggeldLangCount > 0) taggeldParts.push(`${taggeldLangCount}× Taggeld lang`);
+      const taggeldInfo = taggeldParts.length > 0 ? ` · ${taggeldParts.join(" · ")}` : "";
       toast({
         title:
           errors.length > 0
             ? `${savedCount} von ${total} gespeichert`
             : skippedCount > 0
-            ? `${savedCount} gespeichert · ${skippedCount} übersprungen`
-            : `${savedCount} ${savedCount === 1 ? "Eintrag" : "Einträge"} gespeichert`,
+            ? `${savedCount} gespeichert · ${skippedCount} übersprungen${taggeldInfo}`
+            : `${savedCount} ${savedCount === 1 ? "Eintrag" : "Einträge"} gespeichert${taggeldInfo}`,
         description: errors.length > 0 ? errors.join(", ") : undefined,
         variant: errors.length > 0 ? "destructive" : undefined,
       });
@@ -1152,6 +1025,21 @@ export default function Stunden() {
             )}
           </h3>
 
+          {/* Vorausfüllungs-Hinweis (nur wenn Tagesplanung Daten liefert) */}
+          {!aktuellerEigenerTag &&
+            tagesplanungBaustelleId &&
+            form.tagStatus === "baustelle" && (
+              <div className="flex items-start gap-2 bg-primary/5 border border-primary/20 rounded-md px-3 py-2 text-xs">
+                <span className="text-base leading-none">ⓘ</span>
+                <div>
+                  <span className="font-medium">Werte aus Tagesplanung & Soll vorausgefüllt.</span>{" "}
+                  <span className="text-muted-foreground">
+                    Prüfen, ggf. anpassen — dann unten speichern.
+                  </span>
+                </div>
+              </div>
+            )}
+
           {/* Status-Bar */}
           <div>
             <Label className="text-sm font-semibold">Was war an dem Tag?</Label>
@@ -1178,22 +1066,8 @@ export default function Stunden() {
             </div>
           </div>
 
-          {/* Schnellbuchung-Hero (nur bei tag_status='baustelle' und Tagesplanung-Daten) */}
-          {form.tagStatus === "baustelle" && !aktuellerEigenerTag && (
-            <SchnellbuchungHero
-              selectedMa={selectedMaList}
-              tagesplanungPerMa={tagesplanungPerMa}
-              sollPerMa={sollPerMa}
-              baustellen={baustellen}
-              busy={busy}
-              onSchnellbuchung={submitSchnellbuchung}
-              onOpenDetails={() => setDetailsOffen(true)}
-              detailsOffen={detailsOffen}
-            />
-          )}
-
-          {/* Matrix (bei Arbeit) — nur sichtbar wenn Details geöffnet sind oder edit-Modus */}
-          {isArbeit && (detailsOffen || aktuellerEigenerTag || form.tagStatus !== "baustelle") && (
+          {/* Matrix (bei Arbeit) — direkt sichtbar, Werte aus Tagesplanung + Soll vorausgefüllt */}
+          {isArbeit && (
             <MatrixEditor
               taetigkeiten={form.taetigkeiten}
               selectedMa={selectedMaList}
@@ -1202,6 +1076,8 @@ export default function Stunden() {
               onChange={(neue) => setForm((f) => ({ ...f, taetigkeiten: neue }))}
               summenProMa={summenProMa}
               tagesplanungBaustelleId={tagesplanungBaustelleId}
+              tagesplanungTaetigkeit={tagesplanungTaetigkeit}
+              sollPerMa={sollPerMa}
             />
           )}
 
@@ -1270,7 +1146,7 @@ export default function Stunden() {
           )}
 
           {/* Pausen (nur Arbeit, global pro Tag) */}
-          {isArbeit && pausen && (detailsOffen || aktuellerEigenerTag) && (
+          {isArbeit && pausen && (
             <div className="space-y-2 border-t pt-3">
               <Label className="text-sm font-semibold flex items-center gap-1.5">
                 <Coffee className="h-4 w-4 text-primary" />
@@ -1312,7 +1188,7 @@ export default function Stunden() {
           )}
 
           {/* Zulagen */}
-          {isArbeit && verfuegbareZulagenIds.length > 0 && (detailsOffen || aktuellerEigenerTag) && (
+          {isArbeit && verfuegbareZulagenIds.length > 0 && (
             <div className="space-y-2 border-t pt-3">
               <Label className="text-sm font-semibold">Zulagen</Label>
               <div className="flex flex-wrap gap-1.5">
@@ -1379,7 +1255,7 @@ export default function Stunden() {
           )}
 
           {/* Fahrt nur für Polier-Self (Taggeld wird automatisch berechnet — Block ist nur für Fahrtgeld/km) */}
-          {isArbeit && istPolier && forUserIds.has(primaryUserId) && (detailsOffen || aktuellerEigenerTag) && (
+          {isArbeit && istPolier && forUserIds.has(primaryUserId) && (
             <FahrtSection
               fahrt={form.fahrt}
               setFahrt={(fahrt) => setForm((f) => ({ ...f, fahrt }))}
@@ -1455,142 +1331,6 @@ export default function Stunden() {
 
 // ─── Matrix-Editor ──────────────────────────────────────────────────────
 
-// ─── Schnellbuchung-Hero ────────────────────────────────────────────────
-
-function SchnellbuchungHero({
-  selectedMa,
-  tagesplanungPerMa,
-  sollPerMa,
-  baustellen,
-  busy,
-  onSchnellbuchung,
-  onOpenDetails,
-  detailsOffen,
-}: {
-  selectedMa: Profile[];
-  tagesplanungPerMa: Map<string, { baustelle_id: string; taetigkeit: string | null }>;
-  sollPerMa: Map<string, number>;
-  baustellen: Baustelle[];
-  busy: boolean;
-  onSchnellbuchung: () => Promise<void>;
-  onOpenDetails: () => void;
-  detailsOffen: boolean;
-}) {
-  // Pro MA: planbar oder nicht
-  const planbar = selectedMa.filter((m) => {
-    const tp = tagesplanungPerMa.get(m.id);
-    const soll = sollPerMa.get(m.id) ?? 0;
-    return tp && soll > 0;
-  });
-  const nichtPlanbar = selectedMa.filter((m) => !planbar.includes(m));
-
-  // Baustellen-Gruppen mit Counts
-  const baustelleCounts = new Map<string, number>();
-  for (const m of planbar) {
-    const bsId = tagesplanungPerMa.get(m.id)?.baustelle_id;
-    if (bsId) baustelleCounts.set(bsId, (baustelleCounts.get(bsId) ?? 0) + 1);
-  }
-  const baustellenLabels = Array.from(baustelleCounts.entries()).map(([id, count]) => {
-    const b = baustellen.find((x) => x.id === id);
-    return `${b?.bvh_name ?? "?"}${count > 1 ? ` (${count})` : ""}`;
-  });
-
-  // Auto-Taggeld pro MA für Vorschau
-  let kurzCount = 0;
-  let langCount = 0;
-  for (const m of planbar) {
-    const soll = sollPerMa.get(m.id) ?? 0;
-    const brutto = soll + 50 / 60; // grobe Schätzung mit Pausen (genauer kommt im Submit)
-    const auto = berechneTaggeld(brutto, "baustelle");
-    kurzCount += auto.kurz;
-    langCount += auto.lang;
-  }
-
-  // Stunden-Vorschau: wenn alle gleiches Soll → eine Zahl, sonst Range
-  const sollValues = planbar.map((m) => sollPerMa.get(m.id) ?? 0);
-  const minSoll = Math.min(...sollValues);
-  const maxSoll = Math.max(...sollValues);
-  const sollDisplay =
-    sollValues.length === 0
-      ? "?"
-      : minSoll === maxSoll
-      ? fmtHNum(minSoll)
-      : `${fmtHNum(minSoll)}–${fmtHNum(maxSoll)}`;
-
-  const disabled = planbar.length === 0;
-
-  return (
-    <div className="rounded-lg border-2 border-primary/30 bg-primary/5 p-4 space-y-3">
-      <div className="flex items-center gap-2">
-        <span className="text-2xl">⚡</span>
-        <div className="font-bold text-base">Tag wie geplant speichern</div>
-      </div>
-
-      {disabled ? (
-        <div className="text-sm text-muted-foreground">
-          {selectedMa.length === 0
-            ? "Keine Mitarbeiter ausgewählt."
-            : "Keine Tagesplanung-Einteilung für heute — bitte zuerst in der Tagesplanung freigeben oder unten manuell buchen."}
-        </div>
-      ) : (
-        <>
-          <div className="text-sm">
-            <div className="font-medium">
-              Für {planbar.length} {planbar.length === 1 ? "Mitarbeiter" : "Mitarbeiter"} ·{" "}
-              <span className="tabular-nums">{sollDisplay} h</span>
-            </div>
-            <div className="text-muted-foreground mt-0.5">
-              {baustellenLabels.join(" · ")}
-            </div>
-            {(kurzCount > 0 || langCount > 0) && (
-              <div className="text-xs text-muted-foreground mt-1">
-                Auto-Taggeld:{" "}
-                {kurzCount > 0 && (
-                  <span className="font-medium">{kurzCount}× kurz</span>
-                )}
-                {kurzCount > 0 && langCount > 0 && " · "}
-                {langCount > 0 && (
-                  <span className="font-medium">{langCount}× lang</span>
-                )}
-              </div>
-            )}
-            {nichtPlanbar.length > 0 && (
-              <div className="text-xs text-amber-700 mt-1">
-                ⚠ {nichtPlanbar.length}{" "}
-                {nichtPlanbar.length === 1 ? "MA" : "MA"} ohne Plan ({nichtPlanbar
-                  .map((m) => m.vorname)
-                  .join(", ")}) — manuell buchen
-              </div>
-            )}
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-2">
-            <Button
-              onClick={onSchnellbuchung}
-              disabled={busy}
-              className="h-12 text-base flex-1"
-            >
-              {busy && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              ✓ Speichern + bestätigen
-            </Button>
-            <Button
-              variant="outline"
-              onClick={onOpenDetails}
-              disabled={detailsOffen}
-              className="h-12"
-            >
-              {detailsOffen ? "Details geöffnet" : "Details anpassen ⌄"}
-            </Button>
-          </div>
-
-          <div className="text-[11px] text-muted-foreground">
-            Falls Zulagen (Schmutz, Höhe) heute anfallen → „Details anpassen".
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
 
 function MatrixEditor({
   taetigkeiten,
@@ -1600,6 +1340,8 @@ function MatrixEditor({
   onChange,
   summenProMa,
   tagesplanungBaustelleId,
+  tagesplanungTaetigkeit,
+  sollPerMa,
 }: {
   taetigkeiten: TaetigkeitsZeile[];
   selectedMa: Profile[];
@@ -1608,6 +1350,8 @@ function MatrixEditor({
   onChange: (neue: TaetigkeitsZeile[]) => void;
   summenProMa: Map<string, number>;
   tagesplanungBaustelleId: string | null;
+  tagesplanungTaetigkeit: string | null;
+  sollPerMa: Map<string, number>;
 }) {
   const isMulti = selectedMa.length > 1;
 
@@ -1708,12 +1452,21 @@ function MatrixEditor({
             </Button>
           </div>
           {!t.taetigkeit_id && (
-            <Input
-              placeholder="Oder Freitext"
-              value={t.taetigkeit_freitext}
-              onChange={(e) => updateZeile(idx, { taetigkeit_freitext: e.target.value })}
-              className="h-9 text-sm"
-            />
+            <div className="space-y-1">
+              <Input
+                placeholder="Oder Freitext"
+                value={t.taetigkeit_freitext}
+                onChange={(e) => updateZeile(idx, { taetigkeit_freitext: e.target.value })}
+                className="h-9 text-sm"
+              />
+              {idx === 0 &&
+                tagesplanungTaetigkeit &&
+                t.taetigkeit_freitext.trim() === tagesplanungTaetigkeit.trim() && (
+                  <div className="text-[10px] inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 w-fit">
+                    <Tag className="h-2.5 w-2.5" /> aus Tagesplanung
+                  </div>
+                )}
+            </div>
           )}
           <div className="space-y-1">
             <BaustelleCombobox
@@ -1733,11 +1486,23 @@ function MatrixEditor({
           {/* Stunden-Eingabe */}
           {!isMulti && selectedMa[0] && (
             // Single-MA: ein Stunden-Feld
-            <StundenZelle
-              value={t.stundenPerMa[selectedMa[0].id] ?? 0}
-              onChange={(v) => setStunden(idx, selectedMa[0].id, v)}
-              big
-            />
+            <div className="space-y-1">
+              <StundenZelle
+                value={t.stundenPerMa[selectedMa[0].id] ?? 0}
+                onChange={(v) => setStunden(idx, selectedMa[0].id, v)}
+                big
+              />
+              {idx === 0 &&
+                Number(t.stundenPerMa[selectedMa[0].id] ?? 0) > 0 &&
+                Math.abs(
+                  Number(t.stundenPerMa[selectedMa[0].id] ?? 0) -
+                    (sollPerMa.get(selectedMa[0].id) ?? 0),
+                ) < 0.01 && (
+                  <div className="text-[10px] inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 w-fit">
+                    <Tag className="h-2.5 w-2.5" /> aus Soll vorausgefüllt
+                  </div>
+                )}
+            </div>
           )}
           {isMulti && !t.proMaModus && (
             // Multi-MA "alle gleich": ein großer Stepper + Helper-Text + Link
@@ -1747,6 +1512,19 @@ function MatrixEditor({
                 onChange={(v) => setStundenAlle(idx, v)}
                 big
               />
+              {idx === 0 &&
+                (() => {
+                  const v = Number(t.stundenPerMa[selectedMa[0].id] ?? 0);
+                  const sollFirst = sollPerMa.get(selectedMa[0].id) ?? 0;
+                  if (v > 0 && Math.abs(v - sollFirst) < 0.01) {
+                    return (
+                      <div className="text-[10px] inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 w-fit">
+                        <Tag className="h-2.5 w-2.5" /> aus Soll vorausgefüllt
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-muted-foreground">
                   ↳ für alle {selectedMa.length} Mitarbeiter
