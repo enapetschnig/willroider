@@ -13,6 +13,8 @@ import {
   Settings,
   LayoutDashboard,
   Clock,
+  HeartPulse,
+  FileText,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { AdminUebersicht } from "@/components/admin/AdminUebersicht";
@@ -22,6 +24,8 @@ import { AdminMonatsabschluss } from "@/components/admin/AdminMonatsabschluss";
 import { AdminEinstellungen } from "@/components/admin/AdminEinstellungen";
 import { AdminStammdatenStunden } from "@/components/admin/AdminStammdatenStunden";
 import { AdminStundenFreigabe } from "@/components/admin/AdminStundenFreigabe";
+import { AdminKrankmeldungen } from "@/components/admin/AdminKrankmeldungen";
+import { AdminLohnzettel } from "@/components/admin/AdminLohnzettel";
 import Mitarbeiter from "@/pages/Mitarbeiter";
 import Kalender from "@/pages/Kalender";
 import Fahrzeuge from "@/pages/Fahrzeuge";
@@ -35,6 +39,8 @@ type TabKey =
   | "stunden_freigabe"
   | "stunden_stamm"
   | "monatsabschluss"
+  | "krankmeldungen"
+  | "lohnzettel"
   | "kalender"
   | "fahrzeuge"
   | "evaluierung"
@@ -48,6 +54,8 @@ const TABS: { key: TabKey; label: string; icon: typeof Users }[] = [
   { key: "stunden_freigabe", label: "Stunden-Freigabe", icon: Clock },
   { key: "stunden_stamm", label: "Stunden-Stammdaten", icon: Clock },
   { key: "monatsabschluss", label: "Monatsabschluss", icon: CalendarCheck },
+  { key: "krankmeldungen", label: "Krankmeldungen", icon: HeartPulse },
+  { key: "lohnzettel", label: "Lohnzettel", icon: FileText },
   { key: "kalender", label: "Arbeitszeitkalender", icon: CalendarRange },
   { key: "fahrzeuge", label: "Fahrzeuge", icon: Truck },
   { key: "evaluierung", label: "Evaluierung", icon: ShieldCheck },
@@ -108,6 +116,8 @@ export default function Admin() {
         {tab === "stunden_freigabe" && <AdminStundenFreigabe />}
         {tab === "stunden_stamm" && <AdminStammdatenStunden />}
         {tab === "monatsabschluss" && <AdminMonatsabschluss />}
+        {tab === "krankmeldungen" && <AdminKrankmeldungen />}
+        {tab === "lohnzettel" && <AdminLohnzettel />}
         {tab === "kalender" && <Kalender />}
         {tab === "fahrzeuge" && <Fahrzeuge />}
         {tab === "evaluierung" && <Evaluierung />}

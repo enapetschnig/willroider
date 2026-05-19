@@ -25,6 +25,8 @@ import { useNavigate } from "react-router-dom";
 import { findeOderErstelleBericht } from "@/hooks/useBericht";
 import { werktagePlus } from "@/lib/feiertage";
 import { UrlaubAntraegeCard } from "@/components/UrlaubAntragDialog";
+import { KrankmeldungenCard } from "@/components/meinTag/KrankmeldungenCard";
+import { LohnzettelCard } from "@/components/meinTag/LohnzettelCard";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
 import { fmtStunden, fmtTage } from "@/lib/konten";
@@ -741,6 +743,12 @@ export default function MeinTag() {
 
       {/* Urlaubsanträge */}
       <UrlaubAntraegeCard userId={user!.id} />
+
+      {/* Krankmeldungen */}
+      <KrankmeldungenCard userId={user!.id} />
+
+      {/* Lohnzettel */}
+      <LohnzettelCard userId={user!.id} />
 
       {/* Partie-Banner */}
       {partie && (

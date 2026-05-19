@@ -904,6 +904,43 @@ export type Database = {
         Update: Partial<Database['public']['Tables']['urlaubsantraege']['Row']>;
         Relationships: [];
       };
+      krankmeldungen: {
+        Row: {
+          id: string;
+          mitarbeiter_id: string;
+          von: string;
+          bis: string;
+          dokument_id: string | null;
+          notiz: string | null;
+          eingereicht_am: string;
+        };
+        Insert: Partial<Database['public']['Tables']['krankmeldungen']['Row']> & {
+          mitarbeiter_id: string;
+          von: string;
+          bis: string;
+        };
+        Update: Partial<Database['public']['Tables']['krankmeldungen']['Row']>;
+        Relationships: [];
+      };
+      lohnzettel: {
+        Row: {
+          id: string;
+          mitarbeiter_id: string;
+          dokument_id: string;
+          monat: number | null;
+          jahr: number | null;
+          titel: string | null;
+          hochgeladen_von: string | null;
+          hochgeladen_am: string;
+          gelesen_am: string | null;
+        };
+        Insert: Partial<Database['public']['Tables']['lohnzettel']['Row']> & {
+          mitarbeiter_id: string;
+          dokument_id: string;
+        };
+        Update: Partial<Database['public']['Tables']['lohnzettel']['Row']>;
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
     Functions: { [_ in never]: never };

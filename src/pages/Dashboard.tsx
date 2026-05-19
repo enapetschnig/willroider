@@ -25,6 +25,7 @@ import {
 import type { Database } from "@/integrations/supabase/types";
 import { BerichteHintCard } from "@/components/dashboard/BerichteHintCard";
 import { TagesplanungHintCard } from "@/components/dashboard/TagesplanungHintCard";
+import { NeuerLohnzettelHintCard } from "@/components/dashboard/NeuerLohnzettelHintCard";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 
@@ -372,6 +373,9 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {/* Neuer Lohnzettel (MA) */}
+      <NeuerLohnzettelHintCard />
+
       {/* Tagesplanung-Hint (Admin: morgiger Plan & ungelesene MA) */}
       <TagesplanungHintCard />
 
