@@ -53,6 +53,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   X,
+  Copy,
+  Eye,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -248,6 +250,113 @@ export default function Tagesplanung() {
     );
   }
 
+  /** Kopiert alle Einteilungen vom letzten Werktag (oder Vortag) auf den aktuellen Tag.
+   *  Skippt MA, die heute krank/Urlaub/SW haben — die werden in der Sonderfälle-Sektion gezeigt. */
+  async function uebernehmePlanVomVortag() {
+    // Letzten Werktag mit Einteilungen finden (max. 7 Tage zurück)
+    let quellDatum: string | null = null;
+    let einteilungenVomQuell: any[] = [];
+    for (let i = 1; i <= 7; i++) {
+      const d = new Date(datum + "T00:00:00");
+      d.setDate(d.getDate() - i);
+      const iso = localIso(d);
+      const { data } = await supabase
+        .from("einteilungen")
+        .select("id, baustelle_id, taetigkeit, treffpunkt, abfahrtszeit")
+        .eq("datum", iso);
+      if (data && data.length > 0) {
+        quellDatum = iso;
+        einteilungenVomQuell = data;
+        break;
+      }
+    }
+    if (!quellDatum) {
+      toast({ variant: "destructive", title: "Kein Vortags-Plan gefunden" });
+      return;
+    }
+    if (
+      !window.confirm(
+        `Alle ${einteilungenVomQuell.length} Einteilungen vom ${new Date(quellDatum).toLocaleDateString("de-AT")} übernehmen?`,
+      )
+    )
+      return;
+
+    const quellIds = einteilungenVomQuell.map((e) => e.id);
+    const [{ data: ems }, { data: efs }] = await Promise.all([
+      supabase
+        .from("einteilung_mitarbeiter")
+        .select("einteilung_id, mitarbeiter_id, rolle")
+        .in("einteilung_id", quellIds),
+      supabase
+        .from("einteilung_fahrzeuge")
+        .select("einteilung_id, fahrzeug_id")
+        .in("einteilung_id", quellIds),
+    ]);
+
+    // Pro Quell-Einteilung neue Einteilung anlegen
+    let saved = 0;
+    let skipped = 0;
+    for (const quell of einteilungenVomQuell) {
+      if (!quell.baustelle_id) {
+        skipped++;
+        continue;
+      }
+      // Existiert schon? Skip wenn ja.
+      const { data: existing } = await supabase
+        .from("einteilungen")
+        .select("id")
+        .eq("datum", datum)
+        .eq("baustelle_id", quell.baustelle_id)
+        .maybeSingle();
+      if (existing) {
+        skipped++;
+        continue;
+      }
+      const { data: neu } = await supabase
+        .from("einteilungen")
+        .insert({
+          datum,
+          baustelle_id: quell.baustelle_id,
+          taetigkeit: quell.taetigkeit,
+          treffpunkt: quell.treffpunkt,
+          abfahrtszeit: quell.abfahrtszeit,
+          created_by: user?.id ?? null,
+        })
+        .select("id")
+        .single();
+      if (!neu) continue;
+
+      // MA übernehmen (abwesende skippen)
+      const maForQuell = (ems ?? [])
+        .filter((m: any) => m.einteilung_id === quell.id)
+        .filter((m: any) => !abwesendIds.has(m.mitarbeiter_id));
+      if (maForQuell.length > 0) {
+        await supabase.from("einteilung_mitarbeiter").insert(
+          maForQuell.map((m: any) => ({
+            einteilung_id: neu.id,
+            mitarbeiter_id: m.mitarbeiter_id,
+            rolle: m.rolle,
+          })),
+        );
+      }
+      // Fahrzeuge übernehmen
+      const fzForQuell = (efs ?? []).filter((f: any) => f.einteilung_id === quell.id);
+      if (fzForQuell.length > 0) {
+        await supabase.from("einteilung_fahrzeuge").insert(
+          fzForQuell.map((f: any) => ({
+            einteilung_id: neu.id,
+            fahrzeug_id: f.fahrzeug_id,
+          })),
+        );
+      }
+      saved++;
+    }
+    toast({
+      title: `${saved} Einteilungen übernommen`,
+      description: skipped > 0 ? `${skipped} übersprungen (existieren bereits)` : undefined,
+    });
+  }
+
   async function freigeben() {
     const { error } = await supabase.from("tagesplanung_freigaben").upsert(
       {
@@ -351,6 +460,9 @@ export default function Tagesplanung() {
           </Button>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={uebernehmePlanVomVortag}>
+            <Copy className="h-4 w-4 mr-1.5" /> Plan vom Vortag
+          </Button>
           <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="h-4 w-4 mr-1.5" /> Drucken
           </Button>
@@ -688,6 +800,7 @@ function EinteilungsZeile({
                 emId={m.ma.id}
                 einteilungId={e.einteilung.id}
                 name={`${m.profil.nachname} ${m.profil.vorname}`}
+                gelesen={!!m.ma.gelesen_am}
                 onRemove={() => onRemoveMa(m.ma.id, e.einteilung.id)}
               />
             ) : null,
@@ -720,11 +833,13 @@ function DraggableMa({
   emId,
   einteilungId,
   name,
+  gelesen,
   onRemove,
 }: {
   emId: string;
   einteilungId: string;
   name: string;
+  gelesen: boolean;
   onRemove: () => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -745,7 +860,17 @@ function DraggableMa({
       {...attributes}
       {...listeners}
     >
-      <span style={{ fontWeight: 500 }}>{name}</span>
+      <span style={{ fontWeight: 500 }}>
+        {name}
+        {gelesen && (
+          <span
+            className="ml-1.5 inline-flex items-center text-emerald-700"
+            title="Plan vom Mitarbeiter zur Kenntnis genommen"
+          >
+            <CheckCircle2 className="h-3 w-3" />
+          </span>
+        )}
+      </span>
       <button
         type="button"
         onClick={(ev) => {

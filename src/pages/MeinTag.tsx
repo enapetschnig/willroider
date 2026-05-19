@@ -60,6 +60,8 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
     fahrzeuge: { kennzeichen: string }[];
     polier: { vorname: string; nachname: string; telefon: string | null } | null;
     einteilungId: string | null;
+    emId: string | null;
+    gelesen: boolean;
   } | null>(null);
 
   const lade = async () => {
@@ -86,7 +88,7 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
 
       const { data: ems } = await supabase
         .from("einteilung_mitarbeiter")
-        .select("einteilung_id, einteilung:einteilungen!inner(datum,baustelle_id,taetigkeit,abfahrtszeit,treffpunkt)")
+        .select("id, einteilung_id, gelesen_am, einteilung:einteilungen!inner(datum,baustelle_id,taetigkeit,abfahrtszeit,treffpunkt)")
         .eq("mitarbeiter_id", userId)
         .eq("einteilung.datum", datum);
       if (!ems || ems.length === 0) {
@@ -104,6 +106,8 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
             fahrzeuge: [],
             polier: null,
             einteilungId: null,
+            emId: null,
+            gelesen: false,
           });
           setLoading(false);
           return;
@@ -142,6 +146,8 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
         fahrzeuge: (efs ?? []).map((e: any) => e.fahrzeug).filter(Boolean),
         polier,
         einteilungId: em.einteilung_id,
+        emId: em.id,
+        gelesen: !!em.gelesen_am,
       });
       setLoading(false);
       return;
@@ -211,6 +217,20 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
           .join(", "),
       )}`
     : null;
+
+  const bestaetigen = async () => {
+    if (!data.emId) return;
+    const { error } = await supabase
+      .from("einteilung_mitarbeiter")
+      .update({ gelesen_am: new Date().toISOString() })
+      .eq("id", data.emId);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    setData({ ...data, gelesen: true });
+    toast({ title: "Bestätigt" });
+  };
 
   return (
     <Card className="border-primary/30 bg-primary/5">
@@ -308,6 +328,25 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
                 <Camera className="h-4 w-4" /> Foto hochladen
               </button>
             </div>
+
+            {/* Lese-Bestätigung */}
+            {data.isToday && data.emId && (
+              <div className="border-t border-primary/15 pt-2">
+                {data.gelesen ? (
+                  <div className="text-xs text-emerald-700 flex items-center gap-1.5">
+                    <CheckCircle2 className="h-4 w-4" /> Plan zur Kenntnis genommen
+                  </div>
+                ) : (
+                  <Button
+                    size="sm"
+                    className="w-full"
+                    onClick={bestaetigen}
+                  >
+                    <CheckCircle2 className="h-4 w-4 mr-1.5" /> Plan zur Kenntnis nehmen
+                  </Button>
+                )}
+              </div>
+            )}
           </>
         ) : (
           <div className="text-sm text-muted-foreground italic">

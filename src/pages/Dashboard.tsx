@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 import { BerichteHintCard } from "@/components/dashboard/BerichteHintCard";
+import { TagesplanungHintCard } from "@/components/dashboard/TagesplanungHintCard";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 
@@ -371,6 +372,9 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {/* Tagesplanung-Hint (Admin: morgiger Plan & ungelesene MA) */}
+      <TagesplanungHintCard />
+
       {/* Berichte-Hint (Polier: heutige Berichte, Bauleiter: zu prüfen) */}
       <BerichteHintCard />
 
