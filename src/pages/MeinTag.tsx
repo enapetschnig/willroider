@@ -161,7 +161,7 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
   useEffect(() => {
     lade();
     const channel = supabase
-      .channel("mein-tag-heute")
+      .channel(`mein-tag-heute-${userId}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "tagesplanung_freigaben" },
@@ -169,7 +169,12 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "einteilung_mitarbeiter" },
+        {
+          event: "*",
+          schema: "public",
+          table: "einteilung_mitarbeiter",
+          filter: `mitarbeiter_id=eq.${userId}`,
+        },
         () => lade(),
       )
       .subscribe();

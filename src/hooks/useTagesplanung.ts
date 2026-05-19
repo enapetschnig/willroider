@@ -74,20 +74,37 @@ export function useTagesplanung(datum: string) {
           .select("mitarbeiter_id, tag_status, datum")
           .eq("datum", datum)
           .in("tag_status", ["urlaub", "krank", "schlechtwetter"]),
+        // Neue Tabellen — defensiv, falls Migration noch nicht durchgelaufen
         supabase
           .from("urlaubsantraege")
           .select("mitarbeiter_id, von, bis, status")
           .eq("status", "genehmigt")
           .lte("von", datum)
-          .gte("bis", datum),
-        supabase.from("tagesplanung_freigaben").select("*").eq("datum", datum).maybeSingle(),
+          .gte("bis", datum)
+          .then(
+            (r) => r,
+            () => ({ data: null, error: null } as any),
+          ),
+        supabase
+          .from("tagesplanung_freigaben")
+          .select("*")
+          .eq("datum", datum)
+          .maybeSingle()
+          .then(
+            (r) => r,
+            () => ({ data: null, error: null } as any),
+          ),
         supabase
           .from("tagesplanung_freigaben")
           .select("*")
           .lte("datum", datum)
           .order("datum", { ascending: false })
           .limit(1)
-          .maybeSingle(),
+          .maybeSingle()
+          .then(
+            (r) => r,
+            () => ({ data: null, error: null } as any),
+          ),
       ]);
 
       const baustellen = new Map((bsRaw ?? []).map((b: any) => [b.id, b as Baustelle]));

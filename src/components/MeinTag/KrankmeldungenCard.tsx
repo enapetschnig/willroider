@@ -226,6 +226,7 @@ function KrankmeldungDialog({
     setBusy(true);
     try {
       let dokumentId: string | null = null;
+      let storagePath: string | null = null;
       if (file) {
         const r = await uploadMaDokument({
           mitarbeiterId: userId,
@@ -235,6 +236,7 @@ function KrankmeldungDialog({
           notiz: notiz.trim() || undefined,
         });
         dokumentId = r.dokumentId;
+        storagePath = r.storagePath;
       }
       const { error } = await supabase.from("krankmeldungen").insert({
         mitarbeiter_id: userId,
@@ -243,7 +245,17 @@ function KrankmeldungDialog({
         dokument_id: dokumentId,
         notiz: notiz.trim() || null,
       });
-      if (error) throw error;
+      if (error) {
+        // Storage-Cleanup: hochgeladene Datei wieder entfernen
+        if (dokumentId && storagePath) {
+          try {
+            await deleteMaDokument(dokumentId, storagePath);
+          } catch {
+            /* ignore */
+          }
+        }
+        throw error;
+      }
       toast({
         title: "Krankmeldung eingereicht",
         description: `${fmtDate(von)} – ${fmtDate(bis)}`,

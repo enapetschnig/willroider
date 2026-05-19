@@ -390,7 +390,7 @@ export default function Tagesplanung() {
   }
 
   async function saveSonstigeHinweise(text: string) {
-    await supabase.from("tagesplanung_freigaben").upsert(
+    const { error } = await supabase.from("tagesplanung_freigaben").upsert(
       {
         datum,
         notiz: text || null,
@@ -399,6 +399,14 @@ export default function Tagesplanung() {
       },
       { onConflict: "datum" },
     );
+    if (error) {
+      toast({
+        variant: "destructive",
+        title: "Fehler beim Speichern",
+        description: error.message,
+      });
+      return;
+    }
     refresh();
   }
 
@@ -536,7 +544,7 @@ export default function Tagesplanung() {
     toast({ title: "PDF heruntergeladen" });
   }
 
-  /** Teilt die PDF via Share-API (Mobile) oder Download + WhatsApp Web (Desktop). */
+  /** Teilt die PDF: Mobile direkt via Share-Sheet, Desktop öffnet WhatsApp Web + lädt PDF. */
   async function teilePdf() {
     if (!plan) {
       toast({ variant: "destructive", title: "Plan noch nicht geladen" });
@@ -553,8 +561,9 @@ export default function Tagesplanung() {
       toast({ title: "Geteilt" });
     } else {
       toast({
-        title: "PDF heruntergeladen",
-        description: "WhatsApp Web wurde geöffnet — PDF einfach ins Chat-Fenster ziehen.",
+        title: "WhatsApp Web geöffnet",
+        description:
+          "Wähle den Chat und ziehe die heruntergeladene PDF einfach ins Nachrichten-Feld.",
       });
     }
   }
