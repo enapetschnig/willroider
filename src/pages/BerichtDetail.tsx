@@ -676,7 +676,11 @@ function MitarbeiterEditor({
   };
 
   const remove = async (id: string) => {
-    await supabase.from("bericht_mitarbeiter").delete().eq("id", id);
+    const { error } = await supabase.from("bericht_mitarbeiter").delete().eq("id", id);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
     onChange();
   };
 
@@ -818,7 +822,11 @@ function TaetigkeitenEditor({
   };
 
   const remove = async (id: string) => {
-    await supabase.from("bericht_taetigkeiten").delete().eq("id", id);
+    const { error } = await supabase.from("bericht_taetigkeiten").delete().eq("id", id);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
     onChange();
   };
 
@@ -936,7 +944,11 @@ function AufmassEditor({
   };
 
   const remove = async (id: string) => {
-    await supabase.from("bericht_aufmass").delete().eq("id", id);
+    const { error } = await supabase.from("bericht_aufmass").delete().eq("id", id);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
     onChange();
   };
 
@@ -1095,6 +1107,8 @@ function FotosEditor({
     let success = 0;
     let failed = 0;
     for (const file of Array.from(files)) {
+      let uploadedPath: string | null = null;
+      let createdDokId: string | null = null;
       try {
         const meta = await readFotoMeta(file);
         const compressed = await compressImage(file);
@@ -1113,6 +1127,7 @@ function FotosEditor({
             contentType: compressed.type || "image/jpeg",
           });
         if (upErr) throw upErr;
+        uploadedPath = storagePath;
 
         const { data: { user } } = await supabase.auth.getUser();
         const { data: doc, error: docErr } = await supabase
@@ -1130,8 +1145,9 @@ function FotosEditor({
           .select("id")
           .single();
         if (docErr) throw docErr;
+        createdDokId = doc.id;
 
-        await supabase.from("bericht_fotos").insert({
+        const { error: bfErr } = await supabase.from("bericht_fotos").insert({
           bericht_id: bericht.id,
           dokument_id: doc.id,
           position: fotos.length + success + 1,
@@ -1139,9 +1155,25 @@ function FotosEditor({
           geo_lng: meta.geo_lng,
           aufgenommen_am: meta.aufgenommen_am,
         });
+        if (bfErr) throw bfErr;
         success++;
       } catch (e) {
         console.error(e);
+        // Cleanup: orphan-Dateien + dokumente-Eintrag bereinigen
+        if (createdDokId) {
+          try {
+            await supabase.from("dokumente").delete().eq("id", createdDokId);
+          } catch {
+            /* ignore */
+          }
+        }
+        if (uploadedPath) {
+          try {
+            await supabase.storage.from("baustellen").remove([uploadedPath]);
+          } catch {
+            /* ignore */
+          }
+        }
         failed++;
       }
     }
@@ -1410,10 +1442,22 @@ function StatusBar({
       )
         return;
     }
+    // PDF zuerst generieren — wenn das fehlschlägt, NICHT auf "freigegeben" wechseln.
+    // Sonst hätte der Bericht Status="freigegeben" ohne PDF, was den Workflow blockiert.
+    try {
+      await generatePdf();
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "PDF-Generierung fehlgeschlagen",
+        description:
+          "Bericht NICHT freigegeben — PDF muss erst erstellt werden können. " +
+          (e as Error).message,
+      });
+      return;
+    }
     await statusMut.mutateAsync({ id: bericht.id, newStatus: "freigegeben" });
     onChange();
-    // PDF generieren
-    await generatePdf();
   };
 
   const reopen = () =>

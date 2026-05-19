@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -133,6 +133,8 @@ export default function Arbeitsplanung() {
     setNewPartieleiterId("");
   };
   const [assignments, setAssignments] = useState<Map<string, AssignmentCell>>(new Map());
+  // Lock gegen Doppelklick auf Bestätigungs-Dialoge (assignBaustelle/setFehlzeit/clearCells)
+  const assignBusyRef = useRef(false);
   const [selectionAnchor, setSelectionAnchor] = useState<{ workerId: string; iso: string } | null>(
     null
   );
@@ -866,6 +868,9 @@ export default function Arbeitsplanung() {
     options?: { wochenendeIncluden?: boolean; manuelleUeberschreiben?: boolean },
   ) => {
     if (!isAdmin || cellsInput.length === 0) return;
+    if (assignBusyRef.current) return; // Doppelklick-Schutz
+    assignBusyRef.current = true;
+    try {
     let cells = cellsInput;
 
     // 1) Wochenenden/Feiertage rausfiltern (außer Override)
@@ -970,6 +975,9 @@ export default function Arbeitsplanung() {
     }
     toast({ title: `${cells.length} Tag${cells.length === 1 ? "" : "e"} eingeteilt` });
     loadAssignments();
+    } finally {
+      assignBusyRef.current = false;
+    }
   };
 
   const setFehlzeit = async (

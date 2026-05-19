@@ -53,6 +53,23 @@ export default function Baustellen() {
 
   useEffect(() => {
     load();
+    // Realtime: bei jeder Mutation an baustellen oder partien neu laden
+    const ch = supabase
+      .channel("baustellen-liste")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "baustellen" },
+        () => load(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "partien" },
+        () => load(),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
   }, []);
 
   const filtered = useMemo(() => {

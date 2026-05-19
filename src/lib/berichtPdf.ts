@@ -63,26 +63,25 @@ export interface BerichtPdfInput {
   fotos: { signedUrl: string; bildunterschrift?: string | null }[];
 }
 
-/** Caching für das Logo (1x pro Session als dataURL geholt). */
-let _logoCache: string | null | undefined = undefined;
+/** Caching für das Logo — nur bei Erfolg cachen, damit später ein neuer
+ *  Versuch möglich ist falls beim ersten Mal Netz-/Fetch-Fehler auftritt. */
+let _logoCache: string | null = null;
 async function getLogoDataUrl(): Promise<string | null> {
-  if (_logoCache !== undefined) return _logoCache;
+  if (_logoCache) return _logoCache;
   try {
     const res = await fetch("/willroider-logo.jpg");
-    if (!res.ok) {
-      _logoCache = null;
-      return null;
-    }
+    if (!res.ok) return null;
     const blob = await res.blob();
-    _logoCache = await new Promise<string>((resolve, reject) => {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
       const r = new FileReader();
       r.onload = () => resolve(r.result as string);
       r.onerror = reject;
       r.readAsDataURL(blob);
     });
-    return _logoCache;
+    _logoCache = dataUrl;
+    return dataUrl;
   } catch {
-    _logoCache = null;
+    // Bei Fehler NICHT cachen — beim nächsten Aufruf wird neu probiert
     return null;
   }
 }
@@ -422,11 +421,18 @@ export async function makeBerichtPdf(input: BerichtPdfInput): Promise<jsPDF> {
 
   // ─── Fotos ─────────────────────────────────────────────────────────
   if (fotos.length > 0) {
-    const fotoData = await Promise.all(
+    // Promise.allSettled: einzelne Foto-Fetch-Fehler dürfen die ganze PDF NICHT
+    // abbrechen — bei Fehler wird ein Platzhalter gerendert.
+    const settled = await Promise.allSettled(
       fotos.map(async (f) => ({
         dataUrl: await fetchAsDataUrl(f.signedUrl),
         bildunterschrift: f.bildunterschrift ?? null,
       })),
+    );
+    const fotoData = settled.map((s, i) =>
+      s.status === "fulfilled"
+        ? s.value
+        : { dataUrl: null, bildunterschrift: fotos[i].bildunterschrift ?? null },
     );
 
     if (y > PAGE_H - 80) {
