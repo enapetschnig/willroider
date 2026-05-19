@@ -24,7 +24,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
 import { useToast } from "@/hooks/use-toast";
 import type { Database } from "@/integrations/supabase/types";
-import { feiertagAt, type FeiertagInfo } from "@/lib/feiertage";
+import { feiertagAt, isWerktag, type FeiertagInfo } from "@/lib/feiertage";
 import { localIso } from "@/lib/dateFmt";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -63,6 +63,8 @@ type AssignmentCell = {
   fehlzeitTyp?: string;
   status?: string;
   isReadOnly?: boolean;
+  /** true wenn diese Zelle in der Tagesplanung manuell editiert wurde. */
+  manuell?: boolean;
 };
 
 const FEHLZEIT_LABEL: Record<string, string> = {
@@ -170,7 +172,7 @@ export default function Arbeitsplanung() {
       supabase
         .from("einteilung_mitarbeiter")
         .select(
-          "id, mitarbeiter_id, einteilung_id, einteilungen!inner(id, datum, baustelle_id, baustellen(bvh_name))"
+          "id, mitarbeiter_id, einteilung_id, manuell_geaendert, einteilungen!inner(id, datum, baustelle_id, manuell_geaendert, baustellen(bvh_name))"
         )
         .gte("einteilungen.datum", startIso)
         .lte("einteilungen.datum", endIso),
@@ -194,6 +196,7 @@ export default function Arbeitsplanung() {
         baustelleId: e.baustelle_id,
         baustelleName: e.baustellen?.bvh_name ?? b?.bvh_name ?? "Bauhof",
         baustelleColor: partie?.farbcode ?? "#6b7280",
+        manuell: !!(r.manuell_geaendert || e.manuell_geaendert),
       });
     });
     (fzRows ?? []).forEach((r: any) => {
@@ -327,6 +330,8 @@ export default function Arbeitsplanung() {
     fehlzeitTyp?: string;
     isReadOnly: boolean;
     einteilungIds: Set<string>;
+    /** true wenn mind. 1 Tag im Bar in der Tagesplanung manuell editiert wurde. */
+    manuell: boolean;
   };
   const barsByWorker = useMemo(() => {
     const result = new Map<string, Bar[]>();
@@ -351,6 +356,7 @@ export default function Arbeitsplanung() {
             cur.endIdx = i;
             if (a.einteilungId) cur.einteilungIds.add(a.einteilungId);
             cur.isReadOnly = cur.isReadOnly && !!a.isReadOnly;
+            if (a.manuell) cur.manuell = true;
             continue;
           }
           // Neuer Bar
@@ -373,6 +379,7 @@ export default function Arbeitsplanung() {
             fehlzeitTyp: a.fehlzeitTyp,
             isReadOnly: !!a.isReadOnly,
             einteilungIds: new Set(a.einteilungId ? [a.einteilungId] : []),
+            manuell: !!a.manuell,
           };
           (cur as any)._key = key;
           bars.push(cur);
@@ -846,10 +853,65 @@ export default function Arbeitsplanung() {
   };
 
   const assignBaustelle = async (
-    cells: { workerId: string; iso: string }[],
-    baustelleId: string
+    cellsInput: { workerId: string; iso: string }[],
+    baustelleId: string,
+    options?: { wochenendeIncluden?: boolean; manuelleUeberschreiben?: boolean },
   ) => {
-    if (!isAdmin || cells.length === 0) return;
+    if (!isAdmin || cellsInput.length === 0) return;
+    let cells = cellsInput;
+
+    // 1) Wochenenden/Feiertage rausfiltern (außer Override)
+    if (!options?.wochenendeIncluden) {
+      const werktageOnly = cells.filter((c) => isWerktag(c.iso));
+      const skipped = cells.length - werktageOnly.length;
+      if (werktageOnly.length === 0) {
+        const ok = window.confirm(
+          `Alle ausgewählten Tage sind Wochenende/Feiertag. Trotzdem als Wochenend-Einsatz eintragen?`,
+        );
+        if (!ok) {
+          toast({
+            title: "Keine Werktage in Auswahl",
+            description: "Sa/So/Feiertage werden standardmäßig übersprungen.",
+          });
+          return;
+        }
+        // User bestätigt Wochenend-Override → ursprüngliche cells behalten
+      } else {
+        cells = werktageOnly;
+        if (skipped > 0) {
+          toast({
+            title: `${skipped} Wochenend-/Feiertage übersprungen`,
+            description: `${cells.length} Werktage werden eingeplant.`,
+          });
+        }
+      }
+    }
+
+    // 2) Konflikt-Check: manuell editierte Tage in der Auswahl?
+    if (!options?.manuelleUeberschreiben) {
+      const manuelle = cells.filter((c) => assignments.get(cellKey(c.workerId, c.iso))?.manuell);
+      if (manuelle.length > 0) {
+        const labels = manuelle.slice(0, 5).map((c) => {
+          const m = profilesById[c.workerId];
+          const dStr = new Date(c.iso + "T00:00:00").toLocaleDateString("de-AT", {
+            weekday: "short",
+            day: "2-digit",
+            month: "2-digit",
+          });
+          return `${m?.vorname ?? ""} ${m?.nachname ?? ""} · ${dStr}`;
+        });
+        const more = manuelle.length - labels.length;
+        const ok = window.confirm(
+          `${manuelle.length} Tag${manuelle.length === 1 ? "" : "e"} wurde${manuelle.length === 1 ? "" : "n"} in der Tagesplanung manuell angepasst:\n\n${labels.join("\n")}${more > 0 ? `\n…und ${more} weitere` : ""}\n\nTrotzdem überschreiben?`,
+        );
+        if (!ok) {
+          // Nur die NICHT-manuellen anwenden
+          cells = cells.filter((c) => !assignments.get(cellKey(c.workerId, c.iso))?.manuell);
+          if (cells.length === 0) return;
+        }
+      }
+    }
+
     await clearCellsRaw(cells);
 
     // Einteilungen pro datum sicherstellen, dann einteilung_mitarbeiter Insert
@@ -893,8 +955,26 @@ export default function Arbeitsplanung() {
     loadAssignments();
   };
 
-  const setFehlzeit = async (cells: { workerId: string; iso: string }[], typ: string) => {
-    if (!isAdmin || cells.length === 0) return;
+  const setFehlzeit = async (
+    cellsInput: { workerId: string; iso: string }[],
+    typ: string,
+  ) => {
+    if (!isAdmin || cellsInput.length === 0) return;
+    // Wochenenden/Feiertage rausfiltern — Urlaub/Krank gilt nur an Werktagen
+    let cells = cellsInput.filter((c) => isWerktag(c.iso));
+    const skipped = cellsInput.length - cells.length;
+    if (cells.length === 0) {
+      toast({
+        title: "Keine Werktage in Auswahl",
+        description: `${FEHLZEIT_LABEL[typ] ?? typ} kann nur an Werktagen gebucht werden.`,
+      });
+      return;
+    }
+    if (skipped > 0) {
+      toast({
+        title: `${skipped} Wochenend-/Feiertage übersprungen`,
+      });
+    }
     await clearCellsRaw(cells);
     const rows = cells.map((c) => ({
       mitarbeiter_id: c.workerId,
@@ -1344,9 +1424,17 @@ export default function Arbeitsplanung() {
                                   background: bar.color,
                                   opacity: bar.isReadOnly ? 0.6 : 1,
                                 }}
-                                title={`${bar.label} · ${dateRange}${bar.isReadOnly ? " (eingereicht)" : ""}`}
+                                title={`${bar.label} · ${dateRange}${bar.isReadOnly ? " (eingereicht)" : ""}${bar.manuell ? " · Tagesplanung manuell angepasst" : ""}`}
                               >
                                 <span className="truncate">{width < 60 ? (bar.label.slice(0, 2)) : bar.label}</span>
+                                {bar.manuell && (
+                                  <span
+                                    className="ml-1 text-yellow-300 drop-shadow"
+                                    aria-label="Tagesplanung manuell angepasst"
+                                  >
+                                    ★
+                                  </span>
+                                )}
                               </div>
                             );
                           })}
@@ -2452,9 +2540,15 @@ function MobileWorkerPlan({
                           cursor: isAdmin ? "pointer" : "default",
                           touchAction: isAdmin ? "none" : undefined,
                           userSelect: "none",
+                          position: "relative",
                         }}
                       >
                         {label}
+                        {a?.manuell && (
+                          <span className="absolute top-0 right-0.5 text-[7px] text-yellow-300 leading-none">
+                            ★
+                          </span>
+                        )}
                       </button>
                     );
                   })}

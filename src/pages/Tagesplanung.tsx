@@ -13,6 +13,18 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  TouchSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -215,6 +227,15 @@ export default function Tagesplanung() {
     await supabase.from("einteilungen").delete().eq("id", einteilungId);
   }
 
+  /** Bewegt eine einteilung_mitarbeiter-Zeile in eine andere Einteilung. */
+  async function moveMitarbeiter(emId: string, neueEinteilungId: string) {
+    await supabase
+      .from("einteilung_mitarbeiter")
+      .update({ einteilung_id: neueEinteilungId, manuell_geaendert: true })
+      .eq("id", emId);
+    await setManuellFlag(neueEinteilungId);
+  }
+
   async function saveSonstigeHinweise(text: string) {
     await supabase.from("tagesplanung_freigaben").upsert(
       {
@@ -245,6 +266,33 @@ export default function Tagesplanung() {
   }
 
   const freigegeben = !!plan?.freigabe;
+
+  // ─── Drag & Drop ────────────────────────────────────────────────────────
+
+  const [dragActive, setDragActive] = useState<{ name: string; emId: string; fromEinteilungId: string } | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+  );
+
+  const onDragStart = (e: DragStartEvent) => {
+    const data = e.active.data.current as
+      | { type: "ma"; emId: string; einteilungId: string; name: string }
+      | undefined;
+    if (data?.type === "ma") {
+      setDragActive({ name: data.name, emId: data.emId, fromEinteilungId: data.einteilungId });
+    }
+  };
+
+  const onDragEnd = async (e: DragEndEvent) => {
+    setDragActive(null);
+    const active = e.active.data.current as any;
+    const over = e.over?.data.current as any;
+    if (!active || !over) return;
+    if (active.type !== "ma" || over.type !== "zeile") return;
+    if (active.einteilungId === over.einteilungId) return;
+    await moveMitarbeiter(active.emId, over.einteilungId);
+  };
 
   // ─── Render ─────────────────────────────────────────────────────────────
 
@@ -324,7 +372,8 @@ export default function Tagesplanung() {
         </div>
       </div>
 
-      {/* Word-Layout-Block */}
+      {/* Word-Layout-Block — mit DndContext für MA-Drag&Drop zwischen Zeilen */}
+      <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <div
         className="bg-white p-6 sm:p-8 border print:border-0 print:p-0 mx-auto"
         style={{
@@ -451,6 +500,14 @@ export default function Tagesplanung() {
           </div>
         )}
       </div>
+      <DragOverlay>
+        {dragActive ? (
+          <div className="bg-primary text-primary-foreground px-2 py-1 rounded shadow-lg text-sm font-medium">
+            {dragActive.name}
+          </div>
+        ) : null}
+      </DragOverlay>
+      </DndContext>
 
       {/* Print-Styles */}
       <style>{`
@@ -508,6 +565,10 @@ function EinteilungsZeile({
   onRemoveMa: (emId: string, einteilungId: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }) {
+  const { setNodeRef: setDropRef, isOver } = useDroppable({
+    id: `zeile-${e.einteilung.id}`,
+    data: { type: "zeile", einteilungId: e.einteilung.id },
+  });
   const [taetEdit, setTaetEdit] = useState(false);
   const [taetVal, setTaetVal] = useState(e.einteilung.taetigkeit ?? "");
 
@@ -519,7 +580,7 @@ function EinteilungsZeile({
   const fzIds = e.fahrzeuge.map((f) => f.id);
 
   return (
-    <tr>
+    <tr ref={setDropRef as any} style={isOver ? { background: "rgba(182, 86, 103, 0.08)" } : undefined}>
       {/* BVH */}
       <td style={td()}>
         {b ? (
@@ -622,23 +683,13 @@ function EinteilungsZeile({
         <div className="space-y-0.5">
           {e.mitarbeiter.map((m) =>
             m.profil ? (
-              <div
+              <DraggableMa
                 key={m.ma.id}
-                className="flex items-center justify-between group"
-                style={{ fontSize: "0.95em" }}
-              >
-                <span style={{ fontWeight: 500 }}>
-                  {m.profil.nachname} {m.profil.vorname}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onRemoveMa(m.ma.id, e.einteilung.id)}
-                  className="print:hidden opacity-0 group-hover:opacity-100 text-red-700 hover:bg-red-50 rounded p-0.5 transition"
-                  title="Entfernen"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
+                emId={m.ma.id}
+                einteilungId={e.einteilung.id}
+                name={`${m.profil.nachname} ${m.profil.vorname}`}
+                onRemove={() => onRemoveMa(m.ma.id, e.einteilung.id)}
+              />
             ) : null,
           )}
           <div className="print:hidden">
@@ -660,6 +711,54 @@ function EinteilungsZeile({
         </div>
       </td>
     </tr>
+  );
+}
+
+// ─── Draggable MA-Karte ───────────────────────────────────────────────
+
+function DraggableMa({
+  emId,
+  einteilungId,
+  name,
+  onRemove,
+}: {
+  emId: string;
+  einteilungId: string;
+  name: string;
+  onRemove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `ma-${emId}`,
+    data: { type: "ma", emId, einteilungId, name },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className="flex items-center justify-between group"
+      style={{
+        fontSize: "0.95em",
+        opacity: isDragging ? 0.3 : 1,
+        cursor: "grab",
+        touchAction: "none",
+      }}
+      {...attributes}
+      {...listeners}
+    >
+      <span style={{ fontWeight: 500 }}>{name}</span>
+      <button
+        type="button"
+        onClick={(ev) => {
+          ev.stopPropagation();
+          onRemove();
+        }}
+        onPointerDown={(ev) => ev.stopPropagation()}
+        className="print:hidden opacity-0 group-hover:opacity-100 text-red-700 hover:bg-red-50 rounded p-0.5 transition"
+        title="Entfernen"
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </div>
   );
 }
 
