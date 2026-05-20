@@ -20,7 +20,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { AdminUebersicht } from "@/components/admin/AdminUebersicht";
 import { AdminUrlaubsKonten } from "@/components/admin/AdminUrlaubsKonten";
 import { AdminZaKonten } from "@/components/admin/AdminZaKonten";
-import { AdminLohnbuchhaltung } from "@/components/admin/AdminLohnbuchhaltung";
 import { AdminEinstellungen } from "@/components/admin/AdminEinstellungen";
 import { AdminStammdatenStunden } from "@/components/admin/AdminStammdatenStunden";
 import { AdminKrankmeldungen } from "@/components/admin/AdminKrankmeldungen";
@@ -35,7 +34,6 @@ type TabKey =
   | "mitarbeiter"
   | "urlaub"
   | "za"
-  | "lohnbuchhaltung"
   | "stunden_stamm"
   | "krankmeldungen"
   | "lohnzettel"
@@ -49,7 +47,6 @@ const TABS: { key: TabKey; label: string; icon: typeof Users }[] = [
   { key: "mitarbeiter", label: "Mitarbeiter & Partien", icon: Users },
   { key: "urlaub", label: "Urlaubs-Konten", icon: Sun },
   { key: "za", label: "ZA-Konten", icon: Hourglass },
-  { key: "lohnbuchhaltung", label: "Lohnbuchhaltung", icon: CalendarCheck },
   { key: "stunden_stamm", label: "Stunden-Stammdaten", icon: Clock },
   { key: "krankmeldungen", label: "Krankmeldungen", icon: HeartPulse },
   { key: "lohnzettel", label: "Lohnzettel", icon: FileText },
@@ -110,7 +107,6 @@ export default function Admin() {
         {tab === "mitarbeiter" && <Mitarbeiter />}
         {tab === "urlaub" && <AdminUrlaubsKonten />}
         {tab === "za" && <AdminZaKonten />}
-        {tab === "lohnbuchhaltung" && <AdminLohnbuchhaltung />}
         {tab === "stunden_stamm" && <AdminStammdatenStunden />}
         {tab === "krankmeldungen" && <AdminKrankmeldungen />}
         {tab === "lohnzettel" && <AdminLohnzettel />}

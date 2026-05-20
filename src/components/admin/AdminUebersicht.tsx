@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
@@ -16,6 +17,7 @@ export function AdminUebersicht({
 }: {
   onNavigate: (k: any) => void;
 }) {
+  const navigate = useNavigate();
   const [aktiveMa, setAktiveMa] = useState(0);
   const [offeneMonate, setOffeneMonate] = useState(0);
   const [urlaubSummeTage, setUrlaubSummeTage] = useState(0);
@@ -74,7 +76,7 @@ export function AdminUebersicht({
           value={`${offeneMonate} MA`}
           tone={offeneMonate > 0 ? "amber" : "muted"}
           cta="Monatsabschluss"
-          onClick={() => onNavigate("lohnbuchhaltung")}
+          onClick={() => navigate("/stundenauswertung")}
         />
         <StatCard
           icon={Sun}
@@ -124,7 +126,7 @@ export function AdminUebersicht({
               icon={CalendarCheck}
               label="Monatsabschluss"
               desc="Soll-/Ist-Vergleich, sperren"
-              onClick={() => onNavigate("lohnbuchhaltung")}
+              onClick={() => navigate("/stundenauswertung")}
             />
           </div>
         </CardContent>

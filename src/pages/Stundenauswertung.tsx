@@ -32,7 +32,7 @@ import {
   Download,
   Loader2,
 } from "lucide-react";
-import type { Database, TagStatus, BuchungStatus } from "@/integrations/supabase/types";
+import type { Database, TagStatus } from "@/integrations/supabase/types";
 import { useStundenTageList } from "@/hooks/useStundenTag";
 import { usePausenConfig, useArbeitszeitLimits, useTaetigkeitenStamm, useZulagenTypen } from "@/hooks/useStammdatenStunden";
 import { berechneTagZeiten, fmtH, fmtHNum } from "@/lib/zeiterfassung";
@@ -63,15 +63,6 @@ const STATUS_LABEL: Record<TagStatus, string> = {
   feiertag: "Feiertag",
 };
 
-const STATUS_BADGE: Record<BuchungStatus, { label: string; cls: string }> = {
-  erfasst: { label: "Erfasst", cls: "bg-blue-100 text-blue-900 border-blue-300" },
-  ma_bestaetigt: { label: "Best.", cls: "bg-emerald-100 text-emerald-900 border-emerald-300" },
-  zm_freigabe: { label: "ZM", cls: "bg-purple-100 text-purple-900 border-purple-300" },
-  buero_freigabe: { label: "Büro", cls: "bg-orange-100 text-orange-900 border-orange-300" },
-  exportiert: { label: "Export.", cls: "bg-gray-300 text-gray-900 border-gray-400" },
-  abgelehnt: { label: "Abgel.", cls: "bg-red-100 text-red-900 border-red-300" },
-};
-
 function monatLabel(monat: string) {
   const [y, m] = monat.split("-");
   return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("de-AT", {
@@ -85,18 +76,35 @@ function currentMonth() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function monatRange(monat: string) {
+export type Periode = "voll" | "h1" | "h2";
+
+/** Liefert den Datums-Range fuer einen Monat + gewaehlte Periode.
+ *   voll = ganzer Monat, h1 = 1.-15., h2 = 16.-Monatsende. */
+function monatRange(monat: string, periode: Periode = "voll") {
   const [y, m] = monat.split("-").map(Number);
-  const from = `${y}-${String(m).padStart(2, "0")}-01`;
+  const mm = String(m).padStart(2, "0");
   const lastDay = new Date(y, m, 0).getDate();
-  const to = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-  return { from, to };
+  if (periode === "h1") {
+    return { from: `${y}-${mm}-01`, to: `${y}-${mm}-15` };
+  }
+  if (periode === "h2") {
+    return { from: `${y}-${mm}-16`, to: `${y}-${mm}-${String(lastDay).padStart(2, "0")}` };
+  }
+  return { from: `${y}-${mm}-01`, to: `${y}-${mm}-${String(lastDay).padStart(2, "0")}` };
+}
+
+function periodeLabel(monat: string, periode: Periode): string {
+  const base = monatLabel(monat);
+  if (periode === "h1") return `Erster Halbmonat · ${base}`;
+  if (periode === "h2") return `Zweiter Halbmonat · ${base}`;
+  return base;
 }
 
 export default function Stundenauswertung() {
   const { toast } = useToast();
   const { user, isAdmin } = useAuth();
   const [monat, setMonat] = useState(currentMonth());
+  const [periode, setPeriode] = useState<Periode>("voll");
   const [members, setMembers] = useState<Profile[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
   const [partieFilter, setPartieFilter] = useState<string>("");
@@ -117,7 +125,7 @@ export default function Stundenauswertung() {
     })();
   }, []);
 
-  const { from, to } = monatRange(monat);
+  const { from, to } = monatRange(monat, periode);
   const memberIds = isAdmin
     ? members
         .filter((m) => !partieFilter || m.partie_id === partieFilter)
@@ -161,15 +169,16 @@ export default function Stundenauswertung() {
   }, [JSON.stringify(memberIds), monat]);
 
   const werktage = useMemo(() => {
-    const [y, m] = monat.split("-").map(Number);
-    const last = new Date(y, m, 0).getDate();
+    // Werktage Mo-Fr im aktiven Periode-Range
+    const start = new Date(from + "T00:00:00");
+    const end = new Date(to + "T00:00:00");
     let count = 0;
-    for (let d = 1; d <= last; d++) {
-      const dow = new Date(y, m - 1, d).getDay();
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dow = d.getDay();
       if (dow !== 0 && dow !== 6) count++;
     }
     return count;
-  }, [monat]);
+  }, [from, to]);
 
   // Gruppieren pro MA
   const byMa = useMemo(() => {
@@ -232,10 +241,8 @@ export default function Stundenauswertung() {
   const exportCsv = async () => {
     const lines: string[] = [];
     lines.push(
-      "Mitarbeiter;Datum;Status;Netto;Brutto;Von;Bis;Anwesenheit (min);Tätigkeiten;Zulagen;Taggeld_kurz;Taggeld_lang;Anmerkung;Workflow",
+      "Mitarbeiter;Datum;Status;Netto;Brutto;Von;Bis;Anwesenheit (min);Tätigkeiten;Zulagen;Taggeld_kurz;Taggeld_lang;Anmerkung",
     );
-    // IDs aller buero_freigabe-Tage sammeln — diese werden nach Export auf 'exportiert' gesetzt
-    const idsZuExportieren: string[] = [];
     const taetById = new Map(taetigkeitenStamm.map((s) => [s.id, s.bezeichnung]));
     const zulById = new Map(zulagenTypen.map((s) => [s.id, s.bezeichnung]));
     const cleanCsv = (s: string) => s.replace(/[;\n]/g, " ");
@@ -287,12 +294,8 @@ export default function Stundenauswertung() {
             tgKurz,
             tgLang,
             cleanCsv(t.tag.anmerkung ?? ""),
-            STATUS_BADGE[t.tag.status].label,
           ].join(";"),
         );
-        if (t.tag.status === "buero_freigabe") {
-          idsZuExportieren.push(t.tag.id);
-        }
       }
     }
     const csv = lines.join("\n");
@@ -303,32 +306,7 @@ export default function Stundenauswertung() {
     a.download = `stundenauswertung_${monat}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-
-    // Nach erfolgreichem Export: buero_freigabe-Tage auf 'exportiert' setzen
-    if (idsZuExportieren.length > 0) {
-      if (
-        window.confirm(
-          `${idsZuExportieren.length} freigegebene Tage als „exportiert" markieren?\n` +
-            `(Verhindert Doppel-Export beim nächsten Mal)`,
-        )
-      ) {
-        const { error } = await supabase
-          .from("stunden_tage")
-          .update({ status: "exportiert" })
-          .in("id", idsZuExportieren);
-        if (error) {
-          toast({
-            variant: "destructive",
-            title: "Status-Update fehlgeschlagen",
-            description: error.message,
-          });
-        } else {
-          toast({
-            title: `${idsZuExportieren.length} Tage als „exportiert" markiert`,
-          });
-        }
-      }
-    }
+    toast({ title: "CSV heruntergeladen" });
   };
 
   return (
@@ -354,7 +332,33 @@ export default function Stundenauswertung() {
           </div>
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="text-sm text-muted-foreground">
-              {monatLabel(monat)} · {werktage} Werktage
+              {periodeLabel(monat, periode)} · {werktage} Werktage
+            </div>
+            <div className="flex items-center gap-1 ml-2">
+              <Button
+                size="sm"
+                variant={periode === "voll" ? "default" : "outline"}
+                onClick={() => setPeriode("voll")}
+                className="h-8 px-2 text-xs"
+              >
+                Ganzer Monat
+              </Button>
+              <Button
+                size="sm"
+                variant={periode === "h1" ? "default" : "outline"}
+                onClick={() => setPeriode("h1")}
+                className="h-8 px-2 text-xs"
+              >
+                1.–15.
+              </Button>
+              <Button
+                size="sm"
+                variant={periode === "h2" ? "default" : "outline"}
+                onClick={() => setPeriode("h2")}
+                className="h-8 px-2 text-xs"
+              >
+                16.–Ende
+              </Button>
             </div>
             {isAdmin && partien.length > 0 && (
               <div className="flex items-center gap-2">
@@ -529,7 +533,6 @@ function DetailMa({
             <TableHead className="text-xs text-right">Von-Bis</TableHead>
             <TableHead className="text-xs">Tätigkeiten / Zulagen</TableHead>
             <TableHead className="text-xs text-center">Taggeld</TableHead>
-            <TableHead className="text-xs">Workflow</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -614,11 +617,6 @@ function DetailMa({
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}
-                </TableCell>
-                <TableCell className="text-xs">
-                  <Badge variant="outline" className={`text-[10px] ${STATUS_BADGE[t.tag.status].cls}`}>
-                    {STATUS_BADGE[t.tag.status].label}
-                  </Badge>
                 </TableCell>
               </TableRow>
             );

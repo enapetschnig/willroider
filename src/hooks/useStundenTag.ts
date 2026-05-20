@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import type { Database, TagStatus, BuchungStatus } from "@/integrations/supabase/types";
+import type { Database, TagStatus } from "@/integrations/supabase/types";
 
 type StundenTag = Database["public"]["Tables"]["stunden_tage"]["Row"];
 type StundenTaetigkeit = Database["public"]["Tables"]["stunden_taetigkeiten"]["Row"];
@@ -210,45 +210,3 @@ export function useDeleteStundenTag() {
   });
 }
 
-/** Status setzen (Bestätigung / Freigabe / Re-Open). */
-export function useSetStundenStatus() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: {
-      ids: string[];
-      newStatus: BuchungStatus;
-      grund?: string;
-    }) => {
-      const { data: { user } } = await supabase.auth.getUser();
-      const now = new Date().toISOString();
-      const patch: any = { status: input.newStatus };
-      if (input.newStatus === "ma_bestaetigt") patch.bestaetigt_am = now;
-      if (input.newStatus === "zm_freigabe") {
-        patch.freigegeben_zm_id = user?.id ?? null;
-        patch.freigegeben_zm_am = now;
-      }
-      if (input.newStatus === "buero_freigabe" || input.newStatus === "exportiert") {
-        patch.freigegeben_buero_id = user?.id ?? null;
-        patch.freigegeben_buero_am = now;
-      }
-      if (input.newStatus === "abgelehnt") {
-        patch.abgelehnt_grund = input.grund ?? null;
-      }
-      // Re-Open
-      if (input.newStatus === "erfasst") {
-        patch.bestaetigt_am = null;
-        patch.freigegeben_zm_id = null;
-        patch.freigegeben_zm_am = null;
-        patch.freigegeben_buero_id = null;
-        patch.freigegeben_buero_am = null;
-        patch.abgelehnt_grund = null;
-      }
-      const { error } = await supabase
-        .from("stunden_tage")
-        .update(patch)
-        .in("id", input.ids);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["stunden_tage_list"] }),
-  });
-}
