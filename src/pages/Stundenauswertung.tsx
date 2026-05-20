@@ -36,6 +36,14 @@ import type { Database, TagStatus, BuchungStatus } from "@/integrations/supabase
 import { useStundenTageList } from "@/hooks/useStundenTag";
 import { usePausenConfig, useArbeitszeitLimits, useTaetigkeitenStamm, useZulagenTypen } from "@/hooks/useStammdatenStunden";
 import { berechneTagZeiten, fmtH, fmtHNum } from "@/lib/zeiterfassung";
+import {
+  aggregiereTaetigkeiten,
+  aggregiereZulagen,
+  aggregiereTaggeld,
+  fmtEur,
+  TAGGELD_SATZ_KURZ_EUR,
+  TAGGELD_SATZ_LANG_EUR,
+} from "@/lib/stundenAggregation";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
@@ -190,10 +198,13 @@ export default function Stundenauswertung() {
   const exportCsv = async () => {
     const lines: string[] = [];
     lines.push(
-      "Mitarbeiter;Datum;Status;Netto;Brutto;Von;Bis;Anwesenheit (min);Anmerkung;Workflow",
+      "Mitarbeiter;Datum;Status;Netto;Brutto;Von;Bis;Anwesenheit (min);Tätigkeiten;Zulagen;Taggeld_kurz;Taggeld_lang;Anmerkung;Workflow",
     );
     // IDs aller buero_freigabe-Tage sammeln — diese werden nach Export auf 'exportiert' gesetzt
     const idsZuExportieren: string[] = [];
+    const taetById = new Map(taetigkeitenStamm.map((s) => [s.id, s.bezeichnung]));
+    const zulById = new Map(zulagenTypen.map((s) => [s.id, s.bezeichnung]));
+    const cleanCsv = (s: string) => s.replace(/[;\n]/g, " ");
     for (const { ma, list } of byMa) {
       for (const t of list) {
         const isArbeit = t.tag.tag_status === "baustelle" || t.tag.tag_status === "firma";
@@ -213,6 +224,20 @@ export default function Stundenauswertung() {
                   "07:00",
               })
             : null;
+        const taetStr = t.taetigkeiten
+          .map((tt) => {
+            const bez = (tt.taetigkeit_id && taetById.get(tt.taetigkeit_id)) || tt.taetigkeit_freitext || "—";
+            return `${bez} ${Number(tt.stunden ?? 0)}h`;
+          })
+          .join(", ");
+        const zulStr = t.zulagen
+          .map((z) => {
+            const bez = zulById.get(z.zulagen_typ_id) ?? "Zulage";
+            return z.stunden != null ? `${bez} ${Number(z.stunden)}h` : bez;
+          })
+          .join(", ");
+        const tgKurz = Number(t.fahrt?.taggeld_kurz ?? 0);
+        const tgLang = Number(t.fahrt?.taggeld_lang ?? 0);
         lines.push(
           [
             `${ma!.nachname} ${ma!.vorname}`,
@@ -223,7 +248,11 @@ export default function Stundenauswertung() {
             zeiten?.von ?? "",
             zeiten?.bis ?? "",
             zeiten?.pausenMinuten ?? "",
-            (t.tag.anmerkung ?? "").replace(/[;\n]/g, " "),
+            cleanCsv(taetStr),
+            cleanCsv(zulStr),
+            tgKurz,
+            tgLang,
+            cleanCsv(t.tag.anmerkung ?? ""),
             STATUS_BADGE[t.tag.status].label,
           ].join(";"),
         );
@@ -387,6 +416,9 @@ export default function Stundenauswertung() {
                           <TableCell colSpan={5} className="bg-muted/20 p-0">
                             <DetailMa
                               list={r.list}
+                              soll={r.soll}
+                              ist={r.ist}
+                              diff={r.diff}
                               taetigkeitenStamm={taetigkeitenStamm}
                               zulagenTypen={zulagenTypen}
                               pausen={pausen}
@@ -409,19 +441,30 @@ export default function Stundenauswertung() {
 
 function DetailMa({
   list,
+  soll,
+  ist,
+  diff,
   taetigkeitenStamm,
   zulagenTypen,
   pausen,
   limits,
 }: {
   list: ReturnType<typeof useStundenTageList>["data"];
+  soll: number;
+  ist: number;
+  diff: number;
   taetigkeitenStamm: Database["public"]["Tables"]["taetigkeiten_stamm"]["Row"][];
   zulagenTypen: Database["public"]["Tables"]["zulagen_typen"]["Row"][];
   pausen: { vm: any; mittag: any } | undefined;
   limits: any;
 }) {
+  const tage = list ?? [];
+  const aggTaet = aggregiereTaetigkeiten(tage, taetigkeitenStamm);
+  const aggZul = aggregiereZulagen(tage, zulagenTypen);
+  const aggTg = aggregiereTaggeld(tage);
+
   return (
-    <div className="p-3 space-y-1">
+    <div className="p-3 space-y-3">
       <Table>
         <TableHeader>
           <TableRow>
@@ -431,11 +474,12 @@ function DetailMa({
             <TableHead className="text-xs text-right">Brutto</TableHead>
             <TableHead className="text-xs text-right">Von-Bis</TableHead>
             <TableHead className="text-xs">Tätigkeiten / Zulagen</TableHead>
+            <TableHead className="text-xs text-center">Taggeld</TableHead>
             <TableHead className="text-xs">Workflow</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {(list ?? []).map((t) => {
+          {tage.map((t) => {
             const isArbeit = t.tag.tag_status === "baustelle" || t.tag.tag_status === "firma";
             const zeiten =
               isArbeit && pausen
@@ -453,6 +497,8 @@ function DetailMa({
                       "07:00",
                   })
                 : null;
+            const tgKurz = Number(t.fahrt?.taggeld_kurz ?? 0);
+            const tgLang = Number(t.fahrt?.taggeld_lang ?? 0);
             return (
               <TableRow key={t.tag.id}>
                 <TableCell className="text-xs tabular-nums">
@@ -502,6 +548,19 @@ function DetailMa({
                     </div>
                   )}
                 </TableCell>
+                <TableCell className="text-xs text-center tabular-nums">
+                  {tgLang > 0 ? (
+                    <span className="px-1 rounded bg-sky-100 text-sky-900 border border-sky-300 text-[10px]">
+                      {tgLang}× lang
+                    </span>
+                  ) : tgKurz > 0 ? (
+                    <span className="px-1 rounded bg-sky-50 text-sky-900 border border-sky-200 text-[10px]">
+                      {tgKurz}× kurz
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </TableCell>
                 <TableCell className="text-xs">
                   <Badge variant="outline" className={`text-[10px] ${STATUS_BADGE[t.tag.status].cls}`}>
                     {STATUS_BADGE[t.tag.status].label}
@@ -512,6 +571,93 @@ function DetailMa({
           })}
         </TableBody>
       </Table>
+
+      {/* Aggregations-Block am Ende der Detail-View */}
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+        <Card>
+          <CardContent className="p-3 space-y-1">
+            <div className="font-semibold text-muted-foreground uppercase text-[10px]">
+              Tätigkeiten im Monat
+            </div>
+            {aggTaet.length === 0 ? (
+              <div className="text-muted-foreground italic">Keine Tätigkeiten erfasst</div>
+            ) : (
+              aggTaet.map((a) => (
+                <div key={a.bezeichnung} className="flex justify-between tabular-nums">
+                  <span className="truncate pr-2">{a.bezeichnung}</span>
+                  <span className="font-medium">{fmtHNum(a.summe_stunden)} h</span>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-3 space-y-1">
+            <div className="font-semibold text-muted-foreground uppercase text-[10px]">Zulagen</div>
+            {aggZul.length === 0 ? (
+              <div className="text-muted-foreground italic">Keine Zulagen</div>
+            ) : (
+              aggZul.map((z) => (
+                <div key={z.bezeichnung} className="flex justify-between tabular-nums">
+                  <span className="truncate pr-2">{z.bezeichnung}</span>
+                  <span className="font-medium">
+                    {fmtHNum(z.summe_stunden)} h · {z.anzahl_tage} Tag{z.anzahl_tage === 1 ? "" : "e"}
+                  </span>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-3 space-y-1">
+            <div className="font-semibold text-muted-foreground uppercase text-[10px]">Taggeld</div>
+            <div className="flex justify-between tabular-nums">
+              <span>Kurz ({fmtEur(TAGGELD_SATZ_KURZ_EUR)})</span>
+              <span className="font-medium">
+                {aggTg.kurz_anzahl}× · {fmtEur(aggTg.kurz_eur)}
+              </span>
+            </div>
+            <div className="flex justify-between tabular-nums">
+              <span>Lang ({fmtEur(TAGGELD_SATZ_LANG_EUR)})</span>
+              <span className="font-medium">
+                {aggTg.lang_anzahl}× · {fmtEur(aggTg.lang_eur)}
+              </span>
+            </div>
+            <div className="flex justify-between tabular-nums pt-1 border-t font-semibold">
+              <span>Summe</span>
+              <span>{fmtEur(aggTg.total_eur)}</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-3 space-y-1">
+            <div className="font-semibold text-muted-foreground uppercase text-[10px]">
+              Soll · Ist · Differenz
+            </div>
+            <div className="flex justify-between tabular-nums">
+              <span>Soll (Kalender)</span>
+              <span className="font-medium">{fmtHNum(soll)} h</span>
+            </div>
+            <div className="flex justify-between tabular-nums">
+              <span>Ist (Netto)</span>
+              <span className="font-medium">{fmtHNum(ist)} h</span>
+            </div>
+            <div className="flex justify-between tabular-nums pt-1 border-t font-semibold">
+              <span>Differenz</span>
+              <span className={diff > 0 ? "text-emerald-700" : diff < 0 ? "text-amber-700" : ""}>
+                {diff > 0 ? "+" : ""}
+                {fmtHNum(diff)} h
+              </span>
+            </div>
+            <div className="text-[10px] text-muted-foreground pt-1">
+              → wird beim Monatsabschluss als ZA-Buchung gespeichert.
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

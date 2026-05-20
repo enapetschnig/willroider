@@ -53,14 +53,16 @@ export function AdminMonatsabschluss() {
     const endDate = new Date(year, month, 1);
     const end = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, "0")}-${String(endDate.getDate()).padStart(2, "0")}`;
 
+    // Ist-Stunden aus stunden_tage (neue Tabelle, Phase B). Der Abschluss-RPC
+    // selbst liest schon korrekt aus stunden_tage — hier nur die Anzeige-Ist.
     const [{ data: ps }, { data: pks }, { data: ma }, { data: stunden }] =
       await Promise.all([
         supabase.from("profiles").select("*").eq("is_active", true).order("nachname"),
         supabase.from("profile_konten_settings").select("*"),
         supabase.from("monatsabschluss").select("*").eq("monat", monat),
         supabase
-          .from("stundenbuchungen")
-          .select("mitarbeiter_id, arbeitsstunden, fahrstunden, fehlzeit_stunden")
+          .from("stunden_tage")
+          .select("mitarbeiter_id, netto_stunden")
           .gte("datum", start)
           .lt("datum", end),
       ]);
@@ -76,10 +78,7 @@ export function AdminMonatsabschluss() {
     const iMap: Record<string, number> = {};
     ((stunden as any[]) ?? []).forEach((s) => {
       iMap[s.mitarbeiter_id] =
-        (iMap[s.mitarbeiter_id] ?? 0) +
-        Number(s.arbeitsstunden ?? 0) +
-        Number(s.fahrstunden ?? 0) +
-        Number(s.fehlzeit_stunden ?? 0);
+        (iMap[s.mitarbeiter_id] ?? 0) + Number(s.netto_stunden ?? 0);
     });
     setIst(iMap);
   };
