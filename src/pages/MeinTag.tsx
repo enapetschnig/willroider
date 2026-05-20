@@ -18,7 +18,6 @@ import {
   Loader2,
   Phone,
   Camera,
-  AlertTriangle,
   Truck,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -43,8 +42,10 @@ type Partie = Database["public"]["Tables"]["partien"]["Row"];
 
 /**
  * Heute-Karte: zeigt dem MA seine konkrete heutige Einteilung
- * (Baustelle, Fahrzeug, Polier) — sobald die Tagesplanung freigegeben ist.
- * Wenn keine Freigabe vorliegt, fällt sie auf den letzten freigegebenen Tag zurück.
+ * (Baustelle, Fahrzeug, Polier) — fallback auf den letzten freigegebenen Tag.
+ *
+ * UI-Prinzip: Der MA sieht nur seine Einteilung, NICHT den Workflow-Status
+ * (freigegeben/in Bearbeitung). Wenn nichts da ist → Card erscheint nicht.
  */
 function HeuteEinteilungCard({ userId }: { userId: string }) {
   const { toast } = useToast();
@@ -53,7 +54,6 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<{
     datum: string;
-    isFreigegeben: boolean;
     isToday: boolean;
     baustelle: Baustelle | null;
     taetigkeit: string | null;
@@ -62,8 +62,6 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
     fahrzeuge: { kennzeichen: string }[];
     polier: { vorname: string; nachname: string; telefon: string | null } | null;
     einteilungId: string | null;
-    emId: string | null;
-    gelesen: boolean;
   } | null>(null);
 
   const lade = async () => {
@@ -90,7 +88,7 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
 
       const { data: ems } = await supabase
         .from("einteilung_mitarbeiter")
-        .select("id, einteilung_id, gelesen_am, einteilung:einteilungen!inner(datum,baustelle_id,taetigkeit,abfahrtszeit,treffpunkt)")
+        .select("id, einteilung_id, einteilung:einteilungen!inner(datum,baustelle_id,taetigkeit,abfahrtszeit,treffpunkt)")
         .eq("mitarbeiter_id", userId)
         .eq("einteilung.datum", datum);
       if (!ems || ems.length === 0) {
@@ -99,7 +97,6 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
           // heute keine Einteilung, aber heute IST der Tag → trotzdem Ergebnis zurück
           setData({
             datum,
-            isFreigegeben: !!frei,
             isToday: true,
             baustelle: null,
             taetigkeit: null,
@@ -108,8 +105,6 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
             fahrzeuge: [],
             polier: null,
             einteilungId: null,
-            emId: null,
-            gelesen: false,
           });
           setLoading(false);
           return;
@@ -139,7 +134,6 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
       }
       setData({
         datum,
-        isFreigegeben: !!frei,
         isToday: datum === today,
         baustelle,
         taetigkeit: einteilung.taetigkeit,
@@ -148,8 +142,6 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
         fahrzeuge: (efs ?? []).map((e: any) => e.fahrzeug).filter(Boolean),
         polier,
         einteilungId: em.einteilung_id,
-        emId: em.id,
-        gelesen: !!em.gelesen_am,
       });
       setLoading(false);
       return;
@@ -194,18 +186,9 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
     );
   }
 
-  if (!data) {
-    return (
-      <Card className="border-amber-300 bg-amber-50">
-        <CardContent className="p-4 flex items-center gap-2">
-          <AlertTriangle className="h-5 w-5 text-amber-700 shrink-0" />
-          <span className="text-sm text-amber-900">
-            Für heute ist noch kein Plan freigegeben.
-          </span>
-        </CardContent>
-      </Card>
-    );
-  }
+  // Wenn weder heute noch ein letzter freigegebener Tag eine Einteilung
+  // liefert, zeigen wir gar nichts — der MA sieht nur Begrüßung + Vorschau.
+  if (!data) return null;
 
   const fotoUpload = async () => {
     if (!data.baustelle) return;
@@ -225,32 +208,11 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
       )}`
     : null;
 
-  const bestaetigen = async () => {
-    if (!data.emId) return;
-    const { error } = await supabase
-      .from("einteilung_mitarbeiter")
-      .update({ gelesen_am: new Date().toISOString() })
-      .eq("id", data.emId);
-    if (error) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
-      return;
-    }
-    setData({ ...data, gelesen: true });
-    toast({ title: "Bestätigt" });
-  };
-
   return (
     <Card className="border-primary/30 bg-primary/5">
       <CardContent className="p-4 space-y-3">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="text-xs uppercase tracking-wide text-primary font-semibold">
-            {data.isToday ? "Heute" : `Plan vom ${data.datum}`}
-          </div>
-          {!data.isFreigegeben && (
-            <Badge variant="outline" className="bg-amber-50 border-amber-300 text-amber-900 text-[10px]">
-              <AlertTriangle className="h-3 w-3 mr-1" /> Noch in Bearbeitung
-            </Badge>
-          )}
+        <div className="text-xs uppercase tracking-wide text-primary font-semibold">
+          {data.isToday ? "Heute" : `Plan vom ${data.datum}`}
         </div>
 
         {data.baustelle ? (
@@ -336,24 +298,6 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
               </button>
             </div>
 
-            {/* Lese-Bestätigung */}
-            {data.isToday && data.emId && (
-              <div className="border-t border-primary/15 pt-2">
-                {data.gelesen ? (
-                  <div className="text-xs text-emerald-700 flex items-center gap-1.5">
-                    <CheckCircle2 className="h-4 w-4" /> Plan zur Kenntnis genommen
-                  </div>
-                ) : (
-                  <Button
-                    size="sm"
-                    className="w-full"
-                    onClick={bestaetigen}
-                  >
-                    <CheckCircle2 className="h-4 w-4 mr-1.5" /> Plan zur Kenntnis nehmen
-                  </Button>
-                )}
-              </div>
-            )}
           </>
         ) : (
           <div className="text-sm text-muted-foreground italic">
@@ -404,12 +348,16 @@ function VorschauCard({ userId }: { userId: string }) {
 
     const result = tage
       .filter((t) => t !== today) // Heute zeigt die HeuteEinteilungCard
-      .slice(0, 7)
       .map((datum) => ({
         datum,
+        bvh: emByDate.get(datum)?.bvh ?? null,
+        taetigkeit: emByDate.get(datum)?.taetigkeit ?? null,
         isFreigegeben: freiSet.has(datum),
-        ...(emByDate.get(datum) ?? { bvh: null, taetigkeit: null }),
-      }));
+      }))
+      // Nur freigegebene Tage mit Einteilung zeigen — der MA soll
+      // den Freigabe-Workflow gar nicht mitkriegen.
+      .filter((e) => e.isFreigegeben && e.bvh)
+      .slice(0, 7);
 
     setEintraege(result);
     setLoading(false);
@@ -453,22 +401,10 @@ function VorschauCard({ userId }: { userId: string }) {
                 className="flex items-center gap-2 text-sm px-2 py-1.5 rounded bg-muted/30"
               >
                 <span className="font-bold tabular-nums w-20 shrink-0">{dStr}</span>
-                {e.isFreigegeben ? (
-                  e.bvh ? (
-                    <>
-                      <span className="flex-1 truncate font-medium">{e.bvh}</span>
-                      {e.taetigkeit && (
-                        <span className="text-xs italic text-muted-foreground truncate">
-                          {e.taetigkeit}
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    <span className="italic text-muted-foreground">Keine Einteilung</span>
-                  )
-                ) : (
-                  <span className="italic text-amber-700 text-xs">
-                    Plan noch nicht freigegeben
+                <span className="flex-1 truncate font-medium">{e.bvh}</span>
+                {e.taetigkeit && (
+                  <span className="text-xs italic text-muted-foreground truncate">
+                    {e.taetigkeit}
                   </span>
                 )}
               </div>

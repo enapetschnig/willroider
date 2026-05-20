@@ -13,7 +13,7 @@
  * Mobile-Fallback bei N>1 MA: pro Tätigkeit eine Card mit MA-Inputs vertikal.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -184,9 +184,36 @@ export default function Stunden() {
   const [forUserIds, setForUserIds] = useState<Set<string>>(new Set());
   const [memberSearch, setMemberSearch] = useState<string>("");
 
+  // Vorarbeiter-Vorausfüllung: wenn der User Polier einer Partie ist, werden
+  // die Kollegen aus seiner heutigen Einteilung beim Mount mitselektiert.
+  // Läuft nur einmal pro (user, date)-Kontext — wenn der User dann manuell
+  // de-/selektiert, bleibt das stehen. Bei Datumswechsel wird neu vorgeschlagen.
+  const prefilledKeyRef = useRef<string>("");
   useEffect(() => {
-    if (user) setForUserIds(new Set([user.id]));
-  }, [user]);
+    if (!user || !date) return;
+    const key = `${user.id}|${date}`;
+    if (prefilledKeyRef.current === key) return;
+    let cancelled = false;
+    (async () => {
+      const initial = new Set<string>([user.id]);
+      if (polierPartie) {
+        const eint = await getBaustellenForMaToday(user.id, date);
+        if (eint[0]) {
+          const { data: ems } = await supabase
+            .from("einteilung_mitarbeiter")
+            .select("mitarbeiter_id")
+            .eq("einteilung_id", eint[0].einteilung_id);
+          (ems ?? []).forEach((e: any) => initial.add(e.mitarbeiter_id));
+        }
+      }
+      if (cancelled) return;
+      prefilledKeyRef.current = key;
+      setForUserIds(initial);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, date, polierPartie]);
 
   // Polier-Partie / Members
   useEffect(() => {
