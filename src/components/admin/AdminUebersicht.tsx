@@ -74,7 +74,7 @@ export function AdminUebersicht({
           value={`${offeneMonate} MA`}
           tone={offeneMonate > 0 ? "amber" : "muted"}
           cta="Monatsabschluss"
-          onClick={() => onNavigate("monatsabschluss")}
+          onClick={() => onNavigate("lohnbuchhaltung")}
         />
         <StatCard
           icon={Sun}
@@ -124,7 +124,7 @@ export function AdminUebersicht({
               icon={CalendarCheck}
               label="Monatsabschluss"
               desc="Soll-/Ist-Vergleich, sperren"
-              onClick={() => onNavigate("monatsabschluss")}
+              onClick={() => onNavigate("lohnbuchhaltung")}
             />
           </div>
         </CardContent>

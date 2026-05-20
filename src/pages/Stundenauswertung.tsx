@@ -44,6 +44,12 @@ import {
   TAGGELD_SATZ_KURZ_EUR,
   TAGGELD_SATZ_LANG_EUR,
 } from "@/lib/stundenAggregation";
+import {
+  makeStundenzettelPdf,
+  makeAlleStundenzettelPdf,
+  type StundenzettelData,
+} from "@/lib/stundenZettelPdf";
+import { FileText } from "lucide-react";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
@@ -195,6 +201,34 @@ export default function Stundenauswertung() {
     setMonat(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
   };
 
+  function buildStundenzettel(r: typeof byMa[number]): StundenzettelData {
+    return {
+      mitarbeiter: { id: r.ma!.id, vorname: r.ma!.vorname ?? "", nachname: r.ma!.nachname ?? "" },
+      monat,
+      tage: r.list ?? [],
+      soll: r.soll,
+      ist: r.ist,
+      diff: r.diff,
+      taetigkeitenStamm,
+      zulagenTypen,
+    };
+  }
+
+  const exportPdfEinzeln = (r: typeof byMa[number]) => {
+    const data = buildStundenzettel(r);
+    const doc = makeStundenzettelPdf(data);
+    const safeName = `${data.mitarbeiter.nachname}_${data.mitarbeiter.vorname}`.replace(/\s+/g, "");
+    doc.save(`Stundenzettel_${monat}_${safeName}.pdf`);
+  };
+
+  const exportPdfAlle = () => {
+    if (byMa.length === 0) return;
+    const alleData = byMa.map(buildStundenzettel);
+    const doc = makeAlleStundenzettelPdf(alleData);
+    doc.save(`Stundenzettel_${monat}_alle.pdf`);
+    toast({ title: `${alleData.length} Stundenzettel erstellt` });
+  };
+
   const exportCsv = async () => {
     const lines: string[] = [];
     lines.push(
@@ -339,9 +373,14 @@ export default function Stundenauswertung() {
                 </select>
               </div>
             )}
-            <Button size="sm" variant="outline" onClick={exportCsv} disabled={byMa.length === 0}>
-              <Download className="h-4 w-4 mr-1.5" /> CSV
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={exportPdfAlle} disabled={byMa.length === 0}>
+                <FileText className="h-4 w-4 mr-1.5" /> Alle Stundenzettel (PDF)
+              </Button>
+              <Button size="sm" variant="outline" onClick={exportCsv} disabled={byMa.length === 0}>
+                <Download className="h-4 w-4 mr-1.5" /> CSV
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -364,12 +403,13 @@ export default function Stundenauswertung() {
                   <TableHead className="text-right">Soll</TableHead>
                   <TableHead className="text-right">Ist (Netto)</TableHead>
                   <TableHead className="text-right">Diff</TableHead>
+                  <TableHead className="text-right w-20">PDF</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {byMa.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-sm text-muted-foreground p-6">
+                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground p-6">
                       Keine Mitarbeiter im Filter.
                     </TableCell>
                   </TableRow>
@@ -410,10 +450,24 @@ export default function Stundenauswertung() {
                           {r.diff > 0 ? "+" : ""}
                           {fmtHNum(r.diff)} h
                         </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              exportPdfEinzeln(r);
+                            }}
+                            title="Stundenzettel als PDF"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                          </Button>
+                        </TableCell>
                       </TableRow>
                       {expanded && (
                         <TableRow>
-                          <TableCell colSpan={5} className="bg-muted/20 p-0">
+                          <TableCell colSpan={6} className="bg-muted/20 p-0">
                             <DetailMa
                               list={r.list}
                               soll={r.soll}
