@@ -35,6 +35,15 @@ function prevMonthIso(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+/** Berechnet die Datums-Grenzen für einen YYYY-MM-Monat. */
+function monatRange(monat: string): { von: string; bis: string } {
+  const [y, m] = monat.split("-").map(Number);
+  const von = `${y}-${String(m).padStart(2, "0")}-01`;
+  const lastDay = new Date(y, m, 0).getDate();
+  const bis = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  return { von, bis };
+}
+
 export function AdminMonatsabschluss() {
   const { toast } = useToast();
   const [monat, setMonat] = useState<string>(prevMonthIso());
@@ -126,8 +135,10 @@ export function AdminMonatsabschluss() {
     if (!confirm(`Monat ${monat} für ${offene.length} Mitarbeiter abschließen?`))
       return;
     setRunning(true);
+    const { von, bis } = monatRange(monat);
     const { error } = await supabase.rpc("monatsabschluss_durchfuehren" as any, {
-      p_monat: monat,
+      p_von_datum: von,
+      p_bis_datum: bis,
       p_mitarbeiter_id: null,
     });
     setRunning(false);
@@ -141,8 +152,10 @@ export function AdminMonatsabschluss() {
 
   const closeOne = async (uid: string) => {
     if (!confirm(`Monat ${monat} für diesen Mitarbeiter abschließen?`)) return;
+    const { von, bis } = monatRange(monat);
     const { error } = await supabase.rpc("monatsabschluss_durchfuehren" as any, {
-      p_monat: monat,
+      p_von_datum: von,
+      p_bis_datum: bis,
       p_mitarbeiter_id: uid,
     });
     if (error) {
@@ -160,8 +173,10 @@ export function AdminMonatsabschluss() {
       )
     )
       return;
+    const { von, bis } = monatRange(monat);
     const { error } = await supabase.rpc("monatsabschluss_oeffnen" as any, {
-      p_monat: monat,
+      p_von_datum: von,
+      p_bis_datum: bis,
       p_mitarbeiter_id: uid,
     });
     if (error) {
