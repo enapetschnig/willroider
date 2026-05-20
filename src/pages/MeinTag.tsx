@@ -20,7 +20,7 @@ import {
   Truck,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { findeOderErstelleBericht } from "@/hooks/useBericht";
+import { findeOderErstelleBerichtMitVorausfuellung } from "@/hooks/useBericht";
 import { werktagePlus } from "@/lib/feiertage";
 import { UrlaubAntraegeCard } from "@/components/UrlaubAntragDialog";
 import { KrankmeldungenCard } from "@/components/MeinTag/KrankmeldungenCard";
@@ -186,7 +186,11 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
   const fotoUpload = async () => {
     if (!data.baustelle) return;
     try {
-      const r = await findeOderErstelleBericht(data.baustelle.id, today, "bautagesbericht");
+      const r = await findeOderErstelleBerichtMitVorausfuellung(
+        data.baustelle.id,
+        today,
+        "bautagesbericht",
+      );
       navigate(`/berichte/${r.id}`);
     } catch (e) {
       toast({ variant: "destructive", title: "Fehler", description: (e as Error).message });

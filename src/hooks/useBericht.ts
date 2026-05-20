@@ -5,6 +5,10 @@ import type {
   BerichtTyp,
   BerichtStatus,
 } from "@/integrations/supabase/types";
+import {
+  ladeVorausfuellung,
+  uebernehmeVorausfuellung,
+} from "@/hooks/useBerichtVorausfuellung";
 
 type Bericht = Database["public"]["Tables"]["berichte"]["Row"];
 type BerichtMA = Database["public"]["Tables"]["bericht_mitarbeiter"]["Row"];
@@ -177,4 +181,29 @@ export async function findeOderErstelleBericht(
     if (again) return { id: again.id, created: false };
   }
   throw error;
+}
+
+/** Erstellt oder findet einen Bericht und befüllt — bei neu erstelltem
+ *  Bericht — direkt MA + Tätigkeiten aus der Zeiterfassung (sofern vorhanden).
+ *  Wird sowohl aus Berichte.tsx als auch aus MeinTag.tsx aufgerufen, damit der
+ *  Auto-Import nicht erst im Detail-View greift. */
+export async function findeOderErstelleBerichtMitVorausfuellung(
+  baustelleId: string,
+  datum: string,
+  typ: BerichtTyp,
+): Promise<{ id: string; created: boolean; importiert: number }> {
+  const r = await findeOderErstelleBericht(baustelleId, datum, typ);
+  let importiert = 0;
+  if (r.created) {
+    try {
+      const vf = await ladeVorausfuellung(baustelleId, datum);
+      if (vf.mitarbeiter.length > 0 || vf.taetigkeiten.length > 0) {
+        await uebernehmeVorausfuellung(r.id, vf);
+        importiert = vf.mitarbeiter.length;
+      }
+    } catch {
+      /* Vorausfüllung optional — Bericht ist trotzdem angelegt. */
+    }
+  }
+  return { ...r, importiert };
 }

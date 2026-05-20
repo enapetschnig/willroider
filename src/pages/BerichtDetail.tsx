@@ -125,17 +125,15 @@ export default function BerichtDetail() {
 
   // Auto-Vorausfüllung beim ersten Öffnen — Hook MUSS vor Early-Returns stehen
   // (Rules of Hooks); Null-Check + Bedingungen im Effect-Body.
+  // Läuft auch wenn `zeiterfassung_quelle_am` zwar gesetzt ist, der Bericht
+  // aber faktisch leer ist (frühere Snapshot-Marker-Bug-Sessions) — nachfüllen
+  // nur dann, wenn MAs UND Tätigkeiten noch leer sind, sodass manuelle
+  // Einträge nicht überschrieben werden.
   useEffect(() => {
     if (!bericht) return;
     const b0 = bericht.bericht;
-    if (
-      b0.status !== "entwurf" ||
-      b0.zeiterfassung_quelle_am ||
-      bericht.mitarbeiter.length > 0 ||
-      bericht.taetigkeiten.length > 0
-    ) {
-      return;
-    }
+    if (b0.status !== "entwurf") return;
+    if (bericht.mitarbeiter.length > 0 || bericht.taetigkeiten.length > 0) return;
     setBusy(true);
     (async () => {
       try {

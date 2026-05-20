@@ -143,20 +143,23 @@ export async function uebernehmeVorausfuellung(
       })),
     );
   }
-  // Snapshot-Marker setzen
-  await supabase
-    .from("berichte")
-    .update({ zeiterfassung_quelle_am: new Date().toISOString() })
-    .eq("id", berichtId);
+  // Snapshot-Marker + Audit-Log NUR setzen, wenn tatsaechlich Daten uebernommen
+  // wurden. Sonst bleibt zeiterfassung_quelle_am=null und beim naechsten Oeffnen
+  // versucht der Auto-Import erneut — falls inzwischen MAs gebucht wurden.
+  if (result.mitarbeiter.length > 0 || result.taetigkeiten.length > 0) {
+    await supabase
+      .from("berichte")
+      .update({ zeiterfassung_quelle_am: new Date().toISOString() })
+      .eq("id", berichtId);
 
-  // Audit-Log
-  const { data: { user } } = await supabase.auth.getUser();
-  await supabase.from("bericht_aenderungen").insert({
-    bericht_id: berichtId,
-    autor_id: user?.id ?? null,
-    art: "vorausfuellung",
-    details: `${result.mitarbeiter.length} MA, ${result.taetigkeiten.length} Tätigkeiten aus Zeiterfassung`,
-  });
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("bericht_aenderungen").insert({
+      bericht_id: berichtId,
+      autor_id: user?.id ?? null,
+      art: "vorausfuellung",
+      details: `${result.mitarbeiter.length} MA, ${result.taetigkeiten.length} Tätigkeiten aus Zeiterfassung`,
+    });
+  }
 }
 
 /** Lädt die Vorausfüllung asynchron; geeignet für UI-Preview. */

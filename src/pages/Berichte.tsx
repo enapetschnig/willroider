@@ -27,7 +27,7 @@ import { FileText, Plus, Building2, FileCheck2, Loader2, ChevronRight, Hammer, C
 import type { Database, BerichtStatus, BerichtTyp } from "@/integrations/supabase/types";
 import { useBerichteList } from "@/hooks/useBerichte";
 import { getBaustellenForMaToday } from "@/lib/tagesplanung";
-import { findeOderErstelleBericht } from "@/hooks/useBericht";
+import { findeOderErstelleBerichtMitVorausfuellung } from "@/hooks/useBericht";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -319,9 +319,17 @@ function NeuerBerichtDialog({
     if (!baustelleId) return;
     setLoading(true);
     try {
-      const { id, created } = await findeOderErstelleBericht(baustelleId, datum, typ);
+      const { id, created, importiert } = await findeOderErstelleBerichtMitVorausfuellung(
+        baustelleId,
+        datum,
+        typ,
+      );
       toast({
-        title: created ? "Bericht angelegt" : "Bericht existiert bereits — geöffnet",
+        title: created
+          ? importiert > 0
+            ? `Bericht angelegt · ${importiert} MA aus Zeiterfassung übernommen`
+            : "Bericht angelegt"
+          : "Bericht existiert bereits — geöffnet",
       });
       onClose();
       navigate(`/berichte/${id}`);
