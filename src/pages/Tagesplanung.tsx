@@ -68,7 +68,7 @@ import {
   Share2,
 } from "lucide-react";
 import { makeTagesplanungPdf } from "@/lib/tagesplanungPdf";
-import { teilenOderDownload, downloadDatei } from "@/lib/teilen";
+import { teilePdfViaWhatsApp, downloadDatei } from "@/lib/teilen";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -106,6 +106,18 @@ function moveDate(iso: string, days: number): string {
   return localIso(d);
 }
 
+/** Erkennt PostgREST-Schema-Cache-Fehler ("Could not find the table …"),
+ *  d.h. die Migration ist noch nicht auf der Cloud-DB gelaufen. */
+function isSetupFehler(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  if (error.code === "PGRST205" || error.code === "42P01") return true;
+  const msg = (error.message ?? "").toLowerCase();
+  return (
+    msg.includes("tagesplanung_freigaben") ||
+    (msg.includes("could not find") && msg.includes("table"))
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────
 
 export default function Tagesplanung() {
@@ -115,6 +127,26 @@ export default function Tagesplanung() {
   const [datum, setDatum] = useState<string>(todayIso());
   const [view, setView] = useState<"baustellen" | "mitarbeiter">("baustellen");
   const { data: plan, isLoading } = useTagesplanung(datum);
+
+  /** Probe-Query bei Mount: prüft ob `tagesplanung_freigaben` in der Cloud-DB
+   *  existiert. Wenn nicht, wird oben ein Banner + Setup-Dialog angeboten. */
+  const [setupFehler, setSetupFehler] = useState(false);
+  const [setupDialogOpen, setSetupDialogOpen] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { error } = await supabase
+        .from("tagesplanung_freigaben")
+        .select("datum")
+        .limit(1);
+      if (!cancelled && error && isSetupFehler(error)) {
+        setSetupFehler(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /** Direkt nach jeder Mutation aufrufen — invalidiert den useTagesplanung-Cache
    *  damit das UI sofort die neuen Daten zeigt (ohne auf Realtime zu warten). */
@@ -400,6 +432,11 @@ export default function Tagesplanung() {
       { onConflict: "datum" },
     );
     if (error) {
+      if (isSetupFehler(error)) {
+        setSetupFehler(true);
+        setSetupDialogOpen(true);
+        return;
+      }
       toast({
         variant: "destructive",
         title: "Fehler beim Speichern",
@@ -544,7 +581,10 @@ export default function Tagesplanung() {
     toast({ title: "PDF heruntergeladen" });
   }
 
-  /** Teilt die PDF: Mobile direkt via Share-Sheet, Desktop öffnet WhatsApp Web + lädt PDF. */
+  /** Teilt die PDF in 1 Klick:
+   *  - Mobile: native Share-Sheet → WhatsApp mit Bild-Vorschau direkt
+   *  - Desktop: PDF wird hochgeladen, signed URL in WhatsApp-Web als Text +
+   *    klickbarer Link an den Empfänger. */
   async function teilePdf() {
     if (!plan) {
       toast({ variant: "destructive", title: "Plan noch nicht geladen" });
@@ -552,20 +592,36 @@ export default function Tagesplanung() {
     }
     const doc = makeTagesplanungPdf(plan);
     const blob = doc.output("blob");
-    const ok = await teilenOderDownload({
+    const r = await teilePdfViaWhatsApp({
       blob,
       filename: pdfFilename(),
       text: pdfTeilenText(),
     });
-    if (ok) {
+    if (r.mode === "share" && r.ok) {
       toast({ title: "Geteilt" });
-    } else {
+    } else if (r.mode === "url" && r.ok) {
       toast({
         title: "WhatsApp Web geöffnet",
         description:
-          "Wähle den Chat und ziehe die heruntergeladene PDF einfach ins Nachrichten-Feld.",
+          "Chat wählen und Senden — der Empfänger bekommt einen Link zur PDF.",
+      });
+    } else if (r.mode === "missing-bucket") {
+      setSetupDialogOpen(true);
+      toast({
+        variant: "destructive",
+        title: "Storage-Bucket fehlt",
+        description:
+          "PDF wurde heruntergeladen. Bitte einmaliges DB-Setup ausführen.",
+      });
+    } else if (r.mode === "download") {
+      toast({
+        variant: "destructive",
+        title: "Upload fehlgeschlagen",
+        description:
+          "PDF wurde heruntergeladen — bitte manuell in WhatsApp ziehen.",
       });
     }
+    // mode === "share" && !ok ⇒ User hat im Share-Sheet abgebrochen, kein Toast
   }
 
   async function freigeben() {
@@ -579,9 +635,15 @@ export default function Tagesplanung() {
       { onConflict: "datum" },
     );
     if (error) {
+      if (isSetupFehler(error)) {
+        setSetupFehler(true);
+        setSetupDialogOpen(true);
+        return;
+      }
       toast({ variant: "destructive", title: "Fehler", description: error.message });
       return;
     }
+    setSetupFehler(false);
     toast({ title: "Plan für " + fmtHeaderDatum(datum) + " freigegeben" });
     refresh();
   }
@@ -628,6 +690,35 @@ export default function Tagesplanung() {
   return (
     <div className="space-y-4">
       <PageHeader title="Tagesplanung" />
+
+      {/* Setup-Banner: Tabelle tagesplanung_freigaben fehlt in der Cloud-DB */}
+      {setupFehler && (
+        <div className="print:hidden rounded-md border border-amber-300 bg-amber-50 p-3 flex items-start gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-700 mt-0.5 flex-none" />
+          <div className="flex-1 text-sm">
+            <div className="font-semibold text-amber-900">
+              Einmaliges DB-Setup nötig
+            </div>
+            <div className="text-amber-800">
+              „Plan freigeben" und WhatsApp-Sharing brauchen eine Tabelle bzw.
+              einen Storage-Bucket, die noch nicht in der Cloud-DB angelegt sind.
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-amber-400 bg-white text-amber-900 hover:bg-amber-100"
+            onClick={() => setSetupDialogOpen(true)}
+          >
+            Setup anzeigen
+          </Button>
+        </div>
+      )}
+
+      <SetupSqlDialog
+        open={setupDialogOpen}
+        onOpenChange={setSetupDialogOpen}
+      />
 
       {/* Control-Bar (print:hidden) */}
       <div className="flex items-center justify-between gap-2 print:hidden flex-wrap">
@@ -892,6 +983,125 @@ export default function Tagesplanung() {
         }
       `}</style>
     </div>
+  );
+}
+
+// ─── Setup-Dialog: SQL-Anweisung zum einmaligen Cloud-DB-Setup ─────────
+
+const SETUP_SQL = `-- Einmaliges Setup für „Plan freigeben" + WhatsApp-Sharing.
+-- Kann gefahrlos mehrfach ausgeführt werden (idempotent).
+
+-- 1) Tabelle für Plan-Freigaben + „sonstige Hinweise"
+CREATE TABLE IF NOT EXISTS public.tagesplanung_freigaben (
+  datum date PRIMARY KEY,
+  freigegeben_am timestamptz NOT NULL DEFAULT now(),
+  freigegeben_von uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  notiz text
+);
+ALTER TABLE public.tagesplanung_freigaben ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tpf_sel ON public.tagesplanung_freigaben;
+CREATE POLICY tpf_sel ON public.tagesplanung_freigaben FOR SELECT USING (true);
+DROP POLICY IF EXISTS tpf_write ON public.tagesplanung_freigaben;
+CREATE POLICY tpf_write ON public.tagesplanung_freigaben FOR ALL
+  USING (public.is_admin_role(auth.uid()))
+  WITH CHECK (public.is_admin_role(auth.uid()));
+
+-- 2) Storage-Bucket für WhatsApp-Sharing (PDF-Upload + signed URL)
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('share-temp', 'share-temp', false)
+ON CONFLICT (id) DO NOTHING;
+DROP POLICY IF EXISTS share_temp_select ON storage.objects;
+CREATE POLICY share_temp_select ON storage.objects FOR SELECT
+  USING (bucket_id = 'share-temp');
+DROP POLICY IF EXISTS share_temp_insert ON storage.objects;
+CREATE POLICY share_temp_insert ON storage.objects FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'share-temp');
+DROP POLICY IF EXISTS share_temp_delete ON storage.objects;
+CREATE POLICY share_temp_delete ON storage.objects FOR DELETE TO authenticated
+  USING (bucket_id = 'share-temp');
+
+-- 3) PostgREST-Schema-Cache neu laden (wichtig!)
+NOTIFY pgrst, 'reload schema';
+`;
+
+function SetupSqlDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const { toast } = useToast();
+  const [copied, setCopied] = useState(false);
+
+  async function copySql() {
+    try {
+      await navigator.clipboard.writeText(SETUP_SQL);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      toast({ title: "SQL kopiert" });
+    } catch {
+      toast({
+        variant: "destructive",
+        title: "Kopieren fehlgeschlagen",
+        description: "Bitte SQL manuell markieren und kopieren.",
+      });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Einmaliges DB-Setup</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 text-sm">
+          <div className="text-muted-foreground">
+            Für „Plan freigeben" und das WhatsApp-Sharing braucht die Cloud-DB
+            eine Tabelle + einen Storage-Bucket. Das ist eine{" "}
+            <b>einmalige Einrichtung</b> — danach funktioniert beides dauerhaft.
+          </div>
+          <ol className="list-decimal pl-5 space-y-2">
+            <li>
+              <a
+                href="https://supabase.com/dashboard"
+                target="_blank"
+                rel="noreferrer"
+                className="underline text-primary"
+              >
+                Supabase-Dashboard öffnen
+              </a>{" "}
+              → dein Projekt → links im Menü <b>„SQL Editor"</b>.
+            </li>
+            <li>
+              <b>„New query"</b> klicken, das SQL unten einfügen, dann <b>„Run"</b>.
+            </li>
+            <li>
+              Hier zurück → diese Meldung schließen. Fertig.
+            </li>
+          </ol>
+          <div className="relative">
+            <pre className="bg-muted rounded-md p-3 text-xs overflow-x-auto whitespace-pre max-h-64">
+              {SETUP_SQL}
+            </pre>
+            <Button
+              size="sm"
+              variant="outline"
+              className="absolute top-2 right-2"
+              onClick={copySql}
+            >
+              <Copy className="h-3.5 w-3.5 mr-1" />
+              {copied ? "Kopiert!" : "SQL kopieren"}
+            </Button>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Schließen
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
