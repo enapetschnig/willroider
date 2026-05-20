@@ -1197,7 +1197,9 @@ export default function Stunden() {
                                   Array.from(forUserIds).map((uid) => [uid, null]),
                                 ),
                                 notiz: "",
-                                proMaModus: false,
+                                // Bei Multi-MA: standardmäßig pro MA individuell.
+                                // Bei Single-MA: irrelevant (nur ein Eingabefeld).
+                                proMaModus: forUserIds.size > 1,
                               });
                             return { ...f, zulagenSelected: next };
                           })
