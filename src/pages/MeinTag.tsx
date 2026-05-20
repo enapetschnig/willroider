@@ -365,7 +365,7 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
   );
 }
 
-/** Nächste 14 Werktage — Kompakt-Liste der freigegebenen Einteilungen. */
+/** Nächste 7 Werktage — Kompakt-Liste der freigegebenen Einteilungen. */
 function VorschauCard({ userId }: { userId: string }) {
   const [eintraege, setEintraege] = useState<
     { datum: string; isFreigegeben: boolean; bvh: string | null; taetigkeit: string | null }[]
@@ -375,7 +375,7 @@ function VorschauCard({ userId }: { userId: string }) {
   const lade = async () => {
     setLoading(true);
     const today = localIso();
-    const tage = werktagePlus(today, 14);
+    const tage = werktagePlus(today, 7);
     const von = tage[0];
     const bis = tage[tage.length - 1];
 
@@ -404,7 +404,7 @@ function VorschauCard({ userId }: { userId: string }) {
 
     const result = tage
       .filter((t) => t !== today) // Heute zeigt die HeuteEinteilungCard
-      .slice(0, 10)
+      .slice(0, 7)
       .map((datum) => ({
         datum,
         isFreigegeben: freiSet.has(datum),
@@ -437,7 +437,7 @@ function VorschauCard({ userId }: { userId: string }) {
     <Card>
       <CardContent className="p-4 space-y-2">
         <div className="text-xs font-semibold uppercase text-muted-foreground">
-          Nächste 14 Tage
+          Nächste 7 Tage
         </div>
         <div className="space-y-1.5">
           {eintraege.map((e) => {

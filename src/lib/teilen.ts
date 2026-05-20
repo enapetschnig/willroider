@@ -131,6 +131,91 @@ export function downloadDatei(blob: Blob, filename: string) {
 }
 
 /**
+ * Variante „PDF direkt im Chat" für Desktop:
+ *  - PDF wird heruntergeladen
+ *  - WhatsApp Web öffnet sich in neuem Tab
+ *  - User zieht die PDF aus dem Download-Ordner in den Chat (Drag & Drop)
+ *
+ * Vorteil: Empfänger bekommt die echte PDF mit Vorschau im Chat (kein Link).
+ * Nachteil: User muss einen manuellen Drag&Drop-Schritt machen.
+ */
+export function teilePdfDirektDownload(input: TeilenInput): TeilenResult {
+  downloadBlob(input.blob, input.filename);
+  // WhatsApp Web mit pre-filled Text öffnen — User kann Chat wählen
+  // und die heruntergeladene PDF direkt reinziehen.
+  const w = window.open(
+    `https://web.whatsapp.com/send?text=${encodeURIComponent(input.text)}`,
+    "_blank",
+  );
+  return {
+    ok: true,
+    mode: "download",
+    message: w
+      ? undefined
+      : "Popup blockiert — bitte WhatsApp Web manuell öffnen",
+  };
+}
+
+/**
+ * Variante „Als Link teilen": PDF wird in Storage hochgeladen, ein signed
+ * URL (7 Tage) im WhatsApp-Web-Text vorbereitet. Empfänger klickt den Link
+ * → PDF öffnet sich im Browser.
+ *
+ * Ohne Native-Share-Versuch — wird explizit aus dem WhatsApp-Auswahl-Dialog
+ * gewählt, wo der Native-Share-Pfad bereits separat behandelt wird.
+ */
+export async function teilePdfViaLink(
+  input: TeilenInput,
+): Promise<TeilenResult> {
+  try {
+    const id = crypto.randomUUID();
+    const path = `${id}/${input.filename}`;
+    const { error: upErr } = await supabase.storage
+      .from("share-temp")
+      .upload(path, input.blob, {
+        contentType: "application/pdf",
+        upsert: false,
+      });
+    if (upErr) {
+      const msg = upErr.message?.toLowerCase() ?? "";
+      if (msg.includes("bucket") && msg.includes("not found")) {
+        downloadBlob(input.blob, input.filename);
+        return {
+          ok: false,
+          mode: "missing-bucket",
+          message: "Storage-Bucket 'share-temp' fehlt — bitte Setup ausführen",
+        };
+      }
+      throw upErr;
+    }
+    const { data: signed, error: urlErr } = await supabase.storage
+      .from("share-temp")
+      .createSignedUrl(path, 7 * 24 * 3600);
+    if (urlErr || !signed?.signedUrl) {
+      throw urlErr || new Error("Signed URL fehlgeschlagen");
+    }
+    const waText = `${input.text}\n${signed.signedUrl}`;
+    const waUrl = `https://wa.me/?text=${encodeURIComponent(waText)}`;
+    const w = window.open(waUrl, "_blank");
+    if (!w) {
+      return {
+        ok: true,
+        mode: "url",
+        message: signed.signedUrl,
+      };
+    }
+    return { ok: true, mode: "url" };
+  } catch (e) {
+    downloadBlob(input.blob, input.filename);
+    return {
+      ok: false,
+      mode: "download",
+      message: (e as Error).message,
+    };
+  }
+}
+
+/**
  * Alte API-Kompatibilität — Wrapper um teilePdfViaWhatsApp damit bestehender Code
  * weiterläuft. Liefert true wenn nativ geteilt wurde, sonst false.
  */

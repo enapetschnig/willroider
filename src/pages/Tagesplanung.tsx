@@ -68,7 +68,12 @@ import {
   Share2,
 } from "lucide-react";
 import { makeTagesplanungPdf } from "@/lib/tagesplanungPdf";
-import { teilePdfViaWhatsApp, downloadDatei } from "@/lib/teilen";
+import {
+  teilePdfDirektDownload,
+  teilePdfViaLink,
+  downloadDatei,
+  type TeilenInput,
+} from "@/lib/teilen";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -132,6 +137,10 @@ export default function Tagesplanung() {
    *  existiert. Wenn nicht, wird oben ein Banner + Setup-Dialog angeboten. */
   const [setupFehler, setSetupFehler] = useState(false);
   const [setupDialogOpen, setSetupDialogOpen] = useState(false);
+
+  /** WhatsApp-Share-Auswahl-Dialog: wenn nicht-null, ist Dialog offen und
+   *  enthält die PDF-Daten (blob/filename/text) zum Teilen. */
+  const [sharePayload, setSharePayload] = useState<TeilenInput | null>(null);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -581,10 +590,10 @@ export default function Tagesplanung() {
     toast({ title: "PDF heruntergeladen" });
   }
 
-  /** Teilt die PDF in 1 Klick:
-   *  - Mobile: native Share-Sheet → WhatsApp mit Bild-Vorschau direkt
-   *  - Desktop: PDF wird hochgeladen, signed URL in WhatsApp-Web als Text +
-   *    klickbarer Link an den Empfänger. */
+  /** Teilt die PDF via WhatsApp:
+   *  - Mobile/Devices mit Native Share API: System-Share-Sheet → 1-Klick
+   *  - Desktop ohne Native Share: Auswahl-Dialog mit zwei Pfaden
+   *    (Direkt-Download für Drag&Drop vs. Cloud-Link). */
   async function teilePdf() {
     if (!plan) {
       toast({ variant: "destructive", title: "Plan noch nicht geladen" });
@@ -592,14 +601,53 @@ export default function Tagesplanung() {
     }
     const doc = makeTagesplanungPdf(plan);
     const blob = doc.output("blob");
-    const r = await teilePdfViaWhatsApp({
+    const payload: TeilenInput = {
       blob,
       filename: pdfFilename(),
       text: pdfTeilenText(),
+    };
+
+    // 1) Native Share zuerst probieren (Mobile, manche Desktops)
+    const file = new File([blob], payload.filename, { type: "application/pdf" });
+    if ((navigator as any).canShare?.({ files: [file] })) {
+      try {
+        await (navigator as any).share({
+          files: [file],
+          title: payload.text,
+          text: payload.text,
+        });
+        toast({ title: "Geteilt" });
+        return;
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+        // Sonst: Fallback auf Auswahl-Dialog
+      }
+    }
+
+    // 2) Auswahl-Dialog öffnen (Desktop-Standard-Pfad)
+    setSharePayload(payload);
+  }
+
+  /** Direkt-Download-Pfad (PDF im Chat per Drag & Drop). */
+  function shareDirekt() {
+    if (!sharePayload) return;
+    teilePdfDirektDownload(sharePayload);
+    setSharePayload(null);
+    toast({
+      title: "PDF heruntergeladen",
+      description:
+        "WhatsApp Web ist offen — ziehe die PDF aus dem Downloads-Ordner in den Chat.",
+      duration: 8000,
     });
-    if (r.mode === "share" && r.ok) {
-      toast({ title: "Geteilt" });
-    } else if (r.mode === "url" && r.ok) {
+  }
+
+  /** Link-Pfad (PDF in Storage, signed URL als WhatsApp-Text). */
+  async function shareLink() {
+    if (!sharePayload) return;
+    const payload = sharePayload;
+    setSharePayload(null);
+    const r = await teilePdfViaLink(payload);
+    if (r.mode === "url" && r.ok) {
       toast({
         title: "WhatsApp Web geöffnet",
         description:
@@ -621,7 +669,6 @@ export default function Tagesplanung() {
           "PDF wurde heruntergeladen — bitte manuell in WhatsApp ziehen.",
       });
     }
-    // mode === "share" && !ok ⇒ User hat im Share-Sheet abgebrochen, kein Toast
   }
 
   async function freigeben() {
@@ -718,6 +765,13 @@ export default function Tagesplanung() {
       <SetupSqlDialog
         open={setupDialogOpen}
         onOpenChange={setSetupDialogOpen}
+      />
+
+      <WhatsAppShareDialog
+        payload={sharePayload}
+        onClose={() => setSharePayload(null)}
+        onDirekt={shareDirekt}
+        onLink={shareLink}
       />
 
       {/* Control-Bar (print:hidden) */}
@@ -1098,6 +1152,67 @@ function SetupSqlDialog({
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Schließen
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── WhatsApp-Share-Auswahl-Dialog (Desktop) ─────────────────────────
+
+function WhatsAppShareDialog({
+  payload,
+  onClose,
+  onDirekt,
+  onLink,
+}: {
+  payload: TeilenInput | null;
+  onClose: () => void;
+  onDirekt: () => void;
+  onLink: () => void;
+}) {
+  return (
+    <Dialog open={!!payload} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Wie willst du die PDF teilen?</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 pt-2">
+          <button
+            type="button"
+            onClick={onDirekt}
+            className="w-full text-left rounded-lg border-2 border-emerald-300 bg-emerald-50 hover:bg-emerald-100 p-4 transition"
+          >
+            <div className="flex items-center gap-2 font-semibold text-emerald-900">
+              <Download className="h-5 w-5" />
+              PDF direkt im Chat (Drag &amp; Drop)
+            </div>
+            <div className="text-sm text-emerald-800 mt-1.5">
+              Die PDF wird heruntergeladen und WhatsApp Web öffnet sich. Zieh die
+              PDF dann aus dem Downloads-Ordner in den Chat — der Empfänger
+              sieht die echte PDF mit Vorschau.
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={onLink}
+            className="w-full text-left rounded-lg border-2 border-sky-300 bg-sky-50 hover:bg-sky-100 p-4 transition"
+          >
+            <div className="flex items-center gap-2 font-semibold text-sky-900">
+              <Share2 className="h-5 w-5" />
+              Als klickbaren Link teilen
+            </div>
+            <div className="text-sm text-sky-800 mt-1.5">
+              PDF wird hochgeladen, der Empfänger bekommt einen klickbaren Link
+              im WhatsApp-Text (öffnet die PDF im Browser). Funktioniert ohne
+              Drag &amp; Drop, ideal wenn der Empfänger nicht am PC ist.
+            </div>
+          </button>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Abbrechen
           </Button>
         </DialogFooter>
       </DialogContent>
