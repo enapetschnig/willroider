@@ -31,6 +31,9 @@ import {
   ChevronUp,
   Download,
   Loader2,
+  Pencil,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
 import { useStundenTageList } from "@/hooks/useStundenTag";
@@ -50,6 +53,9 @@ import {
   type StundenzettelData,
 } from "@/lib/stundenZettelPdf";
 import { FileText } from "lucide-react";
+import { AdminTagEditModal } from "@/components/admin/AdminTagEditModal";
+import { useQueryClient } from "@tanstack/react-query";
+import type { StundenTagFull } from "@/hooks/useStundenTag";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
@@ -103,12 +109,17 @@ function periodeLabel(monat: string, periode: Periode): string {
 export default function Stundenauswertung() {
   const { toast } = useToast();
   const { user, isAdmin } = useAuth();
+  const qc = useQueryClient();
   const [monat, setMonat] = useState(currentMonth());
   const [periode, setPeriode] = useState<Periode>("voll");
   const [members, setMembers] = useState<Profile[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
   const [partieFilter, setPartieFilter] = useState<string>("");
   const [expandedUid, setExpandedUid] = useState<string | null>(null);
+  const [editTag, setEditTag] = useState<{
+    tag: StundenTagFull;
+    mitarbeiterName: string;
+  } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -209,6 +220,100 @@ export default function Stundenauswertung() {
     const d = new Date(y, m - 1 + delta, 1);
     setMonat(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
   };
+
+  // ─── Monatsabschluss-Section ────────────────────────────────────────
+  // Lädt für die aktuelle Periode (von/bis) die bereits gebuchten
+  // monatsabschluss-Einträge pro MA — basis für die Abschluss-Section
+  // am Ende der Page.
+  const [abschluss, setAbschluss] = useState<Record<string, { za_buchung_id: string | null }>>({});
+  const [abschlussBusy, setAbschlussBusy] = useState(false);
+
+  async function ladeAbschluesse() {
+    if (memberIds.length === 0) {
+      setAbschluss({});
+      return;
+    }
+    const { data } = await supabase
+      .from("monatsabschluss")
+      .select("mitarbeiter_id, za_buchung_id, von_datum, bis_datum")
+      .eq("von_datum", from)
+      .eq("bis_datum", to)
+      .in("mitarbeiter_id", memberIds);
+    const map: Record<string, { za_buchung_id: string | null }> = {};
+    ((data as any[]) ?? []).forEach((r) => {
+      map[r.mitarbeiter_id] = { za_buchung_id: r.za_buchung_id };
+    });
+    setAbschluss(map);
+  }
+  useEffect(() => {
+    ladeAbschluesse();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to, JSON.stringify(memberIds)]);
+
+  const periodeKurzLabel =
+    periode === "h1" ? "1.–15." : periode === "h2" ? "16.–Ende" : "Ganzer Monat";
+
+  const offeneAbschluesse = byMa.filter((r) => !abschluss[r.uid]);
+
+  async function schliesseAlleAb() {
+    if (offeneAbschluesse.length === 0) return;
+    if (
+      !window.confirm(
+        `Periode (${periodeKurzLabel}, ${monatLabel(monat)}) für ${offeneAbschluesse.length} Mitarbeiter abschließen?`,
+      )
+    )
+      return;
+    setAbschlussBusy(true);
+    const { error } = await supabase.rpc("monatsabschluss_durchfuehren" as any, {
+      p_von_datum: from,
+      p_bis_datum: to,
+      p_mitarbeiter_id: null,
+    });
+    setAbschlussBusy(false);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    toast({ title: `Periode abgeschlossen` });
+    ladeAbschluesse();
+    qc.invalidateQueries({ queryKey: ["stunden_tage_list"] });
+  }
+
+  async function schliesseEinenAb(uid: string) {
+    if (!window.confirm(`Periode (${periodeKurzLabel}, ${monatLabel(monat)}) für diesen Mitarbeiter abschließen?`))
+      return;
+    const { error } = await supabase.rpc("monatsabschluss_durchfuehren" as any, {
+      p_von_datum: from,
+      p_bis_datum: to,
+      p_mitarbeiter_id: uid,
+    });
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    toast({ title: "Abgeschlossen" });
+    ladeAbschluesse();
+  }
+
+  async function oeffneEinen(uid: string) {
+    if (
+      !window.confirm(
+        `Periode wieder öffnen?\nDie ZA-Buchung wird gelöscht.`,
+      )
+    )
+      return;
+    const { error } = await supabase.rpc("monatsabschluss_oeffnen" as any, {
+      p_von_datum: from,
+      p_bis_datum: to,
+      p_mitarbeiter_id: uid,
+    });
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    toast({ title: "Periode geöffnet" });
+    ladeAbschluesse();
+  }
 
   function buildStundenzettel(r: typeof byMa[number]): StundenzettelData {
     return {
@@ -481,6 +586,12 @@ export default function Stundenauswertung() {
                               zulagenTypen={zulagenTypen}
                               pausen={pausen}
                               limits={limits}
+                              onEditTag={(t) =>
+                                setEditTag({
+                                  tag: t,
+                                  mitarbeiterName: `${r.ma!.vorname ?? ""} ${r.ma!.nachname ?? ""}`.trim(),
+                                })
+                              }
                             />
                           </TableCell>
                         </TableRow>
@@ -493,6 +604,117 @@ export default function Stundenauswertung() {
           </CardContent>
         </Card>
       )}
+
+      {/* Monatsabschluss-Section am Ende der Auswertung */}
+      {isAdmin && byMa.length > 0 && (
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                  <Lock className="h-4 w-4 text-primary" />
+                  Periode abschließen
+                </h3>
+                <p className="text-xs text-muted-foreground mt-1 max-w-xl">
+                  Bucht die Differenz Soll/Ist als ZA-Buchung pro Mitarbeiter und
+                  sperrt die Periode gegen nachträgliche Änderungen. Periode kann
+                  später wieder geöffnet werden.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                onClick={schliesseAlleAb}
+                disabled={offeneAbschluesse.length === 0 || abschlussBusy}
+              >
+                {abschlussBusy && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+                <Lock className="h-3.5 w-3.5 mr-1" />
+                Alle offenen abschließen ({offeneAbschluesse.length})
+              </Button>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">Mitarbeiter</TableHead>
+                  <TableHead className="text-xs text-right">Soll</TableHead>
+                  <TableHead className="text-xs text-right">Ist</TableHead>
+                  <TableHead className="text-xs text-right">Differenz</TableHead>
+                  <TableHead className="text-xs">Status</TableHead>
+                  <TableHead className="text-xs text-right">Aktion</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {byMa.map((r) => {
+                  const ab = abschluss[r.uid];
+                  return (
+                    <TableRow key={r.uid}>
+                      <TableCell className="text-sm">
+                        {r.ma!.nachname} {r.ma!.vorname}
+                      </TableCell>
+                      <TableCell className="text-sm text-right tabular-nums">
+                        {fmtHNum(r.soll)} h
+                      </TableCell>
+                      <TableCell className="text-sm text-right tabular-nums">
+                        {fmtHNum(r.ist)} h
+                      </TableCell>
+                      <TableCell
+                        className={`text-sm text-right tabular-nums font-bold ${
+                          r.diff > 0 ? "text-emerald-700" : r.diff < 0 ? "text-amber-700" : ""
+                        }`}
+                      >
+                        {r.diff > 0 ? "+" : ""}
+                        {fmtHNum(r.diff)} h
+                      </TableCell>
+                      <TableCell>
+                        {ab ? (
+                          <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-900 border-emerald-300">
+                            Abgeschlossen
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-900 border-amber-300">
+                            Offen
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {ab ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => oeffneEinen(r.uid)}
+                            className="h-7 px-2"
+                          >
+                            <Unlock className="h-3.5 w-3.5 mr-1" /> Öffnen
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            onClick={() => schliesseEinenAb(r.uid)}
+                            className="h-7 px-2"
+                          >
+                            <Lock className="h-3.5 w-3.5 mr-1" /> Abschließen
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Tag-Edit-Modal */}
+      <AdminTagEditModal
+        open={!!editTag}
+        onOpenChange={(v) => !v && setEditTag(null)}
+        tag={editTag?.tag ?? null}
+        mitarbeiterName={editTag?.mitarbeiterName ?? ""}
+        onSaved={() => {
+          qc.invalidateQueries({ queryKey: ["stunden_tage_list"] });
+          ladeAbschluesse();
+        }}
+      />
     </div>
   );
 }
@@ -506,6 +728,7 @@ function DetailMa({
   zulagenTypen,
   pausen,
   limits,
+  onEditTag,
 }: {
   list: ReturnType<typeof useStundenTageList>["data"];
   soll: number;
@@ -515,6 +738,7 @@ function DetailMa({
   zulagenTypen: Database["public"]["Tables"]["zulagen_typen"]["Row"][];
   pausen: { vm: any; mittag: any } | undefined;
   limits: any;
+  onEditTag?: (t: StundenTagFull) => void;
 }) {
   const tage = list ?? [];
   const aggTaet = aggregiereTaetigkeiten(tage, taetigkeitenStamm);
@@ -533,6 +757,7 @@ function DetailMa({
             <TableHead className="text-xs text-right">Von-Bis</TableHead>
             <TableHead className="text-xs">Tätigkeiten / Zulagen</TableHead>
             <TableHead className="text-xs text-center">Taggeld</TableHead>
+            <TableHead className="text-xs text-right w-16">Edit</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -616,6 +841,19 @@ function DetailMa({
                     </span>
                   ) : (
                     <span className="text-muted-foreground">—</span>
+                  )}
+                </TableCell>
+                <TableCell className="text-right">
+                  {onEditTag && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 w-7 p-0"
+                      onClick={() => onEditTag(t)}
+                      title="Tag bearbeiten"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
                   )}
                 </TableCell>
               </TableRow>
