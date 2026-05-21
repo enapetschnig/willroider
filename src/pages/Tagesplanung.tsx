@@ -66,6 +66,7 @@ import {
   Building2,
   Download,
   Share2,
+  CalendarRange,
 } from "lucide-react";
 import { makeTagesplanungPdf } from "@/lib/tagesplanungPdf";
 import {
@@ -571,6 +572,109 @@ export default function Tagesplanung() {
     }
   }
 
+  /** Übernimmt die interne Jahresplanung (Arbeitsplanung-Matrix) für DIESEN
+   *  Tag als Vorlage in die Tagesplanung. Beide Seiten bleiben sonst
+   *  unabhängig. Skippt abwesende MA und Baustellen, die heute schon eine
+   *  Einteilung haben. */
+  async function uebernehmeAusJahresplanung() {
+    if (copyBusy) return;
+    setCopyBusy(true);
+    try {
+      const { data: jpEinteilungen } = await supabase
+        .from("jahresplan_einteilungen")
+        .select("id, baustelle_id, taetigkeit")
+        .eq("datum", datum);
+      if (!jpEinteilungen || jpEinteilungen.length === 0) {
+        toast({
+          variant: "destructive",
+          title: "Keine Jahresplanung für diesen Tag",
+        });
+        return;
+      }
+      if (
+        !window.confirm(
+          `${jpEinteilungen.length} Einteilung${jpEinteilungen.length === 1 ? "" : "en"} aus der Jahresplanung für den ${new Date(datum).toLocaleDateString("de-AT")} übernehmen?`,
+        )
+      )
+        return;
+
+      const jpIds = jpEinteilungen.map((e) => e.id);
+      const [{ data: jms }, { data: jfs }] = await Promise.all([
+        supabase
+          .from("jahresplan_mitarbeiter")
+          .select("einteilung_id, mitarbeiter_id")
+          .in("einteilung_id", jpIds),
+        supabase
+          .from("jahresplan_fahrzeuge")
+          .select("einteilung_id, fahrzeug_id")
+          .in("einteilung_id", jpIds),
+      ]);
+
+      let saved = 0;
+      let skipped = 0;
+      for (const jp of jpEinteilungen) {
+        if (!jp.baustelle_id) {
+          skipped++;
+          continue;
+        }
+        // Existiert für (Tag, Baustelle) schon eine Einteilung? Dann skippen.
+        const { data: existing } = await supabase
+          .from("einteilungen")
+          .select("id")
+          .eq("datum", datum)
+          .eq("baustelle_id", jp.baustelle_id)
+          .maybeSingle();
+        if (existing) {
+          skipped++;
+          continue;
+        }
+        const { data: neu } = await supabase
+          .from("einteilungen")
+          .insert({
+            datum,
+            baustelle_id: jp.baustelle_id,
+            taetigkeit: jp.taetigkeit,
+            created_by: user?.id ?? null,
+          })
+          .select("id")
+          .single();
+        if (!neu) continue;
+
+        // MA übernehmen (abwesende skippen)
+        const maForJp = (jms ?? [])
+          .filter((m: any) => m.einteilung_id === jp.id)
+          .filter((m: any) => !abwesendIds.has(m.mitarbeiter_id));
+        if (maForJp.length > 0) {
+          await supabase.from("einteilung_mitarbeiter").insert(
+            maForJp.map((m: any) => ({
+              einteilung_id: neu.id,
+              mitarbeiter_id: m.mitarbeiter_id,
+            })),
+          );
+        }
+        // Fahrzeuge übernehmen
+        const fzForJp = (jfs ?? []).filter((f: any) => f.einteilung_id === jp.id);
+        if (fzForJp.length > 0) {
+          await supabase.from("einteilung_fahrzeuge").insert(
+            fzForJp.map((f: any) => ({
+              einteilung_id: neu.id,
+              fahrzeug_id: f.fahrzeug_id,
+            })),
+          );
+        }
+        saved++;
+      }
+      toast({
+        title: `${saved} Einteilung${saved === 1 ? "" : "en"} aus Jahresplanung übernommen`,
+        description:
+          skipped > 0 ? `${skipped} übersprungen (bereits vorhanden)` : undefined,
+      });
+      refresh();
+    } finally {
+      setCopyBusy(false);
+    }
+  }
+
   function pdfFilename(): string {
     return `Arbeitseinteilung_${datum}.pdf`;
   }
@@ -824,6 +928,14 @@ export default function Tagesplanung() {
             disabled={copyBusy}
           >
             <Copy className="h-4 w-4 mr-1.5" /> Plan vom Vortag
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={uebernehmeAusJahresplanung}
+            disabled={copyBusy}
+          >
+            <CalendarRange className="h-4 w-4 mr-1.5" /> Aus Jahresplanung
           </Button>
           <Button variant="outline" size="sm" onClick={downloadPdf}>
             <Download className="h-4 w-4 mr-1.5" /> PDF

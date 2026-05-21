@@ -62,8 +62,6 @@ type AssignmentCell = {
   fehlzeitTyp?: string;
   status?: string;
   isReadOnly?: boolean;
-  /** true wenn diese Zelle in der Tagesplanung manuell editiert wurde. */
-  manuell?: boolean;
 };
 
 const FEHLZEIT_LABEL: Record<string, string> = {
@@ -173,9 +171,9 @@ export default function Arbeitsplanung() {
     const endIso = isoDate(new Date(rangeStart.getTime() + (totalDays - 1) * DAY_MS));
     const [{ data: emRows }, { data: fzRows }] = await Promise.all([
       supabase
-        .from("einteilung_mitarbeiter")
+        .from("jahresplan_mitarbeiter")
         .select(
-          "id, mitarbeiter_id, einteilung_id, manuell_geaendert, einteilungen!inner(id, datum, baustelle_id, manuell_geaendert, baustellen(bvh_name))"
+          "id, mitarbeiter_id, einteilung_id, einteilungen:jahresplan_einteilungen!inner(id, datum, baustelle_id, baustellen(bvh_name))"
         )
         .gte("einteilungen.datum", startIso)
         .lte("einteilungen.datum", endIso),
@@ -199,7 +197,6 @@ export default function Arbeitsplanung() {
         baustelleId: e.baustelle_id,
         baustelleName: e.baustellen?.bvh_name ?? b?.bvh_name ?? "Bauhof",
         baustelleColor: partie?.farbcode ?? "#6b7280",
-        manuell: !!(r.manuell_geaendert || e.manuell_geaendert),
       });
     });
     (fzRows ?? []).forEach((r: any) => {
@@ -221,8 +218,8 @@ export default function Arbeitsplanung() {
     const ch = supabase
       .channel("planung-bs")
       .on("postgres_changes", { event: "*", schema: "public", table: "baustellen" }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "einteilungen" }, () => loadAssignments())
-      .on("postgres_changes", { event: "*", schema: "public", table: "einteilung_mitarbeiter" }, () => loadAssignments())
+      .on("postgres_changes", { event: "*", schema: "public", table: "jahresplan_einteilungen" }, () => loadAssignments())
+      .on("postgres_changes", { event: "*", schema: "public", table: "jahresplan_mitarbeiter" }, () => loadAssignments())
       .on("postgres_changes", { event: "*", schema: "public", table: "stundenbuchungen" }, () => loadAssignments())
       .subscribe();
     return () => {
@@ -340,8 +337,6 @@ export default function Arbeitsplanung() {
     /** Tatsächlich belegte dayHeader-Indizes (nur Werktage) — Wochenenden/
      *  Feiertage im visuellen Span sind NICHT enthalten. */
     assignedIdx: Set<number>;
-    /** true wenn mind. 1 Tag im Bar in der Tagesplanung manuell editiert wurde. */
-    manuell: boolean;
   };
   const barsByWorker = useMemo(() => {
     const result = new Map<string, Bar[]>();
@@ -379,7 +374,6 @@ export default function Arbeitsplanung() {
             cur.assignedIdx.add(i);
             if (a.einteilungId) cur.einteilungIds.add(a.einteilungId);
             cur.isReadOnly = cur.isReadOnly && !!a.isReadOnly;
-            if (a.manuell) cur.manuell = true;
             continue;
           }
           // Neuer Bar
@@ -404,7 +398,6 @@ export default function Arbeitsplanung() {
             isReadOnly: !!a.isReadOnly,
             einteilungIds: new Set(a.einteilungId ? [a.einteilungId] : []),
             assignedIdx: new Set([i]),
-            manuell: !!a.manuell,
           };
           (cur as any)._key = key;
           bars.push(cur);
@@ -498,7 +491,6 @@ export default function Arbeitsplanung() {
     if (bar.source === "einteilung" && bar.baustelleId) {
       await assignBaustelle(neueCells, bar.baustelleId, {
         wochenendeIncluden: false,
-        manuelleUeberschreiben: true,
       });
     } else if (bar.source === "fehlzeit" && bar.fehlzeitTyp) {
       await setFehlzeit(neueCells, bar.fehlzeitTyp);
@@ -899,10 +891,10 @@ export default function Arbeitsplanung() {
     if (cells.length === 0) return;
     const workerIds = Array.from(new Set(cells.map((c) => c.workerId)));
     const dates = Array.from(new Set(cells.map((c) => c.iso)));
-    // Einteilung-Mitarbeiter-Einträge für (worker, datum) löschen
+    // Jahresplan-Mitarbeiter-Einträge für (worker, datum) löschen
     const { data: emToDelete } = await supabase
-      .from("einteilung_mitarbeiter")
-      .select("id, mitarbeiter_id, einteilung_id, einteilungen!inner(datum)")
+      .from("jahresplan_mitarbeiter")
+      .select("id, mitarbeiter_id, einteilung_id, einteilungen:jahresplan_einteilungen!inner(datum)")
       .in("mitarbeiter_id", workerIds)
       .in("einteilungen.datum", dates);
     const emIds = (emToDelete ?? [])
@@ -913,7 +905,7 @@ export default function Arbeitsplanung() {
       )
       .map((r: any) => r.id);
     if (emIds.length > 0) {
-      await supabase.from("einteilung_mitarbeiter").delete().in("id", emIds);
+      await supabase.from("jahresplan_mitarbeiter").delete().in("id", emIds);
     }
     // Fehlzeit-Einträge mit Status offen löschen
     const { data: fzToDelete } = await supabase
@@ -934,7 +926,7 @@ export default function Arbeitsplanung() {
   const assignBaustelle = async (
     cellsInput: { workerId: string; iso: string }[],
     baustelleId: string,
-    options?: { wochenendeIncluden?: boolean; manuelleUeberschreiben?: boolean },
+    options?: { wochenendeIncluden?: boolean },
   ) => {
     if (!isAdmin || cellsInput.length === 0) return;
     if (assignBusyRef.current) return; // Doppelklick-Schutz
@@ -969,50 +961,17 @@ export default function Arbeitsplanung() {
       }
     }
 
-    // 2) Konflikt-Check: manuell editierte Tage in der Auswahl?
-    if (!options?.manuelleUeberschreiben) {
-      const manuelle = cells.filter((c) => assignments.get(cellKey(c.workerId, c.iso))?.manuell);
-      if (manuelle.length > 0) {
-        const labels = manuelle.slice(0, 5).map((c) => {
-          const m = profilesById[c.workerId];
-          const dStr = new Date(c.iso + "T00:00:00").toLocaleDateString("de-AT", {
-            weekday: "short",
-            day: "2-digit",
-            month: "2-digit",
-          });
-          return `${m?.vorname ?? ""} ${m?.nachname ?? ""} · ${dStr}`;
-        });
-        const more = manuelle.length - labels.length;
-        const ok = window.confirm(
-          `${manuelle.length} Tag${manuelle.length === 1 ? "" : "e"} wurde${manuelle.length === 1 ? "" : "n"} in der Tagesplanung manuell angepasst:\n\n${labels.join("\n")}${more > 0 ? `\n…und ${more} weitere` : ""}\n\nTrotzdem überschreiben?`,
-        );
-        if (!ok) {
-          // Nur die NICHT-manuellen anwenden
-          cells = cells.filter((c) => !assignments.get(cellKey(c.workerId, c.iso))?.manuell);
-          if (cells.length === 0) {
-            toast({
-              title: "Keine Änderung",
-              description:
-                "Alle ausgewählten Tage sind in der Tagesplanung manuell angepasst — nichts überschrieben.",
-            });
-            setSelection(new Set());
-            setPopover(null);
-            return;
-          }
-        }
-      }
-    }
-
     await clearCellsRaw(cells);
 
-    // Einteilungen pro datum sicherstellen, dann einteilung_mitarbeiter Insert
+    // Jahresplan-Einteilungen pro datum sicherstellen, dann
+    // jahresplan_mitarbeiter Insert
     const inserts: { mitarbeiter_id: string; einteilung_id: string }[] = [];
     const datesSeen = new Map<string, string>(); // iso -> einteilung_id
     for (const c of cells) {
       let einteilungId = datesSeen.get(c.iso);
       if (!einteilungId) {
         const { data: existing } = await supabase
-          .from("einteilungen")
+          .from("jahresplan_einteilungen")
           .select("id")
           .eq("datum", c.iso)
           .eq("baustelle_id", baustelleId)
@@ -1021,7 +980,7 @@ export default function Arbeitsplanung() {
           einteilungId = existing.id;
         } else {
           const { data: created, error } = await supabase
-            .from("einteilungen")
+            .from("jahresplan_einteilungen")
             .insert({ datum: c.iso, baustelle_id: baustelleId })
             .select("id")
             .single();
@@ -1036,7 +995,7 @@ export default function Arbeitsplanung() {
       inserts.push({ mitarbeiter_id: c.workerId, einteilung_id: einteilungId! });
     }
     if (inserts.length > 0) {
-      const { error } = await supabase.from("einteilung_mitarbeiter").insert(inserts as any);
+      const { error } = await supabase.from("jahresplan_mitarbeiter").insert(inserts as any);
       if (error) {
         toast({ variant: "destructive", title: "Fehler", description: error.message });
         return;
@@ -1551,7 +1510,7 @@ export default function Arbeitsplanung() {
                                     : 1,
                                   pointerEvents: greifbar ? "auto" : "none",
                                 }}
-                                title={`${bar.label} · ${dateRange}${bar.isReadOnly ? " (eingereicht)" : ""}${bar.manuell ? " · Tagesplanung manuell angepasst" : ""}`}
+                                title={`${bar.label} · ${dateRange}${bar.isReadOnly ? " (eingereicht)" : ""}`}
                               >
                                 {greifbar && (
                                   <>
@@ -1588,14 +1547,6 @@ export default function Arbeitsplanung() {
                                 <span className="truncate pointer-events-none">
                                   {width < 60 ? bar.label.slice(0, 2) : bar.label}
                                 </span>
-                                {bar.manuell && (
-                                  <span
-                                    className="ml-1 text-yellow-300 drop-shadow pointer-events-none"
-                                    aria-label="Tagesplanung manuell angepasst"
-                                  >
-                                    ★
-                                  </span>
-                                )}
                               </div>
                             );
                           })}
@@ -2234,12 +2185,12 @@ function CellPopover({
     (async () => {
       const [{ data: e }, { data: ef }] = await Promise.all([
         supabase
-          .from("einteilungen")
+          .from("jahresplan_einteilungen")
           .select("taetigkeit")
           .eq("id", singleEinteilungId)
           .maybeSingle(),
         supabase
-          .from("einteilung_fahrzeuge")
+          .from("jahresplan_fahrzeuge")
           .select("fahrzeug_id")
           .eq("einteilung_id", singleEinteilungId),
       ]);
@@ -2271,17 +2222,17 @@ function CellPopover({
     setSavingDetails(true);
     // 1) Tätigkeit aktualisieren
     await supabase
-      .from("einteilungen")
+      .from("jahresplan_einteilungen")
       .update({ taetigkeit: taetigkeit.trim() || null })
       .eq("id", singleEinteilungId);
     // 2) Fahrzeug-Set ersetzen (delete-all + insert)
     await supabase
-      .from("einteilung_fahrzeuge")
+      .from("jahresplan_fahrzeuge")
       .delete()
       .eq("einteilung_id", singleEinteilungId);
     if (selectedFahrzeuge.size > 0) {
       await supabase
-        .from("einteilung_fahrzeuge")
+        .from("jahresplan_fahrzeuge")
         .insert(
           Array.from(selectedFahrzeuge).map((fid) => ({
             einteilung_id: singleEinteilungId,
@@ -2706,11 +2657,6 @@ function MobileWorkerPlan({
                         }}
                       >
                         {label}
-                        {a?.manuell && (
-                          <span className="absolute top-0 right-0.5 text-[7px] text-yellow-300 leading-none">
-                            ★
-                          </span>
-                        )}
                       </button>
                     );
                   })}

@@ -263,6 +263,49 @@ export type Database = {
         Update: Partial<Database['public']['Tables']['einteilung_mitarbeiter']['Row']>;
         Relationships: [];
       };
+      jahresplan_einteilungen: {
+        Row: {
+          id: string;
+          datum: string;
+          baustelle_id: string | null;
+          taetigkeit: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['jahresplan_einteilungen']['Row']> & {
+          datum: string;
+        };
+        Update: Partial<Database['public']['Tables']['jahresplan_einteilungen']['Row']>;
+        Relationships: [];
+      };
+      jahresplan_mitarbeiter: {
+        Row: {
+          id: string;
+          einteilung_id: string;
+          mitarbeiter_id: string;
+          created_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['jahresplan_mitarbeiter']['Row']> & {
+          einteilung_id: string;
+          mitarbeiter_id: string;
+        };
+        Update: Partial<Database['public']['Tables']['jahresplan_mitarbeiter']['Row']>;
+        Relationships: [];
+      };
+      jahresplan_fahrzeuge: {
+        Row: {
+          id: string;
+          einteilung_id: string;
+          fahrzeug_id: string;
+          created_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['jahresplan_fahrzeuge']['Row']> & {
+          einteilung_id: string;
+          fahrzeug_id: string;
+        };
+        Update: Partial<Database['public']['Tables']['jahresplan_fahrzeuge']['Row']>;
+        Relationships: [];
+      };
       stundenbuchungen: {
         Row: {
           id: string;
