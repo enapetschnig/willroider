@@ -16,6 +16,7 @@ import type { Database } from "@/integrations/supabase/types";
 import {
   fmtStunden,
   monatsSoll,
+  tagesSoll,
   ladeKalenderMap,
   type TagessollKalender,
 } from "@/lib/konten";
@@ -50,7 +51,9 @@ export function AdminMonatsabschluss() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [settings, setSettings] = useState<Record<string, PKS>>({});
   const [abschluss, setAbschluss] = useState<Record<string, Monatsabschluss>>({});
-  const [ist, setIst] = useState<Record<string, number>>({});
+  const [stundenRows, setStundenRows] = useState<
+    { mitarbeiter_id: string; netto_stunden: number; tag_status: string; datum: string }[]
+  >([]);
   const [running, setRunning] = useState(false);
   const [kalender, setKalender] = useState<Map<string, TagessollKalender>>(
     new Map()
@@ -79,7 +82,7 @@ export function AdminMonatsabschluss() {
           .lt("von_datum", end),
         supabase
           .from("stunden_tage")
-          .select("mitarbeiter_id, netto_stunden")
+          .select("mitarbeiter_id, netto_stunden, tag_status, datum")
           .gte("datum", start)
           .lt("datum", end),
       ]);
@@ -92,12 +95,14 @@ export function AdminMonatsabschluss() {
       (a) => (aMap[a.mitarbeiter_id] = a)
     );
     setAbschluss(aMap);
-    const iMap: Record<string, number> = {};
-    ((stunden as any[]) ?? []).forEach((s) => {
-      iMap[s.mitarbeiter_id] =
-        (iMap[s.mitarbeiter_id] ?? 0) + Number(s.netto_stunden ?? 0);
-    });
-    setIst(iMap);
+    setStundenRows(
+      ((stunden as any[]) ?? []).map((s) => ({
+        mitarbeiter_id: s.mitarbeiter_id,
+        netto_stunden: Number(s.netto_stunden ?? 0),
+        tag_status: s.tag_status,
+        datum: s.datum,
+      })),
+    );
   };
 
   useEffect(() => {
@@ -116,6 +121,25 @@ export function AdminMonatsabschluss() {
       (s?.arbeitszeitmodell as ArbeitszeitModell) ?? "zimmerei_sommer";
     return monatsSoll(year, month, kalender, modell, tagesnorm, grad);
   };
+
+  // Anzeige-Ist: gearbeitete Tage = Netto, Abwesenheit = Tages-Soll
+  // gutgeschrieben — identisch zur Logik im Abschluss-RPC.
+  const istMap = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of stundenRows) {
+      const s = settings[r.mitarbeiter_id];
+      const tagesnorm = Number(s?.tagesnorm_stunden ?? 8);
+      const grad = Number(s?.beschaeftigungsgrad ?? 1);
+      const modell =
+        (s?.arbeitszeitmodell as ArbeitszeitModell) ?? "zimmerei_sommer";
+      const worked = r.tag_status === "baustelle" || r.tag_status === "firma";
+      const credit = worked
+        ? r.netto_stunden
+        : tagesSoll(r.datum, kalender, modell, tagesnorm, grad);
+      m[r.mitarbeiter_id] = (m[r.mitarbeiter_id] ?? 0) + credit;
+    }
+    return m;
+  }, [stundenRows, settings, kalender]);
 
   const offene = profiles.filter((p) => !abschluss[p.id]);
 
@@ -239,8 +263,11 @@ export function AdminMonatsabschluss() {
               {profiles.map((p) => {
                 const ma = abschluss[p.id];
                 const sollVal = ma ? Number(ma.soll_stunden) : sollFor(p.id);
-                const istVal = ma ? Number(ma.ist_stunden) : ist[p.id] ?? 0;
-                const diff = istVal - sollVal;
+                const istVal = ma ? Number(ma.ist_stunden) : istMap[p.id] ?? 0;
+                const zaFaktor = Number(settings[p.id]?.za_faktor ?? 1);
+                const diff = ma
+                  ? Number(ma.differenz_stunden)
+                  : Math.round((istVal - sollVal) * zaFaktor * 100) / 100;
                 return (
                   <tr key={p.id} className="border-t">
                     <td className="px-3 py-2">

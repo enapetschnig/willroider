@@ -48,6 +48,21 @@ const VORLAGEN: Vorlage[] = [
   { key: "BV", label: "Betriebsversammlung", wochentyp: "BV", mo: 9, di: 9, mi: 9, do_: 9, fr: 6, sa: 0, so: 0 },
 ];
 
+/** Anzahl der ISO-Wochen eines Jahres (52 oder 53). Der 28.12. liegt
+ *  immer in der letzten ISO-Woche — daraus lässt sich die Anzahl ablesen. */
+function isoWeeksInYear(year: number): number {
+  const d = new Date(year, 11, 28);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  const week1 = new Date(d.getFullYear(), 0, 4);
+  return (
+    1 +
+    Math.round(
+      ((d.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7,
+    )
+  );
+}
+
 export default function Kalender() {
   const { isAdmin } = useAuth();
   const { toast } = useToast();
@@ -100,7 +115,9 @@ export default function Kalender() {
       .eq("jahr", year);
     const have = new Set((existing ?? []).map((x: any) => x.kw));
     const insertRows = [];
-    for (let kw = 1; kw <= 52; kw++) {
+    // Jahre mit 53 ISO-Wochen (z.B. 2026) brauchen auch KW 53.
+    const wochenImJahr = isoWeeksInYear(year);
+    for (let kw = 1; kw <= wochenImJahr; kw++) {
       if (!have.has(kw)) {
         insertRows.push({
           jahr: year,
