@@ -921,6 +921,7 @@ function AufmassEditor({
   kannEditieren: boolean;
   onChange: () => void;
 }) {
+  const { toast } = useToast();
   const [neu, setNeu] = useState({
     beschreibung: "",
     menge: 0,

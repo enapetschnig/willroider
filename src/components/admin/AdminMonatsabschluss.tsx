@@ -68,7 +68,15 @@ export function AdminMonatsabschluss() {
       await Promise.all([
         supabase.from("profiles").select("*").eq("is_active", true).order("nachname"),
         supabase.from("profile_konten_settings").select("*"),
-        supabase.from("monatsabschluss").select("*").eq("monat", monat),
+        // Alle Abschlüsse, deren Periode in diesem Monat beginnt — erfasst
+        // auch Halbmonats-Abschlüsse (H1/H2). Würde hier nur monat="YYYY-MM"
+        // gefiltert, gälten halb abgeschlossene MA als „offen" und ein
+        // Voll-Monats-Abschluss würde ihre Differenz doppelt ins ZA buchen.
+        supabase
+          .from("monatsabschluss")
+          .select("*")
+          .gte("von_datum", start)
+          .lt("von_datum", end),
         supabase
           .from("stunden_tage")
           .select("mitarbeiter_id, netto_stunden")

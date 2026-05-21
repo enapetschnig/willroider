@@ -68,6 +68,15 @@ const STATUS_VARIANT: Record<Baustelle["status"], "default" | "secondary" | "out
   abgeschlossen: "secondary",
 };
 
+/** stunden_tage.tag_status → Anzeige-Label für die „Heute"-Karte. Nur
+ *  Fehlzeit-Status; baustelle/firma sind keine Fehlzeit (→ undefined). */
+const FEHLZEIT_LABEL: Record<string, string> = {
+  urlaub: "Urlaub",
+  krank: "Krank",
+  schlechtwetter: "Schlechtwetter",
+  feiertag: "Feiertag",
+};
+
 type HeuteEintrag = {
   einteilungId: string;
   baustelleId: string;
@@ -168,33 +177,36 @@ export default function Dashboard() {
         }
       }
 
-      // 2) Schon gebuchte Stunden heute pro Baustelle dazuholen
+      // 2) Schon gebuchte Stunden heute pro Baustelle aus der Zeiterfassung
+      //    (stunden_taetigkeiten → stunden_tage) dazuholen.
       if (eintraege.length > 0) {
         const { data: stunden } = await supabase
-          .from("stundenbuchungen")
-          .select("baustelle_id, arbeitsstunden")
-          .eq("mitarbeiter_id", user.id)
-          .eq("datum", today);
+          .from("stunden_taetigkeiten")
+          .select(
+            "baustelle_id, stunden, stunden_tag:stunden_tage!inner(mitarbeiter_id, datum)"
+          )
+          .eq("stunden_tag.mitarbeiter_id", user.id)
+          .eq("stunden_tag.datum", today);
         if (stunden) {
           for (const e of eintraege) {
             e.bereitsGebucht = stunden
               .filter((r: any) => r.baustelle_id === e.baustelleId)
-              .reduce((s: number, r: any) => s + Number(r.arbeitsstunden ?? 0), 0);
+              .reduce((s: number, r: any) => s + Number(r.stunden ?? 0), 0);
           }
         }
       }
 
-      // 3) Falls Fehlzeit für heute (Urlaub/Krank/Feiertag/SW)
-      const { data: fz } = await supabase
-        .from("stundenbuchungen")
-        .select("fehlzeit_typ")
+      // 3) Falls heute eine Fehlzeit erfasst ist (Urlaub/Krank/SW/Feiertag)
+      const { data: tag } = await supabase
+        .from("stunden_tage")
+        .select("tag_status")
         .eq("mitarbeiter_id", user.id)
         .eq("datum", today)
-        .not("fehlzeit_typ", "is", null)
         .maybeSingle();
+      const status = (tag?.tag_status as string | undefined) ?? null;
 
       setHeuteEinteilungen(eintraege);
-      setHeuteFehlzeit((fz?.fehlzeit_typ as string | null) ?? null);
+      setHeuteFehlzeit(status ? (FEHLZEIT_LABEL[status] ?? null) : null);
     };
     loadHeute();
 
@@ -217,7 +229,12 @@ export default function Dashboard() {
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "stundenbuchungen", filter: `mitarbeiter_id=eq.${user.id}` },
+        { event: "*", schema: "public", table: "stunden_tage", filter: `mitarbeiter_id=eq.${user.id}` },
+        loadHeute
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "stunden_taetigkeiten" },
         loadHeute
       )
       .subscribe();

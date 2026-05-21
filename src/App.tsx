@@ -1,9 +1,10 @@
+import { ReactNode } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Auth from "@/pages/Auth";
 import NotFound from "@/pages/NotFound";
 import Dashboard from "@/pages/Dashboard";
@@ -31,6 +32,22 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } },
 });
 
+/** Rollen-Gate für ganze Seiten. RLS schützt die Daten, dieser Wrapper
+ *  verhindert zusätzlich, dass Nicht-Berechtigte die Seite per URL öffnen.
+ *  Wird innerhalb von ProtectedRoute gerendert — Auth ist hier bereits geladen. */
+function RequireRole({
+  role,
+  children,
+}: {
+  role: "admin" | "review";
+  children: ReactNode;
+}) {
+  const { isAdmin, canReview } = useAuth();
+  const erlaubt = role === "admin" ? isAdmin : canReview;
+  if (!erlaubt) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -43,20 +60,38 @@ const App = () => (
             <Route path="/registriert" element={<RegistrierungBestaetigung />} />
             <Route element={<ProtectedRoute />}>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/arbeitsplanung" element={<Arbeitsplanung />} />
-              <Route path="/tagesplanung" element={<Tagesplanung />} />
+              <Route
+                path="/arbeitsplanung"
+                element={<RequireRole role="admin"><Arbeitsplanung /></RequireRole>}
+              />
+              <Route
+                path="/tagesplanung"
+                element={<RequireRole role="admin"><Tagesplanung /></RequireRole>}
+              />
               <Route path="/baustellen" element={<Baustellen />} />
               <Route path="/baustellen/:id" element={<BaustelleDetail />} />
-              <Route path="/angebote" element={<Angebote />} />
-              <Route path="/angebote/:id" element={<AngebotDetail />} />
-              <Route path="/admin" element={<Admin />} />
+              <Route
+                path="/angebote"
+                element={<RequireRole role="admin"><Angebote /></RequireRole>}
+              />
+              <Route
+                path="/angebote/:id"
+                element={<RequireRole role="admin"><AngebotDetail /></RequireRole>}
+              />
+              <Route
+                path="/admin"
+                element={<RequireRole role="admin"><Admin /></RequireRole>}
+              />
               {/* Alte Routen leiten in den Admin-Bereich um (Backwards-Compat) */}
               <Route path="/mitarbeiter" element={<Navigate to="/admin?tab=mitarbeiter" replace />} />
               <Route path="/fahrzeuge" element={<Navigate to="/admin?tab=fahrzeuge" replace />} />
               <Route path="/kalender" element={<Navigate to="/admin?tab=kalender" replace />} />
               <Route path="/evaluierung" element={<Navigate to="/admin?tab=evaluierung" replace />} />
               <Route path="/stunden" element={<Stunden />} />
-              <Route path="/stunden/auswertung" element={<Stundenauswertung />} />
+              <Route
+                path="/stunden/auswertung"
+                element={<RequireRole role="review"><Stundenauswertung /></RequireRole>}
+              />
               <Route path="/berichte" element={<Berichte />} />
               <Route path="/berichte/:id" element={<BerichtDetail />} />
               <Route path="/mein-tag" element={<MeinTag />} />

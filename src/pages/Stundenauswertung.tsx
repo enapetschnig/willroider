@@ -24,6 +24,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { isWerktag } from "@/lib/feiertage";
 import {
   ChevronLeft,
   ChevronRight,
@@ -188,13 +189,13 @@ export default function Stundenauswertung() {
   }, [JSON.stringify(memberIds), monat]);
 
   const werktage = useMemo(() => {
-    // Werktage Mo-Fr im aktiven Periode-Range
+    // Werktage im aktiven Periode-Range — Wochenenden UND Feiertage zählen
+    // nicht als Soll-Tag (sonst ist das Soll in Feiertagsmonaten zu hoch).
     const start = new Date(from + "T00:00:00");
     const end = new Date(to + "T00:00:00");
     let count = 0;
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const dow = d.getDay();
-      if (dow !== 0 && dow !== 6) count++;
+      if (isWerktag(d)) count++;
     }
     return count;
   }, [from, to]);

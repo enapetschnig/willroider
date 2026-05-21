@@ -44,23 +44,32 @@ export default function ChangePasswordDialog() {
       return;
     }
 
-    // Aktuelles Passwort verifizieren: re-auth mit der aktuellen User-Email
+    // Aktuelles Passwort verifizieren: re-auth mit Email ODER Telefonnummer.
+    // Telefon-only-Accounts haben keine Email — dort über phone verifizieren,
+    // damit die Prüfung nicht stillschweigend übersprungen wird.
     const { data: u } = await supabase.auth.getUser();
     const email = u.user?.email;
-    if (email && currentPassword) {
-      const { error: reauthErr } = await supabase.auth.signInWithPassword({
-        email,
-        password: currentPassword,
+    const phone = u.user?.phone;
+    if (!email && !phone) {
+      toast({
+        variant: "destructive",
+        title: "Verifizierung nicht möglich",
+        description: "Konto ohne Email/Telefonnummer — bitte an den Administrator wenden.",
       });
-      if (reauthErr) {
-        toast({
-          variant: "destructive",
-          title: "Aktuelles Passwort falsch",
-          description: "Bitte überprüfe deine Eingabe.",
-        });
-        setLoading(false);
-        return;
-      }
+      setLoading(false);
+      return;
+    }
+    const { error: reauthErr } = email
+      ? await supabase.auth.signInWithPassword({ email, password: currentPassword })
+      : await supabase.auth.signInWithPassword({ phone: phone!, password: currentPassword });
+    if (reauthErr) {
+      toast({
+        variant: "destructive",
+        title: "Aktuelles Passwort falsch",
+        description: "Bitte überprüfe deine Eingabe.",
+      });
+      setLoading(false);
+      return;
     }
 
     const { error } = await supabase.auth.updateUser({

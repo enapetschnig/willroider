@@ -625,6 +625,8 @@ export type Database = {
           id: string;
           mitarbeiter_id: string;
           monat: string;
+          von_datum: string;
+          bis_datum: string;
           soll_stunden: number;
           ist_stunden: number;
           differenz_stunden: number;
