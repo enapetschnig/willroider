@@ -18,6 +18,7 @@ import {
   Phone,
   Camera,
   Truck,
+  FileText,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { findeOderErstelleBerichtMitVorausfuellung } from "@/hooks/useBericht";
@@ -25,6 +26,13 @@ import { werktagePlus } from "@/lib/feiertage";
 import { UrlaubAntraegeCard } from "@/components/UrlaubAntragDialog";
 import { KrankmeldungenCard } from "@/components/MeinTag/KrankmeldungenCard";
 import { LohnzettelCard } from "@/components/MeinTag/LohnzettelCard";
+import { TagesplanPreview } from "@/components/TagesplanPreview";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
 import { fmtStunden, fmtTage } from "@/lib/konten";
@@ -45,6 +53,7 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
   const navigate = useNavigate();
   const today = localIso();
   const [loading, setLoading] = useState(true);
+  const [planOpen, setPlanOpen] = useState(false);
   const [data, setData] = useState<{
     datum: string;
     isToday: boolean;
@@ -288,6 +297,13 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
               )}
               <button
                 type="button"
+                onClick={() => setPlanOpen(true)}
+                className="inline-flex items-center gap-1.5 text-sm bg-background border rounded-md px-3 py-1.5 hover:bg-muted"
+              >
+                <FileText className="h-4 w-4" /> Tagesplan ansehen
+              </button>
+              <button
+                type="button"
                 onClick={fotoUpload}
                 className="inline-flex items-center gap-1.5 text-sm bg-background border rounded-md px-3 py-1.5 hover:bg-muted"
               >
@@ -302,6 +318,16 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
           </div>
         )}
       </CardContent>
+
+      {/* Tagesplan-Vorschau im Word-Layout — live aus der Tagesplanung */}
+      <Dialog open={planOpen} onOpenChange={setPlanOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Tagesplan</DialogTitle>
+          </DialogHeader>
+          <TagesplanPreview datum={data.datum} />
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
