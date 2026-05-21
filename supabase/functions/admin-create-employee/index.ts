@@ -187,10 +187,12 @@ Deno.serve(async (req) => {
   const profileUpdate: Record<string, unknown> = {
     telefon: telefonE164,
     geburtsdatum: body.geburtsdatum || null,
-    partie_id: body.partie_id ?? null,
     is_partieleiter: body.is_partieleiter ?? false,
     is_active: true,
   };
+  // partie_id nur setzen, wenn explizit übergeben — sonst bleibt die vom
+  // handle_new_user-Trigger gesetzte Standard-Partie „Werkvorfertigung".
+  if (body.partie_id) profileUpdate.partie_id = body.partie_id;
   if (emailInput) profileUpdate.email = emailInput;
 
   const { error: profileErr } = await supabase

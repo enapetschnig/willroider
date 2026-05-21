@@ -284,21 +284,18 @@ export default function Arbeitsplanung() {
 
   const workerGroups = useMemo(() => {
     const groups: { partie: Partie | null; members: Profile[] }[] = [];
-    // "Lager"-Gruppe ganz oben — IMMER sichtbar (auch leer) als Drag-Ziel,
-    // damit MA jederzeit aus-/einsortiert werden können.
-    if (filterPartie === "alle" || filterPartie === "ohne") {
-      groups.push({ partie: null, members: unassignedMembers });
-    }
     const filtered =
       filterPartie === "alle"
         ? partien
-        : filterPartie === "ohne"
-        ? []
         : partien.filter((p) => p.id === filterPartie);
     // Alle gefilterten Partien rendern — auch leere, damit man MA per Drag
-    // hineinziehen kann.
+    // hineinziehen kann. MA ohne Partie (Fallback) landen in „Werkvorfertigung".
+    const wvf = partien.find((p) => p.name === "Werkvorfertigung");
     filtered.forEach((p) => {
-      const members = (membersByPartie[p.id] ?? []).filter((m) => m.is_active !== false);
+      let members = (membersByPartie[p.id] ?? []).filter((m) => m.is_active !== false);
+      if (wvf && p.id === wvf.id && unassignedMembers.length > 0) {
+        members = [...members, ...unassignedMembers];
+      }
       groups.push({ partie: p, members });
     });
     return groups;
@@ -475,10 +472,14 @@ export default function Arbeitsplanung() {
       workerId: bar.workerId,
       iso: dayIsoByIdx[i],
     }));
-    const neueCells = bd.preview.cellIsos.map((iso) => ({
-      workerId: bd.preview!.workerId,
-      iso,
-    }));
+    // Harte Sicherung: niemals Sa/So/Feiertag belegen — egal was die
+    // Preview liefert.
+    const neueCells = bd.preview.cellIsos
+      .filter((iso) => isWerktag(iso))
+      .map((iso) => ({
+        workerId: bd.preview!.workerId,
+        iso,
+      }));
     const sameSet =
       alteCells.length === neueCells.length &&
       alteCells.every((c) =>
@@ -597,14 +598,14 @@ export default function Arbeitsplanung() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [barDrag, dayHeaders, dayIsoByIdx]);
 
-  // ─── MA-Namen-Drag: Mitarbeiter zwischen Partien / Lager verschieben ────
+  // ─── MA-Namen-Drag: Mitarbeiter zwischen Partien verschieben ────────────
   type NameDrag = {
     member: Profile;
     fromPartieId: string | null;
     pointerStart: { x: number; y: number };
     active: boolean;
     pos: { x: number; y: number };
-    /** string = Partie-Ziel, null = Lager, undefined = kein gültiges Ziel */
+    /** string = Partie-Ziel, undefined = kein gültiges Ziel */
     overPartieId: string | null | undefined;
   };
   const [nameDrag, setNameDrag] = useState<NameDrag | null>(null);
@@ -1166,7 +1167,6 @@ export default function Arbeitsplanung() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="alle">Alle Partien</SelectItem>
-                <SelectItem value="ohne">Lager</SelectItem>
                 {partien.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     {p.name}
@@ -1349,6 +1349,15 @@ export default function Arbeitsplanung() {
               <div className="p-6 text-center text-sm text-muted-foreground">
                 Keine Mitarbeiter in Partien zugeordnet.
               </div>
+            )}
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => openPartieEditor()}
+                className="w-full flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground hover:bg-muted border-b transition"
+              >
+                <Plus className="h-3.5 w-3.5" /> Neue Partie
+              </button>
             )}
           </div>
 
@@ -1598,6 +1607,28 @@ export default function Arbeitsplanung() {
                                 />
                               );
                             })()}
+                          {/* Wochenend-/Feiertag-Overlay ÜBER den Bars —
+                              schneidet gebrückte Balken optisch durch, sodass
+                              Sa/So/Feiertage nie „belegt" aussehen. */}
+                          {dayHeaders.map((d, i) => {
+                            const isWeekend =
+                              d.date.getDay() === 0 || d.date.getDay() === 6;
+                            const isFeiertag = !!d.feiertag;
+                            if (!isWeekend && !isFeiertag) return null;
+                            return (
+                              <div
+                                key={`we${i}`}
+                                className="absolute top-0 bottom-0 z-30 pointer-events-none"
+                                style={{
+                                  left: i * dayWidth,
+                                  width: dayWidth,
+                                  background: isFeiertag
+                                    ? "rgba(139,92,246,0.32)"
+                                    : "rgba(120,120,120,0.34)",
+                                }}
+                              />
+                            );
+                          })}
                         </div>
                       );
                     })}
@@ -1808,9 +1839,7 @@ export default function Arbeitsplanung() {
           {nameDrag.overPartieId !== undefined && (
             <span className="ml-1.5 font-normal opacity-80">
               →{" "}
-              {nameDrag.overPartieId === null
-                ? "Lager"
-                : partien.find((p) => p.id === nameDrag.overPartieId)?.name ?? "?"}
+              {partien.find((p) => p.id === nameDrag.overPartieId)?.name ?? "?"}
             </span>
           )}
         </div>
@@ -1882,7 +1911,7 @@ function PolierHeader({
               )}
             </div>
           ) : (
-            <span className="truncate block">{partie?.name ?? "Lager"}</span>
+            <span className="truncate block">{partie?.name ?? "—"}</span>
           )}
         </div>
         <span className="text-[10px] opacity-70 shrink-0">{bvhCount} BVH</span>
@@ -2000,7 +2029,7 @@ function MemberActionPopover({
             </span>
           ) : (
             <span className="ml-1.5 font-normal text-amber-700 italic">
-              · Lager
+              · ohne Partie
             </span>
           )}
         </div>
@@ -2509,7 +2538,7 @@ function MobileWorkerPlan({
               color: g.partie?.farbcode ?? undefined,
             }}
           >
-            <span className="flex-1 truncate">{g.partie?.name ?? "Lager"}</span>
+            <span className="flex-1 truncate">{g.partie?.name ?? "—"}</span>
             {isAdmin && g.partie && onEditPartie && (
               <button
                 onClick={() => onEditPartie(g.partie!)}
