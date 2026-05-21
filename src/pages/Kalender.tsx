@@ -14,6 +14,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { feiertageInRange } from "@/lib/feiertage";
+import { isoToYearKw } from "@/lib/konten";
 import type { Database, Wochentyp } from "@/integrations/supabase/types";
 
 type Row = Database["public"]["Tables"]["arbeitszeitkalender"]["Row"];
@@ -40,12 +42,17 @@ type Vorlage = {
   so: number;
 };
 
+/** Tageswerte der beiden Grund-Wochentypen — EINZIGE Definition,
+ *  von VORLAGEN und ensureYear gemeinsam genutzt. */
+const TAGE_L = { mo: 9, di: 9, mi: 9, do_: 9, fr: 6, sa: 0, so: 0 }; // Lang = 42 h
+const TAGE_K = { mo: 9, di: 9, mi: 9, do_: 9, fr: 0, sa: 0, so: 0 }; // Kurz = 36 h
+
 const VORLAGEN: Vorlage[] = [
-  { key: "L_42", label: "Lange Woche (42h)", wochentyp: "L", mo: 9, di: 9, mi: 9, do_: 9, fr: 6, sa: 0, so: 0 },
-  { key: "K_36", label: "Kurze Woche (36h)", wochentyp: "K", mo: 9, di: 9, mi: 9, do_: 9, fr: 0, sa: 0, so: 0 },
+  { key: "L_42", label: "Lange Woche (42h)", wochentyp: "L", ...TAGE_L },
+  { key: "K_36", label: "Kurze Woche (36h)", wochentyp: "K", ...TAGE_K },
   { key: "WINTER_40", label: "Winter 40h Mo-Fr 8h", wochentyp: "L", mo: 8, di: 8, mi: 8, do_: 8, fr: 8, sa: 0, so: 0 },
   { key: "BU", label: "Betriebsurlaub (0h)", wochentyp: "BU", mo: 0, di: 0, mi: 0, do_: 0, fr: 0, sa: 0, so: 0 },
-  { key: "BV", label: "Betriebsversammlung", wochentyp: "BV", mo: 9, di: 9, mi: 9, do_: 9, fr: 6, sa: 0, so: 0 },
+  { key: "BV", label: "Betriebsversammlung", wochentyp: "BV", ...TAGE_L },
 ];
 
 /** Anzahl der ISO-Wochen eines Jahres (52 oder 53). Der 28.12. liegt
@@ -63,11 +70,52 @@ function isoWeeksInYear(year: number): number {
   );
 }
 
+type SollTage = {
+  soll_mo: number; soll_di: number; soll_mi: number; soll_do: number;
+  soll_fr: number; soll_sa: number; soll_so: number;
+};
+/** Index = JS-Wochentag (0=So..6=Sa) → passende soll_*-Spalte. */
+const SOLL_COLS = [
+  "soll_so", "soll_mo", "soll_di", "soll_mi", "soll_do", "soll_fr", "soll_sa",
+] as const;
+
+/** Baut die Tages-Soll-Werte aus einem Wochentyp-Basiswert und nullt die
+ *  Feiertage (übergeben als JS-Wochentag-Indizes 0=So..6=Sa). */
+function bauTage(
+  basis: { mo: number; di: number; mi: number; do_: number; fr: number; sa: number; so: number },
+  feiertageDow: number[],
+): { tage: SollTage; sum: number } {
+  const tage: SollTage = {
+    soll_mo: basis.mo, soll_di: basis.di, soll_mi: basis.mi, soll_do: basis.do_,
+    soll_fr: basis.fr, soll_sa: basis.sa, soll_so: basis.so,
+  };
+  for (const dow of feiertageDow) tage[SOLL_COLS[dow]] = 0;
+  const sum =
+    tage.soll_mo + tage.soll_di + tage.soll_mi + tage.soll_do +
+    tage.soll_fr + tage.soll_sa + tage.soll_so;
+  return { tage, sum };
+}
+
+/** Liefert pro KW die Feiertage eines Jahres (JS-Wochentag + Name). */
+function feiertageProKw(year: number): Map<number, { dow: number; name: string }[]> {
+  const map = new Map<number, { dow: number; name: string }[]>();
+  for (const { iso, info } of feiertageInRange(`${year}-01-01`, `${year}-12-31`)) {
+    const d = new Date(iso + "T00:00:00");
+    const { jahr, kw } = isoToYearKw(d);
+    if (jahr !== year) continue; // ISO-Jahresgrenze → gehört zum Nachbarjahr
+    const arr = map.get(kw) ?? [];
+    arr.push({ dow: d.getDay(), name: info.name });
+    map.set(kw, arr);
+  }
+  return map;
+}
+
 export default function Kalender() {
   const { isAdmin } = useAuth();
   const { toast } = useToast();
   const [year, setYear] = useState<number>(new Date().getFullYear());
   const [rows, setRows] = useState<Row[]>([]);
+  const feiertageMap = useMemo(() => feiertageProKw(year), [year]);
 
   const load = async () => {
     const { data } = await supabase
@@ -94,17 +142,14 @@ export default function Kalender() {
   const applyVorlage = async (id: string, vk: string) => {
     const v = VORLAGEN.find((x) => x.key === vk);
     if (!v) return;
-    const sum = v.mo + v.di + v.mi + v.do_ + v.fr + v.sa + v.so;
+    const row = rows.find((r) => r.id === id);
+    // Feiertage der Woche immer auf 0 — der Kalender bleibt einzige Quelle.
+    const ftDow = (row ? feiertageMap.get(row.kw) ?? [] : []).map((f) => f.dow);
+    const { tage, sum } = bauTage(v, ftDow);
     await updateRow(id, {
       wochentyp: v.wochentyp,
       soll_stunden: sum,
-      soll_mo: v.mo,
-      soll_di: v.di,
-      soll_mi: v.mi,
-      soll_do: v.do_,
-      soll_fr: v.fr,
-      soll_sa: v.sa,
-      soll_so: v.so,
+      ...tage,
     } as any);
   };
 
@@ -118,14 +163,20 @@ export default function Kalender() {
     // Jahre mit 53 ISO-Wochen (z.B. 2026) brauchen auch KW 53.
     const wochenImJahr = isoWeeksInYear(year);
     for (let kw = 1; kw <= wochenImJahr; kw++) {
-      if (!have.has(kw)) {
-        insertRows.push({
-          jahr: year,
-          kw,
-          wochentyp: kw % 2 === 0 ? "L" : "K",
-          soll_stunden: kw % 2 === 0 ? 38.5 : 36,
-        });
-      }
+      if (have.has(kw)) continue;
+      // Startwert abwechselnd L/K — der Admin korrigiert per Vorlage auf
+      // das echte Muster. Tageswerte werden IMMER vollständig gesetzt
+      // (sonst liefert tagesSoll 0); Feiertage werden genullt.
+      const basis = kw % 2 === 0 ? TAGE_L : TAGE_K;
+      const ftDow = (feiertageMap.get(kw) ?? []).map((f) => f.dow);
+      const { tage, sum } = bauTage(basis, ftDow);
+      insertRows.push({
+        jahr: year,
+        kw,
+        wochentyp: kw % 2 === 0 ? "L" : "K",
+        ...tage,
+        soll_stunden: sum,
+      });
     }
     if (insertRows.length > 0) {
       await supabase.from("arbeitszeitkalender").insert(insertRows as any);
@@ -188,6 +239,11 @@ export default function Kalender() {
                 <div className="font-bold text-lg">KW {r.kw}</div>
                 <div className="text-sm font-semibold tabular-nums">{Number(r.soll_stunden).toFixed(1)} h</div>
               </div>
+              {(feiertageMap.get(r.kw) ?? []).length > 0 && (
+                <div className="text-[10px] text-amber-700">
+                  Feiertag: {(feiertageMap.get(r.kw) ?? []).map((f) => f.name).join(", ")}
+                </div>
+              )}
               {isAdmin ? (
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
@@ -279,7 +335,17 @@ export default function Kalender() {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id} className="border-b">
-                  <td className="p-2 font-medium">KW {r.kw}</td>
+                  <td className="p-2 font-medium">
+                    KW {r.kw}
+                    {(feiertageMap.get(r.kw) ?? []).length > 0 && (
+                      <div
+                        className="text-[10px] font-normal text-amber-700"
+                        title="Feiertag — Tages-Soll ist hier 0"
+                      >
+                        {(feiertageMap.get(r.kw) ?? []).map((f) => f.name).join(", ")}
+                      </div>
+                    )}
+                  </td>
                   <td className="p-2">
                     {isAdmin ? (
                       <Select
