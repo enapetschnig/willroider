@@ -10,10 +10,17 @@
  */
 
 import type { StundenTagFull } from "@/hooks/useStundenTag";
+import { berechneTaggeld } from "@/lib/taggeld";
 
 /** Standard-Bau-KV-Sätze (in €). Bei KV-Update hier ändern. */
 export const TAGGELD_SATZ_KURZ_EUR = 12.6;
 export const TAGGELD_SATZ_LANG_EUR = 20.3;
+
+/** Pausen-Dauern (Minuten) — für die Brutto-/Taggeld-Berechnung. */
+export interface PausenDauer {
+  vmDauerMin: number;
+  mittagDauerMin: number;
+}
 
 export interface TaetigkeitName {
   id: string;
@@ -97,17 +104,42 @@ export function aggregiereZulagen(
     .sort((a, b) => b.summe_stunden - a.summe_stunden);
 }
 
-/** Taggeld-Aggregation: aus stunden_fahrt.taggeld_kurz/lang pro Tag. */
+/**
+ * Taggeld für EINEN Tag — berechnet aus Brutto-Stunden + tag_status.
+ * Brutto = netto_stunden + aktive Pausen. Bei `taggeld_manuell=true` wird
+ * der gespeicherte stunden_fahrt-Wert respektiert (bewusster Override).
+ */
+export function taggeldFuerTag(
+  t: StundenTagFull,
+  pausen: PausenDauer,
+): { kurz: number; lang: number } {
+  if (t.fahrt?.taggeld_manuell) {
+    return {
+      kurz: Number(t.fahrt.taggeld_kurz ?? 0),
+      lang: Number(t.fahrt.taggeld_lang ?? 0),
+    };
+  }
+  const pausenStd =
+    ((t.tag.vm_pause ? pausen.vmDauerMin : 0) +
+      (t.tag.mittag_pause ? pausen.mittagDauerMin : 0)) /
+    60;
+  const brutto = Number(t.tag.netto_stunden) + pausenStd;
+  return berechneTaggeld(brutto, t.tag.tag_status);
+}
+
+/** Taggeld-Aggregation über mehrere Tage — berechnet pro Tag via taggeldFuerTag. */
 export function aggregiereTaggeld(
   tage: StundenTagFull[],
+  pausen: PausenDauer,
   satz_kurz_eur: number = TAGGELD_SATZ_KURZ_EUR,
   satz_lang_eur: number = TAGGELD_SATZ_LANG_EUR,
 ): AggTaggeld {
   let kurz = 0;
   let lang = 0;
   for (const t of tage) {
-    kurz += Number(t.fahrt?.taggeld_kurz ?? 0);
-    lang += Number(t.fahrt?.taggeld_lang ?? 0);
+    const tg = taggeldFuerTag(t, pausen);
+    kurz += tg.kurz;
+    lang += tg.lang;
   }
   const kurz_eur = Math.round(kurz * satz_kurz_eur * 100) / 100;
   const lang_eur = Math.round(lang * satz_lang_eur * 100) / 100;

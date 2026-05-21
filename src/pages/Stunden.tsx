@@ -562,6 +562,12 @@ export default function Stunden() {
   }, [aktuellerEigenerTag?.tag.id, primaryUserId]);
 
   const isArbeit = form.tagStatus === "baustelle" || form.tagStatus === "firma";
+
+  /** Summe der oben eingetragenen Tätigkeiten-Stunden für einen MA —
+   *  dient als Vorausfüllung für neu aktivierte Zulagen. */
+  const taetSummeFuer = (uid: string): number =>
+    form.taetigkeiten.reduce((s, t) => s + Number(t.stundenPerMa[uid] ?? 0), 0);
+
   const selectedMaList = useMemo(() => {
     const ids = Array.from(forUserIds);
     // Self zuerst, Rest nach Nachname
@@ -1220,8 +1226,16 @@ export default function Stunden() {
                             if (next.has(z.id)) next.delete(z.id);
                             else
                               next.set(z.id, {
+                                // Stunden-Split-Zulagen werden mit den oben
+                                // eingetragenen Tätigkeiten-Stunden vorbefüllt
+                                // (manuell überschreibbar). Flat-Zulagen bleiben null.
                                 stundenPerMa: Object.fromEntries(
-                                  Array.from(forUserIds).map((uid) => [uid, null]),
+                                  Array.from(forUserIds).map((uid) => [
+                                    uid,
+                                    z.ermoeglicht_stunden_split
+                                      ? taetSummeFuer(uid)
+                                      : null,
+                                  ]),
                                 ),
                                 notiz: "",
                                 // Bei Multi-MA: standardmäßig pro MA individuell.

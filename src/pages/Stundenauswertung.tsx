@@ -43,9 +43,11 @@ import {
   aggregiereTaetigkeiten,
   aggregiereZulagen,
   aggregiereTaggeld,
+  taggeldFuerTag,
   fmtEur,
   TAGGELD_SATZ_KURZ_EUR,
   TAGGELD_SATZ_LANG_EUR,
+  type PausenDauer,
 } from "@/lib/stundenAggregation";
 import {
   makeStundenzettelPdf,
@@ -155,6 +157,12 @@ export default function Stundenauswertung() {
   const { data: limits } = useArbeitszeitLimits();
   const { data: taetigkeitenStamm = [] } = useTaetigkeitenStamm();
   const { data: zulagenTypen = [] } = useZulagenTypen();
+
+  // Pausen-Dauern für Brutto-/Taggeld-Berechnung
+  const pausenDauer: PausenDauer = {
+    vmDauerMin: pausen?.vm.dauer_minuten ?? 0,
+    mittagDauerMin: pausen?.mittag.dauer_minuten ?? 0,
+  };
 
   // Soll-Stunden pro MA aus Konto-Settings + Werktagen
   const [pks, setPks] = useState<
@@ -325,6 +333,7 @@ export default function Stundenauswertung() {
       diff: r.diff,
       taetigkeitenStamm,
       zulagenTypen,
+      pausen: pausenDauer,
     };
   }
 
@@ -382,8 +391,9 @@ export default function Stundenauswertung() {
             return z.stunden != null ? `${bez} ${Number(z.stunden)}h` : bez;
           })
           .join(", ");
-        const tgKurz = Number(t.fahrt?.taggeld_kurz ?? 0);
-        const tgLang = Number(t.fahrt?.taggeld_lang ?? 0);
+        const tg = taggeldFuerTag(t, pausenDauer);
+        const tgKurz = tg.kurz;
+        const tgLang = tg.lang;
         lines.push(
           [
             `${ma!.nachname} ${ma!.vorname}`,
@@ -585,6 +595,7 @@ export default function Stundenauswertung() {
                               taetigkeitenStamm={taetigkeitenStamm}
                               zulagenTypen={zulagenTypen}
                               pausen={pausen}
+                              pausenDauer={pausenDauer}
                               limits={limits}
                               onEditTag={(t) =>
                                 setEditTag({
@@ -727,6 +738,7 @@ function DetailMa({
   taetigkeitenStamm,
   zulagenTypen,
   pausen,
+  pausenDauer,
   limits,
   onEditTag,
 }: {
@@ -737,13 +749,14 @@ function DetailMa({
   taetigkeitenStamm: Database["public"]["Tables"]["taetigkeiten_stamm"]["Row"][];
   zulagenTypen: Database["public"]["Tables"]["zulagen_typen"]["Row"][];
   pausen: { vm: any; mittag: any } | undefined;
+  pausenDauer: PausenDauer;
   limits: any;
   onEditTag?: (t: StundenTagFull) => void;
 }) {
   const tage = list ?? [];
   const aggTaet = aggregiereTaetigkeiten(tage, taetigkeitenStamm);
   const aggZul = aggregiereZulagen(tage, zulagenTypen);
-  const aggTg = aggregiereTaggeld(tage);
+  const aggTg = aggregiereTaggeld(tage, pausenDauer);
 
   return (
     <div className="p-3 space-y-3">
@@ -753,6 +766,7 @@ function DetailMa({
             <TableHead className="text-xs">Datum</TableHead>
             <TableHead className="text-xs">Status</TableHead>
             <TableHead className="text-xs text-right">Netto</TableHead>
+            <TableHead className="text-xs text-right">Pause</TableHead>
             <TableHead className="text-xs text-right">Brutto</TableHead>
             <TableHead className="text-xs text-right">Von-Bis</TableHead>
             <TableHead className="text-xs">Tätigkeiten / Zulagen</TableHead>
@@ -779,8 +793,9 @@ function DetailMa({
                       "07:00",
                   })
                 : null;
-            const tgKurz = Number(t.fahrt?.taggeld_kurz ?? 0);
-            const tgLang = Number(t.fahrt?.taggeld_lang ?? 0);
+            const tg = taggeldFuerTag(t, pausenDauer);
+            const tgKurz = tg.kurz;
+            const tgLang = tg.lang;
             return (
               <TableRow key={t.tag.id}>
                 <TableCell className="text-xs tabular-nums">
@@ -797,6 +812,11 @@ function DetailMa({
                 </TableCell>
                 <TableCell className="text-xs text-right tabular-nums">
                   {fmtH(Number(t.tag.netto_stunden))}
+                </TableCell>
+                <TableCell className="text-xs text-right tabular-nums">
+                  {zeiten && zeiten.pausenMinuten > 0
+                    ? `${zeiten.pausenMinuten} min`
+                    : "—"}
                 </TableCell>
                 <TableCell className="text-xs text-right tabular-nums">
                   {zeiten ? fmtH(zeiten.bruttoAnwesenheit) : "—"}

@@ -16,11 +16,13 @@ import {
   aggregiereTaetigkeiten,
   aggregiereZulagen,
   aggregiereTaggeld,
+  taggeldFuerTag,
   fmtEur,
   fmtTaetigkeitenInline,
   fmtZulagenInline,
   type TaetigkeitName,
   type ZulagenTypName,
+  type PausenDauer,
   TAGGELD_SATZ_KURZ_EUR,
   TAGGELD_SATZ_LANG_EUR,
 } from "@/lib/stundenAggregation";
@@ -48,6 +50,7 @@ export interface StundenzettelData {
   diff: number;
   taetigkeitenStamm: TaetigkeitName[];
   zulagenTypen: ZulagenTypName[];
+  pausen: PausenDauer;
 }
 
 function monatLabel(monat: string): string {
@@ -82,7 +85,7 @@ export function renderStundenzettel(
 
   const aggTaet = aggregiereTaetigkeiten(data.tage, data.taetigkeitenStamm);
   const aggZul = aggregiereZulagen(data.tage, data.zulagenTypen);
-  const aggTg = aggregiereTaggeld(data.tage);
+  const aggTg = aggregiereTaggeld(data.tage, data.pausen);
 
   // Header
   doc.setFont("helvetica", "bold");
@@ -102,8 +105,9 @@ export function renderStundenzettel(
     const netto = Number(t.tag.netto_stunden);
     const taet = fmtTaetigkeitenInline(t, data.taetigkeitenStamm);
     const zul = fmtZulagenInline(t, data.zulagenTypen);
-    const tgK = Number(t.fahrt?.taggeld_kurz ?? 0);
-    const tgL = Number(t.fahrt?.taggeld_lang ?? 0);
+    const tg = taggeldFuerTag(t, data.pausen);
+    const tgK = tg.kurz;
+    const tgL = tg.lang;
     const tgStr = tgL > 0 ? `${tgL}× L` : tgK > 0 ? `${tgK}× K` : "—";
     return [d.date, d.wt, status, fmtH(netto), taet || "—", zul || "—", tgStr];
   });
