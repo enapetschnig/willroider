@@ -155,7 +155,15 @@ export default function Arbeitsplanung() {
         .order("inventar_nr"),
     ]);
     setBaustellen((bs.data as Baustelle[]) ?? []);
-    setPartien((p.data as Partie[]) ?? []);
+    // Sortierung: Werkvorfertigung immer oben, „Lager" immer unten,
+    // alle anderen alphabetisch dazwischen.
+    const partieRang = (name: string) =>
+      name === "Werkvorfertigung" ? 0 : name === "Lager" ? 2 : 1;
+    const sortedPartien = ((p.data as Partie[]) ?? []).sort(
+      (a, b) =>
+        partieRang(a.name) - partieRang(b.name) || a.name.localeCompare(b.name),
+    );
+    setPartien(sortedPartien);
     setProfiles((pr.data as Profile[]) ?? []);
     setFahrzeuge((fz.data as Fahrzeug[]) ?? []);
   };
@@ -1438,6 +1446,12 @@ export default function Arbeitsplanung() {
                         background: g.partie ? `${g.partie.farbcode}25` : "hsl(var(--muted))",
                       }}
                     />
+                    {/* Platzhalter für leere Gruppen — muss exakt zur
+                        „— leer —"-Zeile der Namens-Spalte passen (28px),
+                        sonst verrutschen Balken und Namen. */}
+                    {g.members.length === 0 && (
+                      <div className="border-b" style={{ height: 28 }} />
+                    )}
                     {g.members.map((m) => {
                       const bars = barsByWorker.get(m.id) ?? [];
                       return (
