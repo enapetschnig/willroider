@@ -24,7 +24,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { isWerktag } from "@/lib/feiertage";
+import { isWerktag, feiertagAt } from "@/lib/feiertage";
 import {
   periodeSoll,
   tagesSoll,
@@ -79,6 +79,14 @@ const STATUS_LABEL: Record<TagStatus, string> = {
   feiertag: "Feiertag",
 };
 
+/** Kurzzeichen für Abwesenheits-Tage in der Monatstabelle. */
+const RASTER_KUERZEL: Record<string, string> = {
+  urlaub: "U",
+  krank: "K",
+  schlechtwetter: "SW",
+  feiertag: "F",
+};
+
 function monatLabel(monat: string) {
   const [y, m] = monat.split("-");
   return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("de-AT", {
@@ -126,7 +134,10 @@ export default function Stundenauswertung() {
   const [partien, setPartien] = useState<Partie[]>([]);
   const [baustellenMap, setBaustellenMap] = useState<Map<string, string>>(new Map());
   const [partieFilter, setPartieFilter] = useState<string>("");
-  const [ansicht, setAnsicht] = useState<"uebersicht" | "tabelle">("uebersicht");
+  const [ansicht, setAnsicht] = useState<
+    "uebersicht" | "raster" | "baustellen"
+  >("uebersicht");
+  const [selectedBaustelle, setSelectedBaustelle] = useState<string>("");
   const [expandedUid, setExpandedUid] = useState<string | null>(null);
   const [editTag, setEditTag] = useState<{
     tag: StundenTagFull;
@@ -283,66 +294,82 @@ export default function Stundenauswertung() {
       .filter((r) => r.ma);
   }, [tage, memberIds, members, pks, kalender, from, to]);
 
-  // Flache Tabelle: eine Zeile pro Baustellen-/Tätigkeits-Eintrag. Tage ohne
-  // Tätigkeiten (z.B. Urlaub/Krank) erscheinen als eine Zeile pro Tag.
-  const flatRows = useMemo(() => {
-    const maName = (uid: string) => {
-      const m = members.find((x) => x.id === uid);
-      return m ? `${m.nachname} ${m.vorname}`.trim() : "—";
-    };
-    type FlatRow = {
-      key: string;
-      tagFull: StundenTagFull;
-      mitarbeiterName: string;
-      datum: string;
-      status: TagStatus;
-      baustelle: string;
-      taetigkeit: string;
-      stunden: number;
-    };
-    const rows: FlatRow[] = [];
+  // ─── Daten für Raster- + Baustellen-Ansicht ──────────────────────────
+  const nameByUid = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of members) {
+      m.set(p.id, `${p.nachname ?? ""} ${p.vorname ?? ""}`.trim() || "—");
+    }
+    return m;
+  }, [members]);
+
+  // Tage der gewählten Periode — Spalten der Monatstabelle.
+  const periodeTage = useMemo(() => {
+    const out: { iso: string; tag: number; kuerzel: string; frei: boolean }[] =
+      [];
+    const WD = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+    const d = new Date(from + "T00:00:00");
+    const end = new Date(to + "T00:00:00");
+    while (d <= end) {
+      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const dow = d.getDay();
+      out.push({
+        iso,
+        tag: d.getDate(),
+        kuerzel: WD[dow],
+        frei: dow === 0 || dow === 6 || !!feiertagAt(iso),
+      });
+      d.setDate(d.getDate() + 1);
+    }
+    return out;
+  }, [from, to]);
+
+  // Schneller Zugriff Raster-Zelle: uid → iso → Tag.
+  const tagByUidIso = useMemo(() => {
+    const m = new Map<string, Map<string, StundenTagFull>>();
     for (const t of tage) {
-      const name = maName(t.tag.mitarbeiter_id);
-      if (t.taetigkeiten.length > 0) {
-        for (const tt of t.taetigkeiten) {
-          rows.push({
-            key: `${t.tag.id}:${tt.id}`,
-            tagFull: t,
-            mitarbeiterName: name,
-            datum: t.tag.datum,
-            status: t.tag.tag_status,
-            baustelle: tt.baustelle_id
-              ? baustellenMap.get(tt.baustelle_id) ?? "—"
-              : "—",
-            taetigkeit:
-              (tt.taetigkeit_id &&
-                taetigkeitenStamm.find((s) => s.id === tt.taetigkeit_id)
-                  ?.bezeichnung) ||
-              tt.taetigkeit_freitext ||
-              "—",
-            stunden: Number(tt.stunden ?? 0),
-          });
+      let inner = m.get(t.tag.mitarbeiter_id);
+      if (!inner) {
+        inner = new Map();
+        m.set(t.tag.mitarbeiter_id, inner);
+      }
+      inner.set(t.tag.datum, t);
+    }
+    return m;
+  }, [tage]);
+
+  // ─── Baustellenauswertung ────────────────────────────────────────────
+  const baustellenMitBuchungen = useMemo(() => {
+    const ids = new Set<string>();
+    for (const t of tage)
+      for (const tt of t.taetigkeiten)
+        if (tt.baustelle_id) ids.add(tt.baustelle_id);
+    return [...ids]
+      .map((id) => ({ id, name: baustellenMap.get(id) ?? "Baustelle" }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [tage, baustellenMap]);
+
+  const baustelleRows = useMemo(() => {
+    if (!selectedBaustelle) return [];
+    const m = new Map<string, number>();
+    for (const t of tage) {
+      for (const tt of t.taetigkeiten) {
+        if (tt.baustelle_id === selectedBaustelle) {
+          m.set(
+            t.tag.mitarbeiter_id,
+            (m.get(t.tag.mitarbeiter_id) ?? 0) + Number(tt.stunden ?? 0),
+          );
         }
-      } else {
-        rows.push({
-          key: t.tag.id,
-          tagFull: t,
-          mitarbeiterName: name,
-          datum: t.tag.datum,
-          status: t.tag.tag_status,
-          baustelle: "—",
-          taetigkeit: "—",
-          stunden: Number(t.tag.netto_stunden ?? 0),
-        });
       }
     }
-    rows.sort(
-      (a, b) =>
-        b.datum.localeCompare(a.datum) ||
-        a.mitarbeiterName.localeCompare(b.mitarbeiterName),
-    );
-    return rows;
-  }, [tage, members, baustellenMap, taetigkeitenStamm]);
+    return [...m.entries()]
+      .map(([uid, stunden]) => ({
+        uid,
+        name: nameByUid.get(uid) ?? "—",
+        stunden,
+      }))
+      .sort((a, b) => b.stunden - a.stunden);
+  }, [tage, selectedBaustelle, nameByUid]);
 
   const moveMonat = (delta: number) => {
     const [y, m] = monat.split("-").map(Number);
@@ -626,7 +653,7 @@ export default function Stundenauswertung() {
       </Card>
 
       {/* Ansicht-Umschalter */}
-      <div className="flex items-center gap-2 print:hidden">
+      <div className="flex items-center gap-2 print:hidden flex-wrap">
         <Button
           variant={ansicht === "uebersicht" ? "default" : "outline"}
           size="sm"
@@ -635,11 +662,18 @@ export default function Stundenauswertung() {
           Mitarbeiter-Übersicht
         </Button>
         <Button
-          variant={ansicht === "tabelle" ? "default" : "outline"}
+          variant={ansicht === "raster" ? "default" : "outline"}
           size="sm"
-          onClick={() => setAnsicht("tabelle")}
+          onClick={() => setAnsicht("raster")}
         >
-          Tabelle
+          Monatstabelle
+        </Button>
+        <Button
+          variant={ansicht === "baustellen" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setAnsicht("baustellen")}
+        >
+          Baustellen
         </Button>
       </div>
 
@@ -756,8 +790,8 @@ export default function Stundenauswertung() {
         </Card>
         ))}
 
-      {/* Tabellen-Ansicht: eine Zeile pro Baustellen-Eintrag */}
-      {ansicht === "tabelle" &&
+      {/* Monatstabelle: Tagesraster Mitarbeiter × Tag */}
+      {ansicht === "raster" &&
         (isLoading ? (
           <Card>
             <CardContent className="p-4 flex items-center gap-2 text-sm text-muted-foreground">
@@ -767,78 +801,224 @@ export default function Stundenauswertung() {
         ) : (
           <Card>
             <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="text-xs border-collapse w-full">
+                  <thead>
+                    <tr className="bg-muted">
+                      <th className="sticky left-0 bg-muted text-left px-2 py-1.5 border-r min-w-[140px] z-10">
+                        Mitarbeiter
+                      </th>
+                      {periodeTage.map((d) => (
+                        <th
+                          key={d.iso}
+                          className={`px-1 py-1 border text-center w-9 ${
+                            d.frei ? "bg-muted-foreground/10 text-muted-foreground" : ""
+                          }`}
+                        >
+                          <div className="font-semibold">{d.tag}</div>
+                          <div className="text-[9px] font-normal">{d.kuerzel}</div>
+                        </th>
+                      ))}
+                      <th className="px-2 py-1 border text-right">Ist</th>
+                      <th className="px-2 py-1 border text-right">Soll</th>
+                      <th className="px-2 py-1 border text-right">Diff</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {byMa.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={periodeTage.length + 4}
+                          className="text-center text-sm text-muted-foreground p-6"
+                        >
+                          Keine Mitarbeiter im Filter.
+                        </td>
+                      </tr>
+                    )}
+                    {byMa.map((r) => (
+                      <tr key={r.uid} className="border-t">
+                        <td className="sticky left-0 bg-card px-2 py-1 border-r font-medium whitespace-nowrap z-10">
+                          {r.ma!.nachname} {r.ma!.vorname}
+                        </td>
+                        {periodeTage.map((d) => {
+                          const cell = tagByUidIso.get(r.uid)?.get(d.iso);
+                          if (!cell) {
+                            return (
+                              <td
+                                key={d.iso}
+                                className={`border text-center text-muted-foreground/40 ${
+                                  d.frei ? "bg-muted-foreground/10" : ""
+                                }`}
+                              >
+                                ·
+                              </td>
+                            );
+                          }
+                          const worked =
+                            cell.tag.tag_status === "baustelle" ||
+                            cell.tag.tag_status === "firma";
+                          return (
+                            <td
+                              key={d.iso}
+                              onClick={() =>
+                                setEditTag({
+                                  tag: cell,
+                                  mitarbeiterName: `${r.ma!.vorname ?? ""} ${r.ma!.nachname ?? ""}`.trim(),
+                                })
+                              }
+                              title={`${STATUS_LABEL[cell.tag.tag_status]} — bearbeiten`}
+                              className={`border text-center tabular-nums cursor-pointer hover:bg-primary/10 ${
+                                worked
+                                  ? ""
+                                  : "bg-amber-50 text-amber-900 font-semibold"
+                              }`}
+                            >
+                              {worked
+                                ? fmtHNum(Number(cell.tag.netto_stunden))
+                                : RASTER_KUERZEL[cell.tag.tag_status] ?? "?"}
+                            </td>
+                          );
+                        })}
+                        <td className="border px-2 text-right tabular-nums font-semibold">
+                          {fmtHNum(r.ist)}
+                        </td>
+                        <td className="border px-2 text-right tabular-nums">
+                          {fmtHNum(r.soll)}
+                        </td>
+                        <td
+                          className={`border px-2 text-right tabular-nums font-bold ${
+                            r.diff > 0
+                              ? "text-emerald-700"
+                              : r.diff < 0
+                              ? "text-amber-700"
+                              : ""
+                          }`}
+                        >
+                          {r.diff > 0 ? "+" : ""}
+                          {fmtHNum(r.diff)}
+                        </td>
+                      </tr>
+                    ))}
+                    {byMa.length > 0 && (
+                      <tr className="border-t-2 bg-muted/40 font-semibold">
+                        <td className="sticky left-0 bg-muted/40 px-2 py-1 border-r z-10">
+                          Summe
+                        </td>
+                        {periodeTage.map((d) => {
+                          let s = 0;
+                          for (const r of byMa) {
+                            const c = tagByUidIso.get(r.uid)?.get(d.iso);
+                            if (
+                              c &&
+                              (c.tag.tag_status === "baustelle" ||
+                                c.tag.tag_status === "firma")
+                            )
+                              s += Number(c.tag.netto_stunden);
+                          }
+                          return (
+                            <td
+                              key={d.iso}
+                              className={`border text-center tabular-nums text-[10px] ${
+                                d.frei ? "bg-muted-foreground/10" : ""
+                              }`}
+                            >
+                              {s > 0 ? fmtHNum(s) : ""}
+                            </td>
+                          );
+                        })}
+                        <td className="border px-2 text-right tabular-nums">
+                          {fmtHNum(byMa.reduce((a, r) => a + r.ist, 0))}
+                        </td>
+                        <td className="border px-2 text-right tabular-nums">
+                          {fmtHNum(byMa.reduce((a, r) => a + r.soll, 0))}
+                        </td>
+                        <td className="border px-2 text-right tabular-nums">
+                          {fmtHNum(byMa.reduce((a, r) => a + r.diff, 0))}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="p-2 text-[10px] text-muted-foreground">
+                Zahl = gebuchte Stunden · U Urlaub · K Krank · SW Schlechtwetter ·
+                F Feiertag · Klick auf eine Zelle öffnet den Tag.
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+
+      {/* Baustellenauswertung: Stunden je Mitarbeiter auf einer Baustelle */}
+      {ansicht === "baustellen" && (
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Label className="text-xs">Baustelle</Label>
+              <select
+                value={selectedBaustelle}
+                onChange={(e) => setSelectedBaustelle(e.target.value)}
+                className="h-9 rounded-md border bg-background px-2 text-sm min-w-[220px]"
+              >
+                <option value="">— Baustelle wählen —</option>
+                {baustellenMitBuchungen.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+              {baustellenMitBuchungen.length === 0 && (
+                <span className="text-xs text-muted-foreground">
+                  Keine gebuchten Stunden im Zeitraum.
+                </span>
+              )}
+            </div>
+
+            {selectedBaustelle && (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Datum</TableHead>
                     <TableHead>Mitarbeiter</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Baustelle</TableHead>
-                    <TableHead>Tätigkeit</TableHead>
                     <TableHead className="text-right">Stunden</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {flatRows.length === 0 && (
+                  {baustelleRows.length === 0 && (
                     <TableRow>
                       <TableCell
-                        colSpan={6}
+                        colSpan={2}
                         className="text-center text-sm text-muted-foreground p-6"
                       >
-                        Keine Einträge im Zeitraum.
+                        Keine Stunden auf dieser Baustelle.
                       </TableCell>
                     </TableRow>
                   )}
-                  {flatRows.map((r) => (
-                    <TableRow
-                      key={r.key}
-                      className="cursor-pointer hover:bg-muted/40"
-                      onClick={() =>
-                        setEditTag({
-                          tag: r.tagFull,
-                          mitarbeiterName: r.mitarbeiterName,
-                        })
-                      }
-                    >
-                      <TableCell className="text-xs tabular-nums whitespace-nowrap">
-                        {new Date(r.datum + "T00:00:00").toLocaleDateString("de-AT", {
-                          weekday: "short",
-                          day: "2-digit",
-                          month: "2-digit",
-                        })}
-                      </TableCell>
+                  {baustelleRows.map((r) => (
+                    <TableRow key={r.uid}>
                       <TableCell className="text-sm font-medium">
-                        {r.mitarbeiterName}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-[10px]">
-                          {STATUS_LABEL[r.status]}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">{r.baustelle}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {r.taetigkeit}
+                        {r.name}
                       </TableCell>
                       <TableCell className="text-right tabular-nums font-semibold">
                         {fmtHNum(r.stunden)} h
                       </TableCell>
                     </TableRow>
                   ))}
-                  {flatRows.length > 0 && (
+                  {baustelleRows.length > 0 && (
                     <TableRow className="bg-muted/30 font-semibold">
-                      <TableCell colSpan={5} className="text-right text-sm">
-                        Summe
-                      </TableCell>
+                      <TableCell className="text-right text-sm">Gesamt</TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {fmtHNum(flatRows.reduce((s, r) => s + r.stunden, 0))} h
+                        {fmtHNum(
+                          baustelleRows.reduce((s, r) => s + r.stunden, 0),
+                        )}{" "}
+                        h
                       </TableCell>
                     </TableRow>
                   )}
                 </TableBody>
               </Table>
-            </CardContent>
-          </Card>
-        ))}
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Monatsabschluss-Section am Ende der Auswertung */}
       {isAdmin && byMa.length > 0 && (
