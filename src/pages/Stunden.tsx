@@ -896,7 +896,9 @@ export default function Stunden() {
   };
 
   const submitLabel =
-    forUserIds.size > 1
+    forUserIds.size === 0
+      ? "Niemand ausgewählt"
+      : forUserIds.size > 1
       ? `Für ${forUserIds.size} Mitarbeiter speichern`
       : aktuellerEigenerTag
       ? "Änderungen speichern"
@@ -1354,7 +1356,7 @@ export default function Stunden() {
           {/* Submit — auf Desktop sichtbar, auf Mobile durch Sticky-Bar ersetzt */}
           <Button
             onClick={submit}
-            disabled={busy}
+            disabled={busy || forUserIds.size === 0}
             className="w-full h-12 text-base hidden lg:flex"
           >
             {busy && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
@@ -1368,7 +1370,11 @@ export default function Stunden() {
         className="lg:hidden fixed left-0 right-0 z-20 px-3 py-2 bg-card border-t shadow-lg"
         style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 56px)" }}
       >
-        <Button onClick={submit} disabled={busy} className="w-full h-12 text-base">
+        <Button
+          onClick={submit}
+          disabled={busy || forUserIds.size === 0}
+          className="w-full h-12 text-base"
+        >
           {busy && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
           {submitLabel}
         </Button>

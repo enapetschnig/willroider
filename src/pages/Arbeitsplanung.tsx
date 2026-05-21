@@ -1479,103 +1479,128 @@ export default function Arbeitsplanung() {
                               />
                             );
                           })}
-                          {/* Bars */}
+                          {/* Bars — je zusammenhängendem Werktag-Lauf ein
+                              Segment. Wochenenden/Feiertage erzeugen eine
+                              echte Lücke, der Block wird optisch aufgeteilt. */}
                           {bars.map((bar, bi) => {
-                            const left = bar.startIdx * dayWidth + 1;
-                            const width = (bar.endIdx - bar.startIdx + 1) * dayWidth - 2;
-                            const days = bar.endIdx - bar.startIdx + 1;
-                            const startDate = dayHeaders[bar.startIdx].date;
-                            const endDate = dayHeaders[bar.endIdx].date;
+                            const sortedIdx = [...bar.assignedIdx].sort(
+                              (a, b) => a - b,
+                            );
+                            if (sortedIdx.length === 0) return null;
+                            const segments: { start: number; end: number }[] = [];
+                            for (const i of sortedIdx) {
+                              const last = segments[segments.length - 1];
+                              if (last && i === last.end + 1) last.end = i;
+                              else segments.push({ start: i, end: i });
+                            }
+                            const startDate = dayHeaders[sortedIdx[0]].date;
+                            const endDate =
+                              dayHeaders[sortedIdx[sortedIdx.length - 1]].date;
                             const dateRange =
-                              days === 1
+                              sortedIdx.length === 1
                                 ? startDate.toLocaleDateString("de-AT")
                                 : `${startDate.toLocaleDateString("de-AT")} – ${endDate.toLocaleDateString("de-AT")}`;
                             const greifbar = isAdmin && !bar.isReadOnly;
                             const wirdGezogen =
                               barDrag?.active && barDrag.bar === bar;
-                            return (
-                              <div
-                                key={bi}
-                                className="absolute rounded-md flex items-center px-1.5 text-[10px] font-semibold text-white truncate shadow-sm"
-                                style={{
-                                  left,
-                                  width,
-                                  top: 2,
-                                  height: 24,
-                                  background: bar.color,
-                                  opacity: bar.isReadOnly
-                                    ? 0.6
-                                    : wirdGezogen
-                                    ? 0.35
-                                    : 1,
-                                  pointerEvents: greifbar ? "auto" : "none",
-                                }}
-                                title={`${bar.label} · ${dateRange}${bar.isReadOnly ? " (eingereicht)" : ""}`}
-                              >
-                                {greifbar && (
-                                  <>
-                                    {/* Resize-Handle links */}
-                                    <div
-                                      onPointerDown={(e) =>
-                                        onBarPointerDown(e, bar, "resize-l")
-                                      }
-                                      className="absolute left-0 top-0 bottom-0"
-                                      style={{ width: 8, cursor: "ew-resize" }}
-                                    />
-                                    {/* Move-Body */}
-                                    <div
-                                      onPointerDown={(e) =>
-                                        onBarPointerDown(e, bar, "move")
-                                      }
-                                      className="absolute top-0 bottom-0"
-                                      style={{
-                                        left: 8,
-                                        right: 8,
-                                        cursor: "grab",
-                                      }}
-                                    />
-                                    {/* Resize-Handle rechts */}
-                                    <div
-                                      onPointerDown={(e) =>
-                                        onBarPointerDown(e, bar, "resize-r")
-                                      }
-                                      className="absolute right-0 top-0 bottom-0"
-                                      style={{ width: 8, cursor: "ew-resize" }}
-                                    />
-                                  </>
-                                )}
-                                <span className="truncate pointer-events-none">
-                                  {width < 60 ? bar.label.slice(0, 2) : bar.label}
-                                </span>
-                              </div>
-                            );
+                            return segments.map((seg, si) => {
+                              const left = seg.start * dayWidth + 1;
+                              const width =
+                                (seg.end - seg.start + 1) * dayWidth - 2;
+                              const isFirst = si === 0;
+                              const isLast = si === segments.length - 1;
+                              return (
+                                <div
+                                  key={`${bi}-${si}`}
+                                  className="absolute rounded-md flex items-center px-1.5 text-[10px] font-semibold text-white truncate shadow-sm"
+                                  style={{
+                                    left,
+                                    width,
+                                    top: 2,
+                                    height: 24,
+                                    background: bar.color,
+                                    opacity: bar.isReadOnly
+                                      ? 0.6
+                                      : wirdGezogen
+                                      ? 0.35
+                                      : 1,
+                                    pointerEvents: greifbar ? "auto" : "none",
+                                  }}
+                                  title={`${bar.label} · ${dateRange}${bar.isReadOnly ? " (eingereicht)" : ""}`}
+                                >
+                                  {greifbar && (
+                                    <>
+                                      {isFirst && (
+                                        <div
+                                          onPointerDown={(e) =>
+                                            onBarPointerDown(e, bar, "resize-l")
+                                          }
+                                          className="absolute left-0 top-0 bottom-0"
+                                          style={{ width: 8, cursor: "ew-resize" }}
+                                        />
+                                      )}
+                                      <div
+                                        onPointerDown={(e) =>
+                                          onBarPointerDown(e, bar, "move")
+                                        }
+                                        className="absolute top-0 bottom-0"
+                                        style={{
+                                          left: isFirst ? 8 : 0,
+                                          right: isLast ? 8 : 0,
+                                          cursor: "grab",
+                                        }}
+                                      />
+                                      {isLast && (
+                                        <div
+                                          onPointerDown={(e) =>
+                                            onBarPointerDown(e, bar, "resize-r")
+                                          }
+                                          className="absolute right-0 top-0 bottom-0"
+                                          style={{ width: 8, cursor: "ew-resize" }}
+                                        />
+                                      )}
+                                    </>
+                                  )}
+                                  <span className="truncate pointer-events-none">
+                                    {width < 60
+                                      ? bar.label.slice(0, 2)
+                                      : bar.label}
+                                  </span>
+                                </div>
+                              );
+                            });
                           })}
-                          {/* Ghost-Vorschau beim Bar-Drag */}
+                          {/* Ghost-Vorschau beim Bar-Drag — ebenfalls in
+                              Segmente geteilt (Wochenend-Lücken sichtbar). */}
                           {barDrag?.active &&
                             barDrag.preview &&
                             barDrag.preview.workerId === m.id &&
                             (() => {
-                              const isos = barDrag.preview.cellIsos;
-                              if (isos.length === 0) return null;
-                              const idxs = isos
+                              const idxs = barDrag.preview.cellIsos
                                 .map((iso) => dayIsoByIdx.indexOf(iso))
-                                .filter((x) => x >= 0);
+                                .filter((x) => x >= 0)
+                                .sort((a, b) => a - b);
                               if (idxs.length === 0) return null;
-                              const gStart = Math.min(...idxs);
-                              const gEnd = Math.max(...idxs);
-                              return (
+                              const segs: { start: number; end: number }[] = [];
+                              for (const i of idxs) {
+                                const last = segs[segs.length - 1];
+                                if (last && i === last.end + 1) last.end = i;
+                                else segs.push({ start: i, end: i });
+                              }
+                              return segs.map((s, si) => (
                                 <div
+                                  key={`g${si}`}
                                   className="absolute rounded-md border-2 border-dashed pointer-events-none z-20"
                                   style={{
-                                    left: gStart * dayWidth + 1,
-                                    width: (gEnd - gStart + 1) * dayWidth - 2,
+                                    left: s.start * dayWidth + 1,
+                                    width: (s.end - s.start + 1) * dayWidth - 2,
                                     top: 2,
                                     height: 24,
                                     background: `${barDrag.bar.color}55`,
                                     borderColor: barDrag.bar.color,
                                   }}
                                 />
-                              );
+                              ));
                             })()}
                           {/* Wochenend-/Feiertag-Overlay ÜBER den Bars —
                               schneidet gebrückte Balken optisch durch, sodass
