@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -183,26 +184,37 @@ export default function Stunden() {
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [forUserIds, setForUserIds] = useState<Set<string>>(new Set());
   const [memberSearch, setMemberSearch] = useState<string>("");
+  // true sobald Rolle (Admin/Polier/Self) feststeht — der Prefill wartet darauf.
+  const [rollenGeladen, setRollenGeladen] = useState(false);
 
-  // Vorarbeiter-Vorausfüllung: wenn der User Polier einer Partie ist, werden
-  // die Kollegen aus seiner heutigen Einteilung beim Mount mitselektiert.
-  // Läuft nur einmal pro (user, date)-Kontext — wenn der User dann manuell
-  // de-/selektiert, bleibt das stehen. Bei Datumswechsel wird neu vorgeschlagen.
+  // Baustelle aus dem Dashboard-Link (/stunden?baustelle=<id>) — bestimmt,
+  // welche Einteilung für die Kollegen-/Projekt-Vorausfüllung genommen wird.
+  const [searchParams] = useSearchParams();
+  const baustelleParam = searchParams.get("baustelle");
+
+  // Vorarbeiter-/Admin-Vorausfüllung: die Kollegen aus der heutigen Einteilung
+  // werden mitselektiert. Läuft einmal pro (user, date, baustelle)-Kontext —
+  // manuelle De-/Selektion bleibt danach stehen.
   const prefilledKeyRef = useRef<string>("");
   useEffect(() => {
-    if (!user || !date) return;
-    const key = `${user.id}|${date}`;
+    if (!user || !date || !rollenGeladen) return;
+    const key = `${user.id}|${date}|${baustelleParam ?? ""}`;
     if (prefilledKeyRef.current === key) return;
     let cancelled = false;
     (async () => {
       const initial = new Set<string>([user.id]);
-      if (polierPartie) {
+      // Admin ODER Polier (= alle mit MA-Picker) bekommen die Kollegen der
+      // Einteilung. Bei Link vom Dashboard die zur Baustelle passende wählen.
+      if (isAdmin || polierPartie) {
         const eint = await getBaustellenForMaToday(user.id, date);
-        if (eint[0]) {
+        const ziel = baustelleParam
+          ? eint.find((e) => e.baustelle_id === baustelleParam) ?? eint[0]
+          : eint[0];
+        if (ziel) {
           const { data: ems } = await supabase
             .from("einteilung_mitarbeiter")
             .select("mitarbeiter_id")
-            .eq("einteilung_id", eint[0].einteilung_id);
+            .eq("einteilung_id", ziel.einteilung_id);
           (ems ?? []).forEach((e: any) => initial.add(e.mitarbeiter_id));
         }
       }
@@ -213,7 +225,7 @@ export default function Stunden() {
     return () => {
       cancelled = true;
     };
-  }, [user, date, polierPartie]);
+  }, [user, date, polierPartie, isAdmin, baustelleParam, rollenGeladen]);
 
   // Polier-Partie / Members
   useEffect(() => {
@@ -243,6 +255,8 @@ export default function Stunden() {
         setAllMembers((members as Profile[]) ?? []);
         setAllPartien([p as Partie]);
       }
+      // Rolle steht jetzt fest → Prefill darf laufen
+      setRollenGeladen(true);
     })();
   }, [user, isAdmin]);
 
@@ -306,10 +320,16 @@ export default function Stunden() {
       const m = new Map<string, { baustelle_id: string; taetigkeit: string | null }>();
       for (const uid of forUserIds) {
         const eint = await getBaustellenForMaToday(uid, date);
-        if (eint[0]) {
+        // Für den primären User die zum Dashboard-Link passende Einteilung
+        // bevorzugen — sonst die erste.
+        const ziel =
+          uid === primaryUserId && baustelleParam
+            ? eint.find((e) => e.baustelle_id === baustelleParam) ?? eint[0]
+            : eint[0];
+        if (ziel) {
           m.set(uid, {
-            baustelle_id: eint[0].baustelle_id,
-            taetigkeit: eint[0].taetigkeit,
+            baustelle_id: ziel.baustelle_id,
+            taetigkeit: ziel.taetigkeit,
           });
         }
       }
@@ -318,7 +338,7 @@ export default function Stunden() {
     return () => {
       cancelled = true;
     };
-  }, [forUserIds, date]);
+  }, [forUserIds, date, baustelleParam, primaryUserId]);
 
   // Baustelle des primary user (für Stunden-Default + Badge)
   const tagesplanungBaustelleId = primaryUserId
