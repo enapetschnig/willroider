@@ -703,8 +703,13 @@ export default function Arbeitsplanung() {
     const aT = new Date(a.iso).getTime();
     const bT = new Date(b.iso).getTime();
     const [s, e] = aT <= bT ? [aT, bT] : [bT, aT];
+    // Wochenenden + Feiertage werden übersprungen — sie sind keine wählbaren
+    // Zellen, die Auswahl läuft einfach über sie hinweg.
     const dates: string[] = [];
-    for (let t = s; t <= e; t += DAY_MS) dates.push(isoDate(new Date(t)));
+    for (let t = s; t <= e; t += DAY_MS) {
+      const iso = isoDate(new Date(t));
+      if (isWerktag(iso)) dates.push(iso);
+    }
     const cells: { workerId: string; iso: string }[] = [];
     for (const wid of workerSlice) {
       for (const iso of dates) {
