@@ -80,8 +80,9 @@ export function useSollHoursForDay(
           ];
           hours = Number(map[wd] ?? 0);
         } else {
-          // Fallback: fix 8h Mo–Fr
-          hours = isWorkday ? 8 : 0;
+          // Fallback bei fehlender Kalenderwoche: Tagesnorm Mo–Fr
+          // (gleiche Logik wie konten.ts/tagesSoll).
+          hours = isWorkday ? tagesnorm : 0;
           usedSource = "fallback";
         }
       } else if (modell === "fix_40h") {

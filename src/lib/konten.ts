@@ -161,6 +161,29 @@ export function monatsSoll(
   return total;
 }
 
+/**
+ * Summe der Tages-Soll-Werte über einen beliebigen Datumsbereich (inkl.
+ * beider Grenzen). Für Halbmonats-/Periodenauswertungen. Identische Logik
+ * wie monatsSoll, nur mit freiem from/to.
+ */
+export function periodeSoll(
+  fromIso: string,
+  toIso: string,
+  kalender: Map<string, TagessollKalender>,
+  modell: ArbeitszeitModell,
+  tagesnorm: number,
+  beschaeftigungsgrad: number
+): number {
+  let total = 0;
+  const d = new Date(fromIso + "T00:00:00");
+  const end = new Date(toIso + "T00:00:00");
+  while (d <= end) {
+    total += tagesSoll(localIso(d), kalender, modell, tagesnorm, beschaeftigungsgrad);
+    d.setDate(d.getDate() + 1);
+  }
+  return total;
+}
+
 export type UrlaubsSaldo = {
   mitarbeiter_id: string;
   saldo_tage: number;

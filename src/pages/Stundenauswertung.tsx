@@ -26,6 +26,13 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { isWerktag } from "@/lib/feiertage";
 import {
+  periodeSoll,
+  tagesSoll,
+  ladeKalenderMap,
+  type TagessollKalender,
+  type ArbeitszeitModell,
+} from "@/lib/konten";
+import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -165,28 +172,56 @@ export default function Stundenauswertung() {
     mittagDauerMin: pausen?.mittag.dauer_minuten ?? 0,
   };
 
-  // Soll-Stunden pro MA aus Konto-Settings + Werktagen
+  // Soll-Stunden pro MA aus Konto-Settings (Tagesnorm/Grad/Modell/ZA-Faktor)
   const [pks, setPks] = useState<
-    Map<string, { tagesnorm: number; beschaeftigungsgrad: number; za_faktor: number }>
+    Map<
+      string,
+      {
+        tagesnorm: number;
+        beschaeftigungsgrad: number;
+        za_faktor: number;
+        modell: ArbeitszeitModell;
+      }
+    >
   >(new Map());
   useEffect(() => {
     (async () => {
       if (memberIds.length === 0) return;
       const { data } = await supabase
         .from("profile_konten_settings")
-        .select("profile_id, tagesnorm_stunden, beschaeftigungsgrad, za_faktor")
+        .select(
+          "profile_id, tagesnorm_stunden, beschaeftigungsgrad, za_faktor, arbeitszeitmodell",
+        )
         .in("profile_id", memberIds);
-      const map = new Map<string, any>();
+      const map = new Map<
+        string,
+        {
+          tagesnorm: number;
+          beschaeftigungsgrad: number;
+          za_faktor: number;
+          modell: ArbeitszeitModell;
+        }
+      >();
       (data ?? []).forEach((r: any) => {
         map.set(r.profile_id, {
           tagesnorm: Number(r.tagesnorm_stunden ?? 8),
           beschaeftigungsgrad: Number(r.beschaeftigungsgrad ?? 1),
           za_faktor: Number(r.za_faktor ?? 1),
+          modell: (r.arbeitszeitmodell ?? "zimmerei_sommer") as ArbeitszeitModell,
         });
       });
       setPks(map);
     })();
   }, [JSON.stringify(memberIds), monat]);
+
+  // Arbeitszeitkalender (L/K-Wochen) — Basis der kalenderbasierten
+  // Soll-Berechnung. Genau dieselbe Quelle, die auch der Abschluss-RPC nutzt.
+  const [kalender, setKalender] = useState<Map<string, TagessollKalender>>(
+    new Map(),
+  );
+  useEffect(() => {
+    ladeKalenderMap(Number(monat.slice(0, 4))).then(setKalender);
+  }, [monat]);
 
   const werktage = useMemo(() => {
     // Werktage im aktiven Periode-Range — Wochenenden UND Feiertage zählen
@@ -217,12 +252,30 @@ export default function Stundenauswertung() {
         const setting = pks.get(uid);
         const tagesnorm = setting?.tagesnorm ?? 8;
         const beschgrad = setting?.beschaeftigungsgrad ?? 1;
-        const soll = werktage * tagesnorm * beschgrad;
-        const ist = list.reduce((a, t) => a + Number(t.tag.netto_stunden), 0);
-        return { uid, ma: m, list, soll, ist, diff: ist - soll };
+        const zaFaktor = setting?.za_faktor ?? 1;
+        const modell = setting?.modell ?? "zimmerei_sommer";
+        // Soll: kalenderbasiert (L/K-Wochen) über die gewählte Periode.
+        const soll = periodeSoll(from, to, kalender, modell, tagesnorm, beschgrad);
+        // Ist: gearbeitete Tage = Netto; Abwesenheit (Urlaub/Krank/SW/
+        // Feiertag) wird mit dem Tages-Soll gutgeschrieben → kein Minus für
+        // Abwesenheit, egal was als Stundenzahl erfasst wurde.
+        const ist = list.reduce((a, t) => {
+          const worked =
+            t.tag.tag_status === "baustelle" || t.tag.tag_status === "firma";
+          return (
+            a +
+            (worked
+              ? Number(t.tag.netto_stunden)
+              : tagesSoll(t.tag.datum, kalender, modell, tagesnorm, beschgrad))
+          );
+        }, 0);
+        // Differenz = ZA-wirksame Differenz (× za_faktor) — identisch zu dem,
+        // was der Abschluss-RPC bucht.
+        const diff = Math.round((ist - soll) * zaFaktor * 100) / 100;
+        return { uid, ma: m, list, soll, ist, diff };
       })
       .filter((r) => r.ma);
-  }, [tage, memberIds, members, pks, werktage]);
+  }, [tage, memberIds, members, pks, kalender, from, to]);
 
   const moveMonat = (delta: number) => {
     const [y, m] = monat.split("-").map(Number);
@@ -521,7 +574,7 @@ export default function Stundenauswertung() {
                   <TableHead className="w-8"></TableHead>
                   <TableHead>Mitarbeiter</TableHead>
                   <TableHead className="text-right">Soll</TableHead>
-                  <TableHead className="text-right">Ist (Netto)</TableHead>
+                  <TableHead className="text-right">Ist</TableHead>
                   <TableHead className="text-right">Diff</TableHead>
                   <TableHead className="text-right w-20">PDF</TableHead>
                 </TableRow>
@@ -953,7 +1006,7 @@ function DetailMa({
               <span className="font-medium">{fmtHNum(soll)} h</span>
             </div>
             <div className="flex justify-between tabular-nums">
-              <span>Ist (Netto)</span>
+              <span>Ist (inkl. Abwesenheit)</span>
               <span className="font-medium">{fmtHNum(ist)} h</span>
             </div>
             <div className="flex justify-between tabular-nums pt-1 border-t font-semibold">

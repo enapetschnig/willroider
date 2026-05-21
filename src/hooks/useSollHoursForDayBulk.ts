@@ -71,10 +71,11 @@ export function useSollHoursForDayBulk(
 
         let hours = 0;
         if (modell === "zimmerei_sommer") {
+          // Fallback bei fehlender Kalenderwoche: Tagesnorm Mo–Fr.
           hours = kalenderTagesStunden != null
             ? kalenderTagesStunden
             : isWorkday
-            ? 8
+            ? tagesnorm
             : 0;
         } else if (modell === "fix_40h") {
           hours = isWorkday ? 8 : 0;
