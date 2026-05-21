@@ -124,7 +124,9 @@ export default function Stundenauswertung() {
   const [periode, setPeriode] = useState<Periode>("voll");
   const [members, setMembers] = useState<Profile[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
+  const [baustellenMap, setBaustellenMap] = useState<Map<string, string>>(new Map());
   const [partieFilter, setPartieFilter] = useState<string>("");
+  const [ansicht, setAnsicht] = useState<"uebersicht" | "tabelle">("uebersicht");
   const [expandedUid, setExpandedUid] = useState<string | null>(null);
   const [editTag, setEditTag] = useState<{
     tag: StundenTagFull;
@@ -133,16 +135,20 @@ export default function Stundenauswertung() {
 
   useEffect(() => {
     (async () => {
-      const [{ data: m }, { data: p }] = await Promise.all([
+      const [{ data: m }, { data: p }, { data: b }] = await Promise.all([
         supabase
           .from("profiles")
           .select("*")
           .eq("is_active", true)
           .order("nachname"),
         supabase.from("partien").select("*").order("name"),
+        supabase.from("baustellen").select("id, bvh_name"),
       ]);
       setMembers((m as Profile[]) ?? []);
       setPartien((p as Partie[]) ?? []);
+      setBaustellenMap(
+        new Map(((b as any[]) ?? []).map((x) => [x.id as string, (x.bvh_name as string) ?? "Baustelle"])),
+      );
     })();
   }, []);
 
@@ -276,6 +282,67 @@ export default function Stundenauswertung() {
       })
       .filter((r) => r.ma);
   }, [tage, memberIds, members, pks, kalender, from, to]);
+
+  // Flache Tabelle: eine Zeile pro Baustellen-/Tätigkeits-Eintrag. Tage ohne
+  // Tätigkeiten (z.B. Urlaub/Krank) erscheinen als eine Zeile pro Tag.
+  const flatRows = useMemo(() => {
+    const maName = (uid: string) => {
+      const m = members.find((x) => x.id === uid);
+      return m ? `${m.nachname} ${m.vorname}`.trim() : "—";
+    };
+    type FlatRow = {
+      key: string;
+      tagFull: StundenTagFull;
+      mitarbeiterName: string;
+      datum: string;
+      status: TagStatus;
+      baustelle: string;
+      taetigkeit: string;
+      stunden: number;
+    };
+    const rows: FlatRow[] = [];
+    for (const t of tage) {
+      const name = maName(t.tag.mitarbeiter_id);
+      if (t.taetigkeiten.length > 0) {
+        for (const tt of t.taetigkeiten) {
+          rows.push({
+            key: `${t.tag.id}:${tt.id}`,
+            tagFull: t,
+            mitarbeiterName: name,
+            datum: t.tag.datum,
+            status: t.tag.tag_status,
+            baustelle: tt.baustelle_id
+              ? baustellenMap.get(tt.baustelle_id) ?? "—"
+              : "—",
+            taetigkeit:
+              (tt.taetigkeit_id &&
+                taetigkeitenStamm.find((s) => s.id === tt.taetigkeit_id)
+                  ?.bezeichnung) ||
+              tt.taetigkeit_freitext ||
+              "—",
+            stunden: Number(tt.stunden ?? 0),
+          });
+        }
+      } else {
+        rows.push({
+          key: t.tag.id,
+          tagFull: t,
+          mitarbeiterName: name,
+          datum: t.tag.datum,
+          status: t.tag.tag_status,
+          baustelle: "—",
+          taetigkeit: "—",
+          stunden: Number(t.tag.netto_stunden ?? 0),
+        });
+      }
+    }
+    rows.sort(
+      (a, b) =>
+        b.datum.localeCompare(a.datum) ||
+        a.mitarbeiterName.localeCompare(b.mitarbeiterName),
+    );
+    return rows;
+  }, [tage, members, baustellenMap, taetigkeitenStamm]);
 
   const moveMonat = (delta: number) => {
     const [y, m] = monat.split("-").map(Number);
@@ -558,8 +625,27 @@ export default function Stundenauswertung() {
         </CardContent>
       </Card>
 
+      {/* Ansicht-Umschalter */}
+      <div className="flex items-center gap-2 print:hidden">
+        <Button
+          variant={ansicht === "uebersicht" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setAnsicht("uebersicht")}
+        >
+          Mitarbeiter-Übersicht
+        </Button>
+        <Button
+          variant={ansicht === "tabelle" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setAnsicht("tabelle")}
+        >
+          Tabelle
+        </Button>
+      </div>
+
       {/* MA-Übersicht */}
-      {isLoading ? (
+      {ansicht === "uebersicht" &&
+        (isLoading ? (
         <Card>
           <CardContent className="p-4 flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Lade…
@@ -668,7 +754,91 @@ export default function Stundenauswertung() {
             </Table>
           </CardContent>
         </Card>
-      )}
+        ))}
+
+      {/* Tabellen-Ansicht: eine Zeile pro Baustellen-Eintrag */}
+      {ansicht === "tabelle" &&
+        (isLoading ? (
+          <Card>
+            <CardContent className="p-4 flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Lade…
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Datum</TableHead>
+                    <TableHead>Mitarbeiter</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Baustelle</TableHead>
+                    <TableHead>Tätigkeit</TableHead>
+                    <TableHead className="text-right">Stunden</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {flatRows.length === 0 && (
+                    <TableRow>
+                      <TableCell
+                        colSpan={6}
+                        className="text-center text-sm text-muted-foreground p-6"
+                      >
+                        Keine Einträge im Zeitraum.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {flatRows.map((r) => (
+                    <TableRow
+                      key={r.key}
+                      className="cursor-pointer hover:bg-muted/40"
+                      onClick={() =>
+                        setEditTag({
+                          tag: r.tagFull,
+                          mitarbeiterName: r.mitarbeiterName,
+                        })
+                      }
+                    >
+                      <TableCell className="text-xs tabular-nums whitespace-nowrap">
+                        {new Date(r.datum + "T00:00:00").toLocaleDateString("de-AT", {
+                          weekday: "short",
+                          day: "2-digit",
+                          month: "2-digit",
+                        })}
+                      </TableCell>
+                      <TableCell className="text-sm font-medium">
+                        {r.mitarbeiterName}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-[10px]">
+                          {STATUS_LABEL[r.status]}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm">{r.baustelle}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {r.taetigkeit}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-semibold">
+                        {fmtHNum(r.stunden)} h
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {flatRows.length > 0 && (
+                    <TableRow className="bg-muted/30 font-semibold">
+                      <TableCell colSpan={5} className="text-right text-sm">
+                        Summe
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {fmtHNum(flatRows.reduce((s, r) => s + r.stunden, 0))} h
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        ))}
 
       {/* Monatsabschluss-Section am Ende der Auswertung */}
       {isAdmin && byMa.length > 0 && (
