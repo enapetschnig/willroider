@@ -24,7 +24,13 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
 import { useToast } from "@/hooks/use-toast";
 import type { Database } from "@/integrations/supabase/types";
-import { feiertagAt, isWerktag, type FeiertagInfo } from "@/lib/feiertage";
+import {
+  feiertagAt,
+  isWerktag,
+  werktagePlus,
+  naechsterWerktag,
+  type FeiertagInfo,
+} from "@/lib/feiertage";
 import { localIso } from "@/lib/dateFmt";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -291,12 +297,9 @@ export default function Arbeitsplanung() {
 
   const workerGroups = useMemo(() => {
     const groups: { partie: Partie | null; members: Profile[] }[] = [];
-    // "Ohne Partie"-Gruppe ganz oben, wenn ungeleisteten MA existieren
-    // (sichtbar bei Filter "alle" oder "ohne")
-    if (
-      unassignedMembers.length > 0 &&
-      (filterPartie === "alle" || filterPartie === "ohne")
-    ) {
+    // "Lager"-Gruppe ganz oben — IMMER sichtbar (auch leer) als Drag-Ziel,
+    // damit MA jederzeit aus-/einsortiert werden können.
+    if (filterPartie === "alle" || filterPartie === "ohne") {
       groups.push({ partie: null, members: unassignedMembers });
     }
     const filtered =
@@ -305,9 +308,11 @@ export default function Arbeitsplanung() {
         : filterPartie === "ohne"
         ? []
         : partien.filter((p) => p.id === filterPartie);
+    // Alle gefilterten Partien rendern — auch leere, damit man MA per Drag
+    // hineinziehen kann.
     filtered.forEach((p) => {
       const members = (membersByPartie[p.id] ?? []).filter((m) => m.is_active !== false);
-      if (members.length > 0) groups.push({ partie: p, members });
+      groups.push({ partie: p, members });
     });
     return groups;
   }, [partien, membersByPartie, unassignedMembers, filterPartie]);
@@ -331,8 +336,8 @@ export default function Arbeitsplanung() {
   // Bars: pro Mitarbeiter zusammenhängende Segmente gleicher Einteilung/Fehlzeit
   type Bar = {
     workerId: string;
-    startIdx: number; // Index in dayHeaders
-    endIdx: number;   // inklusive
+    startIdx: number; // Index in dayHeaders (visueller Anfang)
+    endIdx: number;   // inklusive (visuelles Ende)
     color: string;
     label: string; // BVH-Name oder Fehlzeit-Typ-Label
     source: "einteilung" | "fehlzeit";
@@ -340,6 +345,9 @@ export default function Arbeitsplanung() {
     fehlzeitTyp?: string;
     isReadOnly: boolean;
     einteilungIds: Set<string>;
+    /** Tatsächlich belegte dayHeader-Indizes (nur Werktage) — Wochenenden/
+     *  Feiertage im visuellen Span sind NICHT enthalten. */
+    assignedIdx: Set<number>;
     /** true wenn mind. 1 Tag im Bar in der Tagesplanung manuell editiert wurde. */
     manuell: boolean;
   };
@@ -350,26 +358,40 @@ export default function Arbeitsplanung() {
       for (const m of g.members) {
         const bars: Bar[] = [];
         let cur: Bar | null = null;
+        // Nicht-Werktag-Indizes seit dem letzten echten Assignment — werden
+        // erst dann in den Bar übernommen, wenn er danach fortgesetzt wird.
+        let pendingGap: number[] = [];
         for (let i = 0; i < dayHeaders.length; i++) {
           const iso = isoDate(dayHeaders[i].date);
           const a = assignments.get(cellKey(m.id, iso));
+          const werktag = isWerktag(dayHeaders[i].date);
           if (!a) {
-            cur = null;
+            if (cur && !werktag) {
+              // Sa/So/Feiertag mit offenem Bar → evtl. Brücke, noch nicht committen
+              pendingGap.push(i);
+            } else {
+              // echte Lücke (Werktag ohne Einteilung) → Bar endet
+              cur = null;
+              pendingGap = [];
+            }
             continue;
           }
-          // Kontinuitäts-Schlüssel: gleiche Quelle + gleiche Baustelle/Fehlzeit
           const key =
             a.source === "fehlzeit"
               ? `f:${a.fehlzeitTyp ?? ""}`
               : `e:${a.baustelleId ?? "x"}`;
-          if (cur && (cur as any)._key === key && cur.endIdx === i - 1) {
+          if (cur && (cur as any)._key === key) {
+            // Fortsetzung — Wochenend-Lücke in den visuellen Span aufnehmen
+            pendingGap = [];
             cur.endIdx = i;
+            cur.assignedIdx.add(i);
             if (a.einteilungId) cur.einteilungIds.add(a.einteilungId);
             cur.isReadOnly = cur.isReadOnly && !!a.isReadOnly;
             if (a.manuell) cur.manuell = true;
             continue;
           }
           // Neuer Bar
+          pendingGap = [];
           const color =
             a.source === "fehlzeit"
               ? FEHLZEIT_COLOR[a.fehlzeitTyp ?? "U"] ?? "#6b7280"
@@ -389,6 +411,7 @@ export default function Arbeitsplanung() {
             fehlzeitTyp: a.fehlzeitTyp,
             isReadOnly: !!a.isReadOnly,
             einteilungIds: new Set(a.einteilungId ? [a.einteilungId] : []),
+            assignedIdx: new Set([i]),
             manuell: !!a.manuell,
           };
           (cur as any)._key = key;
@@ -399,6 +422,272 @@ export default function Arbeitsplanung() {
     }
     return result;
   }, [workerGroups, dayHeaders, assignments]);
+
+  // ─── Bar-Drag: Blöcke verschieben / verlängern / verkürzen ──────────────
+  const dayIsoByIdx = useMemo(
+    () => dayHeaders.map((d) => isoDate(d.date)),
+    [dayHeaders],
+  );
+
+  type BarDrag = {
+    bar: Bar;
+    mode: "move" | "resize-l" | "resize-r";
+    pointerStartIdx: number;
+    pointerStart: { x: number; y: number };
+    active: boolean;
+    preview: { workerId: string; cellIsos: string[] } | null;
+  };
+  const [barDrag, setBarDrag] = useState<BarDrag | null>(null);
+
+  /** Werktag-ISOs zwischen zwei Daten (inklusive). */
+  const werktageZwischen = (aIso: string, bIso: string): string[] => {
+    const res: string[] = [];
+    const d = new Date(aIso + "T00:00:00");
+    const end = new Date(bIso + "T00:00:00");
+    while (d <= end) {
+      if (isWerktag(d)) res.push(isoDate(d));
+      d.setDate(d.getDate() + 1);
+    }
+    return res;
+  };
+
+  const onBarPointerDown = (
+    e: React.PointerEvent,
+    bar: Bar,
+    mode: BarDrag["mode"],
+  ) => {
+    if (!isAdmin || bar.isReadOnly) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const row = (e.currentTarget as HTMLElement).closest(
+      "[data-row='1']",
+    ) as HTMLElement | null;
+    let idx = bar.startIdx;
+    if (row) {
+      const rect = row.getBoundingClientRect();
+      idx = Math.max(
+        0,
+        Math.min(dayHeaders.length - 1, Math.floor((e.clientX - rect.left) / dayWidth)),
+      );
+    }
+    setBarDrag({
+      bar,
+      mode,
+      pointerStartIdx: idx,
+      pointerStart: { x: e.clientX, y: e.clientY },
+      active: false,
+      preview: null,
+    });
+  };
+
+  /** Wendet einen abgeschlossenen Bar-Drag an: alte Zellen löschen, neue setzen. */
+  const applyBarDrag = async (bd: BarDrag) => {
+    if (!bd.preview) return;
+    const bar = bd.bar;
+    const alteCells = [...bar.assignedIdx].map((i) => ({
+      workerId: bar.workerId,
+      iso: dayIsoByIdx[i],
+    }));
+    const neueCells = bd.preview.cellIsos.map((iso) => ({
+      workerId: bd.preview!.workerId,
+      iso,
+    }));
+    const sameSet =
+      alteCells.length === neueCells.length &&
+      alteCells.every((c) =>
+        neueCells.some((n) => n.workerId === c.workerId && n.iso === c.iso),
+      );
+    if (sameSet) return;
+    await clearCellsRaw(alteCells);
+    if (bar.source === "einteilung" && bar.baustelleId) {
+      await assignBaustelle(neueCells, bar.baustelleId, {
+        wochenendeIncluden: false,
+        manuelleUeberschreiben: true,
+      });
+    } else if (bar.source === "fehlzeit" && bar.fehlzeitTyp) {
+      await setFehlzeit(neueCells, bar.fehlzeitTyp);
+    }
+    loadAssignments();
+  };
+
+  // Globales Drag-Tracking für Bar-Move/Resize
+  useEffect(() => {
+    if (!barDrag) return;
+
+    const findAt = (x: number, y: number): { workerId: string; idx: number } | null => {
+      const stack = (document.elementsFromPoint(x, y) as HTMLElement[]) ?? [];
+      for (const el of stack) {
+        const row = el.closest?.("[data-row='1']") as HTMLElement | null;
+        if (row && row.dataset.worker) {
+          const rect = row.getBoundingClientRect();
+          const idx = Math.max(
+            0,
+            Math.min(dayHeaders.length - 1, Math.floor((x - rect.left) / dayWidth)),
+          );
+          return { workerId: row.dataset.worker, idx };
+        }
+      }
+      return null;
+    };
+
+    const computePreview = (
+      workerId: string,
+      idx: number,
+    ): BarDrag["preview"] => {
+      const bar = barDrag.bar;
+      const assigned = [...bar.assignedIdx].sort((a, b) => a - b);
+      const count = assigned.length;
+      if (count === 0) return null;
+      const firstIso = dayIsoByIdx[assigned[0]];
+      const lastIso = dayIsoByIdx[assigned[count - 1]];
+      if (barDrag.mode === "move") {
+        const delta = idx - barDrag.pointerStartIdx;
+        const startIdx = Math.max(
+          0,
+          Math.min(dayHeaders.length - 1, assigned[0] + delta),
+        );
+        let startIso = dayIsoByIdx[startIdx];
+        if (!isWerktag(startIso)) startIso = isoDate(naechsterWerktag(startIso));
+        return { workerId, cellIsos: werktagePlus(startIso, count) };
+      }
+      if (barDrag.mode === "resize-r") {
+        let curIso = dayIsoByIdx[idx];
+        if (new Date(curIso) < new Date(firstIso)) curIso = firstIso;
+        const cells = werktageZwischen(firstIso, curIso);
+        return { workerId: bar.workerId, cellIsos: cells.length ? cells : [firstIso] };
+      }
+      // resize-l
+      let curIso = dayIsoByIdx[idx];
+      if (new Date(curIso) > new Date(lastIso)) curIso = lastIso;
+      const cells = werktageZwischen(curIso, lastIso);
+      return { workerId: bar.workerId, cellIsos: cells.length ? cells : [lastIso] };
+    };
+
+    const onMove = (e: PointerEvent) => {
+      const isActive =
+        barDrag.active ||
+        Math.abs(e.clientX - barDrag.pointerStart.x) > 4 ||
+        Math.abs(e.clientY - barDrag.pointerStart.y) > 4;
+      if (!isActive) return;
+      const at = findAt(e.clientX, e.clientY);
+      if (!at) {
+        setBarDrag((cur) => (cur ? { ...cur, active: true } : cur));
+        return;
+      }
+      const preview = computePreview(at.workerId, at.idx);
+      setBarDrag((cur) => (cur ? { ...cur, active: true, preview } : cur));
+    };
+
+    const onUp = (e: PointerEvent) => {
+      const bd = barDrag;
+      setBarDrag(null);
+      if (!bd) return;
+      if (!bd.active || !bd.preview) {
+        // reiner Klick (keine Bewegung) → CellPopover für die Block-Zellen
+        const cells = [...bd.bar.assignedIdx].map((i) => ({
+          workerId: bd.bar.workerId,
+          iso: dayIsoByIdx[i],
+        }));
+        setSelection(new Set(cells.map((c) => cellKey(c.workerId, c.iso))));
+        setPopover({
+          workerId: bd.bar.workerId,
+          cells,
+          anchor: { x: e.clientX, y: e.clientY },
+        });
+        return;
+      }
+      void applyBarDrag(bd);
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+    return () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [barDrag, dayHeaders, dayIsoByIdx]);
+
+  // ─── MA-Namen-Drag: Mitarbeiter zwischen Partien / Lager verschieben ────
+  type NameDrag = {
+    member: Profile;
+    fromPartieId: string | null;
+    pointerStart: { x: number; y: number };
+    active: boolean;
+    pos: { x: number; y: number };
+    /** string = Partie-Ziel, null = Lager, undefined = kein gültiges Ziel */
+    overPartieId: string | null | undefined;
+  };
+  const [nameDrag, setNameDrag] = useState<NameDrag | null>(null);
+  const draggedRecentlyRef = useRef(false);
+
+  const onNamePointerDown = (
+    e: React.PointerEvent,
+    member: Profile,
+    fromPartieId: string | null,
+  ) => {
+    if (!isAdmin) return;
+    setNameDrag({
+      member,
+      fromPartieId,
+      pointerStart: { x: e.clientX, y: e.clientY },
+      active: false,
+      pos: { x: e.clientX, y: e.clientY },
+      overPartieId: undefined,
+    });
+  };
+
+  useEffect(() => {
+    if (!nameDrag) return;
+    const findPartieDrop = (x: number, y: number): string | null | undefined => {
+      const stack = (document.elementsFromPoint(x, y) as HTMLElement[]) ?? [];
+      for (const el of stack) {
+        const drop = el.closest?.("[data-partie-drop]") as HTMLElement | null;
+        if (drop) {
+          const v = drop.dataset.partieDrop ?? "";
+          return v === "lager" ? null : v;
+        }
+      }
+      return undefined;
+    };
+    const onMove = (e: PointerEvent) => {
+      const isActive =
+        nameDrag.active ||
+        Math.abs(e.clientX - nameDrag.pointerStart.x) > 4 ||
+        Math.abs(e.clientY - nameDrag.pointerStart.y) > 4;
+      if (!isActive) return;
+      const over = findPartieDrop(e.clientX, e.clientY);
+      setNameDrag((cur) =>
+        cur
+          ? { ...cur, active: true, pos: { x: e.clientX, y: e.clientY }, overPartieId: over }
+          : cur,
+      );
+    };
+    const onUp = () => {
+      const nd = nameDrag;
+      setNameDrag(null);
+      if (!nd || !nd.active) return;
+      draggedRecentlyRef.current = true;
+      setTimeout(() => {
+        draggedRecentlyRef.current = false;
+      }, 400);
+      if (nd.overPartieId === undefined) return; // kein gültiges Ziel
+      const ziel = nd.overPartieId; // string | null
+      if ((ziel ?? null) === (nd.fromPartieId ?? null)) return; // unverändert
+      assignMemberToPartie(nd.member.id, ziel);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+    return () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nameDrag]);
 
   // Liefert das Cartesian-Produkt zwischen zwei Zellen — über mehrere Mitarbeiter UND Tage
   const makeRange = (
@@ -1133,7 +1422,7 @@ export default function Arbeitsplanung() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="alle">Alle Partien</SelectItem>
-                <SelectItem value="ohne">Ohne Partie</SelectItem>
+                <SelectItem value="ohne">Lager</SelectItem>
                 {partien.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     {p.name}
@@ -1216,8 +1505,19 @@ export default function Arbeitsplanung() {
             </div>
             {workerGroups.map((g) => {
               const polier = polierName(g.partie);
+              const istDropZiel =
+                !!nameDrag?.active &&
+                (g.partie
+                  ? nameDrag.overPartieId === g.partie.id
+                  : nameDrag.overPartieId === null);
               return (
-                <div key={g.partie?.id ?? "ohne"}>
+                <div
+                  key={g.partie?.id ?? "ohne"}
+                  data-partie-drop={g.partie?.id ?? "lager"}
+                  className={
+                    istDropZiel ? "ring-2 ring-primary ring-inset bg-primary/5" : ""
+                  }
+                >
                   <PolierHeader
                     partie={g.partie}
                     polier={polier}
@@ -1230,19 +1530,41 @@ export default function Arbeitsplanung() {
                     onEditPartie={openPartieEditor}
                     isAdmin={isAdmin}
                   />
+                  {g.members.length === 0 && (
+                    <div
+                      className="border-b flex items-center px-2 text-[10px] italic text-muted-foreground"
+                      style={{ height: 28 }}
+                    >
+                      {nameDrag?.active ? "Hierher ziehen …" : "— leer —"}
+                    </div>
+                  )}
                   {g.members.map((m) => {
                     const row = (
                       <button
                         type="button"
+                        onPointerDown={(e) =>
+                          isAdmin && onNamePointerDown(e, m, g.partie?.id ?? null)
+                        }
+                        onClickCapture={(e) => {
+                          if (draggedRecentlyRef.current) {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            draggedRecentlyRef.current = false;
+                          }
+                        }}
                         className={`border-b flex items-center gap-2 px-2 text-[11px] w-full text-left transition ${
                           isAdmin
-                            ? "hover:bg-muted cursor-pointer"
+                            ? "hover:bg-muted cursor-grab active:cursor-grabbing"
                             : "cursor-default"
+                        } ${
+                          nameDrag?.active && nameDrag.member.id === m.id
+                            ? "opacity-40"
+                            : ""
                         }`}
-                        style={{ height: 28 }}
+                        style={{ height: 28, touchAction: isAdmin ? "none" : undefined }}
                         title={
                           isAdmin
-                            ? `${m.vorname} ${m.nachname} · klick zum Verschieben/Entfernen`
+                            ? `${m.vorname} ${m.nachname} · ziehen zum Verschieben, klicken für Menü`
                             : `${m.vorname} ${m.nachname}`
                         }
                       >
@@ -1437,24 +1759,66 @@ export default function Arbeitsplanung() {
                               days === 1
                                 ? startDate.toLocaleDateString("de-AT")
                                 : `${startDate.toLocaleDateString("de-AT")} – ${endDate.toLocaleDateString("de-AT")}`;
+                            const greifbar = isAdmin && !bar.isReadOnly;
+                            const wirdGezogen =
+                              barDrag?.active && barDrag.bar === bar;
                             return (
                               <div
                                 key={bi}
-                                className="absolute pointer-events-none rounded-md flex items-center px-1.5 text-[10px] font-semibold text-white truncate shadow-sm"
+                                className="absolute rounded-md flex items-center px-1.5 text-[10px] font-semibold text-white truncate shadow-sm"
                                 style={{
                                   left,
                                   width,
                                   top: 2,
                                   height: 24,
                                   background: bar.color,
-                                  opacity: bar.isReadOnly ? 0.6 : 1,
+                                  opacity: bar.isReadOnly
+                                    ? 0.6
+                                    : wirdGezogen
+                                    ? 0.35
+                                    : 1,
+                                  pointerEvents: greifbar ? "auto" : "none",
                                 }}
                                 title={`${bar.label} · ${dateRange}${bar.isReadOnly ? " (eingereicht)" : ""}${bar.manuell ? " · Tagesplanung manuell angepasst" : ""}`}
                               >
-                                <span className="truncate">{width < 60 ? (bar.label.slice(0, 2)) : bar.label}</span>
+                                {greifbar && (
+                                  <>
+                                    {/* Resize-Handle links */}
+                                    <div
+                                      onPointerDown={(e) =>
+                                        onBarPointerDown(e, bar, "resize-l")
+                                      }
+                                      className="absolute left-0 top-0 bottom-0"
+                                      style={{ width: 8, cursor: "ew-resize" }}
+                                    />
+                                    {/* Move-Body */}
+                                    <div
+                                      onPointerDown={(e) =>
+                                        onBarPointerDown(e, bar, "move")
+                                      }
+                                      className="absolute top-0 bottom-0"
+                                      style={{
+                                        left: 8,
+                                        right: 8,
+                                        cursor: "grab",
+                                      }}
+                                    />
+                                    {/* Resize-Handle rechts */}
+                                    <div
+                                      onPointerDown={(e) =>
+                                        onBarPointerDown(e, bar, "resize-r")
+                                      }
+                                      className="absolute right-0 top-0 bottom-0"
+                                      style={{ width: 8, cursor: "ew-resize" }}
+                                    />
+                                  </>
+                                )}
+                                <span className="truncate pointer-events-none">
+                                  {width < 60 ? bar.label.slice(0, 2) : bar.label}
+                                </span>
                                 {bar.manuell && (
                                   <span
-                                    className="ml-1 text-yellow-300 drop-shadow"
+                                    className="ml-1 text-yellow-300 drop-shadow pointer-events-none"
                                     aria-label="Tagesplanung manuell angepasst"
                                   >
                                     ★
@@ -1463,6 +1827,33 @@ export default function Arbeitsplanung() {
                               </div>
                             );
                           })}
+                          {/* Ghost-Vorschau beim Bar-Drag */}
+                          {barDrag?.active &&
+                            barDrag.preview &&
+                            barDrag.preview.workerId === m.id &&
+                            (() => {
+                              const isos = barDrag.preview.cellIsos;
+                              if (isos.length === 0) return null;
+                              const idxs = isos
+                                .map((iso) => dayIsoByIdx.indexOf(iso))
+                                .filter((x) => x >= 0);
+                              if (idxs.length === 0) return null;
+                              const gStart = Math.min(...idxs);
+                              const gEnd = Math.max(...idxs);
+                              return (
+                                <div
+                                  className="absolute rounded-md border-2 border-dashed pointer-events-none z-20"
+                                  style={{
+                                    left: gStart * dayWidth + 1,
+                                    width: (gEnd - gStart + 1) * dayWidth - 2,
+                                    top: 2,
+                                    height: 24,
+                                    background: `${barDrag.bar.color}55`,
+                                    borderColor: barDrag.bar.color,
+                                  }}
+                                />
+                              );
+                            })()}
                         </div>
                       );
                     })}
@@ -1664,12 +2055,55 @@ export default function Arbeitsplanung() {
 
       {/* Partie-Editor (anlegen / bearbeiten) */}
       <Dialog open={partieDialog} onOpenChange={(o) => !o && closePartieEditor()}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              {editingPartieId ? "Partie bearbeiten" : "Neue Partie anlegen"}
-            </DialogTitle>
+            <DialogTitle>Partien verwalten</DialogTitle>
           </DialogHeader>
+
+          {/* Bestehende Partien — bearbeiten / löschen */}
+          {partien.length > 0 && (
+            <div className="space-y-1">
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Bestehende Partien
+              </div>
+              {partien.map((p) => (
+                <div
+                  key={p.id}
+                  className={`flex items-center gap-2 rounded-md border px-2 py-1.5 ${
+                    editingPartieId === p.id ? "ring-2 ring-primary" : ""
+                  }`}
+                >
+                  <span
+                    className="h-3 w-3 rounded-full shrink-0"
+                    style={{ background: p.farbcode }}
+                  />
+                  <span className="flex-1 text-sm truncate">{p.name}</span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 w-7 p-0"
+                    onClick={() => openPartieEditor(p)}
+                    title="Bearbeiten"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 w-7 p-0 text-destructive"
+                    onClick={() => deletePartieFromPlan(p.id, p.name)}
+                    title="Löschen"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="border-t pt-3 text-xs uppercase tracking-wide font-semibold text-muted-foreground">
+            {editingPartieId ? "Partie bearbeiten" : "Neue Partie anlegen"}
+          </div>
           <div className="space-y-3">
             <div>
               <label className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -1734,6 +2168,27 @@ export default function Arbeitsplanung() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Schwebender Ghost beim MA-Namen-Drag */}
+      {nameDrag?.active && (
+        <div
+          className="fixed z-50 pointer-events-none rounded-md bg-primary text-primary-foreground text-[11px] font-semibold px-2 py-1 shadow-lg"
+          style={{
+            left: nameDrag.pos.x + 12,
+            top: nameDrag.pos.y + 12,
+          }}
+        >
+          {nameDrag.member.nachname} {nameDrag.member.vorname}
+          {nameDrag.overPartieId !== undefined && (
+            <span className="ml-1.5 font-normal opacity-80">
+              →{" "}
+              {nameDrag.overPartieId === null
+                ? "Lager"
+                : partien.find((p) => p.id === nameDrag.overPartieId)?.name ?? "?"}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1801,7 +2256,7 @@ function PolierHeader({
               )}
             </div>
           ) : (
-            <span className="truncate block">{partie?.name ?? "Ohne Partie"}</span>
+            <span className="truncate block">{partie?.name ?? "Lager"}</span>
           )}
         </div>
         <span className="text-[10px] opacity-70 shrink-0">{bvhCount} BVH</span>
@@ -1919,7 +2374,7 @@ function MemberActionPopover({
             </span>
           ) : (
             <span className="ml-1.5 font-normal text-amber-700 italic">
-              · ohne Partie
+              · Lager
             </span>
           )}
         </div>
@@ -2428,7 +2883,7 @@ function MobileWorkerPlan({
               color: g.partie?.farbcode ?? undefined,
             }}
           >
-            <span className="flex-1 truncate">{g.partie?.name ?? "Ohne Partie"}</span>
+            <span className="flex-1 truncate">{g.partie?.name ?? "Lager"}</span>
             {isAdmin && g.partie && onEditPartie && (
               <button
                 onClick={() => onEditPartie(g.partie!)}
