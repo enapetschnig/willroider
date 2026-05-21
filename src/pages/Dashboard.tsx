@@ -25,6 +25,13 @@ import {
 import type { Database } from "@/integrations/supabase/types";
 import { BerichteHintCard } from "@/components/dashboard/BerichteHintCard";
 import { NeuerLohnzettelHintCard } from "@/components/dashboard/NeuerLohnzettelHintCard";
+import { TagesplanPreview } from "@/components/TagesplanPreview";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 
@@ -85,6 +92,7 @@ export default function Dashboard() {
   >([]);
   const [heuteEinteilungen, setHeuteEinteilungen] = useState<HeuteEintrag[]>([]);
   const [heuteFehlzeit, setHeuteFehlzeit] = useState<string | null>(null);
+  const [planOpen, setPlanOpen] = useState(false);
 
   useEffect(() => {
     supabase
@@ -581,6 +589,14 @@ export default function Dashboard() {
                 })}
               </span>
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={() => setPlanOpen(true)}
+            >
+              <FileText className="h-4 w-4 mr-1.5" /> Tagesplan ansehen
+            </Button>
 
             {heuteFehlzeit ? (
               <div className="text-sm">
@@ -673,6 +689,16 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       )}
+
+      {/* Tagesplan-Vorschau im Dialog */}
+      <Dialog open={planOpen} onOpenChange={setPlanOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Tagesplan</DialogTitle>
+          </DialogHeader>
+          <TagesplanPreview datum={localIso()} />
+        </DialogContent>
+      </Dialog>
 
       {/* Schnellzugriff */}
       <div>

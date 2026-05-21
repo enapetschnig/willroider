@@ -1801,14 +1801,14 @@ function FahrzeugPicker({
   const [sel, setSel] = useState<Set<string>>(new Set(selected));
   useEffect(() => setSel(new Set(selected)), [selected.join(",")]); // eslint-disable-line
 
+  // Jeder Toggle speichert sofort — wie der MA-Picker. Kein „Übernehmen" nötig.
   const toggle = (id: string) => {
     const next = new Set(sel);
     if (next.has(id)) next.delete(id);
     else next.add(id);
     setSel(next);
+    onChange(Array.from(next));
   };
-
-  const apply = () => onChange(Array.from(sel));
 
   const byKat = useMemo(() => {
     const out = new Map<string, Fahrzeug[]>();
@@ -1850,9 +1850,9 @@ function FahrzeugPicker({
           </div>
         </div>
       ))}
-      <Button size="sm" onClick={apply} className="w-full">
-        Übernehmen
-      </Button>
+      <div className="text-[10px] text-muted-foreground text-center pt-1">
+        Auswahl wird automatisch gespeichert
+      </div>
     </div>
   );
 }
