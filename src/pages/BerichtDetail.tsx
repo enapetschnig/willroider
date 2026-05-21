@@ -59,7 +59,12 @@ import type {
   BerichtStatus,
   BerichtTyp,
 } from "@/integrations/supabase/types";
-import { useBericht, useSetBerichtStatus, useUpdateBerichtFelder } from "@/hooks/useBericht";
+import {
+  useBericht,
+  useSetBerichtStatus,
+  useUpdateBerichtFelder,
+  useDeleteBericht,
+} from "@/hooks/useBericht";
 import {
   ladeVorausfuellung,
   uebernehmeVorausfuellung,
@@ -1329,10 +1334,35 @@ function StatusBar({
   onChange: () => void;
 }) {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const statusMut = useSetBerichtStatus();
   const updateMut = useUpdateBerichtFelder();
+  const deleteMut = useDeleteBericht();
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+
+  const loeschen = () => {
+    if (
+      !window.confirm(
+        "Bericht endgültig löschen? Alle Mitarbeiter-, Tätigkeits- und " +
+          "Aufmaß-Zeilen, Fotos und das PDF werden mitgelöscht. Das kann " +
+          "nicht rückgängig gemacht werden.",
+      )
+    )
+      return;
+    deleteMut.mutate(bericht.id, {
+      onSuccess: () => {
+        toast({ title: "Bericht gelöscht" });
+        navigate("/berichte");
+      },
+      onError: (e) =>
+        toast({
+          variant: "destructive",
+          title: "Fehler beim Löschen",
+          description: (e as Error).message,
+        }),
+    });
+  };
 
   // PDF-Signed-URL ziehen wenn freigegeben
   useEffect(() => {
@@ -1533,6 +1563,19 @@ function StatusBar({
                 <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Zurück auf Entwurf
               </Button>
             )}
+          {isAdmin && (
+            <Button
+              onClick={loeschen}
+              disabled={deleteMut.isPending}
+              variant="ghost"
+              className="text-destructive hover:bg-destructive/10"
+            >
+              {deleteMut.isPending && (
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              )}
+              <Trash2 className="h-4 w-4 mr-1.5" /> Bericht löschen
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>

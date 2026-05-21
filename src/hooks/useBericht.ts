@@ -107,6 +107,58 @@ export function useUpdateBerichtFelder() {
   });
 }
 
+/** Löscht einen kompletten Bericht inkl. Children (CASCADE), Foto-/PDF-
+ *  Dokumente und deren Storage-Dateien. Nur für Admin (RLS). */
+export function useDeleteBericht() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      // Foto- + PDF-Dokumente einsammeln
+      const [{ data: fotos }, { data: b }] = await Promise.all([
+        supabase.from("bericht_fotos").select("dokument_id").eq("bericht_id", id),
+        supabase
+          .from("berichte")
+          .select("pdf_dokument_id")
+          .eq("id", id)
+          .maybeSingle(),
+      ]);
+      const dokIds = [
+        ...((fotos ?? []) as any[]).map((f) => f.dokument_id).filter(Boolean),
+        ...((b as any)?.pdf_dokument_id ? [(b as any).pdf_dokument_id] : []),
+      ];
+      // Storage-Dateien best-effort entfernen
+      if (dokIds.length > 0) {
+        const { data: docs } = await supabase
+          .from("dokumente")
+          .select("storage_path")
+          .in("id", dokIds);
+        const paths = ((docs ?? []) as any[])
+          .map((d) => d.storage_path)
+          .filter(Boolean);
+        if (paths.length > 0) {
+          try {
+            await supabase.storage.from("baustellen").remove(paths);
+          } catch {
+            /* Storage-Cleanup ist best-effort — blockiert das Löschen nicht */
+          }
+        }
+      }
+      // Bericht löschen — Children (bericht_mitarbeiter/-taetigkeiten/-aufmass/
+      // -fotos/-aenderungen) werden via ON DELETE CASCADE mitgelöscht.
+      const { error } = await supabase.from("berichte").delete().eq("id", id);
+      if (error) throw error;
+      // Verwaiste dokumente-Zeilen aufräumen
+      if (dokIds.length > 0) {
+        await supabase.from("dokumente").delete().in("id", dokIds);
+      }
+    },
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ["bericht", id] });
+      qc.invalidateQueries({ queryKey: ["berichte_list"] });
+    },
+  });
+}
+
 export function useSetBerichtStatus() {
   const qc = useQueryClient();
   return useMutation({
