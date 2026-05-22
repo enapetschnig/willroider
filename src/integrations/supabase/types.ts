@@ -42,6 +42,7 @@ export type BuchungStatus =
 // Berichte
 export type BerichtTyp = 'bautagesbericht' | 'regiebericht';
 export type BerichtStatus = 'entwurf' | 'eingereicht' | 'freigegeben' | 'archiviert';
+export type StundenBerichtStatus = 'offen' | 'unterschrieben' | 'bestaetigt' | 'versendet';
 export type UrlaubModell = 'fix_datum' | 'eintrittsdatum' | 'monatlich';
 export type UrlaubsantragStatus = 'offen' | 'genehmigt' | 'abgelehnt' | 'storniert';
 
@@ -764,6 +765,53 @@ export type Database = {
         Update: Partial<Database['public']['Tables']['stunden_taetigkeiten']['Row']>;
         Relationships: [];
       };
+      stunden_berichte: {
+        Row: {
+          id: string;
+          mitarbeiter_id: string;
+          jahr: number;
+          monat: number;
+          teil: number;
+          von_datum: string;
+          bis_datum: string;
+          status: StundenBerichtStatus;
+          snapshot: Record<string, unknown>;
+          erstellt_am: string;
+          unterschrift_data: string | null;
+          unterschrieben_am: string | null;
+          bestaetigt_von: string | null;
+          bestaetigt_am: string | null;
+          versendet_am: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['stunden_berichte']['Row']> & {
+          mitarbeiter_id: string;
+          jahr: number;
+          monat: number;
+          teil: number;
+          von_datum: string;
+          bis_datum: string;
+        };
+        Update: Partial<Database['public']['Tables']['stunden_berichte']['Row']>;
+        Relationships: [];
+      };
+      stunden_bericht_aenderungen: {
+        Row: {
+          id: string;
+          stunden_bericht_id: string;
+          autor_id: string | null;
+          zeitpunkt: string;
+          art: string;
+          details: string | null;
+        };
+        Insert: Partial<Database['public']['Tables']['stunden_bericht_aenderungen']['Row']> & {
+          stunden_bericht_id: string;
+          art: string;
+        };
+        Update: Partial<Database['public']['Tables']['stunden_bericht_aenderungen']['Row']>;
+        Relationships: [];
+      };
       stunden_zulagen: {
         Row: {
           id: string;
@@ -1002,6 +1050,7 @@ export type Database = {
       buchung_status: BuchungStatus;
       bericht_typ: BerichtTyp;
       bericht_status: BerichtStatus;
+      stunden_bericht_status: StundenBerichtStatus;
     };
     CompositeTypes: { [_ in never]: never };
   };
