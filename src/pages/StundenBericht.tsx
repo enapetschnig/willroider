@@ -25,6 +25,7 @@ import {
   Unlock,
   AlertTriangle,
   History,
+  FileText,
 } from "lucide-react";
 import type { Database, TagStatus, BuchungStatus, StundenBerichtStatus } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
@@ -40,6 +41,10 @@ import { AdminTagEditModal } from "@/components/admin/AdminTagEditModal";
 import { UnterschriftDialog } from "@/components/UnterschriftDialog";
 import { useZulagenTypen } from "@/hooks/useStammdatenStunden";
 import { aggregiereZulagen } from "@/lib/stundenAggregation";
+import {
+  makeBaustellenstundenberichtPdf,
+  type BsbPdfRow,
+} from "@/lib/baustellenstundenberichtPdf";
 
 const STATUS_LABEL: Record<TagStatus, string> = {
   baustelle: "Baustelle",
@@ -166,6 +171,7 @@ export default function StundenBericht() {
 
   const [editTag, setEditTag] = useState<StundenTagFull | null>(null);
   const [signOpen, setSignOpen] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   const geaendert = useMemo(
     () => geaenderteTage(bericht?.snapshot as BerichtSnapshot | undefined, tage),
@@ -316,6 +322,85 @@ export default function StundenBericht() {
       toast({ title: "Wieder geöffnet" });
     } catch (e) {
       toast({ variant: "destructive", title: "Fehler", description: (e as Error).message });
+    }
+  };
+
+  const handlePdf = async () => {
+    setPdfBusy(true);
+    try {
+      const pdfRows: BsbPdfRow[] = rows.map((row) => {
+        const arbeit = row.art === "baustelle" || row.art === "firma";
+        return {
+          kostenstelle: row.kostenstelle,
+          baustelle: row.label,
+          zellen: periodeTage.map((d) => {
+            const v = row.perDay.get(d.iso);
+            return v === undefined
+              ? ""
+              : arbeit
+              ? fmtHNum(v)
+              : ABWESEND_KUERZEL[row.art] ?? "✓";
+          }),
+          summe: arbeit
+            ? fmtHNum([...row.perDay.values()].reduce((s, v) => s + v, 0))
+            : "",
+        };
+      });
+      const summenZeile = periodeTage.map((d) => {
+        let s = 0;
+        for (const r of rows) {
+          if (r.art === "baustelle" || r.art === "firma")
+            s += r.perDay.get(d.iso) ?? 0;
+        }
+        return s > 0 ? fmtHNum(s) : "";
+      });
+      const summeGesamt = fmtHNum(
+        rows
+          .filter((r) => r.art === "baustelle" || r.art === "firma")
+          .reduce(
+            (s, r) => s + [...r.perDay.values()].reduce((a, v) => a + v, 0),
+            0,
+          ),
+      );
+      const doc = await makeBaustellenstundenberichtPdf({
+        teilLabel:
+          bericht.teil === 1
+            ? "Teil I v. 1. bis 16."
+            : "Teil II v. 17. bis Monatsende",
+        monat: monatName,
+        jahr: bericht.jahr,
+        name: maName,
+        persNr: bericht.mitarbeiter?.pers_nr ?? "",
+        eintritt: bericht.eintrittsdatum
+          ? new Date(bericht.eintrittsdatum).toLocaleDateString("de-AT")
+          : "",
+        austritt: "",
+        tage: periodeTage.map((d) => d.tag),
+        tageIso: periodeTage.map((d) => d.iso),
+        geaendert,
+        rows: pdfRows,
+        summenZeile,
+        summeGesamt,
+        zulagen: zulagenAgg.map(
+          (z) => `${z.bezeichnung} ${fmtHNum(z.summe_stunden)} h`,
+        ),
+        unterschrift: bericht.unterschrift_data,
+        unterschriebenAm: bericht.unterschrieben_am
+          ? new Date(bericht.unterschrieben_am).toLocaleDateString("de-AT")
+          : null,
+        bestaetigtAm: bericht.bestaetigt_am
+          ? new Date(bericht.bestaetigt_am).toLocaleDateString("de-AT")
+          : null,
+      });
+      window.open(doc.output("bloburl") as unknown as string, "_blank");
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "PDF-Fehler",
+        description: (e as Error).message,
+      });
+    } finally {
+      setPdfBusy(false);
     }
   };
 
@@ -611,6 +696,19 @@ export default function StundenBericht() {
 
       {/* Aktionen */}
       <div className="flex flex-wrap gap-2">
+        <Button
+          variant="outline"
+          onClick={handlePdf}
+          disabled={pdfBusy}
+          className="min-w-[140px]"
+        >
+          {pdfBusy ? (
+            <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+          ) : (
+            <FileText className="h-4 w-4 mr-1.5" />
+          )}
+          PDF ansehen
+        </Button>
         {kannUnterschreiben && (
           <Button onClick={() => setSignOpen(true)} className="flex-1 min-w-[200px] h-12">
             <PenLine className="h-4 w-4 mr-1.5" />
