@@ -81,6 +81,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { localIso } from "@/lib/dateFmt";
 import { BaustelleCombobox } from "@/components/stunden/BaustelleCombobox";
 import { useTagesplanung, type EinteilungMitDetails } from "@/hooks/useTagesplanung";
+import { useTaetigkeitenStamm } from "@/hooks/useStammdatenStunden";
 import type { Database } from "@/integrations/supabase/types";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -133,6 +134,7 @@ export default function Tagesplanung() {
   const [datum, setDatum] = useState<string>(todayIso());
   const [view, setView] = useState<"baustellen" | "mitarbeiter">("baustellen");
   const { data: plan, isLoading } = useTagesplanung(datum);
+  const { data: taetigkeitenStamm = [] } = useTaetigkeitenStamm();
 
   /** Probe-Query bei Mount: prüft ob `tagesplanung_freigaben` in der Cloud-DB
    *  existiert. Wenn nicht, wird oben ein Banner + Setup-Dialog angeboten. */
@@ -1071,6 +1073,7 @@ export default function Tagesplanung() {
                 e={e}
                 allFahrzeuge={allFahrzeuge}
                 alleMa={plan?.alleMa ?? []}
+                taetigkeitenStamm={taetigkeitenStamm}
                 abwesendIds={abwesendIds}
                 eingeteilteIds={eingeteilteIds}
                 onTaetigkeit={updateTaetigkeit}
@@ -1357,6 +1360,7 @@ function EinteilungsZeile({
   e,
   allFahrzeuge,
   alleMa,
+  taetigkeitenStamm,
   abwesendIds,
   eingeteilteIds,
   onTaetigkeit,
@@ -1368,6 +1372,7 @@ function EinteilungsZeile({
   e: EinteilungMitDetails;
   allFahrzeuge: Fahrzeug[];
   alleMa: Profile[];
+  taetigkeitenStamm: Database["public"]["Tables"]["taetigkeiten_stamm"]["Row"][];
   abwesendIds: Set<string>;
   eingeteilteIds: Set<string>;
   onTaetigkeit: (id: string, val: string) => Promise<void>;
@@ -1461,6 +1466,24 @@ function EinteilungsZeile({
 
       {/* Tätigkeit */}
       <td style={td()}>
+        {/* Dropdown zur Schnellauswahl aus den Standard-Tätigkeiten —
+            wird im Druck ausgeblendet. */}
+        <select
+          value=""
+          onChange={(ev) => {
+            if (ev.target.value) onTaetigkeit(e.einteilung.id, ev.target.value);
+            ev.target.value = "";
+          }}
+          className="print:hidden mb-1 w-full h-7 rounded-md border bg-background px-1.5 text-xs"
+          aria-label="Tätigkeit wählen"
+        >
+          <option value="">– Tätigkeit wählen –</option>
+          {taetigkeitenStamm.map((t) => (
+            <option key={t.id} value={t.bezeichnung}>
+              {t.bezeichnung}
+            </option>
+          ))}
+        </select>
         {taetEdit ? (
           <Textarea
             autoFocus
@@ -1483,7 +1506,7 @@ function EinteilungsZeile({
             style={{ fontStyle: "italic", fontSize: "0.92em" }}
           >
             {e.einteilung.taetigkeit || (
-              <span className="text-muted-foreground print:hidden">– klicken –</span>
+              <span className="text-muted-foreground print:hidden">– klicken oder oben wählen –</span>
             )}
           </div>
         )}
