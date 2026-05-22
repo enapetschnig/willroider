@@ -25,6 +25,7 @@ import {
 import type { Database } from "@/integrations/supabase/types";
 import { BerichteHintCard } from "@/components/dashboard/BerichteHintCard";
 import { NeuerLohnzettelHintCard } from "@/components/dashboard/NeuerLohnzettelHintCard";
+import { StundenBerichtHintCard } from "@/components/dashboard/StundenBerichtHintCard";
 import { TagesplanPreview } from "@/components/TagesplanPreview";
 import {
   Dialog,
@@ -402,6 +403,9 @@ export default function Dashboard() {
 
       {/* Berichte-Hint (Polier: heutige Berichte, Bauleiter: zu prüfen) */}
       <BerichteHintCard />
+
+      {/* Baustellenstundenbericht (MA: Durchsicht, Büro: Kontrolle) */}
+      <StundenBerichtHintCard />
 
       {/* Neue-Anmeldungen-Banner (Admin) — bewusst ganz oben, vor dem Greeting */}
       {isAdmin && pendingCount > 0 && (

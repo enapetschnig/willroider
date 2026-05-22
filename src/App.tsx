@@ -20,6 +20,8 @@ import { Navigate } from "react-router-dom";
 import Mitarbeiter from "@/pages/Mitarbeiter";
 import Stunden from "@/pages/Stunden";
 import Stundenauswertung from "@/pages/Stundenauswertung";
+import StundenBericht from "@/pages/StundenBericht";
+import StundenBerichteListe from "@/pages/StundenBerichteListe";
 import Berichte from "@/pages/Berichte";
 import BerichtDetail from "@/pages/BerichtDetail";
 import Kalender from "@/pages/Kalender";
@@ -92,6 +94,11 @@ const App = () => (
                 path="/stunden/auswertung"
                 element={<RequireRole role="review"><Stundenauswertung /></RequireRole>}
               />
+              <Route
+                path="/stundenberichte"
+                element={<RequireRole role="review"><StundenBerichteListe /></RequireRole>}
+              />
+              <Route path="/stundenbericht/:id" element={<StundenBericht />} />
               <Route path="/berichte" element={<Berichte />} />
               <Route path="/berichte/:id" element={<BerichtDetail />} />
               <Route path="/mein-tag" element={<MeinTag />} />

@@ -12,6 +12,7 @@ import {
   CalendarRange,
   ShieldCheck,
   BarChart3,
+  FileSpreadsheet,
   Briefcase,
   Settings,
   LogOut,
@@ -51,6 +52,7 @@ const NAV: NavItem[] = [
   { to: "/baustellen", label: "Baustellen", icon: Building2, roles: ["all"], end: false },
   { to: "/stunden", label: "Zeiterfassung", icon: Clock, roles: ["all"], end: true },
   { to: "/stunden/auswertung", label: "Auswertung", icon: BarChart3, roles: ["review"], end: true },
+  { to: "/stundenberichte", label: "Stundenberichte", icon: FileSpreadsheet, roles: ["review"], end: false },
   { to: "/berichte", label: "Berichte", icon: FileText, roles: ["all"], end: false },
   { to: "/admin", label: "Verwaltung", icon: Settings, roles: ["admin"], end: false },
 ];
