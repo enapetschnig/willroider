@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, ChevronLeft, ChevronRight, Filter, UserPlus, X, Trash2, Pencil } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, ChevronDown, Filter, UserPlus, X, Trash2, Pencil } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -137,6 +137,20 @@ export default function Arbeitsplanung() {
     cells: { workerId: string; iso: string }[];
     anchor: { x: number; y: number };
   } | null>(null);
+  // Eingeklappte Partien (reine Anzeige) + aktiver Drag auf einem Partie-Überbalken
+  const [collapsedPartien, setCollapsedPartien] = useState<Set<string>>(new Set());
+  const [partieDrag, setPartieDrag] = useState<{
+    partieId: string;
+    anchorIdx: number;
+    hoverIdx: number;
+  } | null>(null);
+  const toggleCollapse = (pid: string) =>
+    setCollapsedPartien((prev) => {
+      const next = new Set(prev);
+      if (next.has(pid)) next.delete(pid);
+      else next.add(pid);
+      return next;
+    });
   const dayWidth = 22; // px
 
   const load = async () => {
@@ -404,6 +418,53 @@ export default function Arbeitsplanung() {
         }
         if (bars.length > 0) result.set(m.id, bars);
       }
+    }
+    return result;
+  }, [workerGroups, dayHeaders, assignments]);
+
+  // ─── Partie-Konsens: gemeinsame Einteilung aller anwesenden Mitglieder ──
+  // Pro Partie ein Array über dayHeaders: an einem Tag gefüllt, wenn ALLE
+  // nicht-abwesenden Mitglieder dieselbe Baustelle haben.
+  const partieConsensus = useMemo(() => {
+    const result = new Map<
+      string,
+      ({ baustelleId: string | null; color: string; label: string } | null)[]
+    >();
+    if (dayHeaders.length === 0) return result;
+    for (const g of workerGroups) {
+      const pid = g.partie?.id;
+      if (!pid || g.members.length === 0) continue;
+      const arr: ({ baustelleId: string | null; color: string; label: string } | null)[] =
+        [];
+      for (let i = 0; i < dayHeaders.length; i++) {
+        const iso = isoDate(dayHeaders[i].date);
+        let consensus: AssignmentCell | null = null;
+        let valid = true;
+        for (const m of g.members) {
+          const a = assignments.get(cellKey(m.id, iso));
+          if (a?.source === "fehlzeit") continue; // abwesend → ignorieren
+          if (a?.source === "einteilung") {
+            if (!consensus) consensus = a;
+            else if ((consensus.baustelleId ?? "x") !== (a.baustelleId ?? "x")) {
+              valid = false;
+              break;
+            }
+          } else {
+            valid = false; // weder abwesend noch eingeteilt → kein Konsens
+            break;
+          }
+        }
+        arr.push(
+          valid && consensus
+            ? {
+                baustelleId: consensus.baustelleId ?? null,
+                color: consensus.baustelleColor ?? "#6b7280",
+                label: consensus.baustelleName ?? "BV",
+              }
+            : null,
+        );
+      }
+      result.set(pid, arr);
     }
     return result;
   }, [workerGroups, dayHeaders, assignments]);
@@ -795,6 +856,67 @@ export default function Arbeitsplanung() {
       document.removeEventListener("pointercancel", onUp);
     };
   }, [dragAnchor, dragHover, dayHeaders]);
+
+  // Drag-Auswahl auf einem Partie-Überbalken → Popover für die GANZE Partie.
+  useEffect(() => {
+    if (!partieDrag) return;
+    const findIdx = (x: number, y: number): number | null => {
+      const stack = (document.elementsFromPoint(x, y) as HTMLElement[]) ?? [];
+      for (const el of stack) {
+        const pr = el.closest?.("[data-partie-row='1']") as HTMLElement | null;
+        if (pr && pr.dataset.partie === partieDrag.partieId) {
+          const rect = pr.getBoundingClientRect();
+          return Math.max(
+            0,
+            Math.min(
+              dayHeaders.length - 1,
+              Math.floor((x - rect.left) / dayWidth),
+            ),
+          );
+        }
+      }
+      return null;
+    };
+    const onMove = (e: PointerEvent) => {
+      const idx = findIdx(e.clientX, e.clientY);
+      if (idx != null) {
+        setPartieDrag((cur) => (cur ? { ...cur, hoverIdx: idx } : cur));
+      }
+    };
+    const onUp = (e: PointerEvent) => {
+      const pd = partieDrag;
+      setPartieDrag(null);
+      if (!pd) return;
+      const g = workerGroups.find((x) => x.partie?.id === pd.partieId);
+      if (!g || g.members.length === 0) return;
+      const lo = Math.min(pd.anchorIdx, pd.hoverIdx);
+      const hi = Math.max(pd.anchorIdx, pd.hoverIdx);
+      const isos: string[] = [];
+      for (let i = lo; i <= hi; i++) {
+        const iso = isoDate(dayHeaders[i].date);
+        if (isWerktag(iso)) isos.push(iso);
+      }
+      if (isos.length === 0) return;
+      const cells = g.members.flatMap((m) =>
+        isos.map((iso) => ({ workerId: m.id, iso })),
+      );
+      setSelection(new Set(cells.map((c) => cellKey(c.workerId, c.iso))));
+      setPopover({
+        workerId: pd.partieId,
+        cells,
+        anchor: { x: e.clientX, y: e.clientY },
+      });
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+    return () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [partieDrag, workerGroups, dayHeaders]);
 
   const closePopover = () => {
     setPopover(null);
@@ -1221,6 +1343,8 @@ export default function Arbeitsplanung() {
             </div>
             {workerGroups.map((g) => {
               const polier = polierName(g.partie);
+              const partieKey = g.partie?.id ?? "ohne";
+              const collapsed = collapsedPartien.has(partieKey);
               const istDropZiel =
                 !!nameDrag?.active &&
                 (g.partie
@@ -1228,7 +1352,7 @@ export default function Arbeitsplanung() {
                   : nameDrag.overPartieId === null);
               return (
                 <div
-                  key={g.partie?.id ?? "ohne"}
+                  key={partieKey}
                   data-partie-drop={g.partie?.id ?? "lager"}
                   className={
                     istDropZiel ? "ring-2 ring-primary ring-inset bg-primary/5" : ""
@@ -1245,8 +1369,10 @@ export default function Arbeitsplanung() {
                     onDeletePartie={deletePartieFromPlan}
                     onEditPartie={openPartieEditor}
                     isAdmin={isAdmin}
+                    collapsed={collapsed}
+                    onToggleCollapse={() => toggleCollapse(partieKey)}
                   />
-                  {g.members.length === 0 && (
+                  {!collapsed && g.members.length === 0 && (
                     <div
                       className="border-b flex items-center px-2 text-[10px] italic text-muted-foreground"
                       style={{ height: 28 }}
@@ -1254,7 +1380,8 @@ export default function Arbeitsplanung() {
                       {nameDrag?.active ? "Hierher ziehen …" : "— leer —"}
                     </div>
                   )}
-                  {g.members.map((m) => {
+                  {!collapsed &&
+                    g.members.map((m) => {
                     const row = (
                       <button
                         type="button"
@@ -1401,22 +1528,158 @@ export default function Arbeitsplanung() {
                     />
                   );
                 })()}
-                {workerGroups.map((g) => (
-                  <div key={g.partie?.id ?? "ohne"}>
+                {workerGroups.map((g) => {
+                  const partieKey = g.partie?.id ?? "ohne";
+                  const collapsed = collapsedPartien.has(partieKey);
+                  const partieAktiv =
+                    isAdmin && !!g.partie && g.members.length > 0;
+                  return (
+                  <div key={partieKey}>
+                    {/* Partie-Überbalken — Planungszeile für die ganze Partie */}
                     <div
-                      className="border-b"
+                      data-partie-row={g.partie ? "1" : undefined}
+                      data-partie={g.partie?.id}
+                      onPointerDown={(e) => {
+                        if (!partieAktiv || !g.partie) return;
+                        e.preventDefault();
+                        const rect = (
+                          e.currentTarget as HTMLDivElement
+                        ).getBoundingClientRect();
+                        const idx = Math.max(
+                          0,
+                          Math.min(
+                            dayHeaders.length - 1,
+                            Math.floor((e.clientX - rect.left) / dayWidth),
+                          ),
+                        );
+                        setPartieDrag({
+                          partieId: g.partie.id,
+                          anchorIdx: idx,
+                          hoverIdx: idx,
+                        });
+                      }}
+                      className="border-b relative"
                       style={{
                         height: 36,
-                        background: g.partie ? `${g.partie.farbcode}25` : "hsl(var(--muted))",
+                        background: g.partie
+                          ? `${g.partie.farbcode}25`
+                          : "hsl(var(--muted))",
+                        cursor: partieAktiv ? "pointer" : "default",
+                        touchAction: partieAktiv ? "none" : undefined,
+                        userSelect: "none",
                       }}
-                    />
+                      title={
+                        partieAktiv
+                          ? "Ziehen, um die ganze Partie einzuteilen"
+                          : undefined
+                      }
+                    >
+                      {/* Konsens-Balken: gemeinsame Einteilung der Partie */}
+                      {g.partie &&
+                        (() => {
+                          const arr = partieConsensus.get(g.partie.id);
+                          if (!arr) return null;
+                          const segs: {
+                            start: number;
+                            end: number;
+                            color: string;
+                            label: string;
+                          }[] = [];
+                          for (let i = 0; i < arr.length; i++) {
+                            const c = arr[i];
+                            if (!c) continue;
+                            const last = segs[segs.length - 1];
+                            if (
+                              last &&
+                              last.end === i - 1 &&
+                              last.label === c.label &&
+                              last.color === c.color
+                            )
+                              last.end = i;
+                            else
+                              segs.push({
+                                start: i,
+                                end: i,
+                                color: c.color,
+                                label: c.label,
+                              });
+                          }
+                          return segs.map((s, si) => {
+                            const w = (s.end - s.start + 1) * dayWidth - 2;
+                            return (
+                              <div
+                                key={si}
+                                className="absolute rounded-md flex items-center px-1.5 text-[10px] font-bold text-white truncate pointer-events-none shadow-sm"
+                                style={{
+                                  left: s.start * dayWidth + 1,
+                                  width: w,
+                                  top: 6,
+                                  height: 24,
+                                  background: s.color,
+                                }}
+                              >
+                                {w < 60 ? s.label.slice(0, 2) : s.label}
+                              </div>
+                            );
+                          });
+                        })()}
+                      {/* Auswahl-Highlight beim Partie-Drag */}
+                      {partieDrag &&
+                        g.partie &&
+                        partieDrag.partieId === g.partie.id &&
+                        dayHeaders.map((d, i) => {
+                          const lo = Math.min(
+                            partieDrag.anchorIdx,
+                            partieDrag.hoverIdx,
+                          );
+                          const hi = Math.max(
+                            partieDrag.anchorIdx,
+                            partieDrag.hoverIdx,
+                          );
+                          if (i < lo || i > hi || !isWerktag(d.date))
+                            return null;
+                          return (
+                            <div
+                              key={`pd${i}`}
+                              className="absolute top-0 bottom-0 z-10 pointer-events-none"
+                              style={{
+                                left: i * dayWidth,
+                                width: dayWidth,
+                                boxShadow: "inset 0 0 0 2px hsl(var(--primary))",
+                                background: "hsl(var(--primary)/0.15)",
+                              }}
+                            />
+                          );
+                        })}
+                      {/* Wochenend-/Feiertag-Overlay */}
+                      {dayHeaders.map((d, i) => {
+                        const we =
+                          d.date.getDay() === 0 || d.date.getDay() === 6;
+                        const ft = !!d.feiertag;
+                        if (!we && !ft) return null;
+                        return (
+                          <div
+                            key={`we${i}`}
+                            className="absolute top-0 bottom-0 z-20 pointer-events-none"
+                            style={{
+                              left: i * dayWidth,
+                              width: dayWidth,
+                              background: ft
+                                ? "rgba(139,92,246,0.32)"
+                                : "rgba(120,120,120,0.34)",
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
                     {/* Platzhalter für leere Gruppen — muss exakt zur
                         „— leer —"-Zeile der Namens-Spalte passen (28px),
                         sonst verrutschen Balken und Namen. */}
-                    {g.members.length === 0 && (
+                    {!collapsed && g.members.length === 0 && (
                       <div className="border-b" style={{ height: 28 }} />
                     )}
-                    {g.members.map((m) => {
+                    {!collapsed &&
+                      g.members.map((m) => {
                       const bars = barsByWorker.get(m.id) ?? [];
                       return (
                         <div
@@ -1628,7 +1891,8 @@ export default function Arbeitsplanung() {
                       );
                     })}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -1856,6 +2120,8 @@ function PolierHeader({
   onEditPartie,
   isAdmin,
   variant = "desktop",
+  collapsed,
+  onToggleCollapse,
 }: {
   partie: Partie | null;
   polier: string | null;
@@ -1868,6 +2134,8 @@ function PolierHeader({
   onEditPartie?: (partie: Partie) => void;
   isAdmin: boolean;
   variant?: "desktop" | "mobile";
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }) {
   const isMobile = variant === "mobile";
   const farbe = partie?.farbcode ?? "#999";
@@ -1884,6 +2152,21 @@ function PolierHeader({
       }}
     >
       <div className="flex items-center gap-2">
+        {onToggleCollapse && (
+          <button
+            onClick={onToggleCollapse}
+            className="h-5 w-5 -ml-1 rounded flex items-center justify-center shrink-0 hover:bg-white/60 transition"
+            style={{ color: farbe }}
+            title={collapsed ? "Partie ausklappen" : "Partie einklappen"}
+            aria-label={collapsed ? "Partie ausklappen" : "Partie einklappen"}
+          >
+            {collapsed ? (
+              <ChevronRight className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </button>
+        )}
         <span
           className={`inline-block ${
             isMobile ? "h-2.5 w-2.5" : "h-3 w-3"
