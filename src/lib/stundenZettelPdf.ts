@@ -16,6 +16,7 @@ import {
   aggregiereTaetigkeiten,
   aggregiereZulagen,
   aggregiereTaggeld,
+  aggregiereKilometergeld,
   taggeldFuerTag,
   fmtEur,
   fmtTaetigkeitenInline,
@@ -51,6 +52,7 @@ export interface StundenzettelData {
   taetigkeitenStamm: TaetigkeitName[];
   zulagenTypen: ZulagenTypName[];
   pausen: PausenDauer;
+  kilometergeldSatz: number;
 }
 
 function monatLabel(monat: string): string {
@@ -86,6 +88,7 @@ export function renderStundenzettel(
   const aggTaet = aggregiereTaetigkeiten(data.tage, data.taetigkeitenStamm);
   const aggZul = aggregiereZulagen(data.tage, data.zulagenTypen);
   const aggTg = aggregiereTaggeld(data.tage, data.pausen);
+  const aggKm = aggregiereKilometergeld(data.tage, data.kilometergeldSatz);
 
   // Header
   doc.setFont("helvetica", "bold");
@@ -208,6 +211,20 @@ export function renderStundenzettel(
     align: "right",
   });
   doc.setFont("helvetica", "normal");
+
+  // Kilometergeld (nur wenn privat gefahren wurde)
+  if (aggKm.km > 0) {
+    y += 5;
+    doc.setFont("helvetica", "bold");
+    doc.text("Kilometergeld", leftX, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(
+      `${aggKm.km.toLocaleString("de-AT")} km · ${fmtEur(aggKm.eur)}`,
+      leftX + colW - 1,
+      y,
+      { align: "right" },
+    );
+  }
 
   // Unterschriftenfeld
   y += 18;

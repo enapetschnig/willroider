@@ -15,6 +15,7 @@ import {
   Tag,
   Coffee,
   ShieldAlert,
+  Car,
   Loader2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -34,9 +35,71 @@ export function AdminStammdatenStunden() {
     <div className="space-y-4">
       <PausenConfigCard />
       <ArbeitszeitLimitsCard />
+      <KilometergeldCard />
       <TaetigkeitenStammCard />
       <ZulagenStammCard />
     </div>
+  );
+}
+
+// ─── Kilometergeld ─────────────────────────────────────────────────────────
+
+function KilometergeldCard() {
+  const { toast } = useToast();
+  const { data, isLoading } = useArbeitszeitLimits();
+  const mut = useArbeitszeitLimitsMutation();
+
+  if (isLoading || !data) {
+    return (
+      <Card>
+        <CardContent className="p-4 flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Kilometergeld laden…
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const update = async (satz: number) => {
+    try {
+      await mut.mutateAsync({ kilometergeld_satz_eur: satz });
+      toast({ title: "Kilometergeld-Satz aktualisiert" });
+    } catch (e) {
+      toast({ variant: "destructive", title: "Fehler", description: (e as Error).message });
+    }
+  };
+
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-center gap-2 font-semibold">
+          <Car className="h-4 w-4 text-primary" />
+          Kilometergeld
+        </div>
+        <div className="space-y-1 max-w-[200px]">
+          <Label className="text-xs text-muted-foreground">
+            Satz pro privat gefahrenem km
+          </Label>
+          <div className="flex items-center gap-1.5">
+            <Input
+              type="number"
+              step={0.01}
+              min={0}
+              defaultValue={data.kilometergeld_satz_eur}
+              onBlur={(e) => {
+                const v = Number(e.target.value);
+                if (v >= 0 && v !== data.kilometergeld_satz_eur) update(v);
+              }}
+              className="h-9"
+            />
+            <span className="text-xs text-muted-foreground">€/km</span>
+          </div>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          Wird in der Zeiterfassung für privat gefahrene Kilometer verwendet
+          (amtlicher Satz aktuell 0,50 €/km).
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 

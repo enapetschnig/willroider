@@ -154,6 +154,28 @@ export function aggregiereTaggeld(
   };
 }
 
+/** Privat gefahrene Kilometer eines Tages (aus stunden_fahrt). */
+export function kmFuerTag(t: StundenTagFull): number {
+  return t.fahrt?.privat_pkw ? Number(t.fahrt.km_gefahren ?? 0) : 0;
+}
+
+/** Kilometergeld eines Tages = privat gefahrene km × Satz. */
+export function kilometergeldFuerTag(t: StundenTagFull, satzEur: number): number {
+  return Math.round(kmFuerTag(t) * satzEur * 100) / 100;
+}
+
+/** Kilometergeld-Aggregation über mehrere Tage. */
+export function aggregiereKilometergeld(
+  tage: StundenTagFull[],
+  satzEur: number,
+): { km: number; eur: number } {
+  const km = tage.reduce((s, t) => s + kmFuerTag(t), 0);
+  return {
+    km: Math.round(km * 10) / 10,
+    eur: Math.round(km * satzEur * 100) / 100,
+  };
+}
+
 /** Formatiert eine Tätigkeits-Liste eines Tages als kompakten Inline-Text:
  *  `"Holzbau 4.5h, Dämmarbeit 4.5h"`. */
 export function fmtTaetigkeitenInline(

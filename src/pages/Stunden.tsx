@@ -148,6 +148,8 @@ interface ErfassungForm {
   arbeitsbeginn: string | null;
   anmerkung: string;
   zulagenSelected: Map<string, ZulageEintrag>;
+  /** Privat gefahrene Kilometer je Mitarbeiter-ID. */
+  kmPerMa: Record<string, number>;
   fahrt: SaveFahrt | null;
 }
 
@@ -157,6 +159,7 @@ function emptyForm(): ErfassungForm {
     arbeitsbeginn: null,
     anmerkung: "",
     zulagenSelected: new Map(),
+    kmPerMa: {},
     fahrt: null,
   };
 }
@@ -417,6 +420,7 @@ export default function Stunden() {
           },
         ]),
       ),
+      kmPerMa: { [primaryUserId]: Number(t.fahrt?.km_gefahren ?? 0) },
       fahrt: t.fahrt
         ? {
             fahrtgeld_eur: Number(t.fahrt.fahrtgeld_eur),
@@ -438,7 +442,11 @@ export default function Stunden() {
     setForm((f) => {
       const uids = Array.from(forUserIds);
       const maEintraege: Record<string, EintragRow[]> = {};
-      for (const uid of uids) maEintraege[uid] = f.maEintraege[uid] ?? [];
+      const kmPerMa: Record<string, number> = {};
+      for (const uid of uids) {
+        maEintraege[uid] = f.maEintraege[uid] ?? [];
+        kmPerMa[uid] = f.kmPerMa[uid] ?? 0;
+      }
       const zulagenSelected = new Map(
         Array.from(f.zulagenSelected.entries()).map(([typId, z]) => {
           const standardWert =
@@ -457,7 +465,7 @@ export default function Stunden() {
           return [typId, { ...z, stundenPerMa: next }];
         }),
       );
-      return { ...f, maEintraege, zulagenSelected };
+      return { ...f, maEintraege, zulagenSelected, kmPerMa };
     });
   }, [forUserIds]);
 
@@ -660,27 +668,30 @@ export default function Stunden() {
             notiz: val.notiz.trim() || null,
           }));
 
-        // Auto-Taggeld aus den Baustellen-Stunden
+        // Auto-Taggeld aus den Baustellen-Stunden + Kilometergeld-Fahrt
         const baustelleStd = rows
           .filter((r) => r.art === "baustelle")
           .reduce((s, r) => s + Number(r.stunden), 0);
         const isPolierSelf = uid === primaryUserId && istPolier;
         const polierFahrt = isPolierSelf ? form.fahrt : null;
+        const km = Math.max(0, Number(form.kmPerMa[uid] ?? 0));
+        const auto = berechneTaggeld(baustelleStd, "baustelle");
         let fahrtToSave: SaveFahrt | null = null;
         if (polierFahrt?.taggeld_manuell) {
-          fahrtToSave = polierFahrt;
-        } else {
-          const auto = berechneTaggeld(baustelleStd, "baustelle");
-          if (auto.kurz > 0 || auto.lang > 0 || polierFahrt) {
-            fahrtToSave = {
-              fahrtgeld_eur: polierFahrt?.fahrtgeld_eur ?? 0,
-              privat_pkw: polierFahrt?.privat_pkw ?? false,
-              km_gefahren: polierFahrt?.km_gefahren ?? null,
-              taggeld_kurz: auto.kurz,
-              taggeld_lang: auto.lang,
-              taggeld_manuell: false,
-            };
-          }
+          fahrtToSave = {
+            ...polierFahrt,
+            privat_pkw: km > 0,
+            km_gefahren: km > 0 ? km : null,
+          };
+        } else if (auto.kurz > 0 || auto.lang > 0 || polierFahrt || km > 0) {
+          fahrtToSave = {
+            fahrtgeld_eur: polierFahrt?.fahrtgeld_eur ?? 0,
+            privat_pkw: km > 0,
+            km_gefahren: km > 0 ? km : null,
+            taggeld_kurz: auto.kurz,
+            taggeld_lang: auto.lang,
+            taggeld_manuell: false,
+          };
         }
 
         try {
@@ -1064,6 +1075,21 @@ export default function Stunden() {
                 );
               })}
             </div>
+          )}
+
+          {/* Kilometergeld — privat gefahrene km, für alle Mitarbeiter */}
+          {selectedMaList.length > 0 && (
+            <KilometergeldSection
+              selectedMa={selectedMaList}
+              kmPerMa={form.kmPerMa}
+              satz={limits?.kilometergeld_satz_eur ?? 0.5}
+              onChange={(uid, km) =>
+                setForm((f) => ({
+                  ...f,
+                  kmPerMa: { ...f.kmPerMa, [uid]: km },
+                }))
+              }
+            />
           )}
 
           {/* Fahrt — nur Polier-Self */}
@@ -1540,6 +1566,66 @@ function ZulagenStundenInput({
   );
 }
 
+// ─── KilometergeldSection (privat gefahrene km, für alle) ──────────────
+
+function KilometergeldSection({
+  selectedMa,
+  kmPerMa,
+  satz,
+  onChange,
+}: {
+  selectedMa: Profile[];
+  kmPerMa: Record<string, number>;
+  satz: number;
+  onChange: (uid: string, km: number) => void;
+}) {
+  const single = selectedMa.length === 1;
+  return (
+    <div className="space-y-2 border-t pt-3">
+      <Label className="text-sm font-semibold flex items-center gap-1.5">
+        <Car className="h-4 w-4 text-primary" />
+        Kilometergeld
+      </Label>
+      <div className="text-[11px] text-muted-foreground">
+        Privat gefahrene Kilometer — {satz.toFixed(2).replace(".", ",")} €/km
+      </div>
+      <div className="space-y-1.5">
+        {selectedMa.map((m) => {
+          const km = Math.max(0, Number(kmPerMa[m.id] ?? 0));
+          const geld = Math.round(km * satz * 100) / 100;
+          return (
+            <div key={m.id} className="flex items-center gap-2 flex-wrap">
+              {!single && (
+                <span className="text-sm font-medium truncate w-24 shrink-0">
+                  {m.vorname} {m.nachname?.[0] ?? ""}.
+                </span>
+              )}
+              <div className="flex items-center gap-1">
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  value={km || ""}
+                  onChange={(e) =>
+                    onChange(m.id, Math.max(0, Number(e.target.value) || 0))
+                  }
+                  placeholder="0"
+                  className="h-9 w-24 text-center tabular-nums"
+                />
+                <span className="text-xs text-muted-foreground">km</span>
+              </div>
+              <span className="text-sm tabular-nums font-semibold text-primary">
+                = {geld.toFixed(2).replace(".", ",")} €
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── FahrtSection (Polier-Self) ────────────────────────────────────────
 
 function FahrtSection({
@@ -1570,56 +1656,29 @@ function FahrtSection({
         <Switch checked={enabled} onCheckedChange={toggle} />
         <Label className="text-sm font-semibold flex items-center gap-1.5 cursor-pointer">
           <Car className="h-4 w-4 text-primary" />
-          Fahrt &amp; Diäten (Polier)
+          Fahrtgeld &amp; Taggeld (Polier)
         </Label>
       </div>
       {enabled && fahrt && (
         <div className="space-y-2 pl-1">
-          <div className="grid sm:grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Fahrtgeld (€)</Label>
-              <Input
-                type="number"
-                step={0.5}
-                min={0}
-                value={fahrt.fahrtgeld_eur}
-                onChange={(e) =>
-                  setFahrt({ ...fahrt, fahrtgeld_eur: Number(e.target.value) || 0 })
-                }
-                className="h-9"
-              />
-              {baustelle && Number(baustelle.fahrtgeld_pauschale_eur) > 0 && (
-                <div className="text-[10px] text-muted-foreground">
-                  Default aus Baustelle: € {baustelle.fahrtgeld_pauschale_eur}
-                </div>
-              )}
-            </div>
-            <div className="flex items-center gap-2 pt-5">
-              <Switch
-                checked={fahrt.privat_pkw}
-                onCheckedChange={(v) => setFahrt({ ...fahrt, privat_pkw: v })}
-              />
-              <Label className="text-xs cursor-pointer">Privat-PKW</Label>
-            </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Fahrtgeld (€)</Label>
+            <Input
+              type="number"
+              step={0.5}
+              min={0}
+              value={fahrt.fahrtgeld_eur}
+              onChange={(e) =>
+                setFahrt({ ...fahrt, fahrtgeld_eur: Number(e.target.value) || 0 })
+              }
+              className="h-9"
+            />
+            {baustelle && Number(baustelle.fahrtgeld_pauschale_eur) > 0 && (
+              <div className="text-[10px] text-muted-foreground">
+                Default aus Baustelle: € {baustelle.fahrtgeld_pauschale_eur}
+              </div>
+            )}
           </div>
-          {fahrt.privat_pkw && (
-            <div className="space-y-1">
-              <Label className="text-xs">Kilometer</Label>
-              <Input
-                type="number"
-                step={1}
-                min={0}
-                value={fahrt.km_gefahren ?? ""}
-                onChange={(e) =>
-                  setFahrt({
-                    ...fahrt,
-                    km_gefahren: e.target.value === "" ? null : Number(e.target.value),
-                  })
-                }
-                className="h-9"
-              />
-            </div>
-          )}
           <div className="space-y-2 border-t pt-2">
             <div className="flex items-center justify-between">
               <Label className="text-xs font-semibold">Taggeld</Label>

@@ -50,6 +50,9 @@ import {
   aggregiereZulagen,
   aggregiereTaggeld,
   taggeldFuerTag,
+  kmFuerTag,
+  kilometergeldFuerTag,
+  aggregiereKilometergeld,
   fmtEur,
   TAGGELD_SATZ_KURZ_EUR,
   TAGGELD_SATZ_LANG_EUR,
@@ -408,6 +411,7 @@ export default function Stundenauswertung() {
       taetigkeitenStamm,
       zulagenTypen,
       pausen: pausenDauer,
+      kilometergeldSatz: limits?.kilometergeld_satz_eur ?? 0.5,
     };
   }
 
@@ -429,8 +433,9 @@ export default function Stundenauswertung() {
   const exportCsv = async () => {
     const lines: string[] = [];
     lines.push(
-      "Mitarbeiter;Datum;Status;Netto;Brutto;Von;Bis;Anwesenheit (min);Tätigkeiten;Zulagen;Taggeld_kurz;Taggeld_lang;Anmerkung",
+      "Mitarbeiter;Datum;Status;Netto;Brutto;Von;Bis;Anwesenheit (min);Tätigkeiten;Zulagen;Taggeld_kurz;Taggeld_lang;Privat-km;Kilometergeld;Anmerkung",
     );
+    const kmSatz = limits?.kilometergeld_satz_eur ?? 0.5;
     const taetById = new Map(taetigkeitenStamm.map((s) => [s.id, s.bezeichnung]));
     const zulById = new Map(zulagenTypen.map((s) => [s.id, s.bezeichnung]));
     const cleanCsv = (s: string) => s.replace(/[;\n]/g, " ");
@@ -468,6 +473,8 @@ export default function Stundenauswertung() {
         const tg = taggeldFuerTag(t, pausenDauer);
         const tgKurz = tg.kurz;
         const tgLang = tg.lang;
+        const km = kmFuerTag(t);
+        const kmGeld = kilometergeldFuerTag(t, kmSatz);
         lines.push(
           [
             `${ma!.nachname} ${ma!.vorname}`,
@@ -482,6 +489,8 @@ export default function Stundenauswertung() {
             cleanCsv(zulStr),
             tgKurz,
             tgLang,
+            km > 0 ? fmtHNum(km) : "",
+            kmGeld > 0 ? fmtHNum(kmGeld) : "",
             cleanCsv(t.tag.anmerkung ?? ""),
           ].join(";"),
         );
@@ -1000,6 +1009,7 @@ function DetailMa({
   const aggTaet = aggregiereTaetigkeiten(tage, taetigkeitenStamm);
   const aggZul = aggregiereZulagen(tage, zulagenTypen);
   const aggTg = aggregiereTaggeld(tage, pausenDauer);
+  const aggKm = aggregiereKilometergeld(tage, limits?.kilometergeld_satz_eur ?? 0.5);
 
   return (
     <div className="p-3 space-y-3">
@@ -1204,6 +1214,28 @@ function DetailMa({
               <span>Summe</span>
               <span>{fmtEur(aggTg.total_eur)}</span>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-3 space-y-1">
+            <div className="font-semibold text-muted-foreground uppercase text-[10px]">
+              Kilometergeld
+            </div>
+            {aggKm.km > 0 ? (
+              <>
+                <div className="flex justify-between tabular-nums">
+                  <span>Privat gefahren</span>
+                  <span className="font-medium">{fmtHNum(aggKm.km)} km</span>
+                </div>
+                <div className="flex justify-between tabular-nums pt-1 border-t font-semibold">
+                  <span>Summe</span>
+                  <span>{fmtEur(aggKm.eur)}</span>
+                </div>
+              </>
+            ) : (
+              <div className="text-muted-foreground italic">Keine Privatfahrten</div>
+            )}
           </CardContent>
         </Card>
 

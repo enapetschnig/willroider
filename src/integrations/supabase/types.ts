@@ -709,6 +709,7 @@ export type Database = {
           max_netto_pro_tag: number;
           max_brutto_pro_tag: number;
           arbeitsbeginn_default: string;
+          kilometergeld_satz_eur: number;
           updated_at: string;
         };
         Insert: Partial<Database['public']['Tables']['arbeitszeit_limits']['Row']>;
