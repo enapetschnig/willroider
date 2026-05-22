@@ -426,7 +426,7 @@ export default function Stunden() {
         : null,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aktuellerEigenerTag?.tag.id, primaryUserId]);
+  }, [aktuellerEigenerTag?.tag.id, primaryUserId, date]);
 
   // forUserIds-Wechsel: für jeden selektierten MA ein Eintrags-Array sichern,
   // Zulagen-stundenPerMa abgleichen.
