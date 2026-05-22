@@ -749,6 +749,7 @@ export type Database = {
           id: string;
           stunden_tag_id: string;
           position: number;
+          art: TagStatus;
           taetigkeit_id: string | null;
           taetigkeit_freitext: string | null;
           baustelle_id: string | null;

@@ -42,12 +42,10 @@ export async function ladeVorausfuellung(
     .eq("baustelle_id", baustelleId);
   if (error) throw error;
 
-  // Filtere nach Datum + Arbeitsstatus
+  // Nur Baustellen-Einträge (art) dieses Tages — Firma/Urlaub/Krank-Segmente
+  // gehören nicht in den Bautagesbericht.
   const relevant = ((tagTaetigkeiten as any[]) ?? []).filter(
-    (row) =>
-      row.stunden_tag?.datum === datum &&
-      (row.stunden_tag?.tag_status === "baustelle" ||
-        row.stunden_tag?.tag_status === "firma"),
+    (row) => row.stunden_tag?.datum === datum && row.art === "baustelle",
   );
 
   // MA-Aggregation

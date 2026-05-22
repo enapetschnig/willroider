@@ -41,9 +41,11 @@ export interface ArbeitszeitLimits {
 
 export interface BerechneTagInput {
   nettoStunden: number;
-  vmPause: boolean;
-  mittagPause: boolean;
-  pausenConfig: PausenConfig;
+  /** Pausen-Felder werden nicht mehr genutzt (Brutto = Netto), bleiben aber
+   *  optional erhalten, damit Altaufrufer kompilieren. */
+  vmPause?: boolean;
+  mittagPause?: boolean;
+  pausenConfig?: PausenConfig;
   arbeitsbeginn: string; // "HH:MM"
 }
 
@@ -69,13 +71,10 @@ function minutesToHHMM(totalMin: number): string {
  */
 export function berechneTagZeiten(input: BerechneTagInput): TagZeiten {
   const netto = Math.max(0, Number(input.nettoStunden) || 0);
-  const vm = input.vmPause ? Math.max(0, input.pausenConfig.vmDauerMin) : 0;
-  const mittag = input.mittagPause
-    ? Math.max(0, input.pausenConfig.mittagDauerMin)
-    : 0;
-  const pausenMinuten = vm + mittag;
-
-  const bruttoAnwesenheit = netto + pausenMinuten / 60;
+  // Pausen werden nicht mehr aufgeschlagen — der Mitarbeiter gibt die reine
+  // Arbeitszeit ein, Brutto-Anwesenheit = Netto.
+  const pausenMinuten = 0;
+  const bruttoAnwesenheit = netto;
 
   const start = parseHHMM(input.arbeitsbeginn) ?? { h: 7, m: 0 };
   const startMin = start.h * 60 + start.m;

@@ -72,7 +72,7 @@ import {
   useStundenTageList,
   useSaveStundenTag,
   useDeleteStundenTag,
-  type SaveTaetigkeit,
+  type SaveEintrag,
   type SaveZulage,
   type SaveFahrt,
 } from "@/hooks/useStundenTag";
@@ -755,11 +755,12 @@ export default function Stunden() {
                 }))
             : [];
 
-          const taetigkeitenForUid: SaveTaetigkeit[] = isArbeit
+          const taetigkeitenForUid: SaveEintrag[] = isArbeit
             ? form.taetigkeiten
                 .filter((t) => Number(t.stundenPerMa[uid] ?? 0) > 0)
                 .map((t, idx) => ({
                   position: idx + 1,
+                  art: form.tagStatus,
                   taetigkeit_id: t.taetigkeit_id,
                   taetigkeit_freitext: t.taetigkeit_id
                     ? null
@@ -768,7 +769,18 @@ export default function Stunden() {
                   stunden: Number(t.stundenPerMa[uid]),
                   notiz: t.notiz.trim() || null,
                 }))
-            : [];
+            : [
+                // Abwesenheit (Urlaub/Krank/SW) = ein Eintrag dieser Art.
+                {
+                  position: 1,
+                  art: form.tagStatus,
+                  taetigkeit_id: null,
+                  taetigkeit_freitext: null,
+                  baustelle_id: null,
+                  stunden: nettoFuerMa,
+                  notiz: null,
+                },
+              ];
 
           // Auto-Taggeld pro MA aus brutto-Anwesenheit berechnen.
           // WICHTIG: bestehende Polier-Fahrtdaten (Fahrtgeld/km) gehen NICHT verloren
@@ -801,10 +813,6 @@ export default function Stunden() {
               id: dates.length === 1 ? existingEntry?.id : undefined,
               mitarbeiter_id: uid,
               datum: dt,
-              tag_status: form.tagStatus,
-              netto_stunden: nettoFuerMa,
-              vm_pause: isArbeit ? form.vmPause : false,
-              mittag_pause: isArbeit ? form.mittagPause : false,
               arbeitsbeginn: form.arbeitsbeginn,
               anmerkung: form.anmerkung.trim() || null,
               taetigkeiten: taetigkeitenForUid,
@@ -1181,48 +1189,6 @@ export default function Stunden() {
                     Wochenenden und Feiertage werden übersprungen.
                   </div>
                 )}
-              </div>
-            </div>
-          )}
-
-          {/* Pausen (nur Arbeit, global pro Tag) */}
-          {isArbeit && pausen && (
-            <div className="space-y-2 border-t pt-3">
-              <Label className="text-sm font-semibold flex items-center gap-1.5">
-                <Coffee className="h-4 w-4 text-primary" />
-                Pausen (werden auf die Anwesenheit aufgeschlagen)
-              </Label>
-              <div className="grid sm:grid-cols-2 gap-2">
-                <label
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md border cursor-pointer ${
-                    form.vmPause ? "bg-primary/5 border-primary/40" : "border-border"
-                  }`}
-                >
-                  <Switch
-                    checked={form.vmPause}
-                    onCheckedChange={(v) => setForm((f) => ({ ...f, vmPause: v }))}
-                  />
-                  <span className="text-sm">
-                    Vormittagspause{" "}
-                    <span className="text-muted-foreground">({pausen.vm.dauer_minuten} min)</span>
-                  </span>
-                </label>
-                <label
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md border cursor-pointer ${
-                    form.mittagPause ? "bg-primary/5 border-primary/40" : "border-border"
-                  }`}
-                >
-                  <Switch
-                    checked={form.mittagPause}
-                    onCheckedChange={(v) => setForm((f) => ({ ...f, mittagPause: v }))}
-                  />
-                  <span className="text-sm">
-                    Mittagspause{" "}
-                    <span className="text-muted-foreground">
-                      ({pausen.mittag.dauer_minuten} min)
-                    </span>
-                  </span>
-                </label>
               </div>
             </div>
           )}

@@ -24,7 +24,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   useSaveStundenTag,
   type StundenTagFull,
-  type SaveTaetigkeit,
+  type SaveEintrag,
   type SaveZulage,
 } from "@/hooks/useStundenTag";
 import { useTaetigkeitenStamm, useZulagenTypen } from "@/hooks/useStammdatenStunden";
@@ -148,16 +148,31 @@ export function AdminTagEditModal({
 
   const handleSave = async () => {
     try {
-      const taetigkeitenPayload: SaveTaetigkeit[] = taetigkeiten
-        .filter((t) => t.stunden > 0 || t.taetigkeit_id || t.taetigkeit_freitext)
-        .map((t, idx) => ({
-          position: idx + 1,
-          taetigkeit_id: t.taetigkeit_id,
-          taetigkeit_freitext: t.taetigkeit_freitext.trim() || null,
-          baustelle_id: t.baustelle_id,
-          stunden: Number(t.stunden),
-          notiz: t.notiz.trim() || null,
-        }));
+      const isArbeitStatus = tagStatus === "baustelle" || tagStatus === "firma";
+      const taetigkeitenPayload: SaveEintrag[] = isArbeitStatus
+        ? taetigkeiten
+            .filter((t) => t.stunden > 0 || t.taetigkeit_id || t.taetigkeit_freitext)
+            .map((t, idx) => ({
+              position: idx + 1,
+              art: tagStatus,
+              taetigkeit_id: t.taetigkeit_id,
+              taetigkeit_freitext: t.taetigkeit_freitext.trim() || null,
+              baustelle_id: t.baustelle_id,
+              stunden: Number(t.stunden),
+              notiz: t.notiz.trim() || null,
+            }))
+        : [
+            // Abwesenheit (Urlaub/Krank/SW) = ein Eintrag dieser Art.
+            {
+              position: 1,
+              art: tagStatus,
+              taetigkeit_id: null,
+              taetigkeit_freitext: null,
+              baustelle_id: null,
+              stunden: Number(netto),
+              notiz: null,
+            },
+          ];
       const zulagenPayload: SaveZulage[] = zulagen
         .filter((z) => z.zulagen_typ_id)
         .map((z) => ({
@@ -170,10 +185,6 @@ export function AdminTagEditModal({
         id: tag.tag.id,
         mitarbeiter_id: tag.tag.mitarbeiter_id,
         datum: tag.tag.datum,
-        tag_status: tagStatus,
-        netto_stunden: Number(netto),
-        vm_pause: vmPause,
-        mittag_pause: mittagPause,
         arbeitsbeginn: arbeitsbeginn || null,
         anmerkung: anmerkung.trim() || null,
         taetigkeiten: taetigkeitenPayload,

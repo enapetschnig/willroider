@@ -14,8 +14,11 @@ export interface StundenTagFull {
   fahrt: StundenFahrt | null;
 }
 
-export interface SaveTaetigkeit {
+/** Ein typisierter Eintrag eines Tages (Baustelle/Firma/Krank/Urlaub/SW).
+ *  Baustellen-Einträge haben zusätzlich baustelle_id + Tätigkeit. */
+export interface SaveEintrag {
   position: number;
+  art: TagStatus;
   taetigkeit_id: string | null;
   taetigkeit_freitext: string | null;
   baustelle_id: string | null;
@@ -42,13 +45,11 @@ export interface SaveStundenTagInput {
   id?: string;
   mitarbeiter_id: string;
   datum: string;
-  tag_status: TagStatus;
-  netto_stunden: number;
-  vm_pause: boolean;
-  mittag_pause: boolean;
   arbeitsbeginn: string | null;
   anmerkung: string | null;
-  taetigkeiten: SaveTaetigkeit[];
+  /** Typisierte Einträge des Tages. tag_status + netto_stunden werden vom
+   *  DB-Trigger daraus abgeleitet. */
+  taetigkeiten: SaveEintrag[];
   zulagen: SaveZulage[];
   fahrt: SaveFahrt | null;
 }
@@ -120,13 +121,12 @@ export function useSaveStundenTag() {
     mutationFn: async (input: SaveStundenTagInput) => {
       let tagId = input.id;
 
+      // tag_status + netto_stunden leitet der DB-Trigger aus den Einträgen
+      // ab — beim Insert genügt ein provisorischer Status.
       const tagPayload: any = {
         mitarbeiter_id: input.mitarbeiter_id,
         datum: input.datum,
-        tag_status: input.tag_status,
-        netto_stunden: input.netto_stunden,
-        vm_pause: input.vm_pause,
-        mittag_pause: input.mittag_pause,
+        tag_status: input.taetigkeiten[0]?.art ?? "baustelle",
         arbeitsbeginn: input.arbeitsbeginn,
         anmerkung: input.anmerkung,
       };
@@ -156,6 +156,7 @@ export function useSaveStundenTag() {
           input.taetigkeiten.map((t, idx) => ({
             stunden_tag_id: tagId!,
             position: t.position || idx + 1,
+            art: t.art,
             taetigkeit_id: t.taetigkeit_id,
             taetigkeit_freitext: t.taetigkeit_freitext,
             baustelle_id: t.baustelle_id,
