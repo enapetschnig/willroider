@@ -175,6 +175,10 @@ function neuerEintrag(art: TagStatus, baustelle_id: string | null = null): Eintr
 
 const istArbeitArt = (art: TagStatus) => art === "baustelle" || art === "firma";
 
+/** Rundet auf das nächste Viertelstunden-Raster (0,25 h). */
+const aufViertelstunde = (n: number) =>
+  Math.round((Number(n) || 0) / 0.25) * 0.25;
+
 export default function Stunden() {
   const { user, profile, isAdmin } = useAuth();
   const { toast } = useToast();
@@ -1337,7 +1341,6 @@ function EintragRowEditor({
       <StundenZelle
         value={row.stunden}
         onChange={(v) => onChange({ stunden: v })}
-        big
       />
 
       <Input
@@ -1353,11 +1356,9 @@ function EintragRowEditor({
 function StundenZelle({
   value,
   onChange,
-  big = false,
 }: {
   value: number;
   onChange: (v: number) => void;
-  big?: boolean;
 }) {
   return (
     <div className="flex items-center gap-1">
@@ -1365,10 +1366,10 @@ function StundenZelle({
         type="button"
         variant="outline"
         size="icon"
-        className={big ? "h-12 w-12 shrink-0" : "h-7 w-7 shrink-0 p-0"}
-        onClick={() => onChange(Math.max(0, +(value - 0.25).toFixed(2)))}
+        className="h-12 w-12 shrink-0"
+        onClick={() => onChange(Math.max(0, aufViertelstunde(value) - 0.25))}
       >
-        <Minus className={big ? "h-5 w-5" : "h-3 w-3"} />
+        <Minus className="h-5 w-5" />
       </Button>
       <Input
         type="number"
@@ -1376,24 +1377,21 @@ function StundenZelle({
         min={0}
         value={value}
         onChange={(e) => onChange(Number(e.target.value) || 0)}
-        className={`${big ? "h-12 text-xl font-bold" : "h-7 text-sm"} text-center tabular-nums ${
-          big ? "" : "w-14"
-        }`}
+        onBlur={() => onChange(aufViertelstunde(value))}
+        className="h-12 text-xl font-bold text-center tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
       />
       <Button
         type="button"
         variant="outline"
         size="icon"
-        className={big ? "h-12 w-12 shrink-0" : "h-7 w-7 shrink-0 p-0"}
-        onClick={() => onChange(+(value + 0.25).toFixed(2))}
+        className="h-12 w-12 shrink-0"
+        onClick={() => onChange(aufViertelstunde(value) + 0.25)}
       >
-        <Plus className={big ? "h-5 w-5" : "h-3 w-3"} />
+        <Plus className="h-5 w-5" />
       </Button>
-      {big && (
-        <span className="h-12 flex items-center px-1 text-sm font-medium text-muted-foreground">
-          h
-        </span>
-      )}
+      <span className="h-12 flex items-center px-1 text-sm font-medium text-muted-foreground">
+        h
+      </span>
     </div>
   );
 }
