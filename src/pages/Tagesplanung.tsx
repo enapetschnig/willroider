@@ -50,6 +50,8 @@ import {
   ChevronRight,
   Printer,
   Send,
+  Undo2,
+  Lock,
   Plus,
   Trash2,
   CheckCircle2,
@@ -128,7 +130,9 @@ function isSetupFehler(error: { message?: string; code?: string } | null): boole
 // ─── Page ─────────────────────────────────────────────────────────────────
 
 export default function Tagesplanung() {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, role } = useAuth();
+  /** Nur Büro + Geschäftsführung dürfen freigeben/zurücknehmen. */
+  const darfFreigeben = role === "buero" || role === "geschaeftsfuehrung";
   const { toast } = useToast();
   const qc = useQueryClient();
   const [datum, setDatum] = useState<string>(todayIso());
@@ -801,6 +805,25 @@ export default function Tagesplanung() {
     refresh();
   }
 
+  async function freigabeZuruecknehmen() {
+    if (
+      !window.confirm(
+        "Freigabe zurücknehmen? Die Mitarbeiter sehen den Plan dieses Tages dann nicht mehr.",
+      )
+    )
+      return;
+    const { error } = await supabase
+      .from("tagesplanung_freigaben")
+      .delete()
+      .eq("datum", datum);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    toast({ title: "Freigabe zurückgenommen" });
+    refresh();
+  }
+
   const freigegeben = !!plan?.freigabe;
 
   // ─── Drag & Drop ────────────────────────────────────────────────────────
@@ -954,19 +977,32 @@ export default function Tagesplanung() {
             <Printer className="h-4 w-4 mr-1.5" /> Drucken
           </Button>
           {freigegeben ? (
-            <Button
-              size="sm"
-              variant="outline"
-              className="border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100"
-              onClick={freigeben}
-            >
-              <CheckCircle2 className="h-4 w-4 mr-1.5" />
-              Freigegeben · erneut
-            </Button>
-          ) : (
+            <>
+              <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-800 px-2">
+                <CheckCircle2 className="h-4 w-4" />
+                Freigegeben
+              </span>
+              {darfFreigeben && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+                  onClick={freigabeZuruecknehmen}
+                >
+                  <Undo2 className="h-4 w-4 mr-1.5" />
+                  Freigabe zurücknehmen
+                </Button>
+              )}
+            </>
+          ) : darfFreigeben ? (
             <Button size="sm" onClick={freigeben}>
               <Send className="h-4 w-4 mr-1.5" /> Plan freigeben
             </Button>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground px-2">
+              <Lock className="h-4 w-4" />
+              Noch nicht freigegeben — Freigabe durch das Büro
+            </span>
           )}
         </div>
       </div>

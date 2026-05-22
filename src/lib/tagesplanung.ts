@@ -20,8 +20,9 @@ export interface MaTagesEinteilung {
  * Üblicherweise 0 oder 1 Eintrag pro MA pro Tag. Bei V2-Halbtags-Splits liefert
  * die Funktion ein Array — Reihenfolge nach Einteilungs-Erstellung.
  *
- * Greift egal ob Plan freigegeben oder nicht — Stunden/Berichte sollen schon
- * vor Freigabe eine sinnvolle Vorauswahl bekommen.
+ * Hinweis: Für normale Mitarbeiter greift die RLS — nicht freigegebene Tage
+ * liefern nichts. Admins/Büro sehen die Einteilung auch vor der Freigabe (z.B.
+ * für die Vorausfüllung in der Sammel-Zeiterfassung).
  */
 export async function getBaustellenForMaToday(
   mitarbeiterId: string,
