@@ -1,16 +1,12 @@
 /**
- * Stundenerfassung im Gasser-Matrix-Pattern.
+ * Stundenerfassung — Block pro Mitarbeiter.
  *
- * Matrix:
- *   Zeilen = Tätigkeiten (jeweils mit Baustelle + Notiz)
- *   Spalten = ausgewählte Mitarbeiter (1 im Self-Modus, N im Polier-Bulk)
- *   Zellen = Stunden für (MA, Tätigkeit)
+ * Ein Tag besteht aus typisierten Einträgen (Baustelle / Firma / Krank /
+ * Urlaub / Schlechtwetter). Mehrere Einträge pro Tag sind möglich (z.B. halb
+ * Baustelle, halb Firma). In der Sammelerfassung (Polier/Admin) bekommt jeder
+ * Mitarbeiter einen eigenen Block mit eigenen Einträgen.
  *
- * Pausen + Zulagen + Fahrt sind global pro Tag.
- * Tag-Status (Baustelle/Firma/Krank/Urlaub/SW) gilt für alle selektierten MA.
- * Netto-Stunden pro MA = Summe der Stunden in seiner Spalte.
- *
- * Mobile-Fallback bei N>1 MA: pro Tätigkeit eine Card mit MA-Inputs vertikal.
+ * Pausen werden nicht mehr erfasst — der Mitarbeiter gibt reine Netto-Zeit ein.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -39,17 +35,15 @@ import {
   HeartPulse,
   CloudRain,
   Factory,
-  Coffee,
   Edit,
   Trash2,
   AlertTriangle,
   Loader2,
   Car,
-  Tag,
+  Copy,
   Calendar,
 } from "lucide-react";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
-import { feiertagAt } from "@/lib/feiertage";
 import { localIso } from "@/lib/dateFmt";
 import { MicButton } from "@/components/MicButton";
 import { BaustelleCombobox } from "@/components/stunden/BaustelleCombobox";
@@ -65,7 +59,6 @@ import {
   useTaetigkeitenStamm,
   useZulagenTypen,
   useMitarbeiterZulagen,
-  usePausenConfig,
   useArbeitszeitLimits,
 } from "@/hooks/useStammdatenStunden";
 import {
@@ -78,7 +71,7 @@ import {
 } from "@/hooks/useStundenTag";
 import { useSollHoursForDayBulk } from "@/hooks/useSollHoursForDayBulk";
 import { getBaustellenForMaToday } from "@/lib/tagesplanung";
-import { berechneTaggeld, fmtTaggeldLabel } from "@/lib/taggeld";
+import { berechneTaggeld } from "@/lib/taggeld";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -100,6 +93,7 @@ const STATUS_ICONS = {
   schlechtwetter: CloudRain,
   feiertag: Calendar,
 };
+/** Solider Farb-Stil (Knöpfe + Badges). */
 const STATUS_COLORS: Record<TagStatus, string> = {
   baustelle: "bg-primary text-primary-foreground border-primary",
   firma: "bg-blue-500 text-white border-blue-500",
@@ -108,68 +102,78 @@ const STATUS_COLORS: Record<TagStatus, string> = {
   schlechtwetter: "bg-sky-500 text-white border-sky-500",
   feiertag: "bg-violet-500 text-white border-violet-500",
 };
-const STATUS_OPTIONS: TagStatus[] = ["baustelle", "firma", "krank", "urlaub", "schlechtwetter"];
+/** Linke Akzent-Border je Eintrags-Art. */
+const ART_BORDER: Record<TagStatus, string> = {
+  baustelle: "border-l-primary",
+  firma: "border-l-blue-500",
+  krank: "border-l-red-500",
+  urlaub: "border-l-amber-500",
+  schlechtwetter: "border-l-sky-500",
+  feiertag: "border-l-violet-500",
+};
+const STATUS_OPTIONS: TagStatus[] = [
+  "baustelle",
+  "firma",
+  "krank",
+  "urlaub",
+  "schlechtwetter",
+];
 
 const todayIso = () => localIso();
+const newKey = () =>
+  typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
 
-interface TaetigkeitsZeile {
+/** Ein typisierter Eintrag im Tag eines Mitarbeiters. */
+interface EintragRow {
+  key: string;
+  art: TagStatus;
+  baustelle_id: string | null;
   taetigkeit_id: string | null;
   taetigkeit_freitext: string;
-  baustelle_id: string | null;
+  stunden: number;
   notiz: string;
-  stundenPerMa: Record<string, number>;
-  proMaModus: boolean;       // false = "alle gleich" (Default), true = pro MA individuell
 }
 
 interface ZulageEintrag {
-  stundenPerMa: Record<string, number | null>;   // null = alle Netto-Stunden des MA
+  stundenPerMa: Record<string, number | null>; // null = alle Netto-Stunden des MA
   notiz: string;
   proMaModus: boolean;
 }
 
-interface MatrixForm {
-  tagStatus: TagStatus;
-  taetigkeiten: TaetigkeitsZeile[];
-  vmPause: boolean;
-  mittagPause: boolean;
+interface ErfassungForm {
+  /** Einträge je Mitarbeiter-ID. */
+  maEintraege: Record<string, EintragRow[]>;
   arbeitsbeginn: string | null;
   anmerkung: string;
   zulagenSelected: Map<string, ZulageEintrag>;
   fahrt: SaveFahrt | null;
-  fehlzeitStunden: number;
-  fehlzeitBis: string;
 }
 
-function emptyForm(): MatrixForm {
+function emptyForm(): ErfassungForm {
   return {
-    tagStatus: "baustelle",
-    taetigkeiten: [
-      {
-        taetigkeit_id: null,
-        taetigkeit_freitext: "",
-        baustelle_id: null,
-        notiz: "",
-        stundenPerMa: {},
-        proMaModus: false,
-      },
-    ],
-    vmPause: true,
-    mittagPause: true,
+    maEintraege: {},
     arbeitsbeginn: null,
     anmerkung: "",
     zulagenSelected: new Map(),
     fahrt: null,
-    fehlzeitStunden: 8,
-    fehlzeitBis: "",
   };
 }
 
-/** True wenn alle MA in stundenPerMa den gleichen Wert haben (oder leer). */
-function alleGleich<T>(rec: Record<string, T>, userIds: string[]): boolean {
-  if (userIds.length <= 1) return true;
-  const first = rec[userIds[0]];
-  return userIds.every((id) => rec[id] === first);
+function neuerEintrag(art: TagStatus, baustelle_id: string | null = null): EintragRow {
+  return {
+    key: newKey(),
+    art,
+    baustelle_id,
+    taetigkeit_id: null,
+    taetigkeit_freitext: "",
+    stunden: 0,
+    notiz: "",
+  };
 }
+
+const istArbeitArt = (art: TagStatus) => art === "baustelle" || art === "firma";
 
 export default function Stunden() {
   const { user, profile, isAdmin } = useAuth();
@@ -184,17 +188,14 @@ export default function Stunden() {
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [forUserIds, setForUserIds] = useState<Set<string>>(new Set());
   const [memberSearch, setMemberSearch] = useState<string>("");
-  // true sobald Rolle (Admin/Polier/Self) feststeht — der Prefill wartet darauf.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [rollenGeladen, setRollenGeladen] = useState(false);
 
-  // Baustelle aus dem Dashboard-Link (/stunden?baustelle=<id>) — bestimmt,
-  // welche Einteilung für die Kollegen-/Projekt-Vorausfüllung genommen wird.
   const [searchParams] = useSearchParams();
   const baustelleParam = searchParams.get("baustelle");
 
-  // Vorarbeiter-/Admin-Vorausfüllung: die Kollegen aus der heutigen Einteilung
-  // werden mitselektiert. Läuft einmal pro (user, date, baustelle)-Kontext —
-  // manuelle De-/Selektion bleibt danach stehen.
+  // Vorarbeiter-/Admin-Vorausfüllung: Kollegen der heutigen Einteilung
+  // werden mitselektiert. Läuft einmal pro (user, date, baustelle)-Kontext.
   const prefilledKeyRef = useRef<string>("");
   useEffect(() => {
     if (!user || !date || !rollenGeladen) return;
@@ -203,8 +204,6 @@ export default function Stunden() {
     let cancelled = false;
     (async () => {
       const initial = new Set<string>([user.id]);
-      // Admin ODER Polier (= alle mit MA-Picker) bekommen die Kollegen der
-      // Einteilung. Bei Link vom Dashboard die zur Baustelle passende wählen.
       if (isAdmin || polierPartie) {
         const eint = await getBaustellenForMaToday(user.id, date);
         const ziel = baustelleParam
@@ -255,7 +254,6 @@ export default function Stunden() {
         setAllMembers((members as Profile[]) ?? []);
         setAllPartien([p as Partie]);
       }
-      // Rolle steht jetzt fest → Prefill darf laufen
       setRollenGeladen(true);
     })();
   }, [user, isAdmin]);
@@ -284,9 +282,6 @@ export default function Stunden() {
   const { data: zulagenTypen = [] } = useZulagenTypen();
   const { data: erlaubteZulagenIds = [] } = useMitarbeiterZulagen(primaryUserId);
 
-  // Union der Zulagen-Berechtigungen aller ausgewählten MA — bei Polier-Bulk
-  // werden alle Zulagen gezeigt, die mindestens 1 MA erhalten darf. Beim Save
-  // wird pro MA gefiltert.
   const { data: erlaubteZulagenUnion = [] } = useQuery({
     queryKey: ["mitarbeiter_zulagen_union", Array.from(forUserIds)],
     queryFn: async () => {
@@ -302,11 +297,10 @@ export default function Stunden() {
   });
   const verfuegbareZulagenIds =
     forUserIds.size > 1 ? erlaubteZulagenUnion : erlaubteZulagenIds;
-  const { data: pausen } = usePausenConfig();
   const { data: limits } = useArbeitszeitLimits();
   const { sollPerMa } = useSollHoursForDayBulk(Array.from(forUserIds), date);
 
-  // Tagesplanung-Daten pro selektiertem MA (Baustelle + Tätigkeit) — für Vorauswahl
+  // Tagesplanung-Daten pro selektiertem MA (Baustelle + Tätigkeit)
   const [tagesplanungPerMa, setTagesplanungPerMa] = useState<
     Map<string, { baustelle_id: string; taetigkeit: string | null }>
   >(new Map());
@@ -320,17 +314,12 @@ export default function Stunden() {
       const m = new Map<string, { baustelle_id: string; taetigkeit: string | null }>();
       for (const uid of forUserIds) {
         const eint = await getBaustellenForMaToday(uid, date);
-        // Für den primären User die zum Dashboard-Link passende Einteilung
-        // bevorzugen — sonst die erste.
         const ziel =
           uid === primaryUserId && baustelleParam
             ? eint.find((e) => e.baustelle_id === baustelleParam) ?? eint[0]
             : eint[0];
         if (ziel) {
-          m.set(uid, {
-            baustelle_id: ziel.baustelle_id,
-            taetigkeit: ziel.taetigkeit,
-          });
+          m.set(uid, { baustelle_id: ziel.baustelle_id, taetigkeit: ziel.taetigkeit });
         }
       }
       if (!cancelled) setTagesplanungPerMa(m);
@@ -340,56 +329,12 @@ export default function Stunden() {
     };
   }, [forUserIds, date, baustelleParam, primaryUserId]);
 
-  // Baustelle des primary user (für Stunden-Default + Badge)
-  const tagesplanungBaustelleId = primaryUserId
-    ? tagesplanungPerMa.get(primaryUserId)?.baustelle_id ?? null
-    : null;
-  const tagesplanungTaetigkeit = primaryUserId
-    ? tagesplanungPerMa.get(primaryUserId)?.taetigkeit ?? null
-    : null;
-
-  // Default-Setter: wenn Tagesplanung-Baustelle bekannt und Form-Tätigkeit
-  // noch keine Baustelle hat → vorbelegen. Auch Tätigkeit-Freitext + Soll-Stunden
-  // werden befüllt, wenn die Zeile noch leer ist.
-  useEffect(() => {
-    if (!tagesplanungBaustelleId) return;
-    setForm((f) => {
-      const tNeu = f.taetigkeiten.map((t, i) => {
-        if (i !== 0) return t;
-        let next = t;
-        if (t.baustelle_id == null) {
-          next = { ...next, baustelle_id: tagesplanungBaustelleId };
-        }
-        if (
-          tagesplanungTaetigkeit &&
-          !t.taetigkeit_id &&
-          !t.taetigkeit_freitext.trim()
-        ) {
-          next = { ...next, taetigkeit_freitext: tagesplanungTaetigkeit };
-        }
-        // Soll-Stunden auf alle selektierten MA vorbelegen, wo aktuell 0 steht
-        const stundenPerMaNeu: Record<string, number> = { ...t.stundenPerMa };
-        let stundenChanged = false;
-        for (const uid of forUserIds) {
-          const aktuell = stundenPerMaNeu[uid] ?? 0;
-          const soll = sollPerMa.get(uid) ?? 0;
-          if (aktuell === 0 && soll > 0) {
-            stundenPerMaNeu[uid] = soll;
-            stundenChanged = true;
-          }
-        }
-        if (stundenChanged) next = { ...next, stundenPerMa: stundenPerMaNeu };
-        return next;
-      });
-      const changed = tNeu.some((t, i) => t !== f.taetigkeiten[i]);
-      return changed ? { ...f, taetigkeiten: tNeu } : f;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tagesplanungBaustelleId, tagesplanungTaetigkeit, sollPerMa]);
-
   // Status-Map fürs Picker-UI (zeigt pro MA „4,5h" wenn schon was gebucht)
   const memberIds = useMemo(
-    () => Array.from(new Set([user?.id, ...allMembers.map((m) => m.id)].filter(Boolean) as string[])),
+    () =>
+      Array.from(
+        new Set([user?.id, ...allMembers.map((m) => m.id)].filter(Boolean) as string[]),
+      ),
     [user, allMembers],
   );
   const { data: statusForDateMap = new Map<string, { hours: number }>() } = useQuery({
@@ -429,212 +374,184 @@ export default function Stunden() {
   );
 
   // ─── Form-State ─────────────────────────────────────────────────────
-  const [form, setForm] = useState<MatrixForm>(() => emptyForm());
+  const [form, setForm] = useState<ErfassungForm>(() => emptyForm());
 
-  // Form-Reset auf Pausen-Defaults sobald geladen
+  // Bei Datums-/User-Wechsel: bestehenden Eintrag des primaryUsers laden.
   useEffect(() => {
-    if (!pausen) return;
-    setForm((f) => ({
-      ...f,
-      vmPause: pausen.vm.default_aktiv,
-      mittagPause: pausen.mittag.default_aktiv,
-    }));
-  }, [pausen]);
-
-  // Wenn user wechselt forUserIds → für neuen User stundenPerMa initialisieren
-  useEffect(() => {
-    setForm((f) => {
-      const userIds = Array.from(forUserIds);
-      return {
-        ...f,
-        taetigkeiten: f.taetigkeiten.map((t) => {
-          // Bei "alle gleich" neuen MA mit dem Standard-Wert befüllen
-          const standardWert = userIds.find((id) => t.stundenPerMa[id] !== undefined)
-            ? t.stundenPerMa[userIds.find((id) => t.stundenPerMa[id] !== undefined)!]
-            : 0;
-          const next: Record<string, number> = {};
-          for (const uid of userIds) {
-            next[uid] = t.stundenPerMa[uid] ?? (t.proMaModus ? 0 : standardWert);
-          }
-          return { ...t, stundenPerMa: next };
-        }),
-        zulagenSelected: new Map(
-          Array.from(f.zulagenSelected.entries()).map(([typId, z]) => {
-            const next: Record<string, number | null> = {};
-            const standardWert =
-              userIds.find((id) => z.stundenPerMa[id] !== undefined) !== undefined
-                ? z.stundenPerMa[userIds.find((id) => z.stundenPerMa[id] !== undefined)!]
-                : null;
-            for (const uid of userIds) {
-              next[uid] =
-                z.stundenPerMa[uid] !== undefined
-                  ? z.stundenPerMa[uid]
-                  : z.proMaModus
-                  ? 0
-                  : standardWert;
-            }
-            return [typId, { ...z, stundenPerMa: next }];
-          }),
-        ),
-      };
-    });
-  }, [forUserIds]);
-
-  // Bei Datums-/User-Wechsel: bestehenden Eintrag des primaryUsers laden
-  useEffect(() => {
-    const userIds = Array.from(forUserIds);
+    const uids = Array.from(forUserIds);
     if (!aktuellerEigenerTag) {
-      // Form reset wenn auf neuen Tag ohne Daten
-      setForm(() => ({
+      setForm({
         ...emptyForm(),
-        vmPause: pausen?.vm.default_aktiv ?? true,
-        mittagPause: pausen?.mittag.default_aktiv ?? true,
-        // Init stundenPerMa für alle selektierten Users mit 0 (alle gleich)
-        taetigkeiten: [
-          {
-            taetigkeit_id: null,
-            taetigkeit_freitext: "",
-            baustelle_id: null,
-            notiz: "",
-            stundenPerMa: Object.fromEntries(userIds.map((uid) => [uid, 0])),
-            proMaModus: false,
-          },
-        ],
-      }));
+        maEintraege: Object.fromEntries(uids.map((u) => [u, [] as EintragRow[]])),
+      });
       return;
     }
-    // Bestehender Tag: Form aus Daten füllen
     const t = aktuellerEigenerTag;
-    // Bei Single-MA-Bearbeitung: Daten gehören dem primary user.
-    // Wir initialisieren alle anderen User mit 0 (für Bulk-Add nach Edit).
-    const tStunden = (uid: string, defaultVal: number) =>
-      uid === primaryUserId ? defaultVal : 0;
     setForm({
-      tagStatus: t.tag.tag_status,
-      taetigkeiten:
-        t.taetigkeiten.length > 0
-          ? t.taetigkeiten.map((tt) => {
-              const stundenPerMa = Object.fromEntries(
-                userIds.map((uid) => [uid, tStunden(uid, Number(tt.stunden))]),
-              );
-              return {
-                taetigkeit_id: tt.taetigkeit_id,
-                taetigkeit_freitext: tt.taetigkeit_freitext ?? "",
-                baustelle_id: tt.baustelle_id,
-                notiz: tt.notiz ?? "",
-                stundenPerMa,
-                // Auto-Detect: bei Single-MA-Edit immer "alle gleich" (kein Multi-MA-Konflikt)
-                proMaModus: userIds.length > 1 && !alleGleich(stundenPerMa, userIds),
-              };
-            })
-          : [
-              {
-                taetigkeit_id: null,
-                taetigkeit_freitext: "",
-                baustelle_id: null,
-                notiz: "",
-                stundenPerMa: Object.fromEntries(
-                  userIds.map((uid) => [
-                    uid,
-                    uid === primaryUserId ? Number(t.tag.netto_stunden) : 0,
-                  ]),
-                ),
-                proMaModus:
-                  userIds.length > 1 &&
-                  userIds.some((u) => u !== primaryUserId),
-              },
-            ],
-      vmPause: t.tag.vm_pause,
-      mittagPause: t.tag.mittag_pause,
+      ...emptyForm(),
+      maEintraege: {
+        ...Object.fromEntries(uids.map((u) => [u, [] as EintragRow[]])),
+        [primaryUserId]: t.taetigkeiten.map((tt) => ({
+          key: newKey(),
+          art: tt.art,
+          baustelle_id: tt.baustelle_id,
+          taetigkeit_id: tt.taetigkeit_id,
+          taetigkeit_freitext: tt.taetigkeit_freitext ?? "",
+          stunden: Number(tt.stunden),
+          notiz: tt.notiz ?? "",
+        })),
+      },
       arbeitsbeginn: t.tag.arbeitsbeginn?.slice(0, 5) ?? null,
       anmerkung: t.tag.anmerkung ?? "",
       zulagenSelected: new Map(
-        t.zulagen.map((z) => {
-          // Beim Laden: Zulage gehörte nur dem primary user (Single-Tag)
-          // Andere selektierte MA kriegen den gleichen Wert (alle gleich-Default)
-          const stundenPerMa = Object.fromEntries(
-            userIds.map((uid) => [uid, z.stunden ?? null]),
-          );
-          return [
-            z.zulagen_typ_id,
-            {
-              stundenPerMa,
-              notiz: z.notiz ?? "",
-              proMaModus: false,
-            },
-          ];
-        }),
+        t.zulagen.map((z) => [
+          z.zulagen_typ_id,
+          {
+            stundenPerMa: Object.fromEntries(uids.map((u) => [u, z.stunden ?? null])),
+            notiz: z.notiz ?? "",
+            proMaModus: false,
+          },
+        ]),
       ),
       fahrt: t.fahrt
         ? {
             fahrtgeld_eur: Number(t.fahrt.fahrtgeld_eur),
             privat_pkw: t.fahrt.privat_pkw,
-            km_gefahren: t.fahrt.km_gefahren !== null ? Number(t.fahrt.km_gefahren) : null,
+            km_gefahren:
+              t.fahrt.km_gefahren !== null ? Number(t.fahrt.km_gefahren) : null,
             taggeld_kurz: t.fahrt.taggeld_kurz,
             taggeld_lang: t.fahrt.taggeld_lang,
             taggeld_manuell: t.fahrt.taggeld_manuell,
           }
         : null,
-      fehlzeitStunden: 8,
-      fehlzeitBis: "",
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aktuellerEigenerTag?.tag.id, primaryUserId]);
 
-  const isArbeit = form.tagStatus === "baustelle" || form.tagStatus === "firma";
+  // forUserIds-Wechsel: für jeden selektierten MA ein Eintrags-Array sichern,
+  // Zulagen-stundenPerMa abgleichen.
+  useEffect(() => {
+    setForm((f) => {
+      const uids = Array.from(forUserIds);
+      const maEintraege: Record<string, EintragRow[]> = {};
+      for (const uid of uids) maEintraege[uid] = f.maEintraege[uid] ?? [];
+      const zulagenSelected = new Map(
+        Array.from(f.zulagenSelected.entries()).map(([typId, z]) => {
+          const standardWert =
+            uids.find((id) => z.stundenPerMa[id] !== undefined) !== undefined
+              ? z.stundenPerMa[uids.find((id) => z.stundenPerMa[id] !== undefined)!]
+              : null;
+          const next: Record<string, number | null> = {};
+          for (const uid of uids) {
+            next[uid] =
+              z.stundenPerMa[uid] !== undefined
+                ? z.stundenPerMa[uid]
+                : z.proMaModus
+                ? 0
+                : standardWert;
+          }
+          return [typId, { ...z, stundenPerMa: next }];
+        }),
+      );
+      return { ...f, maEintraege, zulagenSelected };
+    });
+  }, [forUserIds]);
 
-  /** Summe der oben eingetragenen Tätigkeiten-Stunden für einen MA —
-   *  dient als Vorausfüllung für neu aktivierte Zulagen. */
+  // Vorausfüllung: leere MA-Blöcke mit einem Baustellen-Eintrag aus der
+  // Tagesplanung + Soll-Stunden vorbefüllen.
+  useEffect(() => {
+    setForm((f) => {
+      let changed = false;
+      const maEintraege = { ...f.maEintraege };
+      for (const uid of forUserIds) {
+        if ((maEintraege[uid] ?? []).length > 0) continue;
+        const tp = tagesplanungPerMa.get(uid);
+        const soll = sollPerMa.get(uid) ?? 0;
+        if (!tp && soll <= 0) continue;
+        maEintraege[uid] = [
+          {
+            key: newKey(),
+            art: "baustelle",
+            baustelle_id: tp?.baustelle_id ?? null,
+            taetigkeit_id: null,
+            taetigkeit_freitext: tp?.taetigkeit ?? "",
+            stunden: soll,
+            notiz: "",
+          },
+        ];
+        changed = true;
+      }
+      return changed ? { ...f, maEintraege } : f;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tagesplanungPerMa, sollPerMa, forUserIds]);
+
+  /** Summe der Netto-Stunden eines MA aus seinen Einträgen. */
+  const summenProMa = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const uid of forUserIds) {
+      const rows = form.maEintraege[uid] ?? [];
+      m.set(
+        uid,
+        Math.round(rows.reduce((s, r) => s + Number(r.stunden || 0), 0) * 100) / 100,
+      );
+    }
+    return m;
+  }, [form.maEintraege, forUserIds]);
+
+  /** Summe der Arbeits-Einträge (Baustelle/Firma) eines MA — für Zulagen-Prefill. */
   const taetSummeFuer = (uid: string): number =>
-    form.taetigkeiten.reduce((s, t) => s + Number(t.stundenPerMa[uid] ?? 0), 0);
+    (form.maEintraege[uid] ?? [])
+      .filter((r) => istArbeitArt(r.art))
+      .reduce((s, r) => s + Number(r.stunden || 0), 0);
 
   const selectedMaList = useMemo(() => {
     const ids = Array.from(forUserIds);
-    // Self zuerst, Rest nach Nachname
     return ids
-      .map((id) => (id === user?.id ? (profile as any as Profile) : allMembers.find((m) => m.id === id)))
+      .map((id) =>
+        id === user?.id
+          ? (profile as any as Profile)
+          : allMembers.find((m) => m.id === id),
+      )
       .filter(Boolean) as Profile[];
   }, [forUserIds, allMembers, profile, user]);
 
-  // MA mit bereits gebuchten Stunden an diesem Tag (für Konflikt-Banner)
+  // MA mit bereits gebuchten Stunden an diesem Tag (Konflikt-Banner)
   const konflikte = useMemo(() => {
     return selectedMaList
       .map((m) => ({ ma: m, h: statusForDateMap.get(m.id)?.hours ?? 0 }))
       .filter((x) => x.h > 0);
   }, [selectedMaList, statusForDateMap]);
 
-  // Netto pro MA + tagZeiten + Soll
   const arbeitsbeginnEffective =
     form.arbeitsbeginn || limits?.arbeitsbeginn_default?.slice(0, 5) || "07:00";
-  const summenProMa = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const uid of forUserIds) {
-      let s = 0;
-      if (isArbeit) {
-        for (const t of form.taetigkeiten) s += Number(t.stundenPerMa[uid] ?? 0);
-      } else {
-        s = form.fehlzeitStunden;
-      }
-      map.set(uid, Math.round(s * 100) / 100);
-    }
-    return map;
-  }, [form.taetigkeiten, form.fehlzeitStunden, forUserIds, isArbeit]);
 
   const tagZeitenForMa = (uid: string) =>
     berechneTagZeiten({
       nettoStunden: summenProMa.get(uid) ?? 0,
-      vmPause: isArbeit ? form.vmPause : false,
-      mittagPause: isArbeit ? form.mittagPause : false,
-      pausenConfig: {
-        vmDauerMin: pausen?.vm.dauer_minuten ?? 20,
-        mittagDauerMin: pausen?.mittag.dauer_minuten ?? 30,
-      },
       arbeitsbeginn: arbeitsbeginnEffective,
     });
 
   const saveMut = useSaveStundenTag();
   const deleteMut = useDeleteStundenTag();
   const [busy, setBusy] = useState(false);
+
+  // ─── Eintrags-Mutationen pro MA ─────────────────────────────────────
+  const setEintraege = (uid: string, rows: EintragRow[]) =>
+    setForm((f) => ({ ...f, maEintraege: { ...f.maEintraege, [uid]: rows } }));
+
+  const uebernehmeFuerAlle = (srcUid: string) => {
+    const src = form.maEintraege[srcUid] ?? [];
+    setForm((f) => {
+      const maEintraege = { ...f.maEintraege };
+      for (const uid of forUserIds) {
+        if (uid === srcUid) continue;
+        maEintraege[uid] = src.map((r) => ({ ...r, key: newKey() }));
+      }
+      return { ...f, maEintraege };
+    });
+    toast({ title: "Einträge übernommen", description: "Für alle Mitarbeiter kopiert." });
+  };
 
   // ─── Submit ──────────────────────────────────────────────────────────
   const submit = async () => {
@@ -643,8 +560,8 @@ export default function Stunden() {
       return;
     }
 
-    // AZG-Check pro MA — bei Überschreitung Confirm
-    if (limits && isArbeit) {
+    // AZG-Check pro MA
+    if (limits) {
       const violations: string[] = [];
       for (const ma of selectedMaList) {
         const z = tagZeitenForMa(ma.id);
@@ -665,24 +582,6 @@ export default function Stunden() {
       }
     }
 
-    // Daten für Multi-Tages-Fehlzeit
-    const dates: string[] = [date];
-    if (!isArbeit && form.fehlzeitBis && form.fehlzeitBis > date) {
-      let cur = new Date(date + "T00:00:00");
-      const end = new Date(form.fehlzeitBis + "T00:00:00");
-      dates.length = 0;
-      while (cur <= end) {
-        const day = cur.getDay();
-        const iso = localIso(cur);
-        if (day !== 0 && day !== 6 && !feiertagAt(iso)) dates.push(iso);
-        cur.setDate(cur.getDate() + 1);
-      }
-      if (dates.length === 0) {
-        toast({ variant: "destructive", title: "Keine Werktage im Zeitraum" });
-        return;
-      }
-    }
-
     setBusy(true);
     let savedCount = 0;
     let skippedCount = 0;
@@ -691,142 +590,113 @@ export default function Stunden() {
     const errors: string[] = [];
 
     try {
-      // Bestehende Einträge laden um zu wissen welche zu upserten + welche zu überspringen
-      for (const dt of dates) {
-        const { data: existing } = await supabase
-          .from("stunden_tage")
-          .select("id, mitarbeiter_id, status")
-          .eq("datum", dt)
-          .in("mitarbeiter_id", Array.from(forUserIds));
-        const existingMap = new Map<string, { id: string; status: string }>();
-        (existing ?? []).forEach((r: any) =>
-          existingMap.set(r.mitarbeiter_id, { id: r.id, status: r.status }),
+      const { data: existing } = await supabase
+        .from("stunden_tage")
+        .select("id, mitarbeiter_id, status")
+        .eq("datum", date)
+        .in("mitarbeiter_id", Array.from(forUserIds));
+      const existingMap = new Map<string, { id: string; status: string }>();
+      (existing ?? []).forEach((r: any) =>
+        existingMap.set(r.mitarbeiter_id, { id: r.id, status: r.status }),
+      );
+
+      for (const uid of forUserIds) {
+        const ma = selectedMaList.find((m) => m.id === uid);
+        const maName = ma ? `${ma.vorname} ${ma.nachname}` : "MA";
+        const rows = (form.maEintraege[uid] ?? []).filter(
+          (r) => Number(r.stunden) > 0,
         );
+        if (rows.length === 0) {
+          skippedCount++;
+          continue;
+        }
+        const existingEntry = existingMap.get(uid);
+        if (existingEntry && existingEntry.status !== "erfasst") {
+          toast({
+            title: `${maName} übersprungen`,
+            description: `Tag bereits ${existingEntry.status}`,
+          });
+          skippedCount++;
+          continue;
+        }
 
-        for (const uid of forUserIds) {
-          const ma = selectedMaList.find((m) => m.id === uid);
-          const maName = ma ? `${ma.vorname} ${ma.nachname}` : "MA";
-          const existingEntry = existingMap.get(uid);
+        const eintraege: SaveEintrag[] = rows.map((r, idx) => {
+          const arbeit = istArbeitArt(r.art);
+          return {
+            position: idx + 1,
+            art: r.art,
+            taetigkeit_id: arbeit ? r.taetigkeit_id : null,
+            taetigkeit_freitext:
+              arbeit && !r.taetigkeit_id ? r.taetigkeit_freitext.trim() || null : null,
+            baustelle_id: r.art === "baustelle" ? r.baustelle_id : null,
+            stunden: Number(r.stunden),
+            notiz: r.notiz.trim() || null,
+          };
+        });
 
-          // Bereits bestätigt/freigegeben → überspringen
-          if (existingEntry && existingEntry.status !== "erfasst") {
-            toast({
-              title: `${maName} übersprungen`,
-              description: `Tag ${dt} bereits ${existingEntry.status}`,
-            });
-            skippedCount++;
-            continue;
+        // Zulagen: nur die, die der MA erhalten darf
+        let erlaubteZulagenForUid: Set<string>;
+        if (uid === primaryUserId) {
+          erlaubteZulagenForUid = new Set(erlaubteZulagenIds);
+        } else {
+          const { data: zRows } = await supabase
+            .from("mitarbeiter_zulagen")
+            .select("zulagen_typ_id")
+            .eq("mitarbeiter_id", uid);
+          erlaubteZulagenForUid = new Set(
+            (zRows ?? []).map((r: any) => r.zulagen_typ_id),
+          );
+        }
+        const zulagen: SaveZulage[] = Array.from(form.zulagenSelected.entries())
+          .filter(([typId]) => erlaubteZulagenForUid.has(typId))
+          .filter(([, val]) => val.stundenPerMa[uid] !== 0)
+          .map(([typId, val]) => ({
+            zulagen_typ_id: typId,
+            stunden: val.stundenPerMa[uid] ?? null,
+            notiz: val.notiz.trim() || null,
+          }));
+
+        // Auto-Taggeld aus den Baustellen-Stunden
+        const baustelleStd = rows
+          .filter((r) => r.art === "baustelle")
+          .reduce((s, r) => s + Number(r.stunden), 0);
+        const isPolierSelf = uid === primaryUserId && istPolier;
+        const polierFahrt = isPolierSelf ? form.fahrt : null;
+        let fahrtToSave: SaveFahrt | null = null;
+        if (polierFahrt?.taggeld_manuell) {
+          fahrtToSave = polierFahrt;
+        } else {
+          const auto = berechneTaggeld(baustelleStd, "baustelle");
+          if (auto.kurz > 0 || auto.lang > 0 || polierFahrt) {
+            fahrtToSave = {
+              fahrtgeld_eur: polierFahrt?.fahrtgeld_eur ?? 0,
+              privat_pkw: polierFahrt?.privat_pkw ?? false,
+              km_gefahren: polierFahrt?.km_gefahren ?? null,
+              taggeld_kurz: auto.kurz,
+              taggeld_lang: auto.lang,
+              taggeld_manuell: false,
+            };
           }
+        }
 
-          const nettoFuerMa = isArbeit
-            ? form.taetigkeiten.reduce((s, t) => s + Number(t.stundenPerMa[uid] ?? 0), 0)
-            : form.fehlzeitStunden;
-          // MA ohne Stunden bei Arbeit → überspringen
-          if (isArbeit && nettoFuerMa === 0) {
-            skippedCount++;
-            continue;
+        try {
+          await saveMut.mutateAsync({
+            id: existingEntry?.id,
+            mitarbeiter_id: uid,
+            datum: date,
+            arbeitsbeginn: form.arbeitsbeginn,
+            anmerkung: form.anmerkung.trim() || null,
+            taetigkeiten: eintraege,
+            zulagen,
+            fahrt: fahrtToSave,
+          });
+          savedCount++;
+          if (fahrtToSave) {
+            taggeldKurzCount += fahrtToSave.taggeld_kurz;
+            taggeldLangCount += fahrtToSave.taggeld_lang;
           }
-
-          // Zulagen: nur die, die der MA erhalten darf
-          let erlaubteZulagenForUid: Set<string>;
-          if (uid === primaryUserId) {
-            erlaubteZulagenForUid = new Set(erlaubteZulagenIds);
-          } else {
-            const { data: zRows } = await supabase
-              .from("mitarbeiter_zulagen")
-              .select("zulagen_typ_id")
-              .eq("mitarbeiter_id", uid);
-            erlaubteZulagenForUid = new Set(
-              (zRows ?? []).map((r: any) => r.zulagen_typ_id),
-            );
-          }
-          const zulagen: SaveZulage[] = isArbeit
-            ? Array.from(form.zulagenSelected.entries())
-                .filter(([typId]) => erlaubteZulagenForUid.has(typId))
-                // Skip wenn MA explizit 0 hat (= "keine Zulage für diesen MA")
-                .filter(([, val]) => {
-                  const v = val.stundenPerMa[uid];
-                  return v !== 0;
-                })
-                .map(([typId, val]) => ({
-                  zulagen_typ_id: typId,
-                  stunden: val.stundenPerMa[uid] ?? null,
-                  notiz: val.notiz.trim() || null,
-                }))
-            : [];
-
-          const taetigkeitenForUid: SaveEintrag[] = isArbeit
-            ? form.taetigkeiten
-                .filter((t) => Number(t.stundenPerMa[uid] ?? 0) > 0)
-                .map((t, idx) => ({
-                  position: idx + 1,
-                  art: form.tagStatus,
-                  taetigkeit_id: t.taetigkeit_id,
-                  taetigkeit_freitext: t.taetigkeit_id
-                    ? null
-                    : t.taetigkeit_freitext.trim() || null,
-                  baustelle_id: t.baustelle_id,
-                  stunden: Number(t.stundenPerMa[uid]),
-                  notiz: t.notiz.trim() || null,
-                }))
-            : [
-                // Abwesenheit (Urlaub/Krank/SW) = ein Eintrag dieser Art.
-                {
-                  position: 1,
-                  art: form.tagStatus,
-                  taetigkeit_id: null,
-                  taetigkeit_freitext: null,
-                  baustelle_id: null,
-                  stunden: nettoFuerMa,
-                  notiz: null,
-                },
-              ];
-
-          // Auto-Taggeld pro MA aus brutto-Anwesenheit berechnen.
-          // WICHTIG: bestehende Polier-Fahrtdaten (Fahrtgeld/km) gehen NICHT verloren
-          // wenn der Status nicht 'baustelle' ist — sie bleiben erhalten (nur Taggeld=0).
-          const isPolierSelf = uid === primaryUserId && istPolier && isArbeit;
-          const polierFahrt = isPolierSelf ? form.fahrt : null;
-          let fahrtToSave: SaveFahrt | null = null;
-          if (polierFahrt?.taggeld_manuell) {
-            // Manueller Override → behalte exakt was Polier eingetragen hat
-            fahrtToSave = polierFahrt;
-          } else if (isArbeit) {
-            const tagZ = tagZeitenForMa(uid);
-            const brutto = tagZ?.bruttoAnwesenheit ?? 0;
-            // Auto-Taggeld: nur bei baustelle > 0, sonst 0
-            const auto = berechneTaggeld(brutto, form.tagStatus);
-            // Fahrt-Eintrag wenn Taggeld > 0 ODER Polier-Fahrtdaten existieren
-            if (auto.kurz > 0 || auto.lang > 0 || polierFahrt) {
-              fahrtToSave = {
-                fahrtgeld_eur: polierFahrt?.fahrtgeld_eur ?? 0,
-                privat_pkw: polierFahrt?.privat_pkw ?? false,
-                km_gefahren: polierFahrt?.km_gefahren ?? null,
-                taggeld_kurz: auto.kurz,
-                taggeld_lang: auto.lang,
-                taggeld_manuell: false,
-              };
-            }
-          }
-          try {
-            await saveMut.mutateAsync({
-              id: dates.length === 1 ? existingEntry?.id : undefined,
-              mitarbeiter_id: uid,
-              datum: dt,
-              arbeitsbeginn: form.arbeitsbeginn,
-              anmerkung: form.anmerkung.trim() || null,
-              taetigkeiten: taetigkeitenForUid,
-              zulagen,
-              fahrt: fahrtToSave,
-            });
-            savedCount++;
-            if (fahrtToSave) {
-              taggeldKurzCount += fahrtToSave.taggeld_kurz;
-              taggeldLangCount += fahrtToSave.taggeld_lang;
-            }
-          } catch (e) {
-            errors.push(`${maName}: ${(e as Error).message}`);
-          }
+        } catch (e) {
+          errors.push(`${maName}: ${(e as Error).message}`);
         }
       }
 
@@ -834,7 +704,8 @@ export default function Stunden() {
       const taggeldParts: string[] = [];
       if (taggeldKurzCount > 0) taggeldParts.push(`${taggeldKurzCount}× Taggeld kurz`);
       if (taggeldLangCount > 0) taggeldParts.push(`${taggeldLangCount}× Taggeld lang`);
-      const taggeldInfo = taggeldParts.length > 0 ? ` · ${taggeldParts.join(" · ")}` : "";
+      const taggeldInfo =
+        taggeldParts.length > 0 ? ` · ${taggeldParts.join(" · ")}` : "";
       toast({
         title:
           errors.length > 0
@@ -848,30 +719,16 @@ export default function Stunden() {
 
       refetchTage();
       queryClient.invalidateQueries({ queryKey: ["stunden_status_for_date"] });
-      // Form-Reset auf Standardwerte für den nächsten Tag (außer wir editieren grad)
       if (!aktuellerEigenerTag) {
         setForm({
           ...emptyForm(),
-          vmPause: pausen?.vm.default_aktiv ?? true,
-          mittagPause: pausen?.mittag.default_aktiv ?? true,
-          taetigkeiten: [
-            {
-              taetigkeit_id: null,
-              taetigkeit_freitext: "",
-              baustelle_id: null,
-              notiz: "",
-              stundenPerMa: Object.fromEntries(
-                Array.from(forUserIds).map((uid) => [uid, 0]),
-              ),
-              proMaModus: false,
-            },
-          ],
+          maEintraege: Object.fromEntries(
+            Array.from(forUserIds).map((uid) => [uid, [] as EintragRow[]]),
+          ),
         });
-        if (dates.length === 1) {
-          const next = new Date(date);
-          next.setDate(next.getDate() + 1);
-          setDate(localIso(next));
-        }
+        const next = new Date(date);
+        next.setDate(next.getDate() + 1);
+        setDate(localIso(next));
       }
     } finally {
       setBusy(false);
@@ -902,6 +759,13 @@ export default function Stunden() {
       return next;
     });
   };
+  const toggleCollapsed = (uid: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
+      return next;
+    });
 
   const submitLabel =
     forUserIds.size === 0
@@ -935,7 +799,7 @@ export default function Stunden() {
         />
       )}
 
-      {/* Konflikt-Banner — wenn selektierte MA an dem Tag schon Stunden haben */}
+      {/* Konflikt-Banner */}
       {konflikte.length > 0 && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-1.5">
           <div className="flex items-center gap-2">
@@ -949,7 +813,9 @@ export default function Stunden() {
           <ul className="text-xs text-amber-900 pl-6 space-y-0.5">
             {konflikte.map(({ ma, h }) => (
               <li key={ma.id} className="tabular-nums">
-                <span className="font-medium">{ma.vorname} {ma.nachname}:</span>{" "}
+                <span className="font-medium">
+                  {ma.vorname} {ma.nachname}:
+                </span>{" "}
                 {fmtH(h)}
               </li>
             ))}
@@ -965,7 +831,12 @@ export default function Stunden() {
       <Card>
         <CardContent className="p-4 space-y-3">
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" className="h-11 w-11 shrink-0" onClick={() => moveDate(-1)}>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-11 w-11 shrink-0"
+              onClick={() => moveDate(-1)}
+            >
               <ChevronLeft className="h-5 w-5" />
             </Button>
             <Input
@@ -974,7 +845,12 @@ export default function Stunden() {
               onChange={(e) => setDate(e.target.value)}
               className="text-center font-medium h-11"
             />
-            <Button variant="outline" size="icon" className="h-11 w-11 shrink-0" onClick={() => moveDate(1)}>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-11 w-11 shrink-0"
+              onClick={() => moveDate(1)}
+            >
               <ChevronRight className="h-5 w-5" />
             </Button>
           </div>
@@ -1011,7 +887,7 @@ export default function Stunden() {
         </CardContent>
       </Card>
 
-      {/* Eigene Tage-Liste — auf Mobile per Default zu, auf Desktop offen */}
+      {/* Eigene Tage-Liste */}
       {tageList.length > 0 && (
         <Card>
           <CardContent className="p-3 space-y-1.5">
@@ -1029,7 +905,9 @@ export default function Stunden() {
                 )}
               </span>
             </button>
-            <div className={tageOffenMobile ? "space-y-1.5" : "space-y-1.5 hidden lg:block"}>
+            <div
+              className={tageOffenMobile ? "space-y-1.5" : "space-y-1.5 hidden lg:block"}
+            >
               {tageList.slice(0, 5).map((t) => (
                 <div
                   key={t.tag.id}
@@ -1088,113 +966,32 @@ export default function Stunden() {
             )}
           </h3>
 
-          {/* Status-Bar */}
-          <div>
-            <Label className="text-sm font-semibold">Was war an dem Tag?</Label>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mt-2">
-              {STATUS_OPTIONS.map((s) => {
-                const Icon = STATUS_ICONS[s];
-                const active = form.tagStatus === s;
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setForm((f) => ({ ...f, tagStatus: s }))}
-                    className={`h-14 rounded-lg text-sm font-semibold border-2 transition flex items-center justify-center gap-1.5 ${
-                      active
-                        ? STATUS_COLORS[s] + " shadow-sm"
-                        : "bg-background border-border hover:bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" />
-                    {STATUS_LABELS[s]}
-                  </button>
-                );
-              })}
+          {selectedMaList.length === 0 && (
+            <div className="text-sm text-muted-foreground italic">
+              Bitte oben Mitarbeiter auswählen.
             </div>
-          </div>
+          )}
 
-          {/* Matrix (bei Arbeit) — direkt sichtbar, Werte aus Tagesplanung + Soll vorausgefüllt */}
-          {isArbeit && (
-            <MatrixEditor
-              taetigkeiten={form.taetigkeiten}
-              selectedMa={selectedMaList}
-              taetigkeitenStamm={taetigkeitenStamm}
+          {/* Block pro Mitarbeiter */}
+          {selectedMaList.map((ma) => (
+            <MaBlock
+              key={ma.id}
+              ma={ma}
+              single={selectedMaList.length === 1}
+              eintraege={form.maEintraege[ma.id] ?? []}
+              onChange={(rows) => setEintraege(ma.id, rows)}
               baustellen={baustellen}
-              onChange={(neue) => setForm((f) => ({ ...f, taetigkeiten: neue }))}
-              summenProMa={summenProMa}
-              tagesplanungBaustelleId={tagesplanungBaustelleId}
-              tagesplanungTaetigkeit={tagesplanungTaetigkeit}
-              sollPerMa={sollPerMa}
+              taetigkeitenStamm={taetigkeitenStamm}
+              soll={sollPerMa.get(ma.id) ?? 0}
+              collapsed={collapsed.has(ma.id)}
+              onToggleCollapse={() => toggleCollapsed(ma.id)}
+              canCopyToAll={selectedMaList.length > 1}
+              onCopyToAll={() => uebernehmeFuerAlle(ma.id)}
             />
-          )}
+          ))}
 
-          {/* Fehlzeit-Eingabe */}
-          {!isArbeit && (
-            <div className="space-y-2 border-t pt-3">
-              <Label className="text-sm font-semibold">Stunden pro Tag</Label>
-              <div className="flex items-stretch gap-2">
-                <Button
-                  variant="outline"
-                  className="h-12 w-12 shrink-0"
-                  onClick={() =>
-                    setForm((f) => ({
-                      ...f,
-                      fehlzeitStunden: Math.max(0, +(f.fehlzeitStunden - 0.25).toFixed(2)),
-                    }))
-                  }
-                >
-                  <Minus className="h-5 w-5" />
-                </Button>
-                <Input
-                  type="number"
-                  step={0.25}
-                  min={0}
-                  value={form.fehlzeitStunden}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      fehlzeitStunden: Math.max(0, Number(e.target.value) || 0),
-                    }))
-                  }
-                  className="h-12 text-center text-xl font-bold tabular-nums"
-                />
-                <span className="h-12 flex items-center px-2 text-sm font-medium text-muted-foreground">
-                  h
-                </span>
-                <Button
-                  variant="outline"
-                  className="h-12 w-12 shrink-0"
-                  onClick={() =>
-                    setForm((f) => ({
-                      ...f,
-                      fehlzeitStunden: +(f.fehlzeitStunden + 0.25).toFixed(2),
-                    }))
-                  }
-                >
-                  <Plus className="h-5 w-5" />
-                </Button>
-              </div>
-              <div className="space-y-1 pt-2">
-                <Label className="text-sm">Bis-Datum (optional, für Mehrtages-Fehlzeit)</Label>
-                <Input
-                  type="date"
-                  min={date}
-                  value={form.fehlzeitBis}
-                  onChange={(e) => setForm((f) => ({ ...f, fehlzeitBis: e.target.value }))}
-                  className="h-10"
-                />
-                {form.fehlzeitBis && form.fehlzeitBis > date && (
-                  <div className="text-[11px] text-muted-foreground">
-                    Wochenenden und Feiertage werden übersprungen.
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Zulagen */}
-          {isArbeit && verfuegbareZulagenIds.length > 0 && (
+          {/* Zulagen (global, pro MA-Stunden) */}
+          {selectedMaList.length > 0 && verfuegbareZulagenIds.length > 0 && (
             <div className="space-y-2 border-t pt-3">
               <Label className="text-sm font-semibold">Zulagen</Label>
               <div className="flex flex-wrap gap-1.5">
@@ -1214,9 +1011,6 @@ export default function Stunden() {
                             if (next.has(z.id)) next.delete(z.id);
                             else
                               next.set(z.id, {
-                                // Stunden-Split-Zulagen werden mit den oben
-                                // eingetragenen Tätigkeiten-Stunden vorbefüllt
-                                // (manuell überschreibbar). Flat-Zulagen bleiben null.
                                 stundenPerMa: Object.fromEntries(
                                   Array.from(forUserIds).map((uid) => [
                                     uid,
@@ -1226,8 +1020,6 @@ export default function Stunden() {
                                   ]),
                                 ),
                                 notiz: "",
-                                // Bei Multi-MA: standardmäßig pro MA individuell.
-                                // Bei Single-MA: irrelevant (nur ein Eingabefeld).
                                 proMaModus: forUserIds.size > 1,
                               });
                             return { ...f, zulagenSelected: next };
@@ -1270,13 +1062,19 @@ export default function Stunden() {
             </div>
           )}
 
-          {/* Fahrt nur für Polier-Self (Taggeld wird automatisch berechnet — Block ist nur für Fahrtgeld/km) */}
-          {isArbeit && istPolier && forUserIds.has(primaryUserId) && (
+          {/* Fahrt — nur Polier-Self */}
+          {istPolier && forUserIds.has(primaryUserId) && (
             <FahrtSection
               fahrt={form.fahrt}
               setFahrt={(fahrt) => setForm((f) => ({ ...f, fahrt }))}
               baustelle={
-                baustellen.find((b) => b.id === form.taetigkeiten[0]?.baustelle_id) ?? null
+                baustellen.find(
+                  (b) =>
+                    b.id ===
+                    (form.maEintraege[primaryUserId] ?? []).find(
+                      (r) => r.art === "baustelle" && r.baustelle_id,
+                    )?.baustelle_id,
+                ) ?? null
               }
             />
           )}
@@ -1303,23 +1101,18 @@ export default function Stunden() {
             </div>
           </div>
 
-          {/* Zusammenfassung pro MA */}
+          {/* Zusammenfassung */}
           {selectedMaList.length > 0 && (
             <ZusammenfassungCard
               selectedMa={selectedMaList}
               summenProMa={summenProMa}
-              isArbeit={isArbeit}
-              tagStatus={form.tagStatus}
               sollPerMa={sollPerMa}
-              vmPause={form.vmPause}
-              mittagPause={form.mittagPause}
-              pausen={pausen}
               arbeitsbeginn={arbeitsbeginnEffective}
               limits={limits}
             />
           )}
 
-          {/* Submit — auf Desktop sichtbar, auf Mobile durch Sticky-Bar ersetzt */}
+          {/* Submit — Desktop */}
           <Button
             onClick={submit}
             disabled={busy || forUserIds.size === 0}
@@ -1331,7 +1124,7 @@ export default function Stunden() {
         </CardContent>
       </Card>
 
-      {/* Mobile Sticky Submit-Bar — sitzt direkt über der Bottom-Nav (h-14 ≈ 56px) */}
+      {/* Mobile Sticky Submit-Bar */}
       <div
         className="lg:hidden fixed left-0 right-0 z-20 px-3 py-2 bg-card border-t shadow-lg"
         style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 56px)" }}
@@ -1349,235 +1142,210 @@ export default function Stunden() {
   );
 }
 
-// ─── Matrix-Editor ──────────────────────────────────────────────────────
+// ─── Block pro Mitarbeiter ──────────────────────────────────────────────
 
-
-function MatrixEditor({
-  taetigkeiten,
-  selectedMa,
-  taetigkeitenStamm,
-  baustellen,
+function MaBlock({
+  ma,
+  single,
+  eintraege,
   onChange,
-  summenProMa,
-  tagesplanungBaustelleId,
-  tagesplanungTaetigkeit,
-  sollPerMa,
+  baustellen,
+  taetigkeitenStamm,
+  soll,
+  collapsed,
+  onToggleCollapse,
+  canCopyToAll,
+  onCopyToAll,
 }: {
-  taetigkeiten: TaetigkeitsZeile[];
-  selectedMa: Profile[];
-  taetigkeitenStamm: Database["public"]["Tables"]["taetigkeiten_stamm"]["Row"][];
+  ma: Profile;
+  single: boolean;
+  eintraege: EintragRow[];
+  onChange: (rows: EintragRow[]) => void;
   baustellen: Baustelle[];
-  onChange: (neue: TaetigkeitsZeile[]) => void;
-  summenProMa: Map<string, number>;
-  tagesplanungBaustelleId: string | null;
-  tagesplanungTaetigkeit: string | null;
-  sollPerMa: Map<string, number>;
+  taetigkeitenStamm: Database["public"]["Tables"]["taetigkeiten_stamm"]["Row"][];
+  soll: number;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  canCopyToAll: boolean;
+  onCopyToAll: () => void;
 }) {
-  const isMulti = selectedMa.length > 1;
+  const total = eintraege.reduce((s, r) => s + Number(r.stunden || 0), 0);
+  const offen = single || !collapsed;
 
-  const addZeile = () => {
-    onChange([
-      ...taetigkeiten,
-      {
-        taetigkeit_id: null,
-        taetigkeit_freitext: "",
-        baustelle_id: taetigkeiten[taetigkeiten.length - 1]?.baustelle_id ?? null,
-        notiz: "",
-        stundenPerMa: Object.fromEntries(selectedMa.map((m) => [m.id, 0])),
-        proMaModus: false,
-      },
-    ]);
+  const addEintrag = (art: TagStatus) => {
+    const letzteBaustelle =
+      [...eintraege].reverse().find((r) => r.art === "baustelle")?.baustelle_id ?? null;
+    onChange([...eintraege, neuerEintrag(art, art === "baustelle" ? letzteBaustelle : null)]);
   };
-
-  const updateZeile = (idx: number, patch: Partial<TaetigkeitsZeile>) => {
-    const next = [...taetigkeiten];
-    next[idx] = { ...next[idx], ...patch };
-    onChange(next);
-  };
-
-  const setStunden = (idx: number, uid: string, val: number) => {
-    const next = [...taetigkeiten];
-    next[idx] = {
-      ...next[idx],
-      stundenPerMa: { ...next[idx].stundenPerMa, [uid]: Math.max(0, val || 0) },
-    };
-    onChange(next);
-  };
-
-  /** Setzt den gleichen Wert für ALLE MA — wird im "alle gleich"-Modus aufgerufen. */
-  const setStundenAlle = (idx: number, val: number) => {
-    const next = [...taetigkeiten];
-    const sper: Record<string, number> = {};
-    for (const m of selectedMa) sper[m.id] = Math.max(0, val || 0);
-    next[idx] = { ...next[idx], stundenPerMa: sper };
-    onChange(next);
-  };
-
-  /** Aktiviert pro-MA-Modus. */
-  const enableProMa = (idx: number) => {
-    const next = [...taetigkeiten];
-    next[idx] = { ...next[idx], proMaModus: true };
-    onChange(next);
-  };
-
-  /** Deaktiviert pro-MA-Modus + setzt alle MA auf den Max-Wert. */
-  const disableProMa = (idx: number) => {
-    const next = [...taetigkeiten];
-    const max = Math.max(0, ...selectedMa.map((m) => Number(next[idx].stundenPerMa[m.id] ?? 0)));
-    const sper: Record<string, number> = {};
-    for (const m of selectedMa) sper[m.id] = max;
-    next[idx] = { ...next[idx], stundenPerMa: sper, proMaModus: false };
-    onChange(next);
-  };
-
-  const removeZeile = (idx: number) => {
-    onChange(taetigkeiten.filter((_, i) => i !== idx));
-  };
+  const updateEintrag = (key: string, patch: Partial<EintragRow>) =>
+    onChange(eintraege.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  const removeEintrag = (key: string) =>
+    onChange(eintraege.filter((r) => r.key !== key));
 
   return (
-    <div className="space-y-2 border-t pt-3">
-      <div className="flex items-center justify-between">
-        <Label className="text-sm font-semibold flex items-center gap-1.5">
-          <Tag className="h-4 w-4 text-primary" />
-          Tätigkeiten
-        </Label>
-        <Button size="sm" variant="outline" onClick={addZeile}>
-          <Plus className="h-3.5 w-3.5 mr-1" /> Tätigkeit
+    <div className="rounded-lg border bg-card">
+      {/* Kopf */}
+      <button
+        type="button"
+        onClick={single ? undefined : onToggleCollapse}
+        className={`w-full flex items-center gap-2 px-3 py-2.5 text-left ${
+          single ? "cursor-default" : "hover:bg-muted/40"
+        }`}
+      >
+        {!single &&
+          (offen ? (
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          ))}
+        <span className="font-semibold truncate">
+          {ma.vorname} {ma.nachname}
+        </span>
+        <span className="ml-auto text-sm tabular-nums font-bold">{fmtH(total)}</span>
+        {soll > 0 && (
+          <span className="text-[11px] text-muted-foreground tabular-nums">
+            / Soll {fmtHNum(soll)}
+          </span>
+        )}
+      </button>
+
+      {offen && (
+        <div className="px-3 pb-3 space-y-2">
+          {eintraege.length === 0 && (
+            <div className="text-xs text-muted-foreground italic py-1">
+              Noch keine Einträge — unten hinzufügen.
+            </div>
+          )}
+          {eintraege.map((row) => (
+            <EintragRowEditor
+              key={row.key}
+              row={row}
+              baustellen={baustellen}
+              taetigkeitenStamm={taetigkeitenStamm}
+              onChange={(patch) => updateEintrag(row.key, patch)}
+              onRemove={() => removeEintrag(row.key)}
+            />
+          ))}
+
+          {/* Eintrag hinzufügen */}
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {STATUS_OPTIONS.map((art) => {
+              const Icon = STATUS_ICONS[art];
+              return (
+                <button
+                  key={art}
+                  type="button"
+                  onClick={() => addEintrag(art)}
+                  className="flex items-center gap-1 text-xs px-2 py-1.5 rounded-md border border-dashed hover:bg-muted transition"
+                >
+                  <Plus className="h-3 w-3" />
+                  <Icon className="h-3.5 w-3.5" />
+                  {STATUS_LABELS[art]}
+                </button>
+              );
+            })}
+          </div>
+
+          {canCopyToAll && eintraege.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full mt-1"
+              onClick={onCopyToAll}
+            >
+              <Copy className="h-3.5 w-3.5 mr-1.5" />
+              Diese Einträge für alle übernehmen
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Eine Eintrags-Zeile ────────────────────────────────────────────────
+
+function EintragRowEditor({
+  row,
+  baustellen,
+  taetigkeitenStamm,
+  onChange,
+  onRemove,
+}: {
+  row: EintragRow;
+  baustellen: Baustelle[];
+  taetigkeitenStamm: Database["public"]["Tables"]["taetigkeiten_stamm"]["Row"][];
+  onChange: (patch: Partial<EintragRow>) => void;
+  onRemove: () => void;
+}) {
+  const Icon = STATUS_ICONS[row.art];
+  const arbeit = istArbeitArt(row.art);
+  return (
+    <div className={`rounded-md border border-l-4 ${ART_BORDER[row.art]} p-2.5 space-y-2 bg-muted/20`}>
+      <div className="flex items-center gap-2">
+        <span
+          className={`inline-flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded ${STATUS_COLORS[row.art]}`}
+        >
+          <Icon className="h-3 w-3" />
+          {STATUS_LABELS[row.art]}
+        </span>
+        <span className="flex-1" />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-destructive shrink-0 h-7 w-7 p-0"
+          onClick={onRemove}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
         </Button>
       </div>
 
-      {taetigkeiten.map((t, idx) => (
-        <div key={idx} className="rounded-md border p-2.5 space-y-2 bg-muted/20">
-          {/* Tätigkeit + Baustelle */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <select
-              value={t.taetigkeit_id ?? ""}
-              onChange={(e) => updateZeile(idx, { taetigkeit_id: e.target.value || null })}
-              className="h-10 flex-1 min-w-0 rounded-md border bg-background px-2 text-sm"
-            >
-              <option value="">— Tätigkeit wählen —</option>
-              {taetigkeitenStamm.map((tt) => (
-                <option key={tt.id} value={tt.id}>
-                  {tt.bezeichnung}
-                </option>
-              ))}
-            </select>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-destructive shrink-0 h-8 w-8 p-0"
-              onClick={() => removeZeile(idx)}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-          {!t.taetigkeit_id && (
+      {row.art === "baustelle" && (
+        <BaustelleCombobox
+          baustellen={baustellen}
+          value={row.baustelle_id ?? ""}
+          onChange={(v) => onChange({ baustelle_id: v || null })}
+          allowClear
+        />
+      )}
+
+      {arbeit && (
+        <>
+          <select
+            value={row.taetigkeit_id ?? ""}
+            onChange={(e) => onChange({ taetigkeit_id: e.target.value || null })}
+            className="h-10 w-full rounded-md border bg-background px-2 text-sm"
+          >
+            <option value="">— Tätigkeit wählen —</option>
+            {taetigkeitenStamm.map((tt) => (
+              <option key={tt.id} value={tt.id}>
+                {tt.bezeichnung}
+              </option>
+            ))}
+          </select>
+          {!row.taetigkeit_id && (
             <Input
               placeholder="Oder Freitext"
-              value={t.taetigkeit_freitext}
-              onChange={(e) => updateZeile(idx, { taetigkeit_freitext: e.target.value })}
+              value={row.taetigkeit_freitext}
+              onChange={(e) => onChange({ taetigkeit_freitext: e.target.value })}
               className="h-9 text-sm"
             />
           )}
-          <BaustelleCombobox
-            baustellen={baustellen}
-            value={t.baustelle_id ?? ""}
-            onChange={(v) => updateZeile(idx, { baustelle_id: v || null })}
-            allowClear
-          />
-
-          {/* Stunden-Eingabe */}
-          {!isMulti && selectedMa[0] && (
-            // Single-MA: ein Stunden-Feld
-            <StundenZelle
-              value={t.stundenPerMa[selectedMa[0].id] ?? 0}
-              onChange={(v) => setStunden(idx, selectedMa[0].id, v)}
-              big
-            />
-          )}
-          {isMulti && !t.proMaModus && (
-            // Multi-MA "alle gleich": ein großer Stepper + Helper-Text + Link
-            <div className="space-y-1.5">
-              <StundenZelle
-                value={t.stundenPerMa[selectedMa[0].id] ?? 0}
-                onChange={(v) => setStundenAlle(idx, v)}
-                big
-              />
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-muted-foreground">
-                  ↳ für alle {selectedMa.length} Mitarbeiter
-                </span>
-                <button
-                  type="button"
-                  onClick={() => enableProMa(idx)}
-                  className="text-primary hover:underline font-medium"
-                >
-                  Pro Mitarbeiter unterschiedlich →
-                </button>
-              </div>
-            </div>
-          )}
-          {isMulti && t.proMaModus && (
-            // Multi-MA differenziert: vertikale Liste pro MA
-            <div className="space-y-1.5">
-              {selectedMa.map((m) => (
-                <div
-                  key={m.id}
-                  className="flex items-center gap-2 bg-background border rounded-md p-2"
-                >
-                  <span className="text-sm font-medium truncate w-20 sm:w-24 shrink-0">
-                    {m.vorname}
-                  </span>
-                  <div className="flex-1 flex items-center justify-end">
-                    <StundenZelle
-                      value={t.stundenPerMa[m.id] ?? 0}
-                      onChange={(v) => setStunden(idx, m.id, v)}
-                    />
-                  </div>
-                </div>
-              ))}
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-muted-foreground tabular-nums">
-                  Σ{" "}
-                  {fmtHNum(
-                    selectedMa.reduce(
-                      (s, m) => s + Number(t.stundenPerMa[m.id] ?? 0),
-                      0,
-                    ),
-                  )}{" "}
-                  h
-                </span>
-                <button
-                  type="button"
-                  onClick={() => disableProMa(idx)}
-                  className="text-primary hover:underline font-medium"
-                >
-                  ← Alle gleich machen
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Notiz */}
-          <Input
-            placeholder="Notiz (optional)"
-            value={t.notiz}
-            onChange={(e) => updateZeile(idx, { notiz: e.target.value })}
-            className="h-9 text-sm"
-          />
-        </div>
-      ))}
-
-      {isMulti && (
-        <div className="bg-primary/5 border border-primary/20 rounded-md p-2 text-xs flex items-center justify-between flex-wrap gap-1">
-          <span className="font-semibold">Netto pro Mitarbeiter:</span>
-          {selectedMa.map((m) => (
-            <span key={m.id} className="tabular-nums">
-              <strong>{m.vorname}</strong>: {fmtH(summenProMa.get(m.id) ?? 0)}
-            </span>
-          ))}
-        </div>
+        </>
       )}
+
+      <StundenZelle
+        value={row.stunden}
+        onChange={(v) => onChange({ stunden: v })}
+        big
+      />
+
+      <Input
+        placeholder="Notiz (optional)"
+        value={row.notiz}
+        onChange={(e) => onChange({ notiz: e.target.value })}
+        className="h-9 text-sm"
+      />
     </div>
   );
 }
@@ -1655,10 +1423,7 @@ function ZulageEditor({
     onChange({ ...eintrag, stundenPerMa: sper });
   };
   const setStundenPerMa = (uid: string, v: number | null) => {
-    onChange({
-      ...eintrag,
-      stundenPerMa: { ...eintrag.stundenPerMa, [uid]: v },
-    });
+    onChange({ ...eintrag, stundenPerMa: { ...eintrag.stundenPerMa, [uid]: v } });
   };
   const enableProMa = () => onChange({ ...eintrag, proMaModus: true });
   const disableProMa = () => {
@@ -1857,16 +1622,13 @@ function FahrtSection({
               />
             </div>
           )}
-          {/* Taggeld: standardmäßig automatisch berechnet — manueller Override nur bei Bedarf */}
           <div className="space-y-2 border-t pt-2">
             <div className="flex items-center justify-between">
               <Label className="text-xs font-semibold">Taggeld</Label>
               <label className="flex items-center gap-2 text-xs cursor-pointer">
                 <Switch
                   checked={fahrt.taggeld_manuell}
-                  onCheckedChange={(v) =>
-                    setFahrt({ ...fahrt, taggeld_manuell: v })
-                  }
+                  onCheckedChange={(v) => setFahrt({ ...fahrt, taggeld_manuell: v })}
                 />
                 <span>Manuell überschreiben</span>
               </label>
@@ -1881,10 +1643,7 @@ function FahrtSection({
                     min={0}
                     value={fahrt.taggeld_kurz}
                     onChange={(e) =>
-                      setFahrt({
-                        ...fahrt,
-                        taggeld_kurz: Number(e.target.value) || 0,
-                      })
+                      setFahrt({ ...fahrt, taggeld_kurz: Number(e.target.value) || 0 })
                     }
                     className="h-9"
                   />
@@ -1897,10 +1656,7 @@ function FahrtSection({
                     min={0}
                     value={fahrt.taggeld_lang}
                     onChange={(e) =>
-                      setFahrt({
-                        ...fahrt,
-                        taggeld_lang: Number(e.target.value) || 0,
-                      })
+                      setFahrt({ ...fahrt, taggeld_lang: Number(e.target.value) || 0 })
                     }
                     className="h-9"
                   />
@@ -1908,7 +1664,8 @@ function FahrtSection({
               </div>
             ) : (
               <div className="text-xs text-muted-foreground italic">
-                Wird automatisch aus den Stunden berechnet (kurz &lt; 9 h, lang ≥ 9 h).
+                Wird automatisch aus den Baustellen-Stunden berechnet (kurz &lt; 9 h,
+                lang ≥ 9 h).
               </div>
             )}
           </div>
@@ -1923,23 +1680,13 @@ function FahrtSection({
 function ZusammenfassungCard({
   selectedMa,
   summenProMa,
-  isArbeit,
-  tagStatus,
   sollPerMa,
-  vmPause,
-  mittagPause,
-  pausen,
   arbeitsbeginn,
   limits,
 }: {
   selectedMa: Profile[];
   summenProMa: Map<string, number>;
-  isArbeit: boolean;
-  tagStatus: TagStatus;
   sollPerMa: Map<string, number>;
-  vmPause: boolean;
-  mittagPause: boolean;
-  pausen: { vm: any; mittag: any } | undefined;
   arbeitsbeginn: string;
   limits:
     | { max_netto_pro_tag: number; max_brutto_pro_tag: number; arbeitsbeginn_default: string }
@@ -1947,25 +1694,15 @@ function ZusammenfassungCard({
 }) {
   return (
     <div className="rounded-lg border bg-primary/5 border-primary/20 p-3 space-y-1.5">
-      <div className="text-[11px] font-semibold uppercase text-primary">Zusammenfassung</div>
+      <div className="text-[11px] font-semibold uppercase text-primary">
+        Zusammenfassung
+      </div>
       {selectedMa.map((m) => {
         const netto = summenProMa.get(m.id) ?? 0;
-        const z = pausen
-          ? berechneTagZeiten({
-              nettoStunden: netto,
-              vmPause: isArbeit ? vmPause : false,
-              mittagPause: isArbeit ? mittagPause : false,
-              pausenConfig: {
-                vmDauerMin: pausen.vm.dauer_minuten,
-                mittagDauerMin: pausen.mittag.dauer_minuten,
-              },
-              arbeitsbeginn,
-            })
-          : null;
+        const z = berechneTagZeiten({ nettoStunden: netto, arbeitsbeginn });
         const soll = sollPerMa.get(m.id) ?? 0;
-        const ueber = z ? ueberstundenForTag(z, soll) : { diff: 0, istUeberstunde: false };
-        const taggeld = z ? berechneTaggeld(z.bruttoAnwesenheit, tagStatus) : { kurz: 0, lang: 0 };
-        const azg = z && limits
+        const ueber = ueberstundenForTag(z, soll);
+        const azg = limits
           ? pruefArbeitszeitGesetz(z, {
               maxNettoProTag: limits.max_netto_pro_tag,
               maxBruttoProTag: limits.max_brutto_pro_tag,
@@ -1981,19 +1718,9 @@ function ZusammenfassungCard({
               {m.vorname} {m.nachname[0] ?? ""}.
             </span>
             <span className="tabular-nums font-bold">{fmtH(netto)}</span>
-            {z && isArbeit && (
-              <>
-                <span className="text-muted-foreground tabular-nums">
-                  Anwesenheit {fmtH(z.bruttoAnwesenheit)}
-                </span>
-                <span className="text-muted-foreground tabular-nums">
-                  {z.von}–{z.bis}
-                </span>
-              </>
-            )}
-            {(taggeld.kurz > 0 || taggeld.lang > 0) && (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
-                {fmtTaggeldLabel(taggeld)} Taggeld
+            {netto > 0 && (
+              <span className="text-muted-foreground tabular-nums">
+                {z.von}–{z.bis}
               </span>
             )}
             {soll > 0 && (
@@ -2017,7 +1744,10 @@ function ZusammenfassungCard({
               </span>
             )}
             {!azg.ok && (
-              <Badge variant="outline" className="text-[10px] bg-destructive/10 border-destructive text-destructive">
+              <Badge
+                variant="outline"
+                className="text-[10px] bg-destructive/10 border-destructive text-destructive"
+              >
                 <AlertTriangle className="h-3 w-3 mr-1" /> {azg.meldung}
               </Badge>
             )}
