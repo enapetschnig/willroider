@@ -105,13 +105,17 @@ export function aggregiereZulagen(
 }
 
 /**
- * Taggeld für EINEN Tag — berechnet aus Brutto-Stunden + tag_status.
- * Brutto = netto_stunden + aktive Pausen. Bei `taggeld_manuell=true` wird
- * der gespeicherte stunden_fahrt-Wert respektiert (bewusster Override).
+ * Taggeld für EINEN Tag — berechnet aus der reinen Baustellen-Zeit.
+ * Maßgeblich ist die Summe der `art='baustelle'`-Einträge; Firma- und
+ * Abwesenheits-Einträge zählen nicht. Bei `taggeld_manuell=true` wird der
+ * gespeicherte stunden_fahrt-Wert respektiert (bewusster Override).
+ *
+ * Der `_pausen`-Parameter wird nicht mehr genutzt (Pausen entfallen),
+ * bleibt aber erhalten, damit Altaufrufer kompilieren.
  */
 export function taggeldFuerTag(
   t: StundenTagFull,
-  pausen: PausenDauer,
+  _pausen?: PausenDauer,
 ): { kurz: number; lang: number } {
   if (t.fahrt?.taggeld_manuell) {
     return {
@@ -119,12 +123,10 @@ export function taggeldFuerTag(
       lang: Number(t.fahrt.taggeld_lang ?? 0),
     };
   }
-  const pausenStd =
-    ((t.tag.vm_pause ? pausen.vmDauerMin : 0) +
-      (t.tag.mittag_pause ? pausen.mittagDauerMin : 0)) /
-    60;
-  const brutto = Number(t.tag.netto_stunden) + pausenStd;
-  return berechneTaggeld(brutto, t.tag.tag_status);
+  const baustelleStunden = t.taetigkeiten
+    .filter((tt) => tt.art === "baustelle")
+    .reduce((s, tt) => s + Number(tt.stunden ?? 0), 0);
+  return berechneTaggeld(baustelleStunden, "baustelle");
 }
 
 /** Taggeld-Aggregation über mehrere Tage — berechnet pro Tag via taggeldFuerTag. */

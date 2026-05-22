@@ -87,6 +87,24 @@ const RASTER_KUERZEL: Record<string, string> = {
   feiertag: "F",
 };
 
+/** Helle Badge-Farben je Eintrags-Art (Tages-Detail). */
+const ART_BADGE: Record<TagStatus, string> = {
+  baustelle: "bg-primary/10 text-primary border border-primary/30",
+  firma: "bg-blue-50 text-blue-700 border border-blue-200",
+  krank: "bg-red-50 text-red-700 border border-red-200",
+  urlaub: "bg-amber-50 text-amber-800 border border-amber-200",
+  schlechtwetter: "bg-sky-50 text-sky-700 border border-sky-200",
+  feiertag: "bg-violet-50 text-violet-700 border border-violet-200",
+};
+
+/** Kurz-Übersicht der Einträge eines Tages — für Tooltips. */
+function segmentSummary(t: StundenTagFull): string {
+  if (t.taetigkeiten.length === 0) return STATUS_LABEL[t.tag.tag_status];
+  return t.taetigkeiten
+    .map((tt) => `${STATUS_LABEL[tt.art]} ${fmtHNum(Number(tt.stunden ?? 0))} h`)
+    .join(" · ");
+}
+
 function monatLabel(monat: string) {
   const [y, m] = monat.split("-");
   return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("de-AT", {
@@ -768,7 +786,7 @@ export default function Stundenauswertung() {
                               diff={r.diff}
                               taetigkeitenStamm={taetigkeitenStamm}
                               zulagenTypen={zulagenTypen}
-                              pausen={pausen}
+                              baustellenMap={baustellenMap}
                               pausenDauer={pausenDauer}
                               limits={limits}
                               onEditTag={(t) =>
@@ -857,6 +875,9 @@ export default function Stundenauswertung() {
                           const worked =
                             cell.tag.tag_status === "baustelle" ||
                             cell.tag.tag_status === "firma";
+                          const mehrere =
+                            new Set(cell.taetigkeiten.map((x) => x.art)).size >
+                            1;
                           return (
                             <td
                               key={d.iso}
@@ -866,16 +887,24 @@ export default function Stundenauswertung() {
                                   mitarbeiterName: `${r.ma!.vorname ?? ""} ${r.ma!.nachname ?? ""}`.trim(),
                                 })
                               }
-                              title={`${STATUS_LABEL[cell.tag.tag_status]} — bearbeiten`}
+                              title={`${segmentSummary(cell)} — bearbeiten`}
                               className={`border text-center tabular-nums cursor-pointer hover:bg-primary/10 ${
                                 worked
                                   ? ""
                                   : "bg-amber-50 text-amber-900 font-semibold"
                               }`}
                             >
-                              {worked
-                                ? fmtHNum(Number(cell.tag.netto_stunden))
-                                : RASTER_KUERZEL[cell.tag.tag_status] ?? "?"}
+                              <span
+                                className={
+                                  mehrere
+                                    ? "border-b border-dotted border-current"
+                                    : ""
+                                }
+                              >
+                                {worked
+                                  ? fmtHNum(Number(cell.tag.netto_stunden))
+                                  : RASTER_KUERZEL[cell.tag.tag_status] ?? "?"}
+                              </span>
                             </td>
                           );
                         })}
@@ -942,7 +971,8 @@ export default function Stundenauswertung() {
               </div>
               <div className="p-2 text-[10px] text-muted-foreground">
                 Zahl = gebuchte Stunden · U Urlaub · K Krank · SW Schlechtwetter ·
-                F Feiertag · Klick auf eine Zelle öffnet den Tag.
+                F Feiertag · gepunktet = mehrere Einträge · Klick auf eine Zelle
+                öffnet den Tag.
               </div>
             </CardContent>
           </Card>
@@ -1141,7 +1171,7 @@ function DetailMa({
   diff,
   taetigkeitenStamm,
   zulagenTypen,
-  pausen,
+  baustellenMap,
   pausenDauer,
   limits,
   onEditTag,
@@ -1152,12 +1182,13 @@ function DetailMa({
   diff: number;
   taetigkeitenStamm: Database["public"]["Tables"]["taetigkeiten_stamm"]["Row"][];
   zulagenTypen: Database["public"]["Tables"]["zulagen_typen"]["Row"][];
-  pausen: { vm: any; mittag: any } | undefined;
+  baustellenMap: Map<string, string>;
   pausenDauer: PausenDauer;
   limits: any;
   onEditTag?: (t: StundenTagFull) => void;
 }) {
   const tage = list ?? [];
+  const taetById = new Map(taetigkeitenStamm.map((s) => [s.id, s.bezeichnung]));
   const aggTaet = aggregiereTaetigkeiten(tage, taetigkeitenStamm);
   const aggZul = aggregiereZulagen(tage, zulagenTypen);
   const aggTg = aggregiereTaggeld(tage, pausenDauer);
@@ -1170,77 +1201,99 @@ function DetailMa({
             <TableHead className="text-xs">Datum</TableHead>
             <TableHead className="text-xs">Status</TableHead>
             <TableHead className="text-xs text-right">Netto</TableHead>
-            <TableHead className="text-xs text-right">Pause</TableHead>
-            <TableHead className="text-xs text-right">Brutto</TableHead>
             <TableHead className="text-xs text-right">Von-Bis</TableHead>
-            <TableHead className="text-xs">Tätigkeiten / Zulagen</TableHead>
+            <TableHead className="text-xs">Einträge / Zulagen</TableHead>
             <TableHead className="text-xs text-center">Taggeld</TableHead>
             <TableHead className="text-xs text-right w-16">Edit</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {tage.map((t) => {
-            const isArbeit = t.tag.tag_status === "baustelle" || t.tag.tag_status === "firma";
-            const zeiten =
-              isArbeit && pausen
-                ? berechneTagZeiten({
-                    nettoStunden: Number(t.tag.netto_stunden),
-                    vmPause: t.tag.vm_pause,
-                    mittagPause: t.tag.mittag_pause,
-                    pausenConfig: {
-                      vmDauerMin: pausen.vm.dauer_minuten,
-                      mittagDauerMin: pausen.mittag.dauer_minuten,
-                    },
-                    arbeitsbeginn:
-                      t.tag.arbeitsbeginn?.slice(0, 5) ||
-                      limits?.arbeitsbeginn_default?.slice(0, 5) ||
-                      "07:00",
-                  })
-                : null;
+            const isArbeit =
+              t.tag.tag_status === "baustelle" || t.tag.tag_status === "firma";
+            const zeiten = isArbeit
+              ? berechneTagZeiten({
+                  nettoStunden: Number(t.tag.netto_stunden),
+                  arbeitsbeginn:
+                    t.tag.arbeitsbeginn?.slice(0, 5) ||
+                    limits?.arbeitsbeginn_default?.slice(0, 5) ||
+                    "07:00",
+                })
+              : null;
             const tg = taggeldFuerTag(t, pausenDauer);
             const tgKurz = tg.kurz;
             const tgLang = tg.lang;
+            const arts =
+              t.taetigkeiten.length > 0
+                ? Array.from(new Set(t.taetigkeiten.map((tt) => tt.art)))
+                : [t.tag.tag_status];
             return (
               <TableRow key={t.tag.id}>
-                <TableCell className="text-xs tabular-nums">
+                <TableCell className="text-xs tabular-nums align-top">
                   {new Date(t.tag.datum).toLocaleDateString("de-AT", {
                     weekday: "short",
                     day: "2-digit",
                     month: "2-digit",
                   })}
                 </TableCell>
-                <TableCell className="text-xs">
-                  <Badge variant="outline" className="text-[10px]">
-                    {STATUS_LABEL[t.tag.tag_status]}
-                  </Badge>
+                <TableCell className="text-xs align-top">
+                  <div className="flex flex-wrap gap-1">
+                    {arts.map((a) => (
+                      <span
+                        key={a}
+                        className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${ART_BADGE[a]}`}
+                      >
+                        {STATUS_LABEL[a]}
+                      </span>
+                    ))}
+                  </div>
                 </TableCell>
-                <TableCell className="text-xs text-right tabular-nums">
+                <TableCell className="text-xs text-right tabular-nums font-semibold align-top">
                   {fmtH(Number(t.tag.netto_stunden))}
                 </TableCell>
-                <TableCell className="text-xs text-right tabular-nums">
-                  {zeiten && zeiten.pausenMinuten > 0
-                    ? `${zeiten.pausenMinuten} min`
-                    : "—"}
-                </TableCell>
-                <TableCell className="text-xs text-right tabular-nums">
-                  {zeiten ? fmtH(zeiten.bruttoAnwesenheit) : "—"}
-                </TableCell>
-                <TableCell className="text-xs text-right tabular-nums">
+                <TableCell className="text-xs text-right tabular-nums align-top">
                   {zeiten ? `${zeiten.von}–${zeiten.bis}` : "—"}
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {t.taetigkeiten
-                    .map(
-                      (tt) =>
-                        taetigkeitenStamm.find((s) => s.id === tt.taetigkeit_id)?.bezeichnung ??
-                        tt.taetigkeit_freitext ??
-                        "—",
-                    )
-                    .join(", ")}
+                <TableCell className="text-xs align-top">
+                  {t.taetigkeiten.length === 0 ? (
+                    <span className="text-muted-foreground">—</span>
+                  ) : (
+                    <div className="space-y-0.5">
+                      {t.taetigkeiten.map((tt) => {
+                        const taet = tt.taetigkeit_id
+                          ? taetById.get(tt.taetigkeit_id)
+                          : tt.taetigkeit_freitext;
+                        const bs = tt.baustelle_id
+                          ? baustellenMap.get(tt.baustelle_id) ?? "Baustelle"
+                          : null;
+                        const label =
+                          [bs, taet].filter(Boolean).join(" · ") ||
+                          tt.notiz ||
+                          "";
+                        return (
+                          <div key={tt.id} className="flex items-center gap-1.5">
+                            <span
+                              className={`text-[9px] font-semibold px-1 rounded shrink-0 ${ART_BADGE[tt.art]}`}
+                            >
+                              {STATUS_LABEL[tt.art]}
+                            </span>
+                            <span className="truncate flex-1 text-muted-foreground">
+                              {label}
+                            </span>
+                            <span className="tabular-nums font-medium shrink-0">
+                              {fmtHNum(Number(tt.stunden ?? 0))} h
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                   {t.zulagen.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-0.5">
+                    <div className="flex flex-wrap gap-1 mt-1">
                       {t.zulagen.map((z) => {
-                        const typ = zulagenTypen.find((x) => x.id === z.zulagen_typ_id);
+                        const typ = zulagenTypen.find(
+                          (x) => x.id === z.zulagen_typ_id,
+                        );
                         return (
                           <span
                             key={z.id}
@@ -1254,7 +1307,7 @@ function DetailMa({
                     </div>
                   )}
                 </TableCell>
-                <TableCell className="text-xs text-center tabular-nums">
+                <TableCell className="text-xs text-center tabular-nums align-top">
                   {tgLang > 0 ? (
                     <span className="px-1 rounded bg-sky-100 text-sky-900 border border-sky-300 text-[10px]">
                       {tgLang}× lang
@@ -1267,7 +1320,7 @@ function DetailMa({
                     <span className="text-muted-foreground">—</span>
                   )}
                 </TableCell>
-                <TableCell className="text-right">
+                <TableCell className="text-right align-top">
                   {onEditTag && (
                     <Button
                       size="sm"

@@ -1,9 +1,13 @@
 /**
  * AdminTagEditModal — voller Tag-Editor für die Stundenauswertung.
  *
- * Admin kann einen einzelnen stunden_tage-Eintrag samt Children
- * (Tätigkeiten, Zulagen, Fahrt) bearbeiten. Wiederverwendet useSaveStundenTag —
- * RLS-Policy lässt Admin via is_admin_role(auth.uid()) zu.
+ * Ein Tag ist eine Liste typisierter Einträge (Baustelle/Firma/Krank/
+ * Urlaub/Schlechtwetter). Jeder Eintrag hat eine eigene Art — mehrere
+ * Arten am selben Tag sind möglich. tag_status + netto_stunden leitet
+ * der DB-Trigger aus den Einträgen ab.
+ *
+ * Wiederverwendet useSaveStundenTag — RLS-Policy lässt Admin via
+ * is_admin_role(auth.uid()) zu.
  */
 
 import { useEffect, useState } from "react";
@@ -19,7 +23,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import {
   useSaveStundenTag,
@@ -28,12 +31,13 @@ import {
   type SaveZulage,
 } from "@/hooks/useStundenTag";
 import { useTaetigkeitenStamm, useZulagenTypen } from "@/hooks/useStammdatenStunden";
+import { fmtH } from "@/lib/zeiterfassung";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 
-const TAG_STATUS_OPTIONS: { value: TagStatus; label: string }[] = [
+const ART_OPTIONS: { value: TagStatus; label: string }[] = [
   { value: "baustelle", label: "Baustelle" },
   { value: "firma", label: "Firma" },
   { value: "krank", label: "Krank" },
@@ -42,7 +46,10 @@ const TAG_STATUS_OPTIONS: { value: TagStatus; label: string }[] = [
   { value: "feiertag", label: "Feiertag" },
 ];
 
-interface FormTaet {
+const istArbeitArt = (art: TagStatus) => art === "baustelle" || art === "firma";
+
+interface FormEintrag {
+  art: TagStatus;
   taetigkeit_id: string | null;
   taetigkeit_freitext: string;
   baustelle_id: string | null;
@@ -74,27 +81,20 @@ export function AdminTagEditModal({
   const { data: taetigkeitenStamm = [] } = useTaetigkeitenStamm();
   const { data: zulagenTypen = [] } = useZulagenTypen();
 
-  const [tagStatus, setTagStatus] = useState<TagStatus>("baustelle");
-  const [netto, setNetto] = useState<number>(8);
-  const [vmPause, setVmPause] = useState(false);
-  const [mittagPause, setMittagPause] = useState(true);
   const [arbeitsbeginn, setArbeitsbeginn] = useState<string>("");
   const [anmerkung, setAnmerkung] = useState<string>("");
-  const [taetigkeiten, setTaetigkeiten] = useState<FormTaet[]>([]);
+  const [eintraege, setEintraege] = useState<FormEintrag[]>([]);
   const [zulagen, setZulagen] = useState<FormZul[]>([]);
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
 
   // Reset Form wenn ein neuer Tag geladen wird
   useEffect(() => {
     if (!tag) return;
-    setTagStatus(tag.tag.tag_status as TagStatus);
-    setNetto(Number(tag.tag.netto_stunden));
-    setVmPause(tag.tag.vm_pause);
-    setMittagPause(tag.tag.mittag_pause);
     setArbeitsbeginn(tag.tag.arbeitsbeginn?.slice(0, 5) ?? "");
     setAnmerkung(tag.tag.anmerkung ?? "");
-    setTaetigkeiten(
+    setEintraege(
       tag.taetigkeiten.map((t) => ({
+        art: t.art,
         taetigkeit_id: t.taetigkeit_id,
         taetigkeit_freitext: t.taetigkeit_freitext ?? "",
         baustelle_id: t.baustelle_id,
@@ -111,7 +111,7 @@ export function AdminTagEditModal({
     );
   }, [tag]);
 
-  // Baustellen laden (für Tätigkeits-Picker)
+  // Baustellen laden (für Eintrags-Picker)
   useEffect(() => {
     if (!open) return;
     (async () => {
@@ -126,15 +126,28 @@ export function AdminTagEditModal({
 
   if (!tag) return null;
 
-  const addTaet = () =>
-    setTaetigkeiten((cur) => [
+  const summe =
+    Math.round(eintraege.reduce((s, e) => s + Number(e.stunden || 0), 0) * 100) /
+    100;
+
+  const addEintrag = () =>
+    setEintraege((cur) => [
       ...cur,
-      { taetigkeit_id: null, taetigkeit_freitext: "", baustelle_id: null, stunden: 0, notiz: "" },
+      {
+        art: "baustelle",
+        taetigkeit_id: null,
+        taetigkeit_freitext: "",
+        baustelle_id:
+          [...cur].reverse().find((e) => e.art === "baustelle")?.baustelle_id ??
+          null,
+        stunden: 0,
+        notiz: "",
+      },
     ]);
-  const removeTaet = (idx: number) =>
-    setTaetigkeiten((cur) => cur.filter((_, i) => i !== idx));
-  const updateTaet = (idx: number, patch: Partial<FormTaet>) =>
-    setTaetigkeiten((cur) => cur.map((t, i) => (i === idx ? { ...t, ...patch } : t)));
+  const removeEintrag = (idx: number) =>
+    setEintraege((cur) => cur.filter((_, i) => i !== idx));
+  const updateEintrag = (idx: number, patch: Partial<FormEintrag>) =>
+    setEintraege((cur) => cur.map((e, i) => (i === idx ? { ...e, ...patch } : e)));
 
   const addZul = () =>
     setZulagen((cur) => [
@@ -148,31 +161,34 @@ export function AdminTagEditModal({
 
   const handleSave = async () => {
     try {
-      const isArbeitStatus = tagStatus === "baustelle" || tagStatus === "firma";
-      const taetigkeitenPayload: SaveEintrag[] = isArbeitStatus
-        ? taetigkeiten
-            .filter((t) => t.stunden > 0 || t.taetigkeit_id || t.taetigkeit_freitext)
-            .map((t, idx) => ({
-              position: idx + 1,
-              art: tagStatus,
-              taetigkeit_id: t.taetigkeit_id,
-              taetigkeit_freitext: t.taetigkeit_freitext.trim() || null,
-              baustelle_id: t.baustelle_id,
-              stunden: Number(t.stunden),
-              notiz: t.notiz.trim() || null,
-            }))
-        : [
-            // Abwesenheit (Urlaub/Krank/SW) = ein Eintrag dieser Art.
-            {
-              position: 1,
-              art: tagStatus,
-              taetigkeit_id: null,
-              taetigkeit_freitext: null,
-              baustelle_id: null,
-              stunden: Number(netto),
-              notiz: null,
-            },
-          ];
+      const taetigkeitenPayload: SaveEintrag[] = eintraege
+        .filter(
+          (e) =>
+            e.stunden > 0 || e.taetigkeit_id || e.taetigkeit_freitext.trim(),
+        )
+        .map((e, idx) => {
+          const arbeit = istArbeitArt(e.art);
+          return {
+            position: idx + 1,
+            art: e.art,
+            taetigkeit_id: arbeit ? e.taetigkeit_id : null,
+            taetigkeit_freitext:
+              arbeit && !e.taetigkeit_id
+                ? e.taetigkeit_freitext.trim() || null
+                : null,
+            baustelle_id: e.art === "baustelle" ? e.baustelle_id : null,
+            stunden: Number(e.stunden),
+            notiz: e.notiz.trim() || null,
+          };
+        });
+      if (taetigkeitenPayload.length === 0) {
+        toast({
+          variant: "destructive",
+          title: "Kein Eintrag",
+          description: "Mindestens ein Eintrag mit Stunden ist nötig.",
+        });
+        return;
+      }
       const zulagenPayload: SaveZulage[] = zulagen
         .filter((z) => z.zulagen_typ_id)
         .map((z) => ({
@@ -228,32 +244,8 @@ export function AdminTagEditModal({
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Status + Stunden + Arbeitsbeginn */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <Label className="text-xs">Status</Label>
-              <select
-                value={tagStatus}
-                onChange={(e) => setTagStatus(e.target.value as TagStatus)}
-                className="h-9 w-full rounded-md border bg-background px-2 text-sm"
-              >
-                {TAG_STATUS_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <Label className="text-xs">Netto-Stunden</Label>
-              <Input
-                type="number"
-                step="0.25"
-                value={netto}
-                onChange={(e) => setNetto(Number(e.target.value))}
-                className="h-9"
-              />
-            </div>
+          {/* Arbeitsbeginn + Tages-Summe */}
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Arbeitsbeginn</Label>
               <Input
@@ -263,107 +255,144 @@ export function AdminTagEditModal({
                 className="h-9"
               />
             </div>
-          </div>
-
-          {/* Pausen */}
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2">
-              <Switch checked={vmPause} onCheckedChange={setVmPause} />
-              <Label className="text-sm">Vormittags-Pause</Label>
-            </div>
-            <div className="flex items-center gap-2">
-              <Switch checked={mittagPause} onCheckedChange={setMittagPause} />
-              <Label className="text-sm">Mittagspause</Label>
+            <div>
+              <Label className="text-xs">Tages-Summe</Label>
+              <div className="h-9 flex items-center px-2 rounded-md border bg-muted/40 text-sm font-bold tabular-nums">
+                {fmtH(summe)}
+              </div>
             </div>
           </div>
 
-          {/* Tätigkeiten */}
+          {/* Einträge */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <Label className="text-sm font-semibold">Tätigkeiten</Label>
-              <Button size="sm" variant="outline" onClick={addTaet} className="h-7 px-2">
-                <Plus className="h-3.5 w-3.5 mr-1" /> Zeile
+              <Label className="text-sm font-semibold">Einträge</Label>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={addEintrag}
+                className="h-7 px-2"
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" /> Eintrag
               </Button>
             </div>
-            {taetigkeiten.length === 0 && (
+            {eintraege.length === 0 && (
               <div className="text-xs text-muted-foreground italic">
-                Keine Tätigkeiten — Zeile hinzufügen.
+                Keine Einträge — Eintrag hinzufügen.
               </div>
             )}
             <div className="space-y-2">
-              {taetigkeiten.map((t, idx) => (
-                <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-                  <div className="col-span-5">
-                    <Label className="text-[10px]">Baustelle</Label>
-                    <select
-                      value={t.baustelle_id ?? ""}
-                      onChange={(e) =>
-                        updateTaet(idx, { baustelle_id: e.target.value || null })
-                      }
-                      className="h-8 w-full rounded-md border bg-background px-1 text-xs"
-                    >
-                      <option value="">—</option>
-                      {baustellen.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.bvh_name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="col-span-4">
-                    <Label className="text-[10px]">Tätigkeit</Label>
-                    <select
-                      value={t.taetigkeit_id ?? ""}
-                      onChange={(e) =>
-                        updateTaet(idx, {
-                          taetigkeit_id: e.target.value || null,
-                          taetigkeit_freitext: "",
-                        })
-                      }
-                      className="h-8 w-full rounded-md border bg-background px-1 text-xs"
-                    >
-                      <option value="">— Freitext —</option>
-                      {taetigkeitenStamm.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.bezeichnung}
-                        </option>
-                      ))}
-                    </select>
-                    {!t.taetigkeit_id && (
-                      <Input
-                        value={t.taetigkeit_freitext}
-                        onChange={(e) =>
-                          updateTaet(idx, { taetigkeit_freitext: e.target.value })
+              {eintraege.map((e, idx) => {
+                const arbeit = istArbeitArt(e.art);
+                return (
+                  <div
+                    key={idx}
+                    className="rounded-md border p-2 space-y-2 bg-muted/20"
+                  >
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={e.art}
+                        onChange={(ev) =>
+                          updateEintrag(idx, {
+                            art: ev.target.value as TagStatus,
+                          })
                         }
-                        placeholder="Freitext"
-                        className="h-7 mt-1 text-xs"
+                        className="h-8 rounded-md border bg-background px-1 text-xs font-semibold"
+                      >
+                        {ART_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      <Input
+                        type="number"
+                        step="0.25"
+                        min={0}
+                        value={e.stunden}
+                        onChange={(ev) =>
+                          updateEintrag(idx, {
+                            stunden: Number(ev.target.value) || 0,
+                          })
+                        }
+                        className="h-8 w-20 text-xs text-center tabular-nums"
                       />
+                      <span className="text-xs text-muted-foreground">h</span>
+                      <span className="flex-1" />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => removeEintrag(idx)}
+                        className="h-8 w-8 p-0 text-destructive"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+
+                    {e.art === "baustelle" && (
+                      <select
+                        value={e.baustelle_id ?? ""}
+                        onChange={(ev) =>
+                          updateEintrag(idx, {
+                            baustelle_id: ev.target.value || null,
+                          })
+                        }
+                        className="h-8 w-full rounded-md border bg-background px-1 text-xs"
+                      >
+                        <option value="">— Baustelle wählen —</option>
+                        {baustellen.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.bvh_name}
+                          </option>
+                        ))}
+                      </select>
                     )}
-                  </div>
-                  <div className="col-span-2">
-                    <Label className="text-[10px]">Stunden</Label>
+
+                    {arbeit && (
+                      <>
+                        <select
+                          value={e.taetigkeit_id ?? ""}
+                          onChange={(ev) =>
+                            updateEintrag(idx, {
+                              taetigkeit_id: ev.target.value || null,
+                              taetigkeit_freitext: "",
+                            })
+                          }
+                          className="h-8 w-full rounded-md border bg-background px-1 text-xs"
+                        >
+                          <option value="">— Tätigkeit / Freitext —</option>
+                          {taetigkeitenStamm.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.bezeichnung}
+                            </option>
+                          ))}
+                        </select>
+                        {!e.taetigkeit_id && (
+                          <Input
+                            value={e.taetigkeit_freitext}
+                            onChange={(ev) =>
+                              updateEintrag(idx, {
+                                taetigkeit_freitext: ev.target.value,
+                              })
+                            }
+                            placeholder="Freitext"
+                            className="h-7 text-xs"
+                          />
+                        )}
+                      </>
+                    )}
+
                     <Input
-                      type="number"
-                      step="0.25"
-                      value={t.stunden}
-                      onChange={(e) =>
-                        updateTaet(idx, { stunden: Number(e.target.value) })
+                      value={e.notiz}
+                      onChange={(ev) =>
+                        updateEintrag(idx, { notiz: ev.target.value })
                       }
-                      className="h-8 text-xs"
+                      placeholder="Notiz (optional)"
+                      className="h-7 text-xs"
                     />
                   </div>
-                  <div className="col-span-1">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => removeTaet(idx)}
-                      className="h-8 w-8 p-0"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

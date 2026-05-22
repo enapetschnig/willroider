@@ -3,7 +3,7 @@
  *
  * Format A4 Portrait, 1–2 Seiten pro MA:
  *   - Header: Firma + MA-Name + Monat
- *   - Tabelle: Datum | Wt | Status | Netto | Brutto | Tätigkeiten | Zulagen | T€
+ *   - Tabelle: Datum | Wt | Status | Netto | Tätigkeiten | Zulagen | Taggeld
  *   - Aggregations-Block: Tätigkeiten-Summen, Zulagen-Summen, Taggeld-Summen
  *   - Summen-Box: Soll · Ist · Differenz → ZA-Buchung
  *   - Unterschriftenfeld
