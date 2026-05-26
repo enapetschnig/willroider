@@ -102,6 +102,15 @@ const STATUS_COLORS: Record<TagStatus, string> = {
   schlechtwetter: "bg-sky-500 text-white border-sky-500",
   feiertag: "bg-violet-500 text-white border-violet-500",
 };
+/** Outline-Stil (Top-Toggle inaktiv) — gleiche Farbe, transparenter Hintergrund. */
+const STATUS_OUTLINE: Record<TagStatus, string> = {
+  baustelle: "bg-background text-primary border-primary/40",
+  firma: "bg-background text-blue-700 border-blue-200",
+  krank: "bg-background text-red-700 border-red-200",
+  urlaub: "bg-background text-amber-700 border-amber-200",
+  schlechtwetter: "bg-background text-sky-700 border-sky-200",
+  feiertag: "bg-background text-violet-700 border-violet-200",
+};
 /** Linke Akzent-Border je Eintrags-Art. */
 const ART_BORDER: Record<TagStatus, string> = {
   baustelle: "border-l-primary",
@@ -161,18 +170,6 @@ function emptyForm(): ErfassungForm {
     zulagenSelected: new Map(),
     kmPerMa: {},
     fahrt: null,
-  };
-}
-
-function neuerEintrag(art: TagStatus, baustelle_id: string | null = null): EintragRow {
-  return {
-    key: newKey(),
-    art,
-    baustelle_id,
-    taetigkeit_id: null,
-    taetigkeit_freitext: "",
-    stunden: 0,
-    notiz: "",
   };
 }
 
@@ -469,29 +466,57 @@ export default function Stunden() {
     });
   }, [forUserIds]);
 
-  // Vorausfüllung: leere MA-Blöcke mit einem Baustellen-Eintrag aus der
-  // Tagesplanung + Soll-Stunden vorbefüllen.
+  // Vorausfüllung leerer MA-Blöcke: neue MA erben „auf Verdacht" die aktiven
+  // Arten der anderen ausgewählten MA (jeder Art ein Default-Eintrag). Hat
+  // noch niemand etwas → Fallback auf einen Baustellen-Eintrag aus der
+  // Tagesplanung + Soll-Stunden.
   useEffect(() => {
     setForm((f) => {
+      // Aktive Arten aus den bestehenden MA-Einträgen ableiten
+      const aktive = new Set<TagStatus>();
+      for (const uid of forUserIds) {
+        for (const r of f.maEintraege[uid] ?? []) aktive.add(r.art);
+      }
+
       let changed = false;
       const maEintraege = { ...f.maEintraege };
       for (const uid of forUserIds) {
         if ((maEintraege[uid] ?? []).length > 0) continue;
         const tp = tagesplanungPerMa.get(uid);
         const soll = sollPerMa.get(uid) ?? 0;
-        if (!tp && soll <= 0) continue;
-        maEintraege[uid] = [
-          {
-            key: newKey(),
-            art: "baustelle",
-            baustelle_id: tp?.baustelle_id ?? null,
-            taetigkeit_id: null,
-            taetigkeit_freitext: tp?.taetigkeit ?? "",
-            stunden: soll,
-            notiz: "",
-          },
-        ];
-        changed = true;
+        if (aktive.size > 0) {
+          // Aktive Arten der anderen MA übernehmen
+          const newRows: EintragRow[] = [];
+          for (const art of aktive) {
+            newRows.push({
+              key: newKey(),
+              art,
+              baustelle_id:
+                art === "baustelle" ? tp?.baustelle_id ?? null : null,
+              taetigkeit_id: null,
+              taetigkeit_freitext:
+                art === "baustelle" ? tp?.taetigkeit ?? "" : "",
+              stunden: newRows.length === 0 ? soll : 0,
+              notiz: "",
+            });
+          }
+          maEintraege[uid] = newRows;
+          changed = true;
+        } else if (tp || soll > 0) {
+          // Fallback: nur ein Baustellen-Eintrag
+          maEintraege[uid] = [
+            {
+              key: newKey(),
+              art: "baustelle",
+              baustelle_id: tp?.baustelle_id ?? null,
+              taetigkeit_id: null,
+              taetigkeit_freitext: tp?.taetigkeit ?? "",
+              stunden: soll,
+              notiz: "",
+            },
+          ];
+          changed = true;
+        }
       }
       return changed ? { ...f, maEintraege } : f;
     });
@@ -565,29 +590,50 @@ export default function Stunden() {
     toast({ title: "Einträge übernommen", description: "Für alle Mitarbeiter kopiert." });
   };
 
-  /** Fügt für alle aktuell ausgewählten Mitarbeiter einen Eintrag der
-   *  gewählten Art an — der "klick oben → für alle"-Schnellpfad. */
-  const addArtFuerAlle = (art: TagStatus) => {
+  /** Aktive Arten = Arten, die mindestens einer der ausgewählten MA bereits
+   *  als Eintrag hat. Daraus leitet sich der „aktiv/inaktiv"-Zustand der
+   *  Top-Toggles ab. */
+  const aktiveArten = useMemo(() => {
+    const set = new Set<TagStatus>();
+    for (const uid of forUserIds) {
+      for (const r of form.maEintraege[uid] ?? []) set.add(r.art);
+    }
+    return set;
+  }, [form.maEintraege, forUserIds]);
+
+  /** Legt für einen Mitarbeiter einen Default-Eintrag dieser Art an. */
+  const defaultEintragFuer = (uid: string, art: TagStatus): EintragRow => {
+    const list = form.maEintraege[uid] ?? [];
+    const tp = tagesplanungPerMa.get(uid);
+    const soll = sollPerMa.get(uid) ?? 0;
+    const letzteBaustelle =
+      [...list].reverse().find((r) => r.art === "baustelle")?.baustelle_id ?? null;
+    return {
+      key: newKey(),
+      art,
+      baustelle_id:
+        art === "baustelle" ? tp?.baustelle_id ?? letzteBaustelle ?? null : null,
+      taetigkeit_id: null,
+      taetigkeit_freitext: art === "baustelle" ? tp?.taetigkeit ?? "" : "",
+      stunden: list.length === 0 ? soll : 0,
+      notiz: "",
+    };
+  };
+
+  /** Top-Toggle: aktiv → alle Einträge dieser Art für alle ausgewählten MA
+   *  entfernen; inaktiv → bei jedem MA ohne Eintrag dieser Art einen
+   *  Default-Eintrag anlegen. */
+  const toggleArtFuerAlle = (art: TagStatus) => {
+    const istAktiv = aktiveArten.has(art);
     setForm((f) => {
       const maEintraege = { ...f.maEintraege };
       for (const uid of forUserIds) {
         const list = maEintraege[uid] ?? [];
-        const tp = tagesplanungPerMa.get(uid);
-        const soll = sollPerMa.get(uid) ?? 0;
-        const letzteBaustelle =
-          [...list].reverse().find((r) => r.art === "baustelle")?.baustelle_id ??
-          null;
-        const newEntry: EintragRow = {
-          key: newKey(),
-          art,
-          baustelle_id:
-            art === "baustelle" ? tp?.baustelle_id ?? letzteBaustelle ?? null : null,
-          taetigkeit_id: null,
-          taetigkeit_freitext: art === "baustelle" ? tp?.taetigkeit ?? "" : "",
-          stunden: list.length === 0 ? soll : 0,
-          notiz: "",
-        };
-        maEintraege[uid] = [...list, newEntry];
+        if (istAktiv) {
+          maEintraege[uid] = list.filter((r) => r.art !== art);
+        } else if (!list.some((r) => r.art === art)) {
+          maEintraege[uid] = [...list, defaultEintragFuer(uid, art)];
+        }
       }
       return { ...f, maEintraege };
     });
@@ -1015,11 +1061,12 @@ export default function Stunden() {
             </div>
           )}
 
-          {/* Status-Buttons: füge schnell einen Eintrag für alle ausgewählten MA an */}
+          {/* Status-Buttons: Toggle pro Art für alle ausgewählten Mitarbeiter */}
           {selectedMaList.length > 0 && (
             <StatusButtonsLeiste
               fuerAnzahl={selectedMaList.length}
-              onAdd={addArtFuerAlle}
+              aktiveArten={aktiveArten}
+              onToggle={toggleArtFuerAlle}
             />
           )}
 
@@ -1212,30 +1259,36 @@ export default function Stunden() {
 
 function StatusButtonsLeiste({
   fuerAnzahl,
-  onAdd,
+  aktiveArten,
+  onToggle,
 }: {
   fuerAnzahl: number;
-  onAdd: (art: TagStatus) => void;
+  aktiveArten: Set<TagStatus>;
+  onToggle: (art: TagStatus) => void;
 }) {
   return (
     <div className="space-y-1.5">
       <div className="text-[11px] text-muted-foreground">
         {fuerAnzahl === 1
-          ? "Tippen — fügt einen Eintrag dieser Art hinzu."
-          : `Tippen — fügt für alle ${fuerAnzahl} Mitarbeiter einen Eintrag dieser Art hinzu.`}
+          ? "Antippen = anschalten, nochmal antippen = ausschalten."
+          : `Antippen schaltet die Art für alle ${fuerAnzahl} Mitarbeiter an/aus.`}
       </div>
       <div className="grid grid-cols-5 gap-1.5">
         {STATUS_OPTIONS.map((art) => {
           const Icon = STATUS_ICONS[art];
+          const aktiv = aktiveArten.has(art);
           return (
             <button
               key={art}
               type="button"
-              onClick={() => onAdd(art)}
-              className={`h-20 rounded-lg border-2 ${STATUS_COLORS[art]} flex flex-col items-center justify-center gap-1 shadow-sm active:scale-[0.97] transition`}
+              onClick={() => onToggle(art)}
+              aria-pressed={aktiv}
+              className={`h-20 rounded-lg border-2 flex flex-col items-center justify-center gap-1 shadow-sm active:scale-[0.97] transition ${
+                aktiv ? STATUS_COLORS[art] : STATUS_OUTLINE[art]
+              }`}
             >
               <Icon className="h-6 w-6" />
-              <span className="text-[11px] sm:text-xs font-semibold leading-none">
+              <span className="text-[10px] sm:text-xs font-semibold leading-none">
                 {STATUS_LABELS[art]}
               </span>
             </button>
@@ -1247,6 +1300,15 @@ function StatusButtonsLeiste({
 }
 
 // ─── Block pro Mitarbeiter ──────────────────────────────────────────────
+
+const ART_REIHENFOLGE: TagStatus[] = [
+  "baustelle",
+  "firma",
+  "urlaub",
+  "krank",
+  "schlechtwetter",
+  "feiertag",
+];
 
 function MaBlock({
   ma,
@@ -1276,15 +1338,32 @@ function MaBlock({
   const total = eintraege.reduce((s, r) => s + Number(r.stunden || 0), 0);
   const offen = single || !collapsed;
 
-  const addEintrag = (art: TagStatus) => {
-    const letzteBaustelle =
-      [...eintraege].reverse().find((r) => r.art === "baustelle")?.baustelle_id ?? null;
-    onChange([...eintraege, neuerEintrag(art, art === "baustelle" ? letzteBaustelle : null)]);
-  };
+  const sections = useMemo(
+    () =>
+      ART_REIHENFOLGE.map((art) => ({
+        art,
+        rows: eintraege.filter((r) => r.art === art),
+      })).filter((s) => s.rows.length > 0),
+    [eintraege],
+  );
+
   const updateEintrag = (key: string, patch: Partial<EintragRow>) =>
     onChange(eintraege.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   const removeEintrag = (key: string) =>
     onChange(eintraege.filter((r) => r.key !== key));
+  const addTaetigkeit = (art: TagStatus, baustelle_id: string | null) =>
+    onChange([
+      ...eintraege,
+      {
+        key: newKey(),
+        art,
+        baustelle_id: art === "baustelle" ? baustelle_id : null,
+        taetigkeit_id: null,
+        taetigkeit_freitext: "",
+        stunden: 0,
+        notiz: "",
+      },
+    ]);
 
   return (
     <div className="rounded-lg border bg-card">
@@ -1315,52 +1394,34 @@ function MaBlock({
 
       {offen && (
         <div className="px-3 pb-3 space-y-2">
-          {eintraege.length === 0 && (
+          {sections.length === 0 && (
             <div className="text-xs text-muted-foreground italic py-1">
-              Noch keine Einträge — unten hinzufügen.
+              Noch keine Einträge — oben eine Art anschalten.
             </div>
           )}
-          {eintraege.map((row) => (
-            <EintragRowEditor
-              key={row.key}
-              row={row}
+          {sections.map((s) => (
+            <ArtSection
+              key={s.art}
+              art={s.art}
+              rows={s.rows}
               baustellen={baustellen}
               taetigkeitenStamm={taetigkeitenStamm}
-              onChange={(patch) => updateEintrag(row.key, patch)}
-              onRemove={() => removeEintrag(row.key)}
+              onUpdate={updateEintrag}
+              onRemove={removeEintrag}
+              onAddSplit={() =>
+                addTaetigkeit(
+                  s.art,
+                  s.rows[s.rows.length - 1]?.baustelle_id ?? null,
+                )
+              }
             />
           ))}
-
-          {/* Eintrag nur für diesen MA hinzufügen — im Self-Modus überflüssig
-              (oben die großen Status-Buttons übernehmen das). */}
-          {!single && (
-            <div className="flex flex-wrap gap-1.5 pt-1">
-              <span className="text-[11px] text-muted-foreground self-center mr-1">
-                Nur für {ma.vorname}:
-              </span>
-              {STATUS_OPTIONS.map((art) => {
-                const Icon = STATUS_ICONS[art];
-                return (
-                  <button
-                    key={art}
-                    type="button"
-                    onClick={() => addEintrag(art)}
-                    className="flex items-center gap-1 text-xs px-2 py-1.5 rounded-md border border-dashed hover:bg-muted transition"
-                  >
-                    <Plus className="h-3 w-3" />
-                    <Icon className="h-3.5 w-3.5" />
-                    {STATUS_LABELS[art]}
-                  </button>
-                );
-              })}
-            </div>
-          )}
 
           {canCopyToAll && eintraege.length > 0 && (
             <Button
               variant="outline"
               size="sm"
-              className="w-full mt-1"
+              className="w-full mt-1 h-10"
               onClick={onCopyToAll}
             >
               <Copy className="h-3.5 w-3.5 mr-1.5" />
@@ -1373,88 +1434,112 @@ function MaBlock({
   );
 }
 
-// ─── Eine Eintrags-Zeile ────────────────────────────────────────────────
+// ─── Art-Section (eine Sammlung von Tätigkeit-Splits derselben Art) ────
 
-function EintragRowEditor({
-  row,
+function ArtSection({
+  art,
+  rows,
   baustellen,
   taetigkeitenStamm,
-  onChange,
+  onUpdate,
   onRemove,
+  onAddSplit,
 }: {
-  row: EintragRow;
+  art: TagStatus;
+  rows: EintragRow[];
   baustellen: Baustelle[];
   taetigkeitenStamm: Database["public"]["Tables"]["taetigkeiten_stamm"]["Row"][];
-  onChange: (patch: Partial<EintragRow>) => void;
-  onRemove: () => void;
+  onUpdate: (key: string, patch: Partial<EintragRow>) => void;
+  onRemove: (key: string) => void;
+  onAddSplit: () => void;
 }) {
-  const Icon = STATUS_ICONS[row.art];
-  const arbeit = istArbeitArt(row.art);
+  const Icon = STATUS_ICONS[art];
+  const arbeit = istArbeitArt(art);
   return (
-    <div className={`rounded-md border border-l-4 ${ART_BORDER[row.art]} p-2.5 space-y-2 bg-muted/20`}>
-      <div className="flex items-center gap-2">
+    <div className={`rounded-md border border-l-4 ${ART_BORDER[art]} bg-muted/15 overflow-hidden`}>
+      <div className="px-2.5 py-1.5 flex items-center gap-2 bg-muted/30 border-b">
         <span
-          className={`inline-flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded ${STATUS_COLORS[row.art]}`}
+          className={`inline-flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded ${STATUS_COLORS[art]}`}
         >
           <Icon className="h-3 w-3" />
-          {STATUS_LABELS[row.art]}
+          {STATUS_LABELS[art]}
         </span>
-        <span className="flex-1" />
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-destructive shrink-0 h-7 w-7 p-0"
-          onClick={onRemove}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </Button>
       </div>
 
-      {row.art === "baustelle" && (
-        <BaustelleCombobox
-          baustellen={baustellen}
-          value={row.baustelle_id ?? ""}
-          onChange={(v) => onChange({ baustelle_id: v || null })}
-          allowClear
-        />
-      )}
-
-      {arbeit && (
-        <>
-          <select
-            value={row.taetigkeit_id ?? ""}
-            onChange={(e) => onChange({ taetigkeit_id: e.target.value || null })}
-            className="h-10 w-full rounded-md border bg-background px-2 text-sm"
+      <div className="p-2.5 space-y-3">
+        {rows.map((row) => (
+          <div
+            key={row.key}
+            className="space-y-2 pb-3 border-b last:border-0 last:pb-0"
           >
-            <option value="">— Tätigkeit wählen —</option>
-            {taetigkeitenStamm.map((tt) => (
-              <option key={tt.id} value={tt.id}>
-                {tt.bezeichnung}
-              </option>
-            ))}
-          </select>
-          {!row.taetigkeit_id && (
-            <Input
-              placeholder="Oder Freitext"
-              value={row.taetigkeit_freitext}
-              onChange={(e) => onChange({ taetigkeit_freitext: e.target.value })}
-              className="h-9 text-sm"
-            />
-          )}
-        </>
-      )}
+            {art === "baustelle" && (
+              <BaustelleCombobox
+                baustellen={baustellen}
+                value={row.baustelle_id ?? ""}
+                onChange={(v) => onUpdate(row.key, { baustelle_id: v || null })}
+                allowClear
+              />
+            )}
 
-      <StundenZelle
-        value={row.stunden}
-        onChange={(v) => onChange({ stunden: v })}
-      />
+            {arbeit && (
+              <>
+                <select
+                  value={row.taetigkeit_id ?? ""}
+                  onChange={(e) =>
+                    onUpdate(row.key, { taetigkeit_id: e.target.value || null })
+                  }
+                  className="h-11 w-full rounded-md border bg-background px-2 text-sm"
+                >
+                  <option value="">— Tätigkeit wählen —</option>
+                  {taetigkeitenStamm.map((tt) => (
+                    <option key={tt.id} value={tt.id}>
+                      {tt.bezeichnung}
+                    </option>
+                  ))}
+                </select>
+                {!row.taetigkeit_id && (
+                  <Input
+                    placeholder="Oder Freitext"
+                    value={row.taetigkeit_freitext}
+                    onChange={(e) =>
+                      onUpdate(row.key, { taetigkeit_freitext: e.target.value })
+                    }
+                    className="h-10 text-sm"
+                  />
+                )}
+              </>
+            )}
 
-      <Input
-        placeholder="Notiz (optional)"
-        value={row.notiz}
-        onChange={(e) => onChange({ notiz: e.target.value })}
-        className="h-9 text-sm"
-      />
+            <div className="flex items-center justify-between gap-2">
+              <StundenZelle
+                value={row.stunden}
+                onChange={(v) => onUpdate(row.key, { stunden: v })}
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive shrink-0 h-11 w-11 p-0"
+                onClick={() => onRemove(row.key)}
+                aria-label="Entfernen"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        ))}
+
+        {arbeit && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full h-11"
+            onClick={onAddSplit}
+          >
+            <Plus className="h-4 w-4 mr-1.5" />
+            Tätigkeit
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -1660,48 +1745,82 @@ function KilometergeldSection({
   onChange: (uid: string, km: number) => void;
 }) {
   const single = selectedMa.length === 1;
+  const hasKm = selectedMa.some((m) => Number(kmPerMa[m.id] ?? 0) > 0);
+  const [open, setOpen] = useState(hasKm);
+  // Wenn von außen km-Werte gesetzt werden (z. B. beim Laden eines Tages),
+  // einmalig öffnen.
+  useEffect(() => {
+    if (hasKm) setOpen(true);
+  }, [hasKm]);
+
+  const summe = selectedMa.reduce(
+    (s, m) => s + Math.max(0, Number(kmPerMa[m.id] ?? 0)),
+    0,
+  );
+
   return (
-    <div className="space-y-2 border-t pt-3">
-      <Label className="text-sm font-semibold flex items-center gap-1.5">
-        <Car className="h-4 w-4 text-primary" />
-        Kilometergeld
-      </Label>
-      <div className="text-[11px] text-muted-foreground">
-        Privat gefahrene Kilometer — {satz.toFixed(2).replace(".", ",")} €/km
-      </div>
-      <div className="space-y-1.5">
-        {selectedMa.map((m) => {
-          const km = Math.max(0, Number(kmPerMa[m.id] ?? 0));
-          const geld = Math.round(km * satz * 100) / 100;
-          return (
-            <div key={m.id} className="flex items-center gap-2 flex-wrap">
-              {!single && (
-                <span className="text-sm font-medium truncate w-24 shrink-0">
-                  {m.vorname} {m.nachname?.[0] ?? ""}.
-                </span>
-              )}
-              <div className="flex items-center gap-1">
-                <Input
-                  type="number"
-                  min={0}
-                  step={1}
-                  inputMode="numeric"
-                  value={km || ""}
-                  onChange={(e) =>
-                    onChange(m.id, Math.max(0, Number(e.target.value) || 0))
-                  }
-                  placeholder="0"
-                  className="h-9 w-24 text-center tabular-nums"
-                />
-                <span className="text-xs text-muted-foreground">km</span>
-              </div>
-              <span className="text-sm tabular-nums font-semibold text-primary">
-                = {geld.toFixed(2).replace(".", ",")} €
-              </span>
-            </div>
-          );
-        })}
-      </div>
+    <div className="border-t pt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full h-11 flex items-center gap-2 text-left"
+      >
+        <Car className="h-4 w-4 text-primary shrink-0" />
+        <span className="text-sm font-semibold">Kilometergeld</span>
+        <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+          {summe > 0
+            ? `${summe} km · ${(Math.round(summe * satz * 100) / 100)
+                .toFixed(2)
+                .replace(".", ",")} €`
+            : "Privat gefahren?"}
+        </span>
+        {open ? (
+          <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
+        ) : (
+          <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+        )}
+      </button>
+
+      {open && (
+        <div className="space-y-2 pt-2">
+          <div className="text-[11px] text-muted-foreground">
+            Privat gefahrene Kilometer — {satz.toFixed(2).replace(".", ",")} €/km
+          </div>
+          <div className="space-y-1.5">
+            {selectedMa.map((m) => {
+              const km = Math.max(0, Number(kmPerMa[m.id] ?? 0));
+              const geld = Math.round(km * satz * 100) / 100;
+              return (
+                <div key={m.id} className="flex items-center gap-2 flex-wrap">
+                  {!single && (
+                    <span className="text-sm font-medium truncate w-24 shrink-0">
+                      {m.vorname} {m.nachname?.[0] ?? ""}.
+                    </span>
+                  )}
+                  <div className="flex items-center gap-1">
+                    <Input
+                      type="number"
+                      min={0}
+                      step={1}
+                      inputMode="numeric"
+                      value={km || ""}
+                      onChange={(e) =>
+                        onChange(m.id, Math.max(0, Number(e.target.value) || 0))
+                      }
+                      placeholder="0"
+                      className="h-10 w-24 text-center tabular-nums"
+                    />
+                    <span className="text-xs text-muted-foreground">km</span>
+                  </div>
+                  <span className="text-sm tabular-nums font-semibold text-primary">
+                    = {geld.toFixed(2).replace(".", ",")} €
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
