@@ -565,6 +565,34 @@ export default function Stunden() {
     toast({ title: "Einträge übernommen", description: "Für alle Mitarbeiter kopiert." });
   };
 
+  /** Fügt für alle aktuell ausgewählten Mitarbeiter einen Eintrag der
+   *  gewählten Art an — der "klick oben → für alle"-Schnellpfad. */
+  const addArtFuerAlle = (art: TagStatus) => {
+    setForm((f) => {
+      const maEintraege = { ...f.maEintraege };
+      for (const uid of forUserIds) {
+        const list = maEintraege[uid] ?? [];
+        const tp = tagesplanungPerMa.get(uid);
+        const soll = sollPerMa.get(uid) ?? 0;
+        const letzteBaustelle =
+          [...list].reverse().find((r) => r.art === "baustelle")?.baustelle_id ??
+          null;
+        const newEntry: EintragRow = {
+          key: newKey(),
+          art,
+          baustelle_id:
+            art === "baustelle" ? tp?.baustelle_id ?? letzteBaustelle ?? null : null,
+          taetigkeit_id: null,
+          taetigkeit_freitext: art === "baustelle" ? tp?.taetigkeit ?? "" : "",
+          stunden: list.length === 0 ? soll : 0,
+          notiz: "",
+        };
+        maEintraege[uid] = [...list, newEntry];
+      }
+      return { ...f, maEintraege };
+    });
+  };
+
   // ─── Submit ──────────────────────────────────────────────────────────
   const submit = async () => {
     if (forUserIds.size === 0) {
@@ -987,6 +1015,14 @@ export default function Stunden() {
             </div>
           )}
 
+          {/* Status-Buttons: füge schnell einen Eintrag für alle ausgewählten MA an */}
+          {selectedMaList.length > 0 && (
+            <StatusButtonsLeiste
+              fuerAnzahl={selectedMaList.length}
+              onAdd={addArtFuerAlle}
+            />
+          )}
+
           {/* Block pro Mitarbeiter */}
           {selectedMaList.map((ma) => (
             <MaBlock
@@ -1172,6 +1208,44 @@ export default function Stunden() {
   );
 }
 
+// ─── Status-Buttons-Leiste (großer „für alle"-Schnellpfad) ────────────
+
+function StatusButtonsLeiste({
+  fuerAnzahl,
+  onAdd,
+}: {
+  fuerAnzahl: number;
+  onAdd: (art: TagStatus) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="text-[11px] text-muted-foreground">
+        {fuerAnzahl === 1
+          ? "Tippen — fügt einen Eintrag dieser Art hinzu."
+          : `Tippen — fügt für alle ${fuerAnzahl} Mitarbeiter einen Eintrag dieser Art hinzu.`}
+      </div>
+      <div className="grid grid-cols-5 gap-1.5">
+        {STATUS_OPTIONS.map((art) => {
+          const Icon = STATUS_ICONS[art];
+          return (
+            <button
+              key={art}
+              type="button"
+              onClick={() => onAdd(art)}
+              className={`h-20 rounded-lg border-2 ${STATUS_COLORS[art]} flex flex-col items-center justify-center gap-1 shadow-sm active:scale-[0.97] transition`}
+            >
+              <Icon className="h-6 w-6" />
+              <span className="text-[11px] sm:text-xs font-semibold leading-none">
+                {STATUS_LABELS[art]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Block pro Mitarbeiter ──────────────────────────────────────────────
 
 function MaBlock({
@@ -1257,24 +1331,30 @@ function MaBlock({
             />
           ))}
 
-          {/* Eintrag hinzufügen */}
-          <div className="flex flex-wrap gap-1.5 pt-1">
-            {STATUS_OPTIONS.map((art) => {
-              const Icon = STATUS_ICONS[art];
-              return (
-                <button
-                  key={art}
-                  type="button"
-                  onClick={() => addEintrag(art)}
-                  className="flex items-center gap-1 text-xs px-2 py-1.5 rounded-md border border-dashed hover:bg-muted transition"
-                >
-                  <Plus className="h-3 w-3" />
-                  <Icon className="h-3.5 w-3.5" />
-                  {STATUS_LABELS[art]}
-                </button>
-              );
-            })}
-          </div>
+          {/* Eintrag nur für diesen MA hinzufügen — im Self-Modus überflüssig
+              (oben die großen Status-Buttons übernehmen das). */}
+          {!single && (
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              <span className="text-[11px] text-muted-foreground self-center mr-1">
+                Nur für {ma.vorname}:
+              </span>
+              {STATUS_OPTIONS.map((art) => {
+                const Icon = STATUS_ICONS[art];
+                return (
+                  <button
+                    key={art}
+                    type="button"
+                    onClick={() => addEintrag(art)}
+                    className="flex items-center gap-1 text-xs px-2 py-1.5 rounded-md border border-dashed hover:bg-muted transition"
+                  >
+                    <Plus className="h-3 w-3" />
+                    <Icon className="h-3.5 w-3.5" />
+                    {STATUS_LABELS[art]}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {canCopyToAll && eintraege.length > 0 && (
             <Button
