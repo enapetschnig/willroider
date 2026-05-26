@@ -1364,6 +1364,12 @@ function MaBlock({
         notiz: "",
       },
     ]);
+  const setSectionBaustelle = (baustelle_id: string | null) =>
+    onChange(
+      eintraege.map((r) =>
+        r.art === "baustelle" ? { ...r, baustelle_id } : r,
+      ),
+    );
 
   return (
     <div className="rounded-lg border bg-card">
@@ -1414,6 +1420,7 @@ function MaBlock({
                   s.rows[s.rows.length - 1]?.baustelle_id ?? null,
                 )
               }
+              onSectionBaustelle={setSectionBaustelle}
             />
           ))}
 
@@ -1444,6 +1451,7 @@ function ArtSection({
   onUpdate,
   onRemove,
   onAddSplit,
+  onSectionBaustelle,
 }: {
   art: TagStatus;
   rows: EintragRow[];
@@ -1452,9 +1460,11 @@ function ArtSection({
   onUpdate: (key: string, patch: Partial<EintragRow>) => void;
   onRemove: (key: string) => void;
   onAddSplit: () => void;
+  onSectionBaustelle: (baustelle_id: string | null) => void;
 }) {
   const Icon = STATUS_ICONS[art];
   const arbeit = istArbeitArt(art);
+  const sectionBaustelleId = art === "baustelle" ? rows[0]?.baustelle_id ?? null : null;
   return (
     <div className={`rounded-md border border-l-4 ${ART_BORDER[art]} bg-muted/15 overflow-hidden`}>
       <div className="px-2.5 py-1.5 flex items-center gap-2 bg-muted/30 border-b">
@@ -1466,21 +1476,23 @@ function ArtSection({
         </span>
       </div>
 
+      {art === "baustelle" && (
+        <div className="p-2.5 border-b bg-background/50">
+          <BaustelleCombobox
+            baustellen={baustellen}
+            value={sectionBaustelleId ?? ""}
+            onChange={(v) => onSectionBaustelle(v || null)}
+            allowClear
+          />
+        </div>
+      )}
+
       <div className="p-2.5 space-y-3">
         {rows.map((row) => (
           <div
             key={row.key}
             className="space-y-2 pb-3 border-b last:border-0 last:pb-0"
           >
-            {art === "baustelle" && (
-              <BaustelleCombobox
-                baustellen={baustellen}
-                value={row.baustelle_id ?? ""}
-                onChange={(v) => onUpdate(row.key, { baustelle_id: v || null })}
-                allowClear
-              />
-            )}
-
             {arbeit && (
               <>
                 <select
@@ -1525,6 +1537,13 @@ function ArtSection({
                 <Trash2 className="h-4 w-4" />
               </Button>
             </div>
+
+            <Input
+              placeholder="Erklärung (optional)"
+              value={row.notiz}
+              onChange={(e) => onUpdate(row.key, { notiz: e.target.value })}
+              className="h-10 text-sm"
+            />
           </div>
         ))}
 
