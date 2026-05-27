@@ -9,7 +9,7 @@
  * Pausen werden nicht mehr erfasst — der Mitarbeiter gibt reine Netto-Zeit ein.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -45,10 +45,10 @@ import { PersonPicker, type Mode } from "@/components/stunden/PersonPicker";
 import {
   STATUS_LABELS,
   STATUS_COLORS,
-  ART_REIHENFOLGE,
   STATUS_OPTIONS,
   istArbeitArt,
   newKey,
+  gruppiereSections,
   type EintragRow,
 } from "@/components/stunden/zeiterfassungUi";
 import { StatusButtonsLeiste } from "@/components/stunden/StatusButtonsLeiste";
@@ -1218,13 +1218,10 @@ function MaBlock({
   const total = eintraege.reduce((s, r) => s + Number(r.stunden || 0), 0);
   const offen = single || !collapsed;
 
-  const sections = useMemo(
-    () =>
-      ART_REIHENFOLGE.map((art) => ({
-        art,
-        rows: eintraege.filter((r) => r.art === art),
-      })).filter((s) => s.rows.length > 0),
-    [eintraege],
+  const sections = useMemo(() => gruppiereSections(eintraege), [eintraege]);
+  const lastBaustelleIdx = sections.reduce(
+    (last, s, idx) => (s.art === "baustelle" ? idx : last),
+    -1,
   );
 
   const updateEintrag = (key: string, patch: Partial<EintragRow>) =>
@@ -1244,12 +1241,26 @@ function MaBlock({
         notiz: "",
       },
     ]);
-  const setSectionBaustelle = (baustelle_id: string | null) =>
+  /** Aktualisiert die Baustelle nur für die übergebenen Zeilen (eine Section). */
+  const setSectionBaustelle = (rowKeys: string[], baustelle_id: string | null) => {
+    const set = new Set(rowKeys);
     onChange(
-      eintraege.map((r) =>
-        r.art === "baustelle" ? { ...r, baustelle_id } : r,
-      ),
+      eintraege.map((r) => (set.has(r.key) ? { ...r, baustelle_id } : r)),
     );
+  };
+  const addWeitereBaustelle = () =>
+    onChange([
+      ...eintraege,
+      {
+        key: newKey(),
+        art: "baustelle",
+        baustelle_id: null,
+        taetigkeit_id: null,
+        taetigkeit_freitext: "",
+        stunden: 0,
+        notiz: "",
+      },
+    ]);
 
   return (
     <div className="rounded-lg border bg-card">
@@ -1285,23 +1296,40 @@ function MaBlock({
               Noch keine Einträge — oben eine Art anschalten.
             </div>
           )}
-          {sections.map((s) => (
-            <ArtSection
-              key={s.art}
-              art={s.art}
-              rows={s.rows}
-              baustellen={baustellen}
-              taetigkeitenStamm={taetigkeitenStamm}
-              onUpdate={updateEintrag}
-              onRemove={removeEintrag}
-              onAddSplit={() =>
-                addTaetigkeit(
-                  s.art,
-                  s.rows[s.rows.length - 1]?.baustelle_id ?? null,
-                )
-              }
-              onSectionBaustelle={setSectionBaustelle}
-            />
+          {sections.map((s, idx) => (
+            <Fragment key={s.key}>
+              <ArtSection
+                art={s.art}
+                rows={s.rows}
+                baustellen={baustellen}
+                taetigkeitenStamm={taetigkeitenStamm}
+                onUpdate={updateEintrag}
+                onRemove={removeEintrag}
+                onAddSplit={() =>
+                  addTaetigkeit(
+                    s.art,
+                    s.rows[s.rows.length - 1]?.baustelle_id ?? null,
+                  )
+                }
+                onSectionBaustelle={(b) =>
+                  setSectionBaustelle(
+                    s.rows.map((r) => r.key),
+                    b,
+                  )
+                }
+              />
+              {idx === lastBaustelleIdx && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full h-11"
+                  onClick={addWeitereBaustelle}
+                >
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  weitere Baustelle
+                </Button>
+              )}
+            </Fragment>
           ))}
 
           {canCopyToAll && eintraege.length > 0 && (

@@ -103,3 +103,48 @@ export const newKey = () =>
 /** Rundet auf das nächste Viertelstunden-Raster (0,25 h). */
 export const aufViertelstunde = (n: number) =>
   Math.round((Number(n) || 0) / 0.25) * 0.25;
+
+/** Eine Art-Section im MA-Block (eine pro Art bei Abwesenheiten, ggf. mehrere
+ *  bei Baustelle — eine je Baustellen-Auswahl). */
+export interface ArtSectionData {
+  /** stabiler Render-Key */
+  key: string;
+  art: TagStatus;
+  /** Die Baustelle der Section (nur bei art=baustelle, sonst null). */
+  baustelleId: string | null;
+  rows: EintragRow[];
+}
+
+/** Gruppiert die Einträge eines Tages in Art-Sections.
+ *  - Bei `baustelle`: Gruppierung nach `baustelle_id`. Zeilen mit
+ *    `baustelle_id=null` bekommen je ihren eigenen Section-Key (mit ihrem
+ *    `row.key`), damit zwei unausgefüllte Baustellen nicht mergen.
+ *  - Bei anderen Arten: maximal eine Section pro Art. */
+export function gruppiereSections(eintraege: EintragRow[]): ArtSectionData[] {
+  const out: ArtSectionData[] = [];
+  for (const art of ART_REIHENFOLGE) {
+    if (art === "baustelle") {
+      const groups = new Map<string, EintragRow[]>();
+      for (const r of eintraege.filter((e) => e.art === "baustelle")) {
+        const k = r.baustelle_id ?? `null:${r.key}`;
+        const arr = groups.get(k);
+        if (arr) arr.push(r);
+        else groups.set(k, [r]);
+      }
+      for (const [key, rows] of groups) {
+        out.push({
+          key: `baustelle:${key}`,
+          art,
+          baustelleId: rows[0]?.baustelle_id ?? null,
+          rows,
+        });
+      }
+    } else {
+      const rows = eintraege.filter((e) => e.art === art);
+      if (rows.length > 0) {
+        out.push({ key: art, art, baustelleId: null, rows });
+      }
+    }
+  }
+  return out;
+}

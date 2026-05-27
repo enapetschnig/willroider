@@ -8,7 +8,7 @@
  * verloren geht.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Dialog,
@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, Plus } from "lucide-react";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -35,7 +35,7 @@ import { useTaetigkeitenStamm } from "@/hooks/useStammdatenStunden";
 import { StatusButtonsLeiste } from "@/components/stunden/StatusButtonsLeiste";
 import { ArtSection } from "@/components/stunden/ArtSection";
 import {
-  ART_REIHENFOLGE,
+  gruppiereSections,
   istArbeitArt,
   newKey,
   type EintragRow,
@@ -106,13 +106,10 @@ export function TagBearbeitenDialog({
     return s;
   }, [eintraege]);
 
-  const sections = useMemo(
-    () =>
-      ART_REIHENFOLGE.map((art) => ({
-        art,
-        rows: eintraege.filter((r) => r.art === art),
-      })).filter((s) => s.rows.length > 0),
-    [eintraege],
+  const sections = useMemo(() => gruppiereSections(eintraege), [eintraege]);
+  const lastBaustelleIdx = sections.reduce(
+    (last, s, idx) => (s.art === "baustelle" ? idx : last),
+    -1,
   );
 
   const defaultEintrag = (art: TagStatus): EintragRow => {
@@ -155,10 +152,26 @@ export function TagBearbeitenDialog({
         notiz: "",
       },
     ]);
-  const setSectionBaustelle = (art: TagStatus, baustelle_id: string | null) =>
+  /** Aktualisiert die Baustelle nur für die übergebenen Zeilen (eine Section). */
+  const setSectionBaustelle = (rowKeys: string[], baustelle_id: string | null) => {
+    const set = new Set(rowKeys);
     setEintraege((es) =>
-      es.map((r) => (r.art === art ? { ...r, baustelle_id } : r)),
+      es.map((r) => (set.has(r.key) ? { ...r, baustelle_id } : r)),
     );
+  };
+  const addWeitereBaustelle = () =>
+    setEintraege((es) => [
+      ...es,
+      {
+        key: newKey(),
+        art: "baustelle",
+        baustelle_id: null,
+        taetigkeit_id: null,
+        taetigkeit_freitext: "",
+        stunden: 0,
+        notiz: "",
+      },
+    ]);
 
   const handleSave = async () => {
     try {
@@ -259,23 +272,40 @@ export function TagBearbeitenDialog({
             </div>
           )}
 
-          {sections.map((s) => (
-            <ArtSection
-              key={s.art}
-              art={s.art}
-              rows={s.rows}
-              baustellen={baustellen}
-              taetigkeitenStamm={taetigkeitenStamm}
-              onUpdate={updateEintrag}
-              onRemove={removeEintrag}
-              onAddSplit={() =>
-                addSplit(
-                  s.art,
-                  s.rows[s.rows.length - 1]?.baustelle_id ?? null,
-                )
-              }
-              onSectionBaustelle={(b) => setSectionBaustelle(s.art, b)}
-            />
+          {sections.map((s, idx) => (
+            <Fragment key={s.key}>
+              <ArtSection
+                art={s.art}
+                rows={s.rows}
+                baustellen={baustellen}
+                taetigkeitenStamm={taetigkeitenStamm}
+                onUpdate={updateEintrag}
+                onRemove={removeEintrag}
+                onAddSplit={() =>
+                  addSplit(
+                    s.art,
+                    s.rows[s.rows.length - 1]?.baustelle_id ?? null,
+                  )
+                }
+                onSectionBaustelle={(b) =>
+                  setSectionBaustelle(
+                    s.rows.map((r) => r.key),
+                    b,
+                  )
+                }
+              />
+              {idx === lastBaustelleIdx && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full h-11"
+                  onClick={addWeitereBaustelle}
+                >
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  weitere Baustelle
+                </Button>
+              )}
+            </Fragment>
           ))}
 
           <div className="space-y-1 border-t pt-3">
