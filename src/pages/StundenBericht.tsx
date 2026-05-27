@@ -37,7 +37,7 @@ import {
   logBerichtAenderung,
 } from "@/hooks/useStundenBericht";
 import { geaenderteTage, type BerichtSnapshot } from "@/lib/stundenBerichtDiff";
-import { AdminTagEditModal } from "@/components/admin/AdminTagEditModal";
+import { TagBearbeitenDialog } from "@/components/TagBearbeitenDialog";
 import { UnterschriftDialog } from "@/components/UnterschriftDialog";
 import { useZulagenTypen } from "@/hooks/useStammdatenStunden";
 import { aggregiereZulagen } from "@/lib/stundenAggregation";
@@ -742,10 +742,12 @@ export default function StundenBericht() {
       </div>
 
       {/* Tag-Editor */}
-      <AdminTagEditModal
+      <TagBearbeitenDialog
         open={!!editTag}
         onOpenChange={(v) => !v && setEditTag(null)}
-        tag={editTag}
+        tag={editTag?.tag.id ? editTag : null}
+        mitarbeiterId={bericht.mitarbeiter_id}
+        datum={editTag?.tag.datum ?? ""}
         mitarbeiterName={maName}
         onSaved={() => {
           if (editTag) onTagSaved(editTag.tag.datum);

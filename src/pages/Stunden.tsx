@@ -30,24 +30,29 @@ import {
   ChevronRight,
   ChevronDown,
   ChevronUp,
-  Hammer,
-  Sun,
-  HeartPulse,
-  CloudRain,
-  Factory,
   Edit,
   Trash2,
   AlertTriangle,
   Loader2,
   Car,
   Copy,
-  Calendar,
 } from "lucide-react";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
 import { MicButton } from "@/components/MicButton";
 import { BaustelleCombobox } from "@/components/stunden/BaustelleCombobox";
 import { PersonPicker, type Mode } from "@/components/stunden/PersonPicker";
+import {
+  STATUS_LABELS,
+  STATUS_COLORS,
+  ART_REIHENFOLGE,
+  STATUS_OPTIONS,
+  istArbeitArt,
+  newKey,
+  type EintragRow,
+} from "@/components/stunden/zeiterfassungUi";
+import { StatusButtonsLeiste } from "@/components/stunden/StatusButtonsLeiste";
+import { ArtSection } from "@/components/stunden/ArtSection";
 import {
   berechneTagZeiten,
   pruefArbeitszeitGesetz,
@@ -77,73 +82,7 @@ type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
 
-const STATUS_LABELS: Record<TagStatus, string> = {
-  baustelle: "Baustelle",
-  firma: "Firma",
-  krank: "Krank",
-  urlaub: "Urlaub",
-  schlechtwetter: "Schlechtwetter",
-  feiertag: "Feiertag",
-};
-const STATUS_ICONS = {
-  baustelle: Hammer,
-  firma: Factory,
-  krank: HeartPulse,
-  urlaub: Sun,
-  schlechtwetter: CloudRain,
-  feiertag: Calendar,
-};
-/** Solider Farb-Stil (Knöpfe + Badges). */
-const STATUS_COLORS: Record<TagStatus, string> = {
-  baustelle: "bg-primary text-primary-foreground border-primary",
-  firma: "bg-blue-500 text-white border-blue-500",
-  krank: "bg-red-500 text-white border-red-500",
-  urlaub: "bg-amber-500 text-white border-amber-500",
-  schlechtwetter: "bg-sky-500 text-white border-sky-500",
-  feiertag: "bg-violet-500 text-white border-violet-500",
-};
-/** Outline-Stil (Top-Toggle inaktiv) — gleiche Farbe, transparenter Hintergrund. */
-const STATUS_OUTLINE: Record<TagStatus, string> = {
-  baustelle: "bg-background text-primary border-primary/40",
-  firma: "bg-background text-blue-700 border-blue-200",
-  krank: "bg-background text-red-700 border-red-200",
-  urlaub: "bg-background text-amber-700 border-amber-200",
-  schlechtwetter: "bg-background text-sky-700 border-sky-200",
-  feiertag: "bg-background text-violet-700 border-violet-200",
-};
-/** Linke Akzent-Border je Eintrags-Art. */
-const ART_BORDER: Record<TagStatus, string> = {
-  baustelle: "border-l-primary",
-  firma: "border-l-blue-500",
-  krank: "border-l-red-500",
-  urlaub: "border-l-amber-500",
-  schlechtwetter: "border-l-sky-500",
-  feiertag: "border-l-violet-500",
-};
-const STATUS_OPTIONS: TagStatus[] = [
-  "baustelle",
-  "firma",
-  "krank",
-  "urlaub",
-  "schlechtwetter",
-];
-
 const todayIso = () => localIso();
-const newKey = () =>
-  typeof crypto !== "undefined" && crypto.randomUUID
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2);
-
-/** Ein typisierter Eintrag im Tag eines Mitarbeiters. */
-interface EintragRow {
-  key: string;
-  art: TagStatus;
-  baustelle_id: string | null;
-  taetigkeit_id: string | null;
-  taetigkeit_freitext: string;
-  stunden: number;
-  notiz: string;
-}
 
 interface ZulageEintrag {
   stundenPerMa: Record<string, number | null>; // null = alle Netto-Stunden des MA
@@ -172,12 +111,6 @@ function emptyForm(): ErfassungForm {
     fahrt: null,
   };
 }
-
-const istArbeitArt = (art: TagStatus) => art === "baustelle" || art === "firma";
-
-/** Rundet auf das nächste Viertelstunden-Raster (0,25 h). */
-const aufViertelstunde = (n: number) =>
-  Math.round((Number(n) || 0) / 0.25) * 0.25;
 
 export default function Stunden() {
   const { user, profile, isAdmin } = useAuth();
@@ -1255,60 +1188,7 @@ export default function Stunden() {
   );
 }
 
-// ─── Status-Buttons-Leiste (großer „für alle"-Schnellpfad) ────────────
-
-function StatusButtonsLeiste({
-  fuerAnzahl,
-  aktiveArten,
-  onToggle,
-}: {
-  fuerAnzahl: number;
-  aktiveArten: Set<TagStatus>;
-  onToggle: (art: TagStatus) => void;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <div className="text-[11px] text-muted-foreground">
-        {fuerAnzahl === 1
-          ? "Antippen = anschalten, nochmal antippen = ausschalten."
-          : `Antippen schaltet die Art für alle ${fuerAnzahl} Mitarbeiter an/aus.`}
-      </div>
-      <div className="grid grid-cols-5 gap-1.5">
-        {STATUS_OPTIONS.map((art) => {
-          const Icon = STATUS_ICONS[art];
-          const aktiv = aktiveArten.has(art);
-          return (
-            <button
-              key={art}
-              type="button"
-              onClick={() => onToggle(art)}
-              aria-pressed={aktiv}
-              className={`h-20 rounded-lg border-2 flex flex-col items-center justify-center gap-1 shadow-sm active:scale-[0.97] transition ${
-                aktiv ? STATUS_COLORS[art] : STATUS_OUTLINE[art]
-              }`}
-            >
-              <Icon className="h-6 w-6" />
-              <span className="text-[10px] sm:text-xs font-semibold leading-none">
-                {STATUS_LABELS[art]}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // ─── Block pro Mitarbeiter ──────────────────────────────────────────────
-
-const ART_REIHENFOLGE: TagStatus[] = [
-  "baustelle",
-  "firma",
-  "urlaub",
-  "krank",
-  "schlechtwetter",
-  "feiertag",
-];
 
 function MaBlock({
   ma,
@@ -1441,170 +1321,6 @@ function MaBlock({
   );
 }
 
-// ─── Art-Section (eine Sammlung von Tätigkeit-Splits derselben Art) ────
-
-function ArtSection({
-  art,
-  rows,
-  baustellen,
-  taetigkeitenStamm,
-  onUpdate,
-  onRemove,
-  onAddSplit,
-  onSectionBaustelle,
-}: {
-  art: TagStatus;
-  rows: EintragRow[];
-  baustellen: Baustelle[];
-  taetigkeitenStamm: Database["public"]["Tables"]["taetigkeiten_stamm"]["Row"][];
-  onUpdate: (key: string, patch: Partial<EintragRow>) => void;
-  onRemove: (key: string) => void;
-  onAddSplit: () => void;
-  onSectionBaustelle: (baustelle_id: string | null) => void;
-}) {
-  const Icon = STATUS_ICONS[art];
-  const arbeit = istArbeitArt(art);
-  const sectionBaustelleId = art === "baustelle" ? rows[0]?.baustelle_id ?? null : null;
-  return (
-    <div className={`rounded-md border border-l-4 ${ART_BORDER[art]} bg-muted/15 overflow-hidden`}>
-      <div className="px-2.5 py-1.5 flex items-center gap-2 bg-muted/30 border-b">
-        <span
-          className={`inline-flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded ${STATUS_COLORS[art]}`}
-        >
-          <Icon className="h-3 w-3" />
-          {STATUS_LABELS[art]}
-        </span>
-      </div>
-
-      {art === "baustelle" && (
-        <div className="p-2.5 border-b bg-background/50">
-          <BaustelleCombobox
-            baustellen={baustellen}
-            value={sectionBaustelleId ?? ""}
-            onChange={(v) => onSectionBaustelle(v || null)}
-            allowClear
-          />
-        </div>
-      )}
-
-      <div className="p-2.5 space-y-3">
-        {rows.map((row) => (
-          <div
-            key={row.key}
-            className="space-y-2 pb-3 border-b last:border-0 last:pb-0"
-          >
-            {arbeit && (
-              <>
-                <select
-                  value={row.taetigkeit_id ?? ""}
-                  onChange={(e) =>
-                    onUpdate(row.key, { taetigkeit_id: e.target.value || null })
-                  }
-                  className="h-11 w-full rounded-md border bg-background px-2 text-sm"
-                >
-                  <option value="">— Tätigkeit wählen —</option>
-                  {taetigkeitenStamm.map((tt) => (
-                    <option key={tt.id} value={tt.id}>
-                      {tt.bezeichnung}
-                    </option>
-                  ))}
-                </select>
-                {!row.taetigkeit_id && (
-                  <Input
-                    placeholder="Oder Freitext"
-                    value={row.taetigkeit_freitext}
-                    onChange={(e) =>
-                      onUpdate(row.key, { taetigkeit_freitext: e.target.value })
-                    }
-                    className="h-10 text-sm"
-                  />
-                )}
-              </>
-            )}
-
-            <div className="flex items-center justify-between gap-2">
-              <StundenZelle
-                value={row.stunden}
-                onChange={(v) => onUpdate(row.key, { stunden: v })}
-              />
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-destructive shrink-0 h-11 w-11 p-0"
-                onClick={() => onRemove(row.key)}
-                aria-label="Entfernen"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <Input
-              placeholder="Erklärung (optional)"
-              value={row.notiz}
-              onChange={(e) => onUpdate(row.key, { notiz: e.target.value })}
-              className="h-10 text-sm"
-            />
-          </div>
-        ))}
-
-        {arbeit && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full h-11"
-            onClick={onAddSplit}
-          >
-            <Plus className="h-4 w-4 mr-1.5" />
-            Tätigkeit
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function StundenZelle({
-  value,
-  onChange,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <div className="flex items-center gap-1">
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        className="h-12 w-12 shrink-0"
-        onClick={() => onChange(Math.max(0, aufViertelstunde(value) - 0.25))}
-      >
-        <Minus className="h-5 w-5" />
-      </Button>
-      <Input
-        type="number"
-        step={0.25}
-        min={0}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value) || 0)}
-        onBlur={() => onChange(aufViertelstunde(value))}
-        className="h-12 text-xl font-bold text-center tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-      />
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        className="h-12 w-12 shrink-0"
-        onClick={() => onChange(aufViertelstunde(value) + 0.25)}
-      >
-        <Plus className="h-5 w-5" />
-      </Button>
-      <span className="h-12 flex items-center px-1 text-sm font-medium text-muted-foreground">
-        h
-      </span>
-    </div>
-  );
-}
 
 // ─── ZulageEditor (alle gleich / pro MA) ────────────────────────────────
 
