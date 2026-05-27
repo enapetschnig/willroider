@@ -21,12 +21,12 @@ import {
   AlertCircle,
   ShieldAlert,
   FileText,
+  Wrench,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 import { BerichteHintCard } from "@/components/dashboard/BerichteHintCard";
 import { NeuerLohnzettelHintCard } from "@/components/dashboard/NeuerLohnzettelHintCard";
 import { StundenBerichtHintCard } from "@/components/dashboard/StundenBerichtHintCard";
-import { HalleHintCard } from "@/components/dashboard/HalleHintCard";
 import { TagesplanPreview } from "@/components/TagesplanPreview";
 import {
   Dialog,
@@ -351,6 +351,15 @@ export default function Dashboard() {
       color: WILLROIDER_RED,
     },
     {
+      to: "/halle",
+      label: "Halle / Werkstatt",
+      desc: "Stunden auf Maschinen erfassen",
+      cta: "Halle öffnen",
+      icon: Wrench,
+      show: true,
+      color: WILLROIDER_RED,
+    },
+    {
       to: "/mein-tag",
       label: "Mein Tag",
       desc: "Heutige Einteilung & Baustelle",
@@ -407,9 +416,6 @@ export default function Dashboard() {
 
       {/* Baustellenstundenbericht (MA: Durchsicht, Büro: Kontrolle) */}
       <StundenBerichtHintCard />
-
-      {/* Halle / Werkstatt-Zeiterfassung — Shortcut */}
-      <HalleHintCard />
 
       {/* Neue-Anmeldungen-Banner (Admin) — bewusst ganz oben, vor dem Greeting */}
       {isAdmin && pendingCount > 0 && (
