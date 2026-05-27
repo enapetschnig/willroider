@@ -611,12 +611,38 @@ export default function Stunden() {
     try {
       const { data: existing } = await supabase
         .from("stunden_tage")
-        .select("id, mitarbeiter_id, status")
+        .select(
+          `id, mitarbeiter_id, status,
+           stunden_taetigkeiten(id, art, baustelle_id, taetigkeit_id, taetigkeit_freitext, stunden, notiz, position)`,
+        )
         .eq("datum", date)
         .in("mitarbeiter_id", Array.from(forUserIds));
-      const existingMap = new Map<string, { id: string; status: string }>();
+      const existingMap = new Map<
+        string,
+        {
+          id: string;
+          status: string;
+          taetigkeiten: Array<{
+            art: TagStatus;
+            baustelle_id: string | null;
+            taetigkeit_id: string | null;
+            taetigkeit_freitext: string | null;
+            stunden: number;
+            notiz: string | null;
+          }>;
+        }
+      >();
       (existing ?? []).forEach((r: any) =>
-        existingMap.set(r.mitarbeiter_id, { id: r.id, status: r.status }),
+        existingMap.set(r.mitarbeiter_id, {
+          id: r.id,
+          status: r.status,
+          taetigkeiten: r.stunden_taetigkeiten ?? [],
+        }),
+      );
+
+      // Maschinen-IDs für „Halle-Einträge erhalten"-Merge
+      const maschinenIds = new Set(
+        baustellen.filter((b) => b.kategorie === "maschine").map((b) => b.id),
       );
 
       for (const uid of forUserIds) {
@@ -639,10 +665,19 @@ export default function Stunden() {
           continue;
         }
 
-        const eintraege: SaveEintrag[] = rows.map((r, idx) => {
+        // Maschinen-Einträge (Halle) des Tages erhalten — /stunden verwaltet
+        // nur Kunden-Baustellen + Firma + Abwesenheiten.
+        const erhaltMaschinen = (existingEntry?.taetigkeiten ?? []).filter(
+          (t) =>
+            t.art === "baustelle" &&
+            !!t.baustelle_id &&
+            maschinenIds.has(t.baustelle_id),
+        );
+
+        const formEintraege: SaveEintrag[] = rows.map((r) => {
           const arbeit = istArbeitArt(r.art);
           return {
-            position: idx + 1,
+            position: 0,
             art: r.art,
             taetigkeit_id: arbeit ? r.taetigkeit_id : null,
             taetigkeit_freitext:
@@ -652,6 +687,19 @@ export default function Stunden() {
             notiz: r.notiz.trim() || null,
           };
         });
+
+        const eintraege: SaveEintrag[] = [
+          ...erhaltMaschinen.map((t) => ({
+            position: 0,
+            art: t.art,
+            taetigkeit_id: t.taetigkeit_id,
+            taetigkeit_freitext: t.taetigkeit_freitext,
+            baustelle_id: t.baustelle_id,
+            stunden: Number(t.stunden),
+            notiz: t.notiz,
+          })),
+          ...formEintraege,
+        ].map((e, idx) => ({ ...e, position: idx + 1 }));
 
         // Zulagen: nur die, die der MA erhalten darf
         let erlaubteZulagenForUid: Set<string>;

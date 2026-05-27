@@ -272,7 +272,15 @@ export function TagBearbeitenDialog({
             </div>
           )}
 
-          {sections.map((s, idx) => (
+          {sections.map((s, idx) => {
+            // Kategorie der Section ableiten: zeigt die Baustelle bzw. Maschine
+            // korrekt im Picker an, je nachdem worauf der Eintrag heute liegt.
+            const sectionKategorie: "baustelle" | "maschine" =
+              s.art === "baustelle" && s.baustelleId
+                ? (baustellen.find((b) => b.id === s.baustelleId)?.kategorie ??
+                    "baustelle")
+                : "baustelle";
+            return (
             <Fragment key={s.key}>
               <ArtSection
                 art={s.art}
@@ -293,6 +301,7 @@ export function TagBearbeitenDialog({
                     b,
                   )
                 }
+                kategorie={sectionKategorie}
               />
               {idx === lastBaustelleIdx && (
                 <Button
@@ -306,7 +315,8 @@ export function TagBearbeitenDialog({
                 </Button>
               )}
             </Fragment>
-          ))}
+            );
+          })}
 
           <div className="space-y-1 border-t pt-3">
             <Label className="text-xs">Anmerkung (optional)</Label>
