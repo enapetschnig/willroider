@@ -9,7 +9,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Building2, Check, ChevronDown } from "lucide-react";
+import { Building2, Check, ChevronDown, Wrench } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -19,19 +19,37 @@ export function BaustelleCombobox({
   value,
   onChange,
   allowClear = false,
+  kategorie,
 }: {
   baustellen: Baustelle[];
   value: string;
   onChange: (id: string) => void;
   allowClear?: boolean;
+  /** Filtert + ändert Label/Icon: 'maschine' für die Halle-Erfassung,
+   *  'baustelle' für die normale Erfassung. Ohne Wert: alle. */
+  kategorie?: "baustelle" | "maschine";
 }) {
   const [open, setOpen] = useState(false);
-  const selected = baustellen.find((b) => b.id === value);
+  const liste = kategorie
+    ? baustellen.filter((b) => (b.kategorie ?? "baustelle") === kategorie)
+    : baustellen;
+  const selected = liste.find((b) => b.id === value);
+  const istMaschine = kategorie === "maschine";
+  const Icon = istMaschine ? Wrench : Building2;
+  const placeholderText = istMaschine ? "Maschine wählen…" : "Baustelle wählen…";
+  const searchPlaceholder = istMaschine
+    ? "Maschine suchen…"
+    : "Baustelle suchen…";
+  const emptyText = istMaschine
+    ? "Keine Maschine gefunden."
+    : "Keine Baustelle gefunden.";
 
-  if (baustellen.length === 0) {
+  if (liste.length === 0) {
     return (
       <div className="text-xs text-muted-foreground p-3 bg-muted/40 rounded">
-        Aktuell keine aktiven Baustellen für deine Partie.
+        {istMaschine
+          ? "Aktuell keine Maschinen angelegt."
+          : "Aktuell keine aktiven Baustellen für deine Partie."}
       </div>
     );
   }
@@ -48,7 +66,7 @@ export function BaustelleCombobox({
         >
           {selected ? (
             <span className="flex items-center gap-2 min-w-0 flex-1">
-              <Building2 className="h-4 w-4 text-primary shrink-0" />
+              <Icon className="h-4 w-4 text-primary shrink-0" />
               <span className="min-w-0 flex-1 truncate">
                 <span className="font-medium">{selected.bvh_name}</span>
                 {selected.kostenstelle && (
@@ -60,8 +78,8 @@ export function BaustelleCombobox({
             </span>
           ) : (
             <span className="flex items-center gap-2 text-muted-foreground">
-              <Building2 className="h-4 w-4 shrink-0" />
-              Baustelle wählen…
+              <Icon className="h-4 w-4 shrink-0" />
+              {placeholderText}
             </span>
           )}
           <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
@@ -72,11 +90,11 @@ export function BaustelleCombobox({
         align="start"
       >
         <Command>
-          <CommandInput placeholder="Baustelle suchen…" className="h-11" />
+          <CommandInput placeholder={searchPlaceholder} className="h-11" />
           <CommandList>
-            <CommandEmpty>Keine Baustelle gefunden.</CommandEmpty>
+            <CommandEmpty>{emptyText}</CommandEmpty>
             <CommandGroup>
-              {allowClear && (
+              {allowClear && !istMaschine && (
                 <CommandItem
                   value="--keine--"
                   onSelect={() => {
@@ -89,7 +107,7 @@ export function BaustelleCombobox({
                   Keine Baustelle (allgemein in Firma)
                 </CommandItem>
               )}
-              {baustellen.map((b) => {
+              {liste.map((b) => {
                 const isSel = b.id === value;
                 return (
                   <CommandItem

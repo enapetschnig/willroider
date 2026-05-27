@@ -3,6 +3,7 @@
  * Schlechtwetter). Klick = Art an/aus für den Kontext (1 MA oder alle).
  */
 
+import { Wrench } from "lucide-react";
 import type { TagStatus } from "@/integrations/supabase/types";
 import {
   STATUS_OPTIONS,
@@ -16,11 +17,26 @@ export function StatusButtonsLeiste({
   fuerAnzahl,
   aktiveArten,
   onToggle,
+  optionen = STATUS_OPTIONS,
+  kategorie,
 }: {
   fuerAnzahl: number;
   aktiveArten: Set<TagStatus>;
   onToggle: (art: TagStatus) => void;
+  /** Welche Arten als Toggles zeigen. Default: alle 5. */
+  optionen?: TagStatus[];
+  /** Bei `'maschine'` wird der baustelle-Button zu „Maschine" (Wrench-Icon). */
+  kategorie?: "baustelle" | "maschine";
 }) {
+  const istMaschine = kategorie === "maschine";
+  const cols =
+    optionen.length === 5
+      ? "grid-cols-5"
+      : optionen.length === 4
+        ? "grid-cols-4"
+        : optionen.length === 3
+          ? "grid-cols-3"
+          : "grid-cols-2";
   return (
     <div className="space-y-1.5">
       <div className="text-[11px] text-muted-foreground">
@@ -28,9 +44,11 @@ export function StatusButtonsLeiste({
           ? "Antippen = anschalten, nochmal antippen = ausschalten."
           : `Antippen schaltet die Art für alle ${fuerAnzahl} Mitarbeiter an/aus.`}
       </div>
-      <div className="grid grid-cols-5 gap-1.5">
-        {STATUS_OPTIONS.map((art) => {
-          const Icon = STATUS_ICONS[art];
+      <div className={`grid ${cols} gap-1.5`}>
+        {optionen.map((art) => {
+          const istMaschBtn = istMaschine && art === "baustelle";
+          const Icon = istMaschBtn ? Wrench : STATUS_ICONS[art];
+          const label = istMaschBtn ? "Maschine" : STATUS_LABELS[art];
           const aktiv = aktiveArten.has(art);
           return (
             <button
@@ -44,7 +62,7 @@ export function StatusButtonsLeiste({
             >
               <Icon className="h-6 w-6" />
               <span className="text-[10px] sm:text-xs font-semibold leading-none">
-                {STATUS_LABELS[art]}
+                {label}
               </span>
             </button>
           );

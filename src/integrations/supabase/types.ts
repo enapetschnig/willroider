@@ -181,6 +181,7 @@ export type Database = {
           besonderes_augenmerk: string | null;
           fahrtgeld_pauschale_eur: number;
           entfernung_km: number | null;
+          kategorie: 'baustelle' | 'maschine';
           created_by: string | null;
           created_at: string;
           updated_at: string;

@@ -22,6 +22,7 @@ import Stunden from "@/pages/Stunden";
 import Stundenauswertung from "@/pages/Stundenauswertung";
 import StundenBericht from "@/pages/StundenBericht";
 import StundenBerichteListe from "@/pages/StundenBerichteListe";
+import HalleErfassung from "@/pages/HalleErfassung";
 import Berichte from "@/pages/Berichte";
 import BerichtDetail from "@/pages/BerichtDetail";
 import Kalender from "@/pages/Kalender";
@@ -90,6 +91,7 @@ const App = () => (
               <Route path="/kalender" element={<Navigate to="/admin?tab=kalender" replace />} />
               <Route path="/evaluierung" element={<Navigate to="/admin?tab=evaluierung" replace />} />
               <Route path="/stunden" element={<Stunden />} />
+              <Route path="/halle" element={<HalleErfassung />} />
               <Route
                 path="/stunden/auswertung"
                 element={<RequireRole role="review"><Stundenauswertung /></RequireRole>}

@@ -30,6 +30,7 @@ export function ArtSection({
   onRemove,
   onAddSplit,
   onSectionBaustelle,
+  kategorie = "baustelle",
 }: {
   art: TagStatus;
   rows: EintragRow[];
@@ -39,11 +40,15 @@ export function ArtSection({
   onRemove: (key: string) => void;
   onAddSplit: () => void;
   onSectionBaustelle: (baustelle_id: string | null) => void;
+  /** Filtert Combobox + setzt Label: 'maschine' für Halle-Erfassung. */
+  kategorie?: "baustelle" | "maschine";
 }) {
   const Icon = STATUS_ICONS[art];
   const arbeit = istArbeitArt(art);
   const sectionBaustelleId =
     art === "baustelle" ? rows[0]?.baustelle_id ?? null : null;
+  const istMaschine = kategorie === "maschine";
+  const artLabel = istMaschine && art === "baustelle" ? "Maschine" : STATUS_LABELS[art];
   return (
     <div
       className={`rounded-md border border-l-4 ${ART_BORDER[art]} bg-muted/15 overflow-hidden`}
@@ -53,7 +58,7 @@ export function ArtSection({
           className={`inline-flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded ${STATUS_COLORS[art]}`}
         >
           <Icon className="h-3 w-3" />
-          {STATUS_LABELS[art]}
+          {artLabel}
         </span>
       </div>
 
@@ -63,7 +68,8 @@ export function ArtSection({
             baustellen={baustellen}
             value={sectionBaustelleId ?? ""}
             onChange={(v) => onSectionBaustelle(v || null)}
-            allowClear
+            allowClear={!istMaschine}
+            kategorie={kategorie}
           />
         </div>
       )}
