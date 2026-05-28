@@ -4,7 +4,8 @@
  * Zeigt einen Halbmonats-Bericht eines Mitarbeiters als Raster
  * (Baustellen × Tage), handytauglich. Geänderte Tage (Abweichung vom
  * Snapshot bei Erzeugung) sind gelb. Workflow: offen → unterschrieben →
- * bestaetigt.
+ * bestaetigt. Einmal unterschrieben (= abgeschickt) ist kein Wieder-Öffnen
+ * mehr möglich; vor dem Abschicken nochmal genau kontrollieren.
  */
 
 import { useMemo, useState } from "react";
@@ -22,7 +23,6 @@ import {
   Loader2,
   PenLine,
   CheckCircle2,
-  Unlock,
   AlertTriangle,
   History,
   FileText,
@@ -265,7 +265,6 @@ export default function StundenBericht() {
     (bericht.status === "unterschrieben" && isAdmin);
   const kannUnterschreiben = bericht.status === "offen" && istEigentuemer;
   const kannBestaetigen = bericht.status === "unterschrieben" && isAdmin;
-  const kannWiederOeffnen = bericht.status === "bestaetigt" && isAdmin;
 
   const maName = bericht.mitarbeiter
     ? `${bericht.mitarbeiter.vorname ?? ""} ${bericht.mitarbeiter.nachname ?? ""}`.trim()
@@ -294,10 +293,19 @@ export default function StundenBericht() {
   };
 
   const handleUnterschrift = async (dataUrl: string) => {
+    if (
+      !window.confirm(
+        "Bericht unterschreiben und abschicken? Nach dem Abschicken ist kein Wieder-Öffnen mehr möglich.",
+      )
+    )
+      return;
     try {
       await aktionen.unterschreiben.mutateAsync({ id: bericht.id, unterschrift: dataUrl });
       setSignOpen(false);
-      toast({ title: "Unterschrieben", description: "Der Bericht geht jetzt an die Kontrolle." });
+      toast({
+        title: "Abgeschickt",
+        description: "Der Bericht wurde unterschrieben und an das Büro übermittelt.",
+      });
     } catch (e) {
       toast({ variant: "destructive", title: "Fehler", description: (e as Error).message });
     }
@@ -309,17 +317,6 @@ export default function StundenBericht() {
     try {
       await aktionen.bestaetigen.mutateAsync(bericht.id);
       toast({ title: "Bestätigt", description: "Periode abgeschlossen, ZA gebucht." });
-    } catch (e) {
-      toast({ variant: "destructive", title: "Fehler", description: (e as Error).message });
-    }
-  };
-
-  const handleWiederOeffnen = async () => {
-    if (!window.confirm("Bericht wieder öffnen? Die ZA-Buchung wird zurückgenommen."))
-      return;
-    try {
-      await aktionen.wiederOeffnen.mutateAsync(bericht.id);
-      toast({ title: "Wieder geöffnet" });
     } catch (e) {
       toast({ variant: "destructive", title: "Fehler", description: (e as Error).message });
     }
@@ -712,7 +709,7 @@ export default function StundenBericht() {
         {kannUnterschreiben && (
           <Button onClick={() => setSignOpen(true)} className="flex-1 min-w-[200px] h-12">
             <PenLine className="h-4 w-4 mr-1.5" />
-            Durchgesehen & unterschreiben
+            Unterschreiben & abschicken
           </Button>
         )}
         {kannBestaetigen && (
@@ -727,16 +724,6 @@ export default function StundenBericht() {
               <CheckCircle2 className="h-4 w-4 mr-1.5" />
             )}
             Bestätigen &amp; abschließen
-          </Button>
-        )}
-        {kannWiederOeffnen && (
-          <Button
-            variant="outline"
-            onClick={handleWiederOeffnen}
-            disabled={aktionen.wiederOeffnen.isPending}
-          >
-            <Unlock className="h-4 w-4 mr-1.5" />
-            Wieder öffnen
           </Button>
         )}
       </div>
