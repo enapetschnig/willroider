@@ -6,7 +6,7 @@
  *  - CSV-Export für Lohnverrechnung
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -645,9 +645,8 @@ export default function Stundenauswertung() {
                 {byMa.map((r) => {
                   const expanded = expandedUid === r.uid;
                   return (
-                    <>
+                    <Fragment key={r.uid}>
                       <TableRow
-                        key={r.uid}
                         className="cursor-pointer hover:bg-muted/40"
                         onClick={() => setExpandedUid(expanded ? null : r.uid)}
                       >
@@ -716,7 +715,7 @@ export default function Stundenauswertung() {
                           </TableCell>
                         </TableRow>
                       )}
-                    </>
+                    </Fragment>
                   );
                 })}
               </TableBody>
