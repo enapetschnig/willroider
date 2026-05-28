@@ -19,6 +19,11 @@ dist-ssr
 # Supabase CLI temp
 supabase/.temp/
 
+# Playwright
+test-results/
+playwright-report/
+.playwright/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

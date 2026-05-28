@@ -640,9 +640,15 @@ export default function Stunden() {
         }),
       );
 
-      // Maschinen-IDs für „Halle-Einträge erhalten"-Merge
+      // Maschinen-IDs für „Halle-Einträge erhalten"-Merge — direkt aus der DB,
+      // damit der Merge nicht versehentlich Halle-Daten löscht, falls die
+      // baustellen-Liste im Cache noch nicht (komplett) geladen ist.
+      const { data: maschinenRows } = await supabase
+        .from("baustellen")
+        .select("id")
+        .eq("kategorie", "maschine");
       const maschinenIds = new Set(
-        baustellen.filter((b) => b.kategorie === "maschine").map((b) => b.id),
+        (maschinenRows ?? []).map((m: { id: string }) => m.id),
       );
 
       for (const uid of forUserIds) {
