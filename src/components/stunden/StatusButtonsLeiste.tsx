@@ -48,7 +48,7 @@ export function StatusButtonsLeiste({
         {optionen.map((art) => {
           const istMaschBtn = istMaschine && art === "baustelle";
           const Icon = istMaschBtn ? Wrench : STATUS_ICONS[art];
-          const label = istMaschBtn ? "Maschine" : STATUS_LABELS[art];
+          const label = istMaschBtn ? "Werk/Maschine" : STATUS_LABELS[art];
           const aktiv = aktiveArten.has(art);
           return (
             <button

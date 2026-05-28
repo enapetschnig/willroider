@@ -48,7 +48,8 @@ export function ArtSection({
   const sectionBaustelleId =
     art === "baustelle" ? rows[0]?.baustelle_id ?? null : null;
   const istMaschine = kategorie === "maschine";
-  const artLabel = istMaschine && art === "baustelle" ? "Maschine" : STATUS_LABELS[art];
+  const artLabel =
+    istMaschine && art === "baustelle" ? "Werk/Maschine" : STATUS_LABELS[art];
   return (
     <div
       className={`rounded-md border border-l-4 ${ART_BORDER[art]} bg-muted/15 overflow-hidden`}

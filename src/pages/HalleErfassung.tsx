@@ -401,7 +401,7 @@ export default function HalleErfassung() {
 
           {sections.length === 0 && (
             <div className="text-xs text-muted-foreground italic text-center py-2">
-              Oben „Maschine" antippen, um Stunden einzutragen.
+              Oben „Werk/Maschine" antippen, um Stunden einzutragen.
             </div>
           )}
 
@@ -433,7 +433,7 @@ export default function HalleErfassung() {
                   onClick={addWeitereMaschine}
                 >
                   <Plus className="h-4 w-4 mr-1.5" />
-                  weitere Maschine
+                  weiteres Werk / weitere Maschine
                 </Button>
               )}
             </Fragment>

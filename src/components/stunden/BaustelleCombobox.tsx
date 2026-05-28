@@ -36,19 +36,21 @@ export function BaustelleCombobox({
   const selected = liste.find((b) => b.id === value);
   const istMaschine = kategorie === "maschine";
   const Icon = istMaschine ? Wrench : Building2;
-  const placeholderText = istMaschine ? "Maschine wählen…" : "Baustelle wählen…";
+  const placeholderText = istMaschine
+    ? "Werk/Maschine wählen…"
+    : "Baustelle wählen…";
   const searchPlaceholder = istMaschine
-    ? "Maschine suchen…"
+    ? "Werk/Maschine suchen…"
     : "Baustelle suchen…";
   const emptyText = istMaschine
-    ? "Keine Maschine gefunden."
+    ? "Kein Werk / keine Maschine gefunden."
     : "Keine Baustelle gefunden.";
 
   if (liste.length === 0) {
     return (
       <div className="text-xs text-muted-foreground p-3 bg-muted/40 rounded">
         {istMaschine
-          ? "Aktuell keine Maschinen angelegt."
+          ? "Aktuell keine Werke/Maschinen angelegt."
           : "Aktuell keine aktiven Baustellen für deine Partie."}
       </div>
     );
