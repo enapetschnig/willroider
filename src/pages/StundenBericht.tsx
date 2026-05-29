@@ -27,6 +27,7 @@ import {
   AlertTriangle,
   History,
   FileText,
+  Mail,
 } from "lucide-react";
 import type { Database, TagStatus, BuchungStatus, StundenBerichtStatus } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
@@ -40,12 +41,10 @@ import {
 import { geaenderteTage, type BerichtSnapshot } from "@/lib/stundenBerichtDiff";
 import { TagBearbeitenDialog } from "@/components/TagBearbeitenDialog";
 import { UnterschriftDialog } from "@/components/UnterschriftDialog";
+import { BsbVersendenDialog } from "@/components/BsbVersendenDialog";
 import { useZulagenTypen } from "@/hooks/useStammdatenStunden";
 import { aggregiereZulagen } from "@/lib/stundenAggregation";
-import {
-  makeBaustellenstundenberichtPdf,
-  type BsbPdfRow,
-} from "@/lib/baustellenstundenberichtPdf";
+import { buildBerichtPdf } from "@/lib/bsbPdfHelper";
 
 const STATUS_LABEL: Record<TagStatus, string> = {
   baustelle: "Baustelle",
@@ -87,8 +86,8 @@ const STATUS_BADGE: Record<
     cls: "bg-emerald-100 text-emerald-900 border-emerald-300",
   },
   versendet: {
-    label: "An die Lohnverrechnung versendet",
-    cls: "bg-emerald-100 text-emerald-900 border-emerald-300",
+    label: "Versendet ans Büro",
+    cls: "bg-emerald-600 text-white border-emerald-700",
   },
 };
 
@@ -173,6 +172,7 @@ export default function StundenBericht() {
   const [editTag, setEditTag] = useState<StundenTagFull | null>(null);
   const [signOpen, setSignOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [versendenOpen, setVersendenOpen] = useState(false);
 
   const geaendert = useMemo(
     () => geaenderteTage(bericht?.snapshot as BerichtSnapshot | undefined, tage),
@@ -266,6 +266,9 @@ export default function StundenBericht() {
     (bericht.status === "unterschrieben" && isAdmin);
   const kannUnterschreiben = bericht.status === "offen" && istEigentuemer;
   const kannBestaetigen = bericht.status === "unterschrieben" && isAdmin;
+  const kannReVersenden =
+    (bericht.status === "bestaetigt" || bericht.status === "versendet") &&
+    isAdmin;
 
   const maName = bericht.mitarbeiter
     ? `${bericht.mitarbeiter.vorname ?? ""} ${bericht.mitarbeiter.nachname ?? ""}`.trim()
@@ -312,84 +315,17 @@ export default function StundenBericht() {
     }
   };
 
-  const handleBestaetigen = async () => {
-    if (!window.confirm("Bericht bestätigen? Die Periode wird damit abgeschlossen (ZA-Buchung)."))
-      return;
-    try {
-      await aktionen.bestaetigen.mutateAsync(bericht.id);
-      toast({ title: "Bestätigt", description: "Periode abgeschlossen, ZA gebucht." });
-    } catch (e) {
-      toast({ variant: "destructive", title: "Fehler", description: (e as Error).message });
-    }
+  /** Klick auf „Bestätigen & ans Büro senden" — Versand-Dialog öffnen.
+   *  Die eigentliche Bestätigung (Status `bestaetigt` + ZA-Buchung)
+   *  passiert atomar mit dem Versand im RPC `stunden_bericht_versenden`. */
+  const handleBestaetigen = () => {
+    setVersendenOpen(true);
   };
 
   const handlePdf = async () => {
     setPdfBusy(true);
     try {
-      const pdfRows: BsbPdfRow[] = rows.map((row) => {
-        const arbeit = row.art === "baustelle" || row.art === "firma";
-        return {
-          kostenstelle: row.kostenstelle,
-          baustelle: row.label,
-          zellen: periodeTage.map((d) => {
-            const v = row.perDay.get(d.iso);
-            return v === undefined
-              ? ""
-              : arbeit
-              ? fmtHNum(v)
-              : ABWESEND_KUERZEL[row.art] ?? "✓";
-          }),
-          summe: arbeit
-            ? fmtHNum([...row.perDay.values()].reduce((s, v) => s + v, 0))
-            : "",
-        };
-      });
-      const summenZeile = periodeTage.map((d) => {
-        let s = 0;
-        for (const r of rows) {
-          if (r.art === "baustelle" || r.art === "firma")
-            s += r.perDay.get(d.iso) ?? 0;
-        }
-        return s > 0 ? fmtHNum(s) : "";
-      });
-      const summeGesamt = fmtHNum(
-        rows
-          .filter((r) => r.art === "baustelle" || r.art === "firma")
-          .reduce(
-            (s, r) => s + [...r.perDay.values()].reduce((a, v) => a + v, 0),
-            0,
-          ),
-      );
-      const doc = await makeBaustellenstundenberichtPdf({
-        teilLabel:
-          bericht.teil === 1
-            ? "Teil I v. 1. bis 16."
-            : "Teil II v. 17. bis Monatsende",
-        monat: monatName,
-        jahr: bericht.jahr,
-        name: maName,
-        persNr: bericht.mitarbeiter?.pers_nr ?? "",
-        eintritt: bericht.eintrittsdatum
-          ? new Date(bericht.eintrittsdatum).toLocaleDateString("de-AT")
-          : "",
-        austritt: "",
-        tage: periodeTage.map((d) => d.tag),
-        tageIso: periodeTage.map((d) => d.iso),
-        geaendert,
-        rows: pdfRows,
-        summenZeile,
-        summeGesamt,
-        zulagen: zulagenAgg.map(
-          (z) => `${z.bezeichnung} ${fmtHNum(z.summe_stunden)} h`,
-        ),
-        unterschrift: bericht.unterschrift_data,
-        unterschriebenAm: bericht.unterschrieben_am
-          ? new Date(bericht.unterschrieben_am).toLocaleDateString("de-AT")
-          : null,
-        bestaetigtAm: bericht.bestaetigt_am
-          ? new Date(bericht.bestaetigt_am).toLocaleDateString("de-AT")
-          : null,
-      });
+      const { doc } = await buildBerichtPdf(bericht.id);
       window.open(doc.output("bloburl") as unknown as string, "_blank");
     } catch (e) {
       toast({
@@ -782,6 +718,15 @@ export default function StundenBericht() {
                 Noch nicht geprüft
               </div>
             )}
+            {bericht.versendet_am && (
+              <div className="text-xs text-emerald-700">
+                Versendet am{" "}
+                {new Date(bericht.versendet_am).toLocaleDateString("de-AT")}
+                {bericht.versendet_an_mail
+                  ? ` an ${bericht.versendet_an_mail}`
+                  : ""}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -841,15 +786,22 @@ export default function StundenBericht() {
         {kannBestaetigen && (
           <Button
             onClick={handleBestaetigen}
-            disabled={aktionen.bestaetigen.isPending}
             className="flex-1 min-w-[200px] h-12"
           >
-            {aktionen.bestaetigen.isPending ? (
-              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-            ) : (
-              <CheckCircle2 className="h-4 w-4 mr-1.5" />
-            )}
-            Bestätigen &amp; abschließen
+            <Mail className="h-4 w-4 mr-1.5" />
+            Bestätigen &amp; ans Büro senden
+          </Button>
+        )}
+        {kannReVersenden && (
+          <Button
+            variant="outline"
+            onClick={() => setVersendenOpen(true)}
+            className="min-w-[180px] h-12"
+          >
+            <Mail className="h-4 w-4 mr-1.5" />
+            {bericht.status === "versendet"
+              ? "Erneut ans Büro senden"
+              : "Ans Büro senden"}
           </Button>
         )}
       </div>
@@ -872,15 +824,22 @@ export default function StundenBericht() {
           {kannBestaetigen && (
             <Button
               onClick={handleBestaetigen}
-              disabled={aktionen.bestaetigen.isPending}
               className="w-full h-12 text-base font-semibold"
             >
-              {aktionen.bestaetigen.isPending ? (
-                <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-              ) : (
-                <CheckCircle2 className="h-5 w-5 mr-2" />
-              )}
-              Bestätigen &amp; abschließen
+              <Mail className="h-5 w-5 mr-2" />
+              Bestätigen &amp; ans Büro senden
+            </Button>
+          )}
+          {kannReVersenden && (
+            <Button
+              variant="outline"
+              onClick={() => setVersendenOpen(true)}
+              className="w-full h-11 text-base font-semibold"
+            >
+              <Mail className="h-5 w-5 mr-2" />
+              {bericht.status === "versendet"
+                ? "Erneut ans Büro senden"
+                : "Ans Büro senden"}
             </Button>
           )}
           <Button
@@ -919,6 +878,16 @@ export default function StundenBericht() {
         onSave={handleUnterschrift}
         titel="Bericht unterschreiben"
         busy={aktionen.unterschreiben.isPending}
+      />
+
+      {/* Versenden ans Büro (bestätigt im selben Schritt, falls nötig) */}
+      <BsbVersendenDialog
+        open={versendenOpen}
+        onOpenChange={setVersendenOpen}
+        berichtIds={[bericht.id]}
+        onSent={() =>
+          qc.invalidateQueries({ queryKey: ["stunden_bericht", bericht.id] })
+        }
       />
     </div>
   );

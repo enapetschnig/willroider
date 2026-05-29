@@ -20,12 +20,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Sparkles, ChevronRight } from "lucide-react";
+import { Loader2, Sparkles, ChevronRight, Mail } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { StundenBerichtStatus } from "@/integrations/supabase/types";
 import {
   useStundenBerichteList,
   useStundenBerichtAktionen,
 } from "@/hooks/useStundenBericht";
+import { BsbVersendenDialog } from "@/components/BsbVersendenDialog";
 
 const STATUS_BADGE: Record<StundenBerichtStatus, { label: string; cls: string }> = {
   offen: { label: "Offen", cls: "bg-slate-100 text-slate-800 border-slate-300" },
@@ -39,7 +41,7 @@ const STATUS_BADGE: Record<StundenBerichtStatus, { label: string; cls: string }>
   },
   versendet: {
     label: "Versendet",
-    cls: "bg-emerald-100 text-emerald-900 border-emerald-300",
+    cls: "bg-emerald-600 text-white border-emerald-700",
   },
 };
 
@@ -64,6 +66,27 @@ export default function StundenBerichteListe() {
     teil,
   });
   const aktionen = useStundenBerichtAktionen();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [versendenOpen, setVersendenOpen] = useState(false);
+
+  // Versand erlaubt für alle Status außer „offen"
+  const versendbar = berichte.filter((b) => b.status !== "offen");
+  const allVersendbarSelected =
+    versendbar.length > 0 &&
+    versendbar.every((b) => selected.has(b.id));
+
+  const toggleOne = (id: string) =>
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const toggleAll = () =>
+    setSelected((prev) => {
+      if (allVersendbarSelected) return new Set();
+      return new Set(versendbar.map((b) => b.id));
+    });
 
   const periodeLabel = `${new Date(jahr, monat - 1, 1).toLocaleDateString("de-AT", {
     month: "long",
@@ -154,6 +177,31 @@ export default function StundenBerichteListe() {
         </CardContent>
       </Card>
 
+      {/* Bulk-Aktion */}
+      {selected.size > 0 && (
+        <Card className="border-primary/40 bg-primary/5">
+          <CardContent className="p-3 flex items-center gap-3 flex-wrap">
+            <div className="text-sm">
+              <strong>{selected.size}</strong> Bericht
+              {selected.size === 1 ? "" : "e"} markiert
+            </div>
+            <div className="ml-auto flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSelected(new Set())}
+              >
+                Auswahl löschen
+              </Button>
+              <Button size="sm" onClick={() => setVersendenOpen(true)}>
+                <Mail className="h-3.5 w-3.5 mr-1.5" />
+                Markierte ans Büro senden
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Liste */}
       <Card>
         <CardContent className="p-0">
@@ -165,6 +213,14 @@ export default function StundenBerichteListe() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={allVersendbarSelected}
+                      onCheckedChange={toggleAll}
+                      aria-label="Alle versendbaren auswählen"
+                      disabled={versendbar.length === 0}
+                    />
+                  </TableHead>
                   <TableHead>Mitarbeiter</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="w-12"></TableHead>
@@ -174,7 +230,7 @@ export default function StundenBerichteListe() {
                 {berichte.length === 0 && (
                   <TableRow>
                     <TableCell
-                      colSpan={3}
+                      colSpan={4}
                       className="text-center text-sm text-muted-foreground p-6"
                     >
                       Keine Berichte für {periodeLabel}. Oben „Berichte erzeugen".
@@ -183,12 +239,24 @@ export default function StundenBerichteListe() {
                 )}
                 {berichte.map((b) => {
                   const badge = STATUS_BADGE[b.status];
+                  const istVersendbar = b.status !== "offen";
                   return (
                     <TableRow
                       key={b.id}
                       className="cursor-pointer hover:bg-muted/40"
                       onClick={() => navigate(`/stundenbericht/${b.id}`)}
                     >
+                      <TableCell
+                        className="w-10"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Checkbox
+                          checked={selected.has(b.id)}
+                          onCheckedChange={() => toggleOne(b.id)}
+                          disabled={!istVersendbar}
+                          aria-label="Bericht auswählen"
+                        />
+                      </TableCell>
                       <TableCell className="font-medium">
                         {b.mitarbeiter
                           ? `${b.mitarbeiter.nachname ?? ""} ${b.mitarbeiter.vorname ?? ""}`.trim()
@@ -210,6 +278,15 @@ export default function StundenBerichteListe() {
           )}
         </CardContent>
       </Card>
+
+      <BsbVersendenDialog
+        open={versendenOpen}
+        onOpenChange={setVersendenOpen}
+        berichtIds={Array.from(selected)}
+        onSent={() => {
+          setSelected(new Set());
+        }}
+      />
     </div>
   );
 }

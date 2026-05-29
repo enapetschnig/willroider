@@ -156,6 +156,17 @@ export function useStundenBerichtAktionen() {
     onSuccess: inval,
   });
 
+  const versenden = useMutation({
+    mutationFn: async (p: { id: string; mail: string }) => {
+      const { error } = await supabase.rpc(
+        "stunden_bericht_versenden" as any,
+        { p_id: p.id, p_mail: p.mail },
+      );
+      if (error) throw error;
+    },
+    onSuccess: inval,
+  });
+
   const loeschen = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("stunden_berichte").delete().eq("id", id);
@@ -164,5 +175,5 @@ export function useStundenBerichtAktionen() {
     onSuccess: inval,
   });
 
-  return { erzeugen, unterschreiben, bestaetigen, loeschen };
+  return { erzeugen, unterschreiben, bestaetigen, versenden, loeschen };
 }

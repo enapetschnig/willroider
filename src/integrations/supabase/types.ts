@@ -790,6 +790,18 @@ export type Database = {
         Update: Partial<Database['public']['Tables']['stunden_taetigkeiten']['Row']>;
         Relationships: [];
       };
+      app_einstellungen: {
+        Row: {
+          schluessel: string;
+          wert: string | null;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['app_einstellungen']['Row']> & {
+          schluessel: string;
+        };
+        Update: Partial<Database['public']['Tables']['app_einstellungen']['Row']>;
+        Relationships: [];
+      };
       stunden_berichte: {
         Row: {
           id: string;
@@ -807,6 +819,7 @@ export type Database = {
           bestaetigt_von: string | null;
           bestaetigt_am: string | null;
           versendet_am: string | null;
+          versendet_an_mail: string | null;
           created_at: string;
           updated_at: string;
         };
