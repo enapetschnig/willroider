@@ -17,16 +17,19 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, ShieldCheck, ShieldAlert, CheckCircle2, Clock, ChevronDown, ChevronUp, Sparkles } from "lucide-react";
+import { Plus, ShieldCheck, ShieldAlert, CheckCircle2, Clock, ChevronDown, ChevronUp, Sparkles, FileText } from "lucide-react";
 import type { Database, EvaluierungTyp, Json } from "@/integrations/supabase/types";
 import { UNTERWEISUNG_OPTIONS, getUnterweisung, unterweisungLabel } from "@/lib/unterweisungen";
 import { localIso } from "@/lib/dateFmt";
 import { EvaluierungKiDialog } from "@/components/EvaluierungKiDialog";
+import { EvaluierungVorlagenCard } from "@/components/admin/EvaluierungVorlagenCard";
+import { makeEvaluierungPdf } from "@/lib/evaluierungPdf";
 
 type Eval = Database["public"]["Tables"]["evaluierungen"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Unterschrift = Database["public"]["Tables"]["evaluierung_unterschriften"]["Row"];
+type Vorlage = Database["public"]["Tables"]["evaluierung_vorlagen"]["Row"];
 
 function getCheckItems(typ: EvaluierungTyp) {
   const u = getUnterweisung(typ);
@@ -64,6 +67,7 @@ export default function Evaluierung() {
   const [kiOpen, setKiOpen] = useState(false);
   const [checklist, setChecklist] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [vorlagen, setVorlagen] = useState<Vorlage[]>([]);
 
   const baustelleParam = params.get("baustelle");
   const canCreate = isAdmin || isPolier;
@@ -81,15 +85,21 @@ export default function Evaluierung() {
   }, [baustellen, profiles, user, isAdmin, isPolier]);
 
   const load = async () => {
-    const [e, b, p] = await Promise.all([
+    const [e, b, p, v] = await Promise.all([
       supabase.from("evaluierungen").select("*").order("datum", { ascending: false }).limit(200),
       supabase.from("baustellen").select("*").order("bvh_name"),
       supabase.from("profiles").select("*"),
+      supabase
+        .from("evaluierung_vorlagen")
+        .select("*")
+        .eq("aktiv", true)
+        .order("name"),
     ]);
     const evals = (e.data as Eval[]) ?? [];
     setRows(evals);
     setBaustellen((b.data as Baustelle[]) ?? []);
     setProfiles((p.data as Profile[]) ?? []);
+    setVorlagen((v.data as Vorlage[]) ?? []);
 
     if (evals.length > 0) {
       const { data: sigs } = await supabase
@@ -112,6 +122,52 @@ export default function Evaluierung() {
   const openNew = () => {
     setEditing({ datum: localIso(), typ: "baustelle" });
     setChecklist({});
+  };
+
+  /** Vorlage übernehmen: füllt typ + notizen vor. Die hardcoded Checkliste
+   *  pro Typ wird im Dialog wie gehabt gerendert. */
+  const applyVorlage = (vorlageId: string) => {
+    const v = vorlagen.find((x) => x.id === vorlageId);
+    if (!v) return;
+    setEditing((prev) => ({
+      ...prev,
+      typ: v.typ,
+      notizen: v.notizen ?? prev?.notizen ?? "",
+    }));
+  };
+
+  const downloadPdf = async (e: Eval, profile: Profile, sig: Unterschrift) => {
+    const b = baustellen.find((x) => x.id === e.baustelle_id);
+    const v = profiles.find((p) => p.id === e.vortragender_id);
+    const cl = (e.checkliste as Record<string, string>) ?? {};
+    const items = getCheckItems(e.typ).map((i) => ({
+      text: i.label,
+      ergebnis: cl[i.key] ?? null,
+    }));
+    const doc = await makeEvaluierungPdf({
+      titel: e.notizen?.slice(0, 80) || "Sicherheits-Unterweisung",
+      typLabel: unterweisungLabel(e.typ),
+      datum: new Date(e.datum).toLocaleDateString("de-AT"),
+      bvhName: b?.bvh_name ?? "—",
+      kostenstelle: b?.kostenstelle ?? "",
+      ort: b?.ort ?? "",
+      vortragender: v ? `${v.vorname} ${v.nachname}` : "",
+      checkliste: items,
+      notizen: e.notizen ?? "",
+      mitarbeiterName: `${profile.vorname} ${profile.nachname}`,
+      unterschriftBase64: sig.unterschrift_data,
+      unterschriebenAm: sig.unterschrieben_am
+        ? new Date(sig.unterschrieben_am).toLocaleString("de-AT", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : null,
+    });
+    const fname = `Unterweisung-${b?.bvh_name ?? "X"}-${profile.nachname}-${e.datum}.pdf`;
+    doc.save(fname);
   };
 
   const openEdit = (e: Eval) => {
@@ -251,6 +307,8 @@ export default function Evaluierung() {
         }
       />
 
+      <EvaluierungVorlagenCard />
+
       <div className="space-y-2">
         {rows.map((e) => {
           const b = baustellen.find((x) => x.id === e.baustelle_id);
@@ -350,15 +408,26 @@ export default function Evaluierung() {
                             {profile.vorname} {profile.nachname}
                           </span>
                           {signed ? (
-                            <span className="flex items-center gap-1 text-emerald-700">
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                              <span className="hidden sm:inline">
-                                {signature?.unterschrieben_am
-                                  ? relTime(signature.unterschrieben_am)
-                                  : "unterschrieben"}
+                            <>
+                              <span className="flex items-center gap-1 text-emerald-700">
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">
+                                  {signature?.unterschrieben_am
+                                    ? relTime(signature.unterschrieben_am)
+                                    : "unterschrieben"}
+                                </span>
+                                <span className="sm:hidden">✓</span>
                               </span>
-                              <span className="sm:hidden">✓</span>
-                            </span>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0"
+                                onClick={() => downloadPdf(e, profile, signature!)}
+                                title="PDF herunterladen"
+                              >
+                                <FileText className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
                           ) : (
                             <span className="flex items-center gap-1 text-amber-700">
                               <Clock className="h-3.5 w-3.5" />
@@ -397,6 +466,23 @@ export default function Evaluierung() {
           </DialogHeader>
           {editing && (
             <form onSubmit={save} className="space-y-3">
+              {!editing.id && vorlagen.length > 0 && (
+                <div className="space-y-1.5 border rounded p-2 bg-primary/5">
+                  <Label className="text-xs">Aus Vorlage übernehmen (optional)</Label>
+                  <select
+                    onChange={(e) => e.target.value && applyVorlage(e.target.value)}
+                    className="w-full h-9 rounded-md border bg-background px-2 text-sm"
+                    defaultValue=""
+                  >
+                    <option value="">— Vorlage wählen —</option>
+                    {vorlagen.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name} · {unterweisungLabel(v.typ)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="col-span-2 space-y-1.5">
                   <Label>Baustelle *</Label>
@@ -429,7 +515,7 @@ export default function Evaluierung() {
                   <Label>Unterweisungs-Typ</Label>
                   <select
                     name="typ"
-                    defaultValue={editing.typ ?? "baustelle"}
+                    value={editing.typ ?? "baustelle"}
                     onChange={(e) =>
                       setEditing((prev) => (prev ? { ...prev, typ: e.target.value as EvaluierungTyp } : prev))
                     }
@@ -502,7 +588,15 @@ export default function Evaluierung() {
 
               <div className="space-y-1.5">
                 <Label>Notizen</Label>
-                <Textarea name="notizen" defaultValue={editing.notizen ?? ""} />
+                <Textarea
+                  name="notizen"
+                  value={editing.notizen ?? ""}
+                  onChange={(e) =>
+                    setEditing((prev) =>
+                      prev ? { ...prev, notizen: e.target.value } : prev,
+                    )
+                  }
+                />
               </div>
 
               <DialogFooter>

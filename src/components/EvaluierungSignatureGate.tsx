@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useRef, useState } from "react";
+import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ShieldAlert, CheckCircle2, Eraser } from "lucide-react";
 import { getUnterweisung } from "@/lib/unterweisungen";
 import type { EvaluierungTyp, Json } from "@/integrations/supabase/types";
-import { localIso } from "@/lib/dateFmt";
+import { localIso, werktageSeit } from "@/lib/dateFmt";
+
+/** Karenzfrist in Werktagen — danach geht der harte Auto-Overlay an. */
+export const SIGNATURE_KARENZ_WERKTAGE = 3;
 
 type OpenSignature = {
   unterschriftId: string;
@@ -19,9 +22,99 @@ type OpenSignature = {
   datum: string;
 };
 
+/** Lädt offene Unterschriften (status='offen') des angemeldeten MA. */
+async function ladeOffene(userId: string): Promise<OpenSignature[]> {
+  const { data } = await supabase
+    .from("evaluierung_unterschriften")
+    .select(
+      "id, evaluierung_id, evaluierungen(id, typ, checkliste, notizen, datum, baustelle_id, baustellen(bvh_name, kostenstelle))",
+    )
+    .eq("mitarbeiter_id", userId)
+    .eq("status", "offen");
+  return (data ?? []).map((r: any) => ({
+    unterschriftId: r.id,
+    evaluierungId: r.evaluierung_id,
+    typ: r.evaluierungen?.typ ?? "baustelle",
+    checkliste: r.evaluierungen?.checkliste ?? {},
+    notizen: r.evaluierungen?.notizen ?? null,
+    baustelleName: r.evaluierungen?.baustellen?.bvh_name ?? "Baustelle",
+    kostenstelle: r.evaluierungen?.baustellen?.kostenstelle ?? null,
+    datum: r.evaluierungen?.datum ?? localIso(),
+  }));
+}
+
+/** Steuerbare Modal-Variante des Signatur-Flusses — kann vom Banner aus
+ *  der MA-Dashboard-Card geöffnet werden. */
+export function EvaluierungSignaturePrompt({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const { user } = useAuth();
+  const [pending, setPending] = useState<OpenSignature[]>([]);
+  if (!open) return null;
+  return (
+    <SignatureOverlay
+      userId={user?.id ?? null}
+      pending={pending}
+      setPending={setPending}
+      onAllDone={onClose}
+      dismissable
+    />
+  );
+}
+
+/** Wrapper, der die App umschließt. Lädt die offenen Unterschriften und
+ *  öffnet den harten Vollbild-Gate nur, wenn die Karenzfrist abgelaufen
+ *  ist (mindestens eine offene Unterschrift ist ≥ 3 Werktage alt). */
 export function EvaluierungSignatureGate({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [pending, setPending] = useState<OpenSignature[]>([]);
+
+  const load = useCallback(async () => {
+    if (!user) return;
+    setPending(await ladeOffene(user.id));
+  }, [user]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const ueberfaellig = pending.some(
+    (p) => werktageSeit(p.datum) >= SIGNATURE_KARENZ_WERKTAGE,
+  );
+
+  if (!user || pending.length === 0 || !ueberfaellig) {
+    return <>{children}</>;
+  }
+
+  return (
+    <SignatureOverlay
+      userId={user.id}
+      pending={pending}
+      setPending={setPending}
+      onAllDone={load}
+      dismissable={false}
+    />
+  );
+}
+
+/** Gemeinsame Overlay-UI — read + sign Step, Canvas-Signatur. */
+function SignatureOverlay({
+  userId,
+  pending,
+  setPending,
+  onAllDone,
+  dismissable,
+}: {
+  userId: string | null;
+  pending: OpenSignature[];
+  setPending: (next: OpenSignature[]) => void;
+  onAllDone: () => void;
+  dismissable: boolean;
+}) {
   const [step, setStep] = useState<"read" | "sign">("read");
   const [scrolledToBottom, setScrolledToBottom] = useState(false);
   const [hasDrawn, setHasDrawn] = useState(false);
@@ -29,41 +122,21 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingRef = useRef(false);
 
-  const load = async () => {
-    if (!user) return;
-    const { data } = await supabase
-      .from("evaluierung_unterschriften")
-      .select(
-        "id, evaluierung_id, evaluierungen(id, typ, checkliste, notizen, datum, baustelle_id, baustellen(bvh_name, kostenstelle))"
-      )
-      .eq("mitarbeiter_id", user.id)
-      .is("unterschrift_data", null);
-
-    const list: OpenSignature[] = (data ?? []).map((r: any) => ({
-      unterschriftId: r.id,
-      evaluierungId: r.evaluierung_id,
-      typ: r.evaluierungen?.typ ?? "baustelle",
-      checkliste: r.evaluierungen?.checkliste ?? {},
-      notizen: r.evaluierungen?.notizen ?? null,
-      baustelleName: r.evaluierungen?.baustellen?.bvh_name ?? "Baustelle",
-      kostenstelle: r.evaluierungen?.baustellen?.kostenstelle ?? null,
-      datum: r.evaluierungen?.datum ?? localIso(),
-    }));
-    setPending(list);
-    if (list.length > 0) {
-      setStep("read");
-      setScrolledToBottom(false);
-      setHasDrawn(false);
-    }
-  };
-
+  // Initial-Load wenn Prompt-Variante geöffnet wird
   useEffect(() => {
-    load();
-  }, [user]);
+    if (!userId) return;
+    if (pending.length === 0) {
+      (async () => {
+        const list = await ladeOffene(userId);
+        setPending(list);
+        if (list.length === 0) onAllDone();
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   const current = pending[0];
 
-  // Canvas signature
   useEffect(() => {
     if (step !== "sign" || !current) return;
     const canvas = canvasRef.current;
@@ -131,11 +204,7 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
     };
   }, [step, current]);
 
-  if (!user || pending.length === 0) {
-    return <>{children}</>;
-  }
-
-  if (!current) return <>{children}</>;
+  if (!current) return null;
 
   const u = getUnterweisung(current.typ);
   const checkliste = (current.checkliste as Record<string, string>) || {};
@@ -168,6 +237,7 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
       .update({
         unterschrift_data: dataUrl,
         unterschrieben_am: new Date().toISOString(),
+        status: "unterschrieben",
       })
       .eq("id", current.unterschriftId);
     if (error) {
@@ -181,7 +251,7 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
     setScrolledToBottom(false);
     setHasDrawn(false);
     setSubmitting(false);
-    if (remaining.length === 0) load();
+    if (remaining.length === 0) onAllDone();
   };
 
   return (
@@ -201,6 +271,16 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
           <div className="text-[10px] opacity-90 shrink-0">
             {pending.length} offen
           </div>
+        )}
+        {dismissable && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-primary-foreground hover:bg-primary/80 shrink-0"
+            onClick={onAllDone}
+          >
+            Später
+          </Button>
         )}
       </div>
 

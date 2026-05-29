@@ -402,12 +402,35 @@ export type Database = {
           mitarbeiter_id: string;
           unterschrift_data: string | null;
           unterschrieben_am: string;
+          status: 'offen' | 'unterschrieben' | 'archiviert';
+          archiviert_grund: string | null;
+          archiviert_am: string | null;
+          reminder_geschickt_am: string | null;
         };
         Insert: Partial<Database['public']['Tables']['evaluierung_unterschriften']['Row']> & {
           evaluierung_id: string;
           mitarbeiter_id: string;
         };
         Update: Partial<Database['public']['Tables']['evaluierung_unterschriften']['Row']>;
+        Relationships: [];
+      };
+      evaluierung_vorlagen: {
+        Row: {
+          id: string;
+          name: string;
+          typ: EvaluierungTyp;
+          checkliste: any;
+          quell_dokument_id: string | null;
+          notizen: string | null;
+          aktiv: boolean;
+          erstellt_von: string | null;
+          erstellt_am: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['evaluierung_vorlagen']['Row']> & {
+          name: string;
+        };
+        Update: Partial<Database['public']['Tables']['evaluierung_vorlagen']['Row']>;
         Relationships: [];
       };
       dokumente: {

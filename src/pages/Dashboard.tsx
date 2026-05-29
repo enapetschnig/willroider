@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { feiertagAt } from "@/lib/feiertage";
-import { localIso } from "@/lib/dateFmt";
+import { localIso, werktageSeit } from "@/lib/dateFmt";
 import {
   Building2,
   CalendarDays,
@@ -27,6 +27,8 @@ import type { Database } from "@/integrations/supabase/types";
 import { BerichteHintCard } from "@/components/dashboard/BerichteHintCard";
 import { NeuerLohnzettelHintCard } from "@/components/dashboard/NeuerLohnzettelHintCard";
 import { StundenBerichtHintCard } from "@/components/dashboard/StundenBerichtHintCard";
+import { UnterschriftenCard } from "@/components/dashboard/UnterschriftenCard";
+import { SIGNATURE_KARENZ_WERKTAGE } from "@/components/EvaluierungSignatureGate";
 import { TagesplanPreview } from "@/components/TagesplanPreview";
 import {
   Dialog,
@@ -99,7 +101,13 @@ export default function Dashboard() {
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [angeboteFaellig, setAngeboteFaellig] = useState<number>(0);
   const [offeneUnterschriften, setOffeneUnterschriften] = useState<
-    { evaluierung_id: string; bvh_name: string; mitarbeiter_id: string; evaluierung_titel: string | null }[]
+    {
+      evaluierung_id: string;
+      bvh_name: string;
+      mitarbeiter_id: string;
+      evaluierung_titel: string | null;
+      evaluierung_datum: string | null;
+    }[]
   >([]);
   const [heuteEinteilungen, setHeuteEinteilungen] = useState<HeuteEintrag[]>([]);
   const [heuteFehlzeit, setHeuteFehlzeit] = useState<string | null>(null);
@@ -302,7 +310,9 @@ export default function Dashboard() {
     const loadUnterschriften = async () => {
       const { data } = await supabase
         .from("v_offene_unterschriften" as any)
-        .select("evaluierung_id, bvh_name, mitarbeiter_id, evaluierung_titel")
+        .select(
+          "evaluierung_id, bvh_name, mitarbeiter_id, evaluierung_titel, evaluierung_datum",
+        )
         .eq("verantwortlich_id", user.id);
       // Pro evaluierung + ma deduplizieren (User kann gleichzeitig Polier+Bauleiter sein)
       const seen = new Set<string>();
@@ -417,6 +427,9 @@ export default function Dashboard() {
       {/* Baustellenstundenbericht (MA: Durchsicht, Büro: Kontrolle) */}
       <StundenBerichtHintCard />
 
+      {/* Offene Unterweisungs-Unterschriften des angemeldeten MA */}
+      <UnterschriftenCard />
+
       {/* Neue-Anmeldungen-Banner (Admin) — bewusst ganz oben, vor dem Greeting */}
       {isAdmin && pendingCount > 0 && (
         <Card className="border-2 border-amber-500 bg-gradient-to-r from-amber-50 to-amber-100 shadow-md ring-2 ring-amber-500/20">
@@ -520,27 +533,59 @@ export default function Dashboard() {
       )}
 
       {/* Offene Unterschriften — Polier/Bauleiter */}
-      {offeneUnterschriften.length > 0 && (
-        <Card className="border-2 border-amber-400 bg-gradient-to-r from-amber-50 to-amber-100 shadow-md">
+      {offeneUnterschriften.length > 0 && (() => {
+        const aelteste = offeneUnterschriften.reduce((max, u) => {
+          if (!u.evaluierung_datum) return max;
+          const wt = werktageSeit(u.evaluierung_datum);
+          return wt > max ? wt : max;
+        }, 0);
+        const eskaliert = aelteste >= SIGNATURE_KARENZ_WERKTAGE;
+        return (
+        <Card
+          className={
+            eskaliert
+              ? "border-2 border-red-500 bg-gradient-to-r from-red-50 to-rose-100 shadow-md"
+              : "border-2 border-amber-400 bg-gradient-to-r from-amber-50 to-amber-100 shadow-md"
+          }
+        >
           <CardContent className="p-4 sm:p-5">
             <div className="flex items-start gap-3 sm:gap-4">
               <div className="relative shrink-0">
-                <div className="h-11 w-11 sm:h-12 sm:w-12 rounded-full bg-amber-500 flex items-center justify-center text-white shadow-md">
+                <div
+                  className={`h-11 w-11 sm:h-12 sm:w-12 rounded-full flex items-center justify-center text-white shadow-md ${
+                    eskaliert ? "bg-red-600 animate-pulse" : "bg-amber-500"
+                  }`}
+                >
                   <ShieldAlert className="h-5 w-5 sm:h-6 sm:w-6" />
                 </div>
-                <span className="absolute -top-0.5 -right-0.5 h-5 min-w-[20px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-amber-50 animate-pulse">
+                <span
+                  className={`absolute -top-0.5 -right-0.5 h-5 min-w-[20px] px-1 rounded-full text-white text-[10px] font-bold flex items-center justify-center ring-2 animate-pulse ${
+                    eskaliert
+                      ? "bg-amber-500 ring-red-50"
+                      : "bg-red-600 ring-amber-50"
+                  }`}
+                >
                   {offeneUnterschriften.length}
                 </span>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="font-bold text-base sm:text-lg text-amber-950 leading-tight">
+                <div
+                  className={`font-bold text-base sm:text-lg leading-tight ${
+                    eskaliert ? "text-red-950" : "text-amber-950"
+                  }`}
+                >
                   {offeneUnterschriften.length === 1
                     ? "1 offene Unterweisung-Unterschrift"
                     : `${offeneUnterschriften.length} offene Unterweisung-Unterschriften`}
                 </div>
-                <div className="text-xs sm:text-sm text-amber-900 mt-1">
-                  Mitarbeiter auf deinen Baustellen haben die Pflicht-Unterweisung
-                  noch nicht bestätigt.
+                <div
+                  className={`text-xs sm:text-sm mt-1 ${
+                    eskaliert ? "text-red-900" : "text-amber-900"
+                  }`}
+                >
+                  {eskaliert
+                    ? `Eskalation: ältester Fall seit ${aelteste} Werktagen offen.`
+                    : "Mitarbeiter auf deinen Baustellen haben die Pflicht-Unterweisung noch nicht bestätigt."}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {Array.from(
@@ -554,7 +599,9 @@ export default function Dashboard() {
                       return (
                         <span
                           key={bvh}
-                          className="inline-flex items-center gap-1.5 bg-white rounded-full px-2.5 py-1 text-xs shadow-sm border border-amber-200"
+                          className={`inline-flex items-center gap-1.5 bg-white rounded-full px-2.5 py-1 text-xs shadow-sm border ${
+                            eskaliert ? "border-red-200" : "border-amber-200"
+                          }`}
                         >
                           <strong>{bvh}</strong>
                           <span className="text-muted-foreground">· {count}</span>
@@ -564,21 +611,34 @@ export default function Dashboard() {
                 </div>
               </div>
               <Link to="/evaluierung" className="shrink-0 hidden sm:block">
-                <Button className="bg-amber-600 hover:bg-amber-700 text-white shadow-md">
+                <Button
+                  className={`${
+                    eskaliert
+                      ? "bg-red-600 hover:bg-red-700"
+                      : "bg-amber-600 hover:bg-amber-700"
+                  } text-white shadow-md`}
+                >
                   Anzeigen
                   <ArrowRight className="h-4 w-4 ml-1.5" />
                 </Button>
               </Link>
             </div>
             <Link to="/evaluierung" className="sm:hidden block mt-3">
-              <Button className="w-full h-11 bg-amber-600 hover:bg-amber-700 text-white shadow-md">
+              <Button
+                className={`w-full h-11 ${
+                  eskaliert
+                    ? "bg-red-600 hover:bg-red-700"
+                    : "bg-amber-600 hover:bg-amber-700"
+                } text-white shadow-md`}
+              >
                 Anzeigen
                 <ArrowRight className="h-4 w-4 ml-1.5" />
               </Button>
             </Link>
           </CardContent>
         </Card>
-      )}
+        );
+      })()}
 
       <PageHeader title={`Hallo ${fullName.split(" ")[0] || "willkommen"}!`} />
 
