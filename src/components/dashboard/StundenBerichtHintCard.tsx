@@ -7,7 +7,7 @@
 import { Link } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { PenLine, FileCheck2, ChevronRight } from "lucide-react";
+import { PenLine, FileCheck2, ChevronRight, ArrowRight } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStundenBerichteList } from "@/hooks/useStundenBericht";
 
@@ -39,22 +39,41 @@ export function StundenBerichtHintCard() {
   return (
     <>
       {meinOffen && (
-        <Card className="border-amber-300 bg-amber-50">
-          <CardContent className="p-4 flex items-center gap-3">
-            <PenLine className="h-8 w-8 text-amber-700 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-amber-900">
-                Dein Baustellenstundenbericht wartet auf dich
+        <Card className="border-2 border-amber-400 bg-gradient-to-r from-amber-50 to-amber-100 shadow-md">
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex items-start gap-3 sm:gap-4">
+              <div className="h-11 w-11 sm:h-12 sm:w-12 rounded-full bg-amber-500 flex items-center justify-center text-white shadow-md shrink-0">
+                <PenLine className="h-5 w-5 sm:h-6 sm:w-6" />
               </div>
-              <div className="text-xs text-amber-800">
-                {monatLabel(meinOffen.jahr, meinOffen.monat)} ·{" "}
-                {meinOffen.teil === 1 ? "Teil I (1.–16.)" : "Teil II (17.–Ende)"}{" "}
-                — durchsehen &amp; unterschreiben
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-base sm:text-lg text-amber-950 leading-tight">
+                  Dein Baustellenstundenbericht wartet auf deine Durchsicht
+                </div>
+                <div className="text-xs sm:text-sm text-amber-900 mt-1">
+                  {monatLabel(meinOffen.jahr, meinOffen.monat)} ·{" "}
+                  {meinOffen.teil === 1
+                    ? "Teil I (1.–16.)"
+                    : "Teil II (17.–Ende)"}{" "}
+                  — bitte kontrollieren, ggf. ändern und unterschreiben.
+                </div>
               </div>
+              <Link
+                to={`/stundenbericht/${meinOffen.id}`}
+                className="shrink-0 hidden sm:block"
+              >
+                <Button className="bg-amber-600 hover:bg-amber-700 text-white shadow-md">
+                  Jetzt öffnen
+                  <ArrowRight className="h-4 w-4 ml-1.5" />
+                </Button>
+              </Link>
             </div>
-            <Link to={`/stundenbericht/${meinOffen.id}`}>
-              <Button size="sm" className="bg-amber-700 hover:bg-amber-800">
-                Öffnen <ChevronRight className="h-3.5 w-3.5 ml-1" />
+            <Link
+              to={`/stundenbericht/${meinOffen.id}`}
+              className="sm:hidden block mt-3"
+            >
+              <Button className="w-full h-11 bg-amber-600 hover:bg-amber-700 text-white shadow-md">
+                Jetzt öffnen
+                <ArrowRight className="h-4 w-4 ml-1.5" />
               </Button>
             </Link>
           </CardContent>
