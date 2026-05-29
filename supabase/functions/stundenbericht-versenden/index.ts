@@ -31,7 +31,8 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-const FROM = Deno.env.get("RESEND_FROM") ?? "noreply@willroider.at";
+const FROM = Deno.env.get("RESEND_FROM") ?? "berichte@willroider.app";
+const REPLY_TO = Deno.env.get("RESEND_REPLY_TO") ?? "maurer@willroider.at";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -78,6 +79,7 @@ Deno.serve(async (req) => {
     // Resend-Payload
     const payload: Record<string, unknown> = {
       from: FROM,
+      reply_to: [REPLY_TO],
       to: [body.empfaenger.trim()],
       subject: body.betreff,
       text: body.text,
