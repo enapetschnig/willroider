@@ -20,6 +20,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import {
   ChevronLeft,
+  ChevronDown,
   Loader2,
   PenLine,
   CheckCircle2,
@@ -402,7 +403,7 @@ export default function StundenBericht() {
   };
 
   return (
-    <div className="space-y-4 max-w-5xl mx-auto pb-28 lg:pb-6">
+    <div className="space-y-4 max-w-5xl mx-auto pb-44 lg:pb-6">
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
           <ChevronLeft className="h-5 w-5" />
@@ -465,8 +466,126 @@ export default function StundenBericht() {
         </div>
       )}
 
-      {/* Raster */}
-      <Card>
+      {/* Mobile: Tag-Card-Liste (vertikal) */}
+      <div className="lg:hidden space-y-2">
+        {editierbar && (
+          <div className="text-xs text-muted-foreground px-1">
+            Tippen auf eine Tages-Card öffnet den Tages-Editor.
+          </div>
+        )}
+        {periodeTage.length === 0 && (
+          <Card>
+            <CardContent className="p-6 text-center text-sm text-muted-foreground">
+              Keine Periode geladen.
+            </CardContent>
+          </Card>
+        )}
+        {periodeTage.map((d) => {
+          const tag = tagByIso.get(d.iso);
+          const istGeaendert = geaendert.has(d.iso);
+          const istFrei = d.frei;
+          const summe =
+            tag?.taetigkeiten.reduce(
+              (s, e) =>
+                e.art === "baustelle" || e.art === "firma"
+                  ? s + Number(e.stunden || 0)
+                  : s,
+              0,
+            ) ?? 0;
+          const datumLabel = new Date(d.iso + "T00:00:00").toLocaleDateString(
+            "de-AT",
+            { day: "2-digit", month: "2-digit" },
+          );
+          return (
+            <Card
+              key={d.iso}
+              onClick={() => openTag(d.iso)}
+              className={`${editierbar ? "cursor-pointer active:scale-[0.995] transition" : ""} ${
+                istGeaendert
+                  ? "border-amber-400 bg-amber-50"
+                  : istFrei
+                  ? "bg-muted/30"
+                  : ""
+              }`}
+            >
+              <CardContent className="p-3 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <div className="text-sm font-bold">
+                    {d.wd} {datumLabel}
+                  </div>
+                  {istGeaendert && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] border-amber-500 text-amber-800 bg-amber-100"
+                    >
+                      geändert
+                    </Badge>
+                  )}
+                  {istFrei && !tag?.taetigkeiten.length && (
+                    <span className="text-[11px] text-muted-foreground">
+                      Wochenende
+                    </span>
+                  )}
+                  {summe > 0 && (
+                    <div className="ml-auto text-sm font-semibold tabular-nums">
+                      Σ {fmtHNum(summe)} h
+                    </div>
+                  )}
+                </div>
+                {tag && tag.taetigkeiten.length > 0 ? (
+                  <div className="space-y-1">
+                    {tag.taetigkeiten.map((e, idx) => {
+                      const istArbeit =
+                        e.art === "baustelle" || e.art === "firma";
+                      const baustelle = e.baustelle_id
+                        ? baustelleMap.get(e.baustelle_id)
+                        : null;
+                      const label =
+                        e.art === "baustelle"
+                          ? baustelle?.bvh_name ?? "Baustelle"
+                          : STATUS_LABEL[e.art];
+                      const kst = baustelle?.kostenstelle ?? "";
+                      return (
+                        <div
+                          key={e.id ?? idx}
+                          className="flex items-center gap-2 text-xs border-l-2 border-primary/30 pl-2"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium truncate">{label}</div>
+                            {kst && (
+                              <div className="text-[10px] text-muted-foreground">
+                                KST {kst}
+                              </div>
+                            )}
+                          </div>
+                          {istArbeit ? (
+                            <div className="font-medium tabular-nums shrink-0">
+                              {fmtHNum(Number(e.stunden || 0))} h
+                            </div>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px] shrink-0">
+                              {ABWESEND_KUERZEL[e.art] ?? STATUS_LABEL[e.art]}
+                            </Badge>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  !istFrei && (
+                    <div className="text-xs text-muted-foreground italic">
+                      Kein Eintrag
+                    </div>
+                  )
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* Desktop: Raster Baustelle × Tag */}
+      <Card className="hidden lg:block">
         <CardContent className="p-0">
           {editierbar && (
             <div className="px-3 pt-3 text-xs text-muted-foreground">
@@ -667,32 +786,39 @@ export default function StundenBericht() {
         </CardContent>
       </Card>
 
-      {/* Audit */}
+      {/* Audit — Mobile: in <details> ein-/ausklappbar mit Tap; Desktop:
+          immer aufgeklappt (open + summary als reiner Header). */}
       {bericht.aenderungen.length > 0 && (
         <Card>
-          <CardContent className="p-4 space-y-1.5">
-            <div className="text-xs font-semibold uppercase text-muted-foreground flex items-center gap-1.5">
-              <History className="h-3.5 w-3.5" /> Änderungen
-            </div>
-            {bericht.aenderungen.map((a) => (
-              <div key={a.id} className="text-xs flex gap-2">
-                <span className="text-muted-foreground tabular-nums shrink-0">
-                  {new Date(a.zeitpunkt).toLocaleString("de-AT", {
-                    day: "2-digit",
-                    month: "2-digit",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </span>
-                <span>{a.details ?? a.art}</span>
+          <CardContent className="p-4">
+            <details open className="group">
+              <summary className="text-xs font-semibold uppercase text-muted-foreground flex items-center gap-1.5 cursor-pointer lg:cursor-default list-none [&::-webkit-details-marker]:hidden">
+                <History className="h-3.5 w-3.5" />
+                <span>Änderungen ({bericht.aenderungen.length})</span>
+                <ChevronDown className="h-3.5 w-3.5 ml-auto transition-transform group-open:rotate-180 lg:hidden" />
+              </summary>
+              <div className="space-y-1.5 mt-2">
+                {bericht.aenderungen.map((a) => (
+                  <div key={a.id} className="text-xs flex gap-2">
+                    <span className="text-muted-foreground tabular-nums shrink-0">
+                      {new Date(a.zeitpunkt).toLocaleString("de-AT", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                    <span>{a.details ?? a.art}</span>
+                  </div>
+                ))}
               </div>
-            ))}
+            </details>
           </CardContent>
         </Card>
       )}
 
-      {/* Aktionen */}
-      <div className="flex flex-wrap gap-2">
+      {/* Aktionen — Desktop inline, Mobile als Sticky-Footer mit Safe-Area */}
+      <div className="hidden lg:flex flex-wrap gap-2">
         <Button
           variant="outline"
           onClick={handlePdf}
@@ -726,6 +852,51 @@ export default function StundenBericht() {
             Bestätigen &amp; abschließen
           </Button>
         )}
+      </div>
+
+      {/* Mobile-Sticky-Footer mit Safe-Area-Padding */}
+      <div
+        className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-card border-t shadow-[0_-2px_10px_-2px_rgba(0,0,0,0.08)]"
+        style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 8px)" }}
+      >
+        <div className="px-3 pt-3 pb-1 space-y-2">
+          {kannUnterschreiben && (
+            <Button
+              onClick={() => setSignOpen(true)}
+              className="w-full h-12 text-base font-semibold"
+            >
+              <PenLine className="h-5 w-5 mr-2" />
+              Unterschreiben & abschicken
+            </Button>
+          )}
+          {kannBestaetigen && (
+            <Button
+              onClick={handleBestaetigen}
+              disabled={aktionen.bestaetigen.isPending}
+              className="w-full h-12 text-base font-semibold"
+            >
+              {aktionen.bestaetigen.isPending ? (
+                <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-5 w-5 mr-2" />
+              )}
+              Bestätigen &amp; abschließen
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            onClick={handlePdf}
+            disabled={pdfBusy}
+            className="w-full h-10"
+          >
+            {pdfBusy ? (
+              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+            ) : (
+              <FileText className="h-4 w-4 mr-1.5" />
+            )}
+            PDF ansehen
+          </Button>
+        </div>
       </div>
 
       {/* Tag-Editor */}
