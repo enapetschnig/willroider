@@ -47,9 +47,13 @@ header button.logout{background:rgba(255,255,255,.2);color:#fff;border:1px solid
 
 /* NAV */
 nav{background:#fff;border-bottom:1px solid var(--line);padding:0 12px;display:flex;
-  gap:2px;overflow-x:auto;position:sticky;top:56px;z-index:40}
+  gap:2px;overflow-x:auto;position:sticky;top:56px;z-index:40;
+  /* Rechter Fade-Hinweis, dass die Tabs horizontal scrollbar sind */
+  background-image:linear-gradient(to right, transparent 90%, rgba(0,0,0,0.08));
+  background-attachment:local}
 nav button{background:none;border:none;padding:12px 16px;cursor:pointer;font-size:13px;
-  font-weight:bold;color:#555;border-bottom:3px solid transparent;white-space:nowrap}
+  font-weight:bold;color:#555;border-bottom:3px solid transparent;white-space:nowrap;
+  min-height:44px}
 nav button.active{color:var(--green);border-bottom-color:var(--green)}
 nav button:hover{background:var(--gray)}
 
@@ -171,8 +175,8 @@ input.len{width:60px}
 </div>
 
 <script>
-const DATA = {"firma": {"name": "Holzbau Willroider GmbH", "strasse": "Willroiderstra—e 13", "plz_ort": "9500 Villach", "uid": "ATU 79881978", "fn": "FN 612643 x", "email": "holzbau@willroider.at", "iban": "AT10 1700 0001 5005 3005"}, "materialien": ["GKB 12,5mm", "GKF 12,5mm", "GKB 15mm", "GKF 15mm", "Fermacell 15mm", "Rigidur 15mm", "Installationsebene 42mm", "OSB 15mm", "OSB 18mm", "Riegel 80mm", "Riegel 100mm", "Riegel 120mm", "Riegel 140mm", "Riegel 160mm", "Riegel 180mm", "Riegel 200mm", "Riegel 240mm", "Riegel 280mm", "Dämmung Zellulose", "Dämmung Steinwolle", "Dämmung Glaswolle", "Holzweichfaser 40mm", "Holzweichfaser 60mm", "Agepan 16mm", "Winddichtung kein UV", "Winddichtung bis 20mm", "Winddichtung bis 50mm", "Lattung stehend 20mm", "Lattung stehend 30mm", "Lattung stehend 40mm", "Lattung stehend 50mm", "Lattung liegend 20mm", "Lattung liegend 30mm", "Lattung liegend 40mm", "Lattung liegend 50mm", "Fassade Fichte", "Fassade Lärche", "Freie Eingabe (direkt eintippen)"], "gruppen": {"dach": {"name": "Dachkonstruktionen (36 12)", "bgk": 0.15, "gw": 0.1, "mat": 0.05}, "decken": {"name": "Holzrahmenbaudecken (36 14)", "bgk": 0.15, "gw": 0.1, "mat": 0.05}, "waende": {"name": "Riegelwaende und Verkleidungen (36 15)", "bgk": 0.12, "gw": 0.08, "mat": 0.05}, "regie": {"name": "Regieleistungen (36 90)", "bgk": 0.1, "gw": 0.08, "mat": 0}}, "settings": {"sz_zimmerer": 35, "sz_vorarbeiter": 38}, "positionen": {"dach": [{"kind": "header", "pos": "36 12 01 — DACHKONSTRUKTIONEN", "bez": ""}, {"kind": "pos", "group": "dach", "pos": "36 12 01 A", "bez": "Walmdach", "aufbau": "— CNC-Abbund Walmdach\n— Bauholz/Leimholz\n— Vordach gehobelt", "eh": "m²", "base": 35.42, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "dach", "pos": "36 12 01 A1", "bez": "Satteldach", "aufbau": "— CNC-Abbund Satteldach\n— Bauholz/Leimholz\n— Vordach gehobelt", "eh": "m²", "base": 31.8, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "dach", "pos": "36 12 01 B", "bez": "Staubläden", "aufbau": "— Staubläden einfräsen\n   in Sparren", "eh": "lfm", "base": 24.07, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "dach", "pos": "36 12 01 C", "bez": "Stützen Leimholz", "aufbau": "— Leimholzstützen\n— Stützenfu— + Idefix\n— Länge: Eingabe —", "eh": "Stk", "base": 140.79, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": true}, {"kind": "pos", "group": "dach", "pos": "36 12 01 D", "bez": "Zangendecke", "aufbau": "— Zangendecke Leimholz\n   sichtbar", "eh": "m²", "base": 36.94, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "dach", "pos": "36 12 01 E", "bez": "AZ Gaupe", "aufbau": "— Gaupe (Pauschal)", "eh": "Pa", "base": 257.38, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "dach", "pos": "36 12 01 X", "bez": "AZ Schwalbenschwanz", "aufbau": "— Schwalbenschwanz-\n   verbindung", "eh": "Stk", "base": 5.1, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}], "decken": [{"kind": "header", "pos": "36 14 01 — DECKEN MIT ZELLULOSE", "bez": ""}, {"kind": "pos", "group": "decken", "pos": "36 14 01 A", "bez": "DE 15-200-24 RS", "aufbau": "— HWS-Platte 15mm\n— Deckenriegel 200mm (Zellulose)\n— Rauschalung 24mm", "eh": "m²", "base": 115.3, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "decken", "pos": "36 14 01 B", "bez": "DE 15-240-24 RS", "aufbau": "— HWS-Platte 15mm\n— Deckenriegel 240mm (Zellulose)\n— Rauschalung 24mm", "eh": "m²", "base": 122.84, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "decken", "pos": "36 14 01 C", "bez": "DE 15-280-24 RS", "aufbau": "— HWS-Platte 15mm\n— Deckenriegel 280mm (Zellulose)\n— Rauschalung 24mm", "eh": "m²", "base": 130.39, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "header", "pos": "36 14 07 — ZUSATZLEISTUNGEN", "bez": ""}, {"kind": "pos", "group": "decken", "pos": "36 14 07 A", "bez": "Unterzüge Decke", "aufbau": "— Unterzüge Leimholz (Ma—konstruktion)", "eh": "m³", "base": 928.97, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}], "waende": [{"kind": "header", "pos": "36 15 01 — AUSSENW—NDE PUTZTR—GER", "bez": ""}, {"kind": "pos", "group": "waende", "pos": "36 15 01 A", "bez": "AW 15-160-60 WF", "aufbau": "— OSB 15mm\n— Riegelwand 160mm (Zellulose)\n— HWF/DWD 60mm Putzträger", "eh": "m²", "base": 120.33, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 01 B", "bez": "AW 15-200-16 WF", "aufbau": "— OSB 15mm\n— Riegelwand 200mm (Zellulose)\n— HWF/DWD 16mm Putzträger", "eh": "m²", "base": 127.88, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 01 C", "bez": "AW 15-240-16 WF", "aufbau": "— OSB 15mm\n— Riegelwand 240mm (Zellulose)\n— HWF/DWD 16mm Putzträger", "eh": "m²", "base": 135.43, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "header", "pos": "36 15 02 — AUSSENW—NDE HINTERL—FTETE FASSADE", "bez": ""}, {"kind": "pos", "group": "waende", "pos": "36 15 02 A", "bez": "AW 15-160-16 DWD", "aufbau": "— OSB 15mm\n— Riegelwand 160mm (Zellulose)\n— DWD 16mm hinterlüftet", "eh": "m²", "base": 110.89, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 02 B", "bez": "AW 15-200-16 DWD", "aufbau": "— OSB 15mm\n— Riegelwand 200mm (Zellulose)\n— DWD 16mm hinterlüftet", "eh": "m²", "base": 118.44, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 02 C", "bez": "AW 15-240-16 DWD", "aufbau": "— OSB 15mm\n— Riegelwand 240mm (Zellulose)\n— DWD 16mm hinterlüftet", "eh": "m²", "base": 125.98, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "header", "pos": "36 15 04 — INNENW—NDE", "bez": ""}, {"kind": "pos", "group": "waende", "pos": "36 15 04 A", "bez": "IW 15-100-15", "aufbau": "— OSB 15mm\n— Riegelwand 100mm (Zellulose)\n— OSB 15mm", "eh": "m²", "base": 97.88, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 04 B", "bez": "IW 15-120-15", "aufbau": "— OSB 15mm\n— Riegelwand 120mm (Zellulose)\n— OSB 15mm", "eh": "m²", "base": 101.66, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 04 C", "bez": "IW 15-160-15", "aufbau": "— OSB 15mm\n— Riegelwand 160mm (Zellulose)\n— OSB 15mm", "eh": "m²", "base": 109.2, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 04 F", "bez": "IW 15-120 einseitig", "aufbau": "— Rigidur 15mm\n— Riegelwand 120mm (einseitig)", "eh": "m²", "base": 77.66, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "header", "pos": "36 15 06 — FASSADEN (Aufzahlung auf AW)", "bez": ""}, {"kind": "pos", "group": "waende", "pos": "36 15 06 A", "bez": "AZ Holzfassade Fichte", "aufbau": "— Lattung stehend\n— Fichte vorvergraut", "eh": "m²", "base": 89.17, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 06 B", "bez": "AZ Holzfassade Lärche", "aufbau": "— Lattung stehend\n— Lärche vorvergraut", "eh": "m²", "base": 114.01, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "header", "pos": "36 15 07/08 — AUFZAHLUNGEN", "bez": ""}, {"kind": "pos", "group": "waende", "pos": "36 15 07 C", "bez": "AZ 2. Abdichtungsebene Fensterbank", "aufbau": "— Purenitkeil\n— unter Fensterbank", "eh": "lfm", "base": 64.8, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 07 D", "bez": "AZ Unterkonstr. Rollokasten", "aufbau": "— Unterkonstruktion Rollokasten", "eh": "lfm", "base": 58.21, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 08 A", "bez": "AZ Gipskarton 12,5mm", "aufbau": "— GK-Platte 12,5mm (vormontiert)", "eh": "m²", "base": 13.45, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}], "regie": [{"kind": "pos", "group": "regie", "pos": "36 90 01 A", "bez": "Regiestunden Vorarbeiter", "aufbau": "Zimmerer Vorarbeiter", "eh": "h", "base": 65.0, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": true, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 B", "bez": "Regiestunden Facharbeiter", "aufbau": "Zimmerer Facharbeiter", "eh": "h", "base": 65.0, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 C", "bez": "Verladen der Bauteile", "aufbau": "Hallenkran und Stapler", "eh": "h", "base": 85.0, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 D", "bez": "Streicharbeiten", "aufbau": "2× Anstrich nach Wahl", "eh": "m²", "base": 16.63, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 E", "bez": "Untersicht 19mm Fichte NF", "aufbau": "naturbelassen", "eh": "m²", "base": 13.16, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 F", "bez": "Untersicht 27mm Fichte NF", "aufbau": "naturbelassen", "eh": "m²", "base": 16.85, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 G", "bez": "Rauschalung 23mm", "aufbau": "", "eh": "m²", "base": 6.94, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 H", "bez": "Konterlattung 50/80", "aufbau": "", "eh": "Stk", "base": 5.12, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 I", "bez": "Dachlatten 40/50", "aufbau": "", "eh": "Stk", "base": 2.51, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 J", "bez": "Naturholzplatten 19mm C/C", "aufbau": "Verzug", "eh": "m²", "base": 22.14, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 K", "bez": "Traufenlatten", "aufbau": "", "eh": "Stk", "base": 6.75, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 L", "bez": "AZ Farbe bauseitig", "aufbau": "-Abzug bei Kunden-Farbe", "eh": "m²", "base": -5.29, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "—", "bez": "Palettenmiete", "aufbau": "Eisenpaletten je Einsatz", "eh": "Woche", "base": 100.0, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}]}};
-// Hinweis: AUER, CLT, CLTZ-Datenb—nke wurden aus dem Original-Kalkulator entfernt,
+const DATA = {"firma": {"name": "Holzbau Willroider GmbH", "strasse": "Willroiderstraße 13", "plz_ort": "9500 Villach", "uid": "ATU 79881978", "fn": "FN 612643 x", "email": "holzbau@willroider.at", "iban": "AT10 1700 0001 5005 3005"}, "materialien": ["GKB 12,5mm", "GKF 12,5mm", "GKB 15mm", "GKF 15mm", "Fermacell 15mm", "Rigidur 15mm", "Installationsebene 42mm", "OSB 15mm", "OSB 18mm", "Riegel 80mm", "Riegel 100mm", "Riegel 120mm", "Riegel 140mm", "Riegel 160mm", "Riegel 180mm", "Riegel 200mm", "Riegel 240mm", "Riegel 280mm", "Dämmung Zellulose", "Dämmung Steinwolle", "Dämmung Glaswolle", "Holzweichfaser 40mm", "Holzweichfaser 60mm", "Agepan 16mm", "Winddichtung kein UV", "Winddichtung bis 20mm", "Winddichtung bis 50mm", "Lattung stehend 20mm", "Lattung stehend 30mm", "Lattung stehend 40mm", "Lattung stehend 50mm", "Lattung liegend 20mm", "Lattung liegend 30mm", "Lattung liegend 40mm", "Lattung liegend 50mm", "Fassade Fichte", "Fassade Lärche", "Freie Eingabe (direkt eintippen)"], "gruppen": {"dach": {"name": "Dachkonstruktionen (36 12)", "bgk": 0.15, "gw": 0.1, "mat": 0.05}, "decken": {"name": "Holzrahmenbaudecken (36 14)", "bgk": 0.15, "gw": 0.1, "mat": 0.05}, "waende": {"name": "Riegelwaende und Verkleidungen (36 15)", "bgk": 0.12, "gw": 0.08, "mat": 0.05}, "regie": {"name": "Regieleistungen (36 90)", "bgk": 0.1, "gw": 0.08, "mat": 0}}, "settings": {"sz_zimmerer": 35, "sz_vorarbeiter": 38}, "positionen": {"dach": [{"kind": "header", "pos": "36 12 01 — DACHKONSTRUKTIONEN", "bez": ""}, {"kind": "pos", "group": "dach", "pos": "36 12 01 A", "bez": "Walmdach", "aufbau": "— CNC-Abbund Walmdach\n— Bauholz/Leimholz\n— Vordach gehobelt", "eh": "m²", "base": 35.42, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "dach", "pos": "36 12 01 A1", "bez": "Satteldach", "aufbau": "— CNC-Abbund Satteldach\n— Bauholz/Leimholz\n— Vordach gehobelt", "eh": "m²", "base": 31.8, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "dach", "pos": "36 12 01 B", "bez": "Staubläden", "aufbau": "— Staubläden einfräsen\n   in Sparren", "eh": "lfm", "base": 24.07, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "dach", "pos": "36 12 01 C", "bez": "Stützen Leimholz", "aufbau": "— Leimholzstützen\n— Stützenfuß + Idefix\n— Länge: Eingabe —", "eh": "Stk", "base": 140.79, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": true}, {"kind": "pos", "group": "dach", "pos": "36 12 01 D", "bez": "Zangendecke", "aufbau": "— Zangendecke Leimholz\n   sichtbar", "eh": "m²", "base": 36.94, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "dach", "pos": "36 12 01 E", "bez": "AZ Gaupe", "aufbau": "— Gaupe (Pauschal)", "eh": "Pa", "base": 257.38, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "dach", "pos": "36 12 01 X", "bez": "AZ Schwalbenschwanz", "aufbau": "— Schwalbenschwanz-\n   verbindung", "eh": "Stk", "base": 5.1, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}], "decken": [{"kind": "header", "pos": "36 14 01 — DECKEN MIT ZELLULOSE", "bez": ""}, {"kind": "pos", "group": "decken", "pos": "36 14 01 A", "bez": "DE 15-200-24 RS", "aufbau": "— HWS-Platte 15mm\n— Deckenriegel 200mm (Zellulose)\n— Rauschalung 24mm", "eh": "m²", "base": 115.3, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "decken", "pos": "36 14 01 B", "bez": "DE 15-240-24 RS", "aufbau": "— HWS-Platte 15mm\n— Deckenriegel 240mm (Zellulose)\n— Rauschalung 24mm", "eh": "m²", "base": 122.84, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "decken", "pos": "36 14 01 C", "bez": "DE 15-280-24 RS", "aufbau": "— HWS-Platte 15mm\n— Deckenriegel 280mm (Zellulose)\n— Rauschalung 24mm", "eh": "m²", "base": 130.39, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "header", "pos": "36 14 07 — ZUSATZLEISTUNGEN", "bez": ""}, {"kind": "pos", "group": "decken", "pos": "36 14 07 A", "bez": "Unterzüge Decke", "aufbau": "— Unterzüge Leimholz (Maßkonstruktion)", "eh": "m³", "base": 928.97, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}], "waende": [{"kind": "header", "pos": "36 15 01 — AUSSENWÄNDE PUTZTRÄGER", "bez": ""}, {"kind": "pos", "group": "waende", "pos": "36 15 01 A", "bez": "AW 15-160-60 WF", "aufbau": "— OSB 15mm\n— Riegelwand 160mm (Zellulose)\n— HWF/DWD 60mm Putzträger", "eh": "m²", "base": 120.33, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 01 B", "bez": "AW 15-200-16 WF", "aufbau": "— OSB 15mm\n— Riegelwand 200mm (Zellulose)\n— HWF/DWD 16mm Putzträger", "eh": "m²", "base": 127.88, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 01 C", "bez": "AW 15-240-16 WF", "aufbau": "— OSB 15mm\n— Riegelwand 240mm (Zellulose)\n— HWF/DWD 16mm Putzträger", "eh": "m²", "base": 135.43, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "header", "pos": "36 15 02 — AUSSENWÄNDE HINTERLÜFTETE FASSADE", "bez": ""}, {"kind": "pos", "group": "waende", "pos": "36 15 02 A", "bez": "AW 15-160-16 DWD", "aufbau": "— OSB 15mm\n— Riegelwand 160mm (Zellulose)\n— DWD 16mm hinterlüftet", "eh": "m²", "base": 110.89, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 02 B", "bez": "AW 15-200-16 DWD", "aufbau": "— OSB 15mm\n— Riegelwand 200mm (Zellulose)\n— DWD 16mm hinterlüftet", "eh": "m²", "base": 118.44, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 02 C", "bez": "AW 15-240-16 DWD", "aufbau": "— OSB 15mm\n— Riegelwand 240mm (Zellulose)\n— DWD 16mm hinterlüftet", "eh": "m²", "base": 125.98, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "header", "pos": "36 15 04 — INNENWÄNDE", "bez": ""}, {"kind": "pos", "group": "waende", "pos": "36 15 04 A", "bez": "IW 15-100-15", "aufbau": "— OSB 15mm\n— Riegelwand 100mm (Zellulose)\n— OSB 15mm", "eh": "m²", "base": 97.88, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 04 B", "bez": "IW 15-120-15", "aufbau": "— OSB 15mm\n— Riegelwand 120mm (Zellulose)\n— OSB 15mm", "eh": "m²", "base": 101.66, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 04 C", "bez": "IW 15-160-15", "aufbau": "— OSB 15mm\n— Riegelwand 160mm (Zellulose)\n— OSB 15mm", "eh": "m²", "base": 109.2, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 04 F", "bez": "IW 15-120 einseitig", "aufbau": "— Rigidur 15mm\n— Riegelwand 120mm (einseitig)", "eh": "m²", "base": 77.66, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "header", "pos": "36 15 06 — FASSADEN (Aufzahlung auf AW)", "bez": ""}, {"kind": "pos", "group": "waende", "pos": "36 15 06 A", "bez": "AZ Holzfassade Fichte", "aufbau": "— Lattung stehend\n— Fichte vorvergraut", "eh": "m²", "base": 89.17, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 06 B", "bez": "AZ Holzfassade Lärche", "aufbau": "— Lattung stehend\n— Lärche vorvergraut", "eh": "m²", "base": 114.01, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "header", "pos": "36 15 07/08 — AUFZAHLUNGEN", "bez": ""}, {"kind": "pos", "group": "waende", "pos": "36 15 07 C", "bez": "AZ 2. Abdichtungsebene Fensterbank", "aufbau": "— Purenitkeil\n— unter Fensterbank", "eh": "lfm", "base": 64.8, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 07 D", "bez": "AZ Unterkonstr. Rollokasten", "aufbau": "— Unterkonstruktion Rollokasten", "eh": "lfm", "base": 58.21, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 08 A", "bez": "AZ Gipskarton 12,5mm", "aufbau": "— GK-Platte 12,5mm (vormontiert)", "eh": "m²", "base": 13.45, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}], "regie": [{"kind": "pos", "group": "regie", "pos": "36 90 01 A", "bez": "Regiestunden Vorarbeiter", "aufbau": "Zimmerer Vorarbeiter", "eh": "h", "base": 65.0, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": true, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 B", "bez": "Regiestunden Facharbeiter", "aufbau": "Zimmerer Facharbeiter", "eh": "h", "base": 65.0, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 C", "bez": "Verladen der Bauteile", "aufbau": "Hallenkran und Stapler", "eh": "h", "base": 85.0, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 D", "bez": "Streicharbeiten", "aufbau": "2× Anstrich nach Wahl", "eh": "m²", "base": 16.63, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 E", "bez": "Untersicht 19mm Fichte NF", "aufbau": "naturbelassen", "eh": "m²", "base": 13.16, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 F", "bez": "Untersicht 27mm Fichte NF", "aufbau": "naturbelassen", "eh": "m²", "base": 16.85, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 G", "bez": "Rauschalung 23mm", "aufbau": "", "eh": "m²", "base": 6.94, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 H", "bez": "Konterlattung 50/80", "aufbau": "", "eh": "Stk", "base": 5.12, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 I", "bez": "Dachlatten 40/50", "aufbau": "", "eh": "Stk", "base": 2.51, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 J", "bez": "Naturholzplatten 19mm C/C", "aufbau": "Verzug", "eh": "m²", "base": 22.14, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 K", "bez": "Traufenlatten", "aufbau": "", "eh": "Stk", "base": 6.75, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 L", "bez": "AZ Farbe bauseitig", "aufbau": "-Abzug bei Kunden-Farbe", "eh": "m²", "base": -5.29, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "—", "bez": "Palettenmiete", "aufbau": "Eisenpaletten je Einsatz", "eh": "Woche", "base": 100.0, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}]}};
+// Hinweis: AUER, CLT, CLTZ-Datenbanken wurden aus dem Original-Kalkulator entfernt,
 // um die HTML-Datei kompakt zu halten. Sie werden bei Bedarf nachgeladen.
 const AUER = [];
 const CLT = [];
@@ -251,16 +255,30 @@ function saveRates(){
     JSON.stringify({k3:state.k3,calc:state.calc,cltAufschlag:state.cltAufschlag,webhookUrl:state.webhookUrl}));
 }
 
-// Pusht den aktuellen K3-Satz einer Gruppe an die Bridge (nur erlaubt fuer
-// GF/Buero — andere bekommen 403, das ist OK, dann wirkt der Satz nur lokal).
+// Pusht den aktuellen K3-Satz einer Gruppe an die Bridge.
+// Erfolg/Fehler werden in UI über `state.k3SyncStatus` exponiert, damit der
+// Nutzer eine Rückmeldung bekommt (gespeichert / nicht erreichbar / Fehler).
 async function pushK3ToServer(gruppe){
   const k=state.k3[gruppe]; if(!k) return;
   try{
-    await fetch(BRIDGE_URL,{
+    const r=await fetch(BRIDGE_URL,{
       method:'POST', headers:{'Content-Type':'application/json', apikey:SUPA_ANON},
       body:JSON.stringify({action:'k3', gruppe, ...k}),
     });
-  }catch(e){ console.warn('K3-Push fehlgeschlagen:', e); }
+    if(!r.ok){
+      const d=await r.json().catch(()=>({}));
+      state.k3SyncStatus = d.error?.includes?.('berechtigt')
+        ? 'Lokal gespeichert (Server-Schreibrecht fehlt)'
+        : 'Server-Sync fehlgeschlagen: '+(d.error||r.statusText);
+    } else {
+      state.k3SyncStatus = 'OK, auf Server gespeichert';
+    }
+  }catch(e){
+    state.k3SyncStatus = 'Offline — Änderung nur lokal gesichert';
+    console.warn('K3-Push fehlgeschlagen:', e);
+  }
+  // Kein render() um Fokus nicht zu verlieren — die Anzeige aktualisiert
+  // sich beim nächsten Re-Render.
 }
 
 function nowStr(){
@@ -316,7 +334,42 @@ function doLogin(){
   logEvent('Login');
   buildNav(); showTab('proj');
 }
-function logout(){location.reload();}
+function logout(){
+  // Wenn wir im iframe der App laufen, melde Parent dass der User „Logout"
+  // gedrückt hat. Die App leitet dann auf das Dashboard zurück. Sonst:
+  // ganz normales reload() → Login-Screen.
+  try{
+    if(window.parent && window.parent !== window){
+      window.parent.postMessage({type:'kalkulator:logout'},'*');
+      return;
+    }
+  }catch(_){}
+  location.reload();
+}
+
+/** Auto-Login wenn die Page mit ?name=...&role=admin (oder mitarbeiter)
+ *  aufgerufen wird — die Willroider-App leitet eingeloggte User mit
+ *  ihrem Profil-Namen hierher, damit kein extra Code-Login nötig ist.
+ *  Es greift NUR wenn ein name vorhanden ist; sonst bleibt der normale
+ *  Login-Bildschirm aktiv. */
+(function autoLoginFromQuery(){
+  try{
+    const p=new URLSearchParams(window.location.search);
+    const name=(p.get('name')||'').trim();
+    if(!name) return;
+    const rolle=(p.get('role')||'admin').toLowerCase();
+    if(!['admin','mitarbeiter','kunde'].includes(rolle)) return;
+    SESSION={rolle, name, code:'APP-'+rolle.toUpperCase()};
+    document.getElementById('login').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    document.getElementById('userName').textContent=name;
+    const b=document.getElementById('userBadge');
+    b.textContent=rolle; b.className='badge '+rolle;
+    logEvent('Login');
+    if(typeof buildNav==='function') buildNav();
+    if(typeof showTab==='function') showTab('proj');
+  }catch(e){ console.warn('Auto-Login fehlgeschlagen:', e); }
+})();
 
 const canCalc=()=>SESSION && (SESSION.rolle==='mitarbeiter'||SESSION.rolle==='admin');
 const isAdmin=()=>SESSION && SESSION.rolle==='admin';
@@ -426,7 +479,7 @@ function viewProj(){
       <select data-pj="laser"><option value="nein"${!pj.laser?' selected':''}>Nein</option>
         <option value="ja"${pj.laser?' selected':''}>Ja</option></select>
       <span class="hint">EP 99,00 —/h · +2h Werkplanung</span></div>
-    <div class="field"><label>Stunden 3D-Aufma—</label>
+    <div class="field"><label>Stunden 3D-Aufmaß</label>
       <input type="number" data-pj="std3d" value="${pj.std3d}">
       <span class="hint">Default 3h</span></div>
     <div class="field"><label>Punktwolke (e57)?</label>
@@ -474,7 +527,7 @@ function viewPositions(group){
     let stuetzeField='';
     if(p.isStuetze){
       stuetzeField=`<div style="margin-top:4px;font-size:11px">Stützenlänge (m):
-        <input class="len" data-stuetze="1" value="${state.stuetzeLen}"></div>`;
+        <input class="len" type="number" min="0.1" step="0.1" data-stuetze="1" value="${state.stuetzeLen}"></div>`;
     }
     rows+=`<tr><td class="ctr">${p.pos}</td>
       <td><b>${p.bez}</b><div class="aufbau">${p.aufbau||''}</div>${stuetzeField}</td>
@@ -568,7 +621,7 @@ function viewSumme(){
       <span class="sub">${eur(sRegie)} (nicht in Summe)</span></div>
     ${eigeneCount>0?`<div class="sumrow"><span class="sub">${eigeneCount} eigene(r) Aufbau(ten)</span><span class="sub">Auf Anfrage</span></div>`:''}
     <p class="note" style="margin-top:14px">Alle Preise exkl. MwSt. · Gültig vorbehaltlich Prüfung · Verbindungsmittel in EP enthalten ·
-      Abrechnung hohl für voll (IW) · —ffnungen &gt;4 m² Abzug bei AW</p>
+      Abrechnung hohl für voll (IW) · Öffnungen &gt;4 m² Abzug bei AW</p>
 
     <div class="btn-row">
       <button class="btn btn-green" onclick="sendMail()">Anfrage per E-Mail senden</button>
@@ -595,7 +648,7 @@ function buildAnfrage(){
   L.push('Projektdaten:');
   L.push('- Wandfläche: '+state.proj.wandflaeche+' m²');
   L.push('- Wandtypen: '+state.proj.wandtypen+' | Geschosse: '+state.proj.geschosse
-        +' | 3D-Aufma—: '+(state.proj.laser?'ja':'nein'));
+        +' | 3D-Aufmaß: '+(state.proj.laser?'ja':'nein'));
   L.push('');
   L.push('Positionen:');
   let anz=0;
@@ -622,6 +675,12 @@ function buildAnfrage(){
 }
 async function sendMail(){
   const a=buildAnfrage();
+  // Leere Anfragen verhindern — sonst landet eine Mail mit 0 Positionen
+  // im Büro, die niemand zuordnen kann.
+  if(a.posAnzahl===0 && a.eigenAnzahl===0){
+    alert('Bitte mindestens eine Position oder einen eigenen Aufbau eintragen, bevor du absendest.');
+    return;
+  }
   const payload={
     action:'anfrage',
     kunde_name:SESSION.name,
@@ -725,6 +784,7 @@ function viewAdmin(){
     <p class="note">Mittellohnpreis (MLP) = Grundlohn x (1+Lohnnebenkosten) x (1+unprod. Zeiten).
       Gesamtzuschlag = GGK + Bauzinsen + Wagnis + Gewinn. Je Gruppe getrennt.</p>
     ${k3Block('dach')}${k3Block('decken')}${k3Block('waende')}${k3Block('regie')}
+    ${state.k3SyncStatus ? `<div class="note" style="color:${state.k3SyncStatus.startsWith('OK')?'#2E5E2E':'#c0392b'};font-weight:bold;font-style:normal">Server-Sync: ${state.k3SyncStatus}</div>` : ''}
     <div class="btn-row">
       <button class="btn btn-green" onclick="saveRates();alert('K3-Sätze gespeichert.')">Sätze speichern</button>
       <button class="btn btn-blue" onclick="exportRates()">Exportieren</button>
@@ -759,10 +819,26 @@ function bindInputs(){
     state.menge[el.dataset.menge]=el.value; render();
   });
   document.querySelectorAll('[data-stuetze]').forEach(el=>el.onchange=()=>{
-    state.stuetzeLen=el.value; render();
+    // Stützenlänge muss > 0 sein — sonst wird der EP rechnerisch 0 und
+    // die Berechnung wirkt kaputt.
+    const v=num(el.value);
+    if(v<=0){
+      alert('Stützenlänge muss größer 0 sein. Standard 3 m wird verwendet.');
+      state.stuetzeLen=3;
+    }else{
+      state.stuetzeLen=v;
+    }
+    render();
   });
   document.querySelectorAll('[data-calc]').forEach(el=>el.onchange=()=>{
     const p=el.dataset.calc,f=el.dataset.f;
+    // K7-Eingaben dürfen nicht negativ sein, sonst entstehen sinnlose VK.
+    const v=num(el.value);
+    if(v<0){
+      alert('Bitte keinen negativen Wert eintragen.');
+      el.value='';
+      return;
+    }
     if(!state.calc[p])state.calc[p]={};
     state.calc[p][f]=el.value;
     saveRates();
@@ -779,6 +855,17 @@ function bindInputs(){
   document.querySelectorAll('[data-eigen-name]').forEach(el=>el.oninput=()=>state.eigene[el.dataset.eigenName].name=el.value);
   document.querySelectorAll('[data-eigen-cnt]').forEach(el=>el.onchange=()=>{
     const i=el.dataset.eigenCnt,n=parseInt(el.value),e=state.eigene[i];
+    // Warnen, wenn beim Reduzieren befüllte Schichten gelöscht würden.
+    if(n<e.schichten.length){
+      const verlier=e.schichten.slice(n).filter(s=>s);
+      if(verlier.length>0 && !confirm(
+        verlier.length+' bereits ausgefüllte Schicht'+(verlier.length===1?'':'en')+
+        ' werden gelöscht:\n\n• '+verlier.join('\n• ')+'\n\nFortfahren?'
+      )){
+        el.value=e.schichten.length;
+        return;
+      }
+    }
     while(e.schichten.length<n)e.schichten.push('');
     e.schichten.length=n;render();
   });

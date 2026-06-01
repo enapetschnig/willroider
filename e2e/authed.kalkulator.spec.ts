@@ -24,7 +24,8 @@ test.describe("Bausatz-Kalkulator", () => {
     await expect(page.locator("body")).toContainText(/bausatz-kalkulator/i, {
       timeout: 10000,
     });
-    const iframe = page.locator('iframe[src="/bausatz-kalkulator.html"]');
+    // iframe-Src enthaelt jetzt Query-Params fuer Auto-Login (?name=&role=)
+    const iframe = page.locator('iframe[src*="bausatz-kalkulator.html"]');
     await expect(iframe).toBeVisible();
   });
 

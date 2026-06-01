@@ -33,6 +33,25 @@ const RESEND_REPLY_TO =
 const KALK_MAIL_TO =
   Deno.env.get("KALKULATOR_MAIL_TO") ?? "maurer@willroider.at";
 
+// Sehr einfacher In-Memory-Rate-Limit (pro IP) für action=anfrage. Soll
+// verhindern, dass jemand das Büro-Postfach via offenem POST-Endpoint
+// flutet. 5 Anfragen pro 10 Minuten pro IP. Beim Cold-Start der Function
+// resettet sich das — das ist OK, der Schutz greift nur in den Bursts.
+const RL_WINDOW_MS = 10 * 60 * 1000;
+const RL_LIMIT = 5;
+const rateBuckets = new Map<string, number[]>();
+function rateLimitOk(ip: string): boolean {
+  const now = Date.now();
+  const arr = (rateBuckets.get(ip) ?? []).filter((t) => now - t < RL_WINDOW_MS);
+  if (arr.length >= RL_LIMIT) {
+    rateBuckets.set(ip, arr);
+    return false;
+  }
+  arr.push(now);
+  rateBuckets.set(ip, arr);
+  return true;
+}
+
 async function sendMail(opts: {
   to: string;
   subject: string;
@@ -137,9 +156,37 @@ Deno.serve(async (req) => {
 
   // ── POST action=anfrage: Kundenanfrage speichern + Bestätigungs-Mail ─
   if (body?.action === "anfrage" || body?.typ === "Anfrage") {
+    // Rate-Limit pro IP (siehe Top-of-File)
+    const ip =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+      req.headers.get("cf-connecting-ip") ??
+      "unknown";
+    if (!rateLimitOk(ip)) {
+      return json(
+        {
+          ok: false,
+          error:
+            "Zu viele Anfragen in kurzer Zeit. Bitte später erneut versuchen.",
+        },
+        429,
+      );
+    }
     const a = body;
     const kundeName: string =
       a.kunde_name ?? a.name ?? "Unbekannter Kunde";
+    if (!kundeName || kundeName.trim().length < 2) {
+      return json({ ok: false, error: "Kunde-Name fehlt" }, 400);
+    }
+    // Minimaler Inhaltscheck — keine komplett leeren Anfragen.
+    if (
+      (!a.positionen_anzahl || a.positionen_anzahl === 0) &&
+      (!a.eigene_anzahl || a.eigene_anzahl === 0)
+    ) {
+      return json(
+        { ok: false, error: "Anfrage enthält keine Positionen" },
+        400,
+      );
+    }
     const summe =
       typeof a.summe_netto === "number"
         ? a.summe_netto
