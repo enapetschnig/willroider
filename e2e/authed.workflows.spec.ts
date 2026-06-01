@@ -233,6 +233,20 @@ test.describe("Workflow: BSB → /stundenbericht/:id Rendering + Buttons", () =>
   test("Detail-Seite öffnet + zeigt Status + neue Button-Beschriftung", async ({
     page,
   }) => {
+    // Idempotent: Status auf 'offen' zurücksetzen (andere Tests könnten ihn weitergedreht haben)
+    const admin = adminClient();
+    await admin
+      .from("stunden_berichte")
+      .update({
+        status: "offen",
+        unterschrift_data: null,
+        unterschrieben_am: null,
+        bestaetigt_am: null,
+        bestaetigt_von: null,
+        versendet_am: null,
+        versendet_an_mail: null,
+      })
+      .eq("id", berichtId);
     await page.goto(`/stundenbericht/${berichtId}`);
     await expect(page.locator("body")).toContainText(
       /baustellenstundenbericht|stundenbericht/i,
@@ -243,7 +257,7 @@ test.describe("Workflow: BSB → /stundenbericht/:id Rendering + Buttons", () =>
       /durchsehen|unterschreib/i,
     );
     await expect(
-      page.getByRole("button", { name: /unterschreiben.*abschicken/i }),
+      page.getByRole("button", { name: /unterschreiben.*abschicken/i }).first(),
     ).toBeVisible();
     // „Wieder öffnen" wurde entfernt — darf nirgends auftauchen
     await expect(page.getByRole("button", { name: /wieder.*öffnen/i })).toHaveCount(0);

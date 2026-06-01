@@ -40,6 +40,21 @@ test("BSB-Detail auf 390px: kein horizontaler Scroll, Footer sichtbar", async ({
   let berichtId: string;
   if (vorh) {
     berichtId = (vorh as any).id;
+    // Idempotent: Status auf 'offen' zurücksetzen — Mobile-Test braucht
+    // den "Tippen auf eine Tages-Card"-Hinweis (editierbar=true) und den
+    // "Unterschreiben & abschicken"-Button (status='offen' für Eigentümer).
+    await admin
+      .from("stunden_berichte")
+      .update({
+        status: "offen",
+        unterschrift_data: null,
+        unterschrieben_am: null,
+        bestaetigt_am: null,
+        bestaetigt_von: null,
+        versendet_am: null,
+        versendet_an_mail: null,
+      })
+      .eq("id", berichtId);
   } else {
     const { data, error } = await admin
       .from("stunden_berichte")
@@ -66,9 +81,9 @@ test("BSB-Detail auf 390px: kein horizontaler Scroll, Footer sichtbar", async ({
     page.locator("body").getByText(/Tippen auf eine Tages-Card/i),
   ).toBeVisible({ timeout: 10000 });
 
-  // Sticky-Footer-CTA muss sichtbar sein
+  // Sticky-Footer-CTA muss sichtbar sein (kann doppelt vorkommen: Desktop + Mobile Sticky-Footer)
   await expect(
-    page.getByRole("button", { name: /unterschreiben.*abschicken/i }),
+    page.getByRole("button", { name: /unterschreiben.*abschicken/i }).first(),
   ).toBeVisible();
 
   // Kein horizontaler Scroll: documentElement.scrollWidth ≤ clientWidth + 1px Toleranz
