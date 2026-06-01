@@ -292,6 +292,10 @@ export default function StundenBericht() {
   const editierbar =
     (bericht.status === "offen" && istEigentuemer) ||
     (bericht.status === "unterschrieben" && isAdmin);
+  /** Vom Büro bestätigt — die geänderten Tage werden grün statt gelb,
+   *  weil sie nochmal durchgeschaut + freigegeben wurden. */
+  const geprueft =
+    bericht.status === "bestaetigt" || bericht.status === "versendet";
   const kannUnterschreiben = bericht.status === "offen" && istEigentuemer;
   const kannBestaetigen = bericht.status === "unterschrieben" && isAdmin;
   const kannReVersenden =
@@ -499,18 +503,30 @@ export default function StundenBericht() {
         </CardContent>
       </Card>
 
-      {/* Geändert-Hinweis */}
-      {geaendert.size > 0 && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 text-amber-700 shrink-0" />
-          <span className="text-sm text-amber-900">
-            {geaendert.size === 1
-              ? "1 Tag wurde nach Erstellung geändert"
-              : `${geaendert.size} Tage wurden nach Erstellung geändert`}{" "}
-            — gelb markiert.
-          </span>
-        </div>
-      )}
+      {/* Geändert-Hinweis — gelb solange offen, grün sobald Büro bestätigt hat */}
+      {geaendert.size > 0 && (() => {
+        const geprueft =
+          bericht.status === "bestaetigt" || bericht.status === "versendet";
+        const cls = geprueft
+          ? "border-emerald-400 bg-emerald-50 text-emerald-900"
+          : "border-amber-300 bg-amber-50 text-amber-900";
+        const iconCls = geprueft ? "text-emerald-700" : "text-amber-700";
+        const text =
+          geaendert.size === 1
+            ? "1 Tag wurde nach Erstellung geändert"
+            : `${geaendert.size} Tage wurden nach Erstellung geändert`;
+        return (
+          <div className={`rounded-lg border p-3 flex items-center gap-2 ${cls}`}>
+            <AlertTriangle className={`h-4 w-4 shrink-0 ${iconCls}`} />
+            <span className="text-sm">
+              {text}
+              {geprueft
+                ? " — vom Büro bestätigt, grün markiert."
+                : " — gelb markiert, bitte vor dem Abschicken nochmal prüfen."}
+            </span>
+          </div>
+        );
+      })()}
 
       {/* Mobile: Tag-Card-Liste (vertikal) */}
       <div className="lg:hidden space-y-2">
@@ -548,7 +564,9 @@ export default function StundenBericht() {
               onClick={() => openTag(d.iso)}
               className={`${editierbar ? "cursor-pointer active:scale-[0.995] transition" : ""} ${
                 istGeaendert
-                  ? "border-amber-400 bg-amber-50"
+                  ? geprueft
+                    ? "border-emerald-400 bg-emerald-50"
+                    : "border-amber-400 bg-amber-50"
                   : istFrei
                   ? "bg-muted/30"
                   : ""
@@ -562,9 +580,13 @@ export default function StundenBericht() {
                   {istGeaendert && (
                     <Badge
                       variant="outline"
-                      className="text-[10px] border-amber-500 text-amber-800 bg-amber-100"
+                      className={`text-[10px] ${
+                        geprueft
+                          ? "border-emerald-500 text-emerald-800 bg-emerald-100"
+                          : "border-amber-500 text-amber-800 bg-amber-100"
+                      }`}
                     >
-                      geändert
+                      {geprueft ? "geprüft" : "geändert"}
                     </Badge>
                   )}
                   {istFrei && !tag?.taetigkeiten.length && (
@@ -653,7 +675,9 @@ export default function StundenBericht() {
                         editierbar ? "cursor-pointer" : ""
                       } ${
                         geaendert.has(d.iso)
-                          ? "bg-amber-200"
+                          ? geprueft
+                            ? "bg-emerald-200"
+                            : "bg-amber-200"
                           : d.frei
                           ? "bg-muted-foreground/10 text-muted-foreground"
                           : ""
@@ -700,7 +724,9 @@ export default function StundenBericht() {
                               editierbar ? "cursor-pointer hover:bg-primary/5" : ""
                             } ${
                               geaendert.has(d.iso)
-                                ? "bg-amber-100"
+                                ? geprueft
+                                  ? "bg-emerald-100"
+                                  : "bg-amber-100"
                                 : d.frei
                                 ? "bg-muted-foreground/5"
                                 : ""
@@ -735,7 +761,11 @@ export default function StundenBericht() {
                         <td
                           key={d.iso}
                           className={`border text-center tabular-nums text-[10px] ${
-                            geaendert.has(d.iso) ? "bg-amber-100" : ""
+                            geaendert.has(d.iso)
+                              ? geprueft
+                                ? "bg-emerald-100"
+                                : "bg-amber-100"
+                              : ""
                           }`}
                         >
                           {s > 0 ? fmtHNum(s) : ""}

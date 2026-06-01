@@ -242,6 +242,8 @@ export async function buildBerichtPdf(
     tage: periodeTage.map((d) => d.tag),
     tageIso: periodeTage.map((d) => d.iso),
     geaendert,
+    geprueft:
+      bericht.status === "bestaetigt" || bericht.status === "versendet",
     rows: pdfRows,
     summenZeile,
     summeGesamt,

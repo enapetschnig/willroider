@@ -2,7 +2,11 @@
  * Baustellenstundenbericht als PDF — Querformat A4, nach der Papier-Vorlage:
  * Firmenkopf · Titel · Monat/Jahr/Eintritt/Austritt · Pers.-Nr./Name ·
  * Raster Kostenstelle | Baustelle | Tage · Zulagen · Legende ·
- * Unterschriftsfelder. Geänderte Tagesspalten sind gelb.
+ * Unterschriftsfelder.
+ *
+ * Geänderte Tagesspalten sind GELB solange der Bericht noch nicht
+ * bestätigt ist (Hinweis: bitte durchschauen). Nach Büro-Bestätigung
+ * wechseln dieselben Zellen auf GRÜN — "geprüft & OK".
  */
 
 import jsPDF from "jspdf";
@@ -34,10 +38,15 @@ export interface BsbPdfInput {
   unterschrift: string | null; // Base64-PNG
   unterschriebenAm: string | null;
   bestaetigtAm: string | null;
+  /** Wenn true, werden geänderte Tagesspalten grün („geprüft") statt
+   *  gelb („bitte durchschauen") gezeichnet. Defaultet zu false, damit
+   *  Aufrufer ohne Status-Info das alte Verhalten erhalten. */
+  geprueft?: boolean;
 }
 
 const BURGUNDY: [number, number, number] = [182, 86, 103];
 const GELB: [number, number, number] = [254, 240, 138];
+const GRUEN: [number, number, number] = [187, 247, 208];
 
 let _logoCache: string | null = null;
 async function getLogo(): Promise<string | null> {
@@ -166,10 +175,11 @@ export async function makeBaustellenstundenberichtPdf(
     margin: { left: margin, right: margin },
     didParseCell: (data) => {
       const c = data.column.index;
+      const markerFarbe = input.geprueft ? GRUEN : GELB;
       if (c >= dayColStart && c < lastCol) {
         const iso = input.tageIso[c - dayColStart];
         if (iso && input.geaendert.has(iso)) {
-          data.cell.styles.fillColor = GELB;
+          data.cell.styles.fillColor = markerFarbe;
         }
       }
       if (data.section === "body" && data.row.index === summenRowIndex) {
