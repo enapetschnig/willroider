@@ -37,9 +37,11 @@ import {
   BEREICHE,
   FIRMA,
   alleBereichPositionen,
+  EIGENE_GRUPPE_LABEL,
   type Bereich,
   type Position,
 } from "@/lib/kalkulator/positionen";
+import { cltSum } from "@/lib/kalkulator/clt";
 import type { KalkulatorState } from "@/hooks/useKalkulator";
 
 type K3State = KalkulatorState["k3"];
@@ -93,7 +95,15 @@ function eingetragenePositionen(
 function buildBedarfText(
   state: KalkulatorState,
   kundenName: string,
-  summen: { bgk: number; dach: number; decken: number; waende: number; regie: number; netto: number },
+  summen: {
+    bgk: number;
+    dach: number;
+    decken: number;
+    waende: number;
+    regie: number;
+    clt: number;
+    netto: number;
+  },
 ): string {
   const L: string[] = [];
   L.push("Anfrage Bausatz-Kalkulator");
@@ -112,15 +122,37 @@ function buildBedarfText(
   else
     for (const e of pos)
       L.push(`  ${e.p.pos}  ${e.p.bez} — ${e.menge} ${e.p.eh} × ${eur(e.ep)} = ${eur(e.summe)}`);
+  if (state.eigeneAufbauten.length > 0) {
+    L.push("");
+    L.push("Eigene Aufbauten (Preis auf Anfrage):");
+    for (const e of state.eigeneAufbauten) {
+      const grp = EIGENE_GRUPPE_LABEL[e.gruppe];
+      const layers = e.schichten.filter((s) => s).join(" / ") || "(keine Schichten gewählt)";
+      L.push(`  • ${grp}: ${e.name || "(ohne Bezeichnung)"} — ${e.menge} m²`);
+      L.push(`    Schichten: ${layers}`);
+    }
+  }
+  if (state.clt.zeilen.length > 0 || state.clt.transport) {
+    L.push("");
+    L.push("CLT (ZMP / Stora Enso Sylva):");
+    L.push(`  Aufschlag: ${state.cltAufschlag.toFixed(1)} %`);
+    L.push(`  CLT-Summe: ${eur(summen.clt)}`);
+  }
   L.push("");
   L.push("Summen (netto, exkl. MwSt.):");
   L.push(`  36 01 Baustellengemeinkosten: ${eur(summen.bgk)}`);
   L.push(`  36 12 Dachkonstruktionen:     ${eur(summen.dach)}`);
   L.push(`  36 14 Decken:                 ${eur(summen.decken)}`);
   L.push(`  36 15 Riegelwände:            ${eur(summen.waende)}`);
+  if (summen.clt > 0) {
+    L.push(`  CLT Massivholz (ZMP):        ${eur(summen.clt)}`);
+  }
   L.push("  ------------------------------------------");
   L.push(`  GESAMTSUMME NETTO:            ${eur(summen.netto)}`);
   L.push(`  36 90 Regie (separat):        ${eur(summen.regie)}`);
+  if (state.eigeneAufbauten.length > 0) {
+    L.push(`  Eigene Aufbauten:             Auf Anfrage`);
+  }
   L.push("");
   L.push(`— ${FIRMA.name}`);
   return L.join("\n");
@@ -135,14 +167,19 @@ export default function SummeTab({ state, setAnfrageId }: TabProps) {
   const sumDecken = useMemo(() => bereichSumme("decken", state), [state]);
   const sumWaende = useMemo(() => bereichSumme("waende", state), [state]);
   const sumRegie = useMemo(() => bereichSumme("regie", state), [state]);
+  const sumClt = useMemo(
+    () => cltSum(state.clt, state.cltAufschlag),
+    [state.clt, state.cltAufschlag],
+  );
   const netto = useMemo(
-    () => bgk + sumDach + sumDecken + sumWaende,
-    [bgk, sumDach, sumDecken, sumWaende],
+    () => bgk + sumDach + sumDecken + sumWaende + sumClt,
+    [bgk, sumDach, sumDecken, sumWaende, sumClt],
   );
   const positionenAnzahl = useMemo(
     () => eingetragenePositionen(state).length,
     [state],
   );
+  const eigeneAnzahl = state.eigeneAufbauten.length;
 
   const kundenName = useMemo(() => {
     if (!profile) return user?.email ?? "Unbekannt";
@@ -157,11 +194,12 @@ export default function SummeTab({ state, setAnfrageId }: TabProps) {
   const [saving, setSaving] = useState(false);
 
   const oeffnen = useCallback(() => {
-    if (positionenAnzahl === 0) {
+    if (positionenAnzahl === 0 && eigeneAnzahl === 0 && state.clt.zeilen.length === 0) {
       toast({
         variant: "destructive",
-        title: "Keine Positionen",
-        description: "Bitte mindestens eine Position eintragen.",
+        title: "Nichts zu speichern",
+        description:
+          "Bitte mindestens eine Position, einen eigenen Aufbau oder ein CLT-Element eintragen.",
       });
       return;
     }
@@ -175,11 +213,12 @@ export default function SummeTab({ state, setAnfrageId }: TabProps) {
         decken: sumDecken,
         waende: sumWaende,
         regie: sumRegie,
+        clt: sumClt,
         netto,
       }),
     );
     setOpen(true);
-  }, [positionenAnzahl, toast, state, kundenName, bgk, sumDach, sumDecken, sumWaende, sumRegie, netto]);
+  }, [positionenAnzahl, eigeneAnzahl, toast, state, kundenName, bgk, sumDach, sumDecken, sumWaende, sumRegie, sumClt, netto]);
 
   const speichern = useCallback(async () => {
     setSaving(true);
@@ -190,6 +229,9 @@ export default function SummeTab({ state, setAnfrageId }: TabProps) {
         mengen: state.mengen,
         overrides: state.overrides,
         stuetzeLen: state.stuetzeLen,
+        eigeneAufbauten: state.eigeneAufbauten,
+        clt: state.clt,
+        cltAufschlag: state.cltAufschlag,
         // K3 mit-speichern, damit der Snapshot auch in 6 Monaten
         // identisch nachgerechnet werden kann, falls sich die Sätze ändern.
         k3_snapshot: state.k3,
@@ -204,7 +246,7 @@ export default function SummeTab({ state, setAnfrageId }: TabProps) {
             kunde_name: titel.trim() || kundenName,
             summe_netto: netto,
             positionen_anzahl: positionenAnzahl,
-            eigene_anzahl: 0,
+            eigene_anzahl: eigeneAnzahl,
             bedarf_text: body,
             ...snapshot,
           },
@@ -236,12 +278,16 @@ export default function SummeTab({ state, setAnfrageId }: TabProps) {
     state.mengen,
     state.overrides,
     state.stuetzeLen,
+    state.eigeneAufbauten,
+    state.clt,
+    state.cltAufschlag,
     state.k3,
     state.anfrageId,
     titel,
     kundenName,
     netto,
     positionenAnzahl,
+    eigeneAnzahl,
     body,
     setAnfrageId,
     toast,
@@ -272,6 +318,9 @@ export default function SummeTab({ state, setAnfrageId }: TabProps) {
             <SumRow label="36 12 · Dachkonstruktionen" value={sumDach} />
             <SumRow label="36 14 · Decken" value={sumDecken} />
             <SumRow label="36 15 · Riegelwände" value={sumWaende} />
+            {sumClt > 0 && (
+              <SumRow label="CLT Massivholz (ZMP)" value={sumClt} />
+            )}
             <div className="flex justify-between items-baseline border-b-2 border-emerald-600 pt-3 pb-2">
               <span className="text-lg font-bold text-emerald-700">
                 GESAMTSUMME NETTO
@@ -284,12 +333,26 @@ export default function SummeTab({ state, setAnfrageId }: TabProps) {
               <span>36 90 · Regie (separat, nur auf Anordnung)</span>
               <span className="tabular-nums">{eur(sumRegie)} (nicht in Summe)</span>
             </div>
+            {eigeneAnzahl > 0 && (
+              <div className="flex justify-between text-sm pt-2">
+                <span>
+                  Eigene Aufbauten ({eigeneAnzahl})
+                </span>
+                <span className="font-semibold text-destructive">
+                  Auf Anfrage (nicht in Summe)
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-wrap gap-2 pt-2">
             <Button
               onClick={oeffnen}
-              disabled={positionenAnzahl === 0}
+              disabled={
+                positionenAnzahl === 0 &&
+                eigeneAnzahl === 0 &&
+                state.clt.zeilen.length === 0
+              }
               className="min-h-[44px]"
             >
               <Save className="h-4 w-4 mr-1.5" />

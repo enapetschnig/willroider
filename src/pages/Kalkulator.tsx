@@ -17,8 +17,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useKalkulator } from "@/hooks/useKalkulator";
 import ProjektTab from "@/components/kalkulator/ProjektTab";
 import PositionenTab from "@/components/kalkulator/PositionenTab";
+import EigeneAufbautenTab from "@/components/kalkulator/EigeneAufbautenTab";
+import CLTTab from "@/components/kalkulator/CLTTab";
 import SummeTab from "@/components/kalkulator/SummeTab";
 import AdminTab from "@/components/kalkulator/AdminTab";
+import ProtokollTab from "@/components/kalkulator/ProtokollTab";
 import { Plus } from "lucide-react";
 
 export default function Kalkulator() {
@@ -65,12 +68,25 @@ export default function Kalkulator() {
           <TabsTrigger value="positionen" className="min-h-[44px]">
             Positionen
           </TabsTrigger>
+          <TabsTrigger value="eigene" className="min-h-[44px]">
+            Eigene Aufbauten
+          </TabsTrigger>
+          <TabsTrigger value="clt" className="min-h-[44px]">
+            CLT
+          </TabsTrigger>
           <TabsTrigger value="summe" className="min-h-[44px]">
             Zusammenfassung
           </TabsTrigger>
-          <TabsTrigger value="admin" className="min-h-[44px]">
-            K3-Sätze
-          </TabsTrigger>
+          {role === "geschaeftsfuehrung" && (
+            <TabsTrigger value="admin" className="min-h-[44px]">
+              K3-Sätze
+            </TabsTrigger>
+          )}
+          {role === "geschaeftsfuehrung" && (
+            <TabsTrigger value="protokoll" className="min-h-[44px]">
+              Protokoll
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="projekt">
@@ -79,12 +95,25 @@ export default function Kalkulator() {
         <TabsContent value="positionen">
           <PositionenTab {...kalk} canCalc={canWriteK3} />
         </TabsContent>
+        <TabsContent value="eigene">
+          <EigeneAufbautenTab {...kalk} />
+        </TabsContent>
+        <TabsContent value="clt">
+          <CLTTab {...kalk} />
+        </TabsContent>
         <TabsContent value="summe">
           <SummeTab {...kalk} setAnfrageId={kalk.setAnfrageId} />
         </TabsContent>
-        <TabsContent value="admin">
-          <AdminTab {...kalk} />
-        </TabsContent>
+        {role === "geschaeftsfuehrung" && (
+          <TabsContent value="admin">
+            <AdminTab {...kalk} />
+          </TabsContent>
+        )}
+        {role === "geschaeftsfuehrung" && (
+          <TabsContent value="protokoll">
+            <ProtokollTab {...kalk} />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

@@ -39,6 +39,56 @@ export const FIRMA = {
   fn: "FN 612643 x",
 };
 
+/** Materialien-Liste für die „Eigene Aufbauten"-Schichtenwahl (aus dem
+ *  HTML-Original 1:1 übernommen). */
+export const MATERIALIEN: string[] = [
+  "GKB 12,5mm",
+  "GKF 12,5mm",
+  "GKB 15mm",
+  "GKF 15mm",
+  "Fermacell 15mm",
+  "Rigidur 15mm",
+  "Installationsebene 42mm",
+  "OSB 15mm",
+  "OSB 18mm",
+  "Riegel 80mm",
+  "Riegel 100mm",
+  "Riegel 120mm",
+  "Riegel 140mm",
+  "Riegel 160mm",
+  "Riegel 180mm",
+  "Riegel 200mm",
+  "Riegel 240mm",
+  "Riegel 280mm",
+  "Dämmung Zellulose",
+  "Dämmung Steinwolle",
+  "Dämmung Glaswolle",
+  "Holzweichfaser 40mm",
+  "Holzweichfaser 60mm",
+  "Agepan 16mm",
+  "Winddichtung kein UV",
+  "Winddichtung bis 20mm",
+  "Winddichtung bis 50mm",
+  "Lattung stehend 20mm",
+  "Lattung stehend 30mm",
+  "Lattung stehend 40mm",
+  "Lattung stehend 50mm",
+  "Lattung liegend 20mm",
+  "Lattung liegend 30mm",
+  "Lattung liegend 40mm",
+  "Lattung liegend 50mm",
+  "Fassade Fichte",
+  "Fassade Lärche",
+  "Freie Eingabe (direkt eintippen)",
+];
+
+export type EigeneGruppe = "waende" | "decken" | "dach";
+export const EIGENE_GRUPPE_LABEL: Record<EigeneGruppe, string> = {
+  waende: "Wand",
+  decken: "Decke",
+  dach: "Dach",
+};
+
 export const BEREICHE: BereichDef[] = [
   {
     key: "dach",

@@ -16,11 +16,31 @@ import {
   type K7Override,
   type ProjektDaten,
 } from "@/lib/kalkulator/calc";
-import type { Bereich } from "@/lib/kalkulator/positionen";
+import type { Bereich, EigeneGruppe } from "@/lib/kalkulator/positionen";
+import { CLT_INITIAL, type CltState } from "@/lib/kalkulator/clt";
+import type { AuerRow } from "@/lib/kalkulator/auer";
 
 type K3State = Record<Bereich | "clt", K3Satz>;
 type MengenState = Record<string, number>;
 type OverridesState = Record<string, K7Override>;
+
+export interface EigenerAufbau {
+  name: string;
+  gruppe: EigeneGruppe;
+  schichten: string[]; // jede Schicht: Material-Name aus MATERIALIEN, leer = nicht gewählt
+  menge: number; // m²
+}
+
+export interface EventlogEntry {
+  typ: "Login" | "Anfrage" | string;
+  zeit: string;
+  name: string;
+  rolle?: string;
+  positionen?: number;
+  eigene?: number;
+  summe?: string;
+  bedarf?: string;
+}
 
 export interface KalkulatorState {
   projekt: ProjektDaten;
@@ -28,6 +48,17 @@ export interface KalkulatorState {
   mengen: MengenState;
   overrides: OverridesState;
   stuetzeLen: number;
+  /** Pro Anfrage angelegte Custom-Aufbauten (Schichten-Auswahl, Preis
+   *  „auf Anfrage"). */
+  eigeneAufbauten: EigenerAufbau[];
+  /** CLT-Konfigurator-State (Platten + Zusatz + Transport). */
+  clt: CltState;
+  /** Aufschlag % auf ZMP-CLT-Listenpreis. */
+  cltAufschlag: number;
+  /** Importierte Auer-Positionen (ONLV-Upload überschreibt AUER_BUILTIN). */
+  auerImport: AuerRow[];
+  /** Lokales Eventlog (Login + Anfrage), max. 500 Einträge. */
+  eventlog: EventlogEntry[];
   /** Wenn gesetzt: wir bearbeiten eine bereits in der DB gespeicherte
    *  Anfrage; Speichern UPDATEt diesen Datensatz statt einen neuen
    *  anzulegen. */
@@ -40,6 +71,11 @@ const INITIAL_STATE: KalkulatorState = {
   mengen: {},
   overrides: {},
   stuetzeLen: 3,
+  eigeneAufbauten: [],
+  clt: CLT_INITIAL,
+  cltAufschlag: 0,
+  auerImport: [],
+  eventlog: [],
   anfrageId: null,
 };
 
@@ -207,6 +243,9 @@ export function useKalkulator(canWriteK3: boolean) {
       mengen: raw.mengen ?? {},
       overrides: raw.overrides ?? {},
       stuetzeLen: raw.stuetzeLen ?? 3,
+      eigeneAufbauten: Array.isArray(raw.eigeneAufbauten) ? raw.eigeneAufbauten : [],
+      clt: raw.clt ?? CLT_INITIAL,
+      cltAufschlag: typeof raw.cltAufschlag === "number" ? raw.cltAufschlag : 0,
       anfrageId: (data as any).id,
     }));
   }, [toast]);
@@ -216,6 +255,82 @@ export function useKalkulator(canWriteK3: boolean) {
    *  statt neu anzulegen. */
   const setAnfrageId = useCallback((id: string | null) => {
     setState((s) => ({ ...s, anfrageId: id }));
+  }, []);
+
+  // ─── Eigene Aufbauten ────────────────────────────────────────────────
+  const addEigenerAufbau = useCallback(() => {
+    setState((s) => ({
+      ...s,
+      eigeneAufbauten: [
+        ...s.eigeneAufbauten,
+        { name: "", gruppe: "waende", schichten: ["", "", ""], menge: 0 },
+      ],
+    }));
+  }, []);
+
+  const updateEigenerAufbau = useCallback(
+    (i: number, patch: Partial<EigenerAufbau>) => {
+      setState((s) => {
+        const arr = [...s.eigeneAufbauten];
+        if (!arr[i]) return s;
+        arr[i] = { ...arr[i], ...patch };
+        return { ...s, eigeneAufbauten: arr };
+      });
+    },
+    [],
+  );
+
+  const setSchichtenAnzahl = useCallback((i: number, n: number) => {
+    setState((s) => {
+      const arr = [...s.eigeneAufbauten];
+      const e = arr[i];
+      if (!e) return s;
+      const next = [...e.schichten];
+      while (next.length < n) next.push("");
+      if (n < next.length) {
+        const verlier = next.slice(n).filter((x) => x);
+        if (verlier.length > 0) {
+          // eslint-disable-next-line no-alert
+          if (!window.confirm(
+            `${verlier.length} ausgefüllte Schicht${verlier.length === 1 ? "" : "en"} werden gelöscht:\n\n• ${verlier.join("\n• ")}\n\nFortfahren?`,
+          )) return s;
+        }
+      }
+      next.length = n;
+      arr[i] = { ...e, schichten: next };
+      return { ...s, eigeneAufbauten: arr };
+    });
+  }, []);
+
+  const removeEigenerAufbau = useCallback((i: number) => {
+    setState((s) => ({
+      ...s,
+      eigeneAufbauten: s.eigeneAufbauten.filter((_, idx) => idx !== i),
+    }));
+  }, []);
+
+  // ─── CLT ──────────────────────────────────────────────────────────────
+  const setCltState = useCallback((patch: Partial<CltState>) => {
+    setState((s) => ({ ...s, clt: { ...s.clt, ...patch } }));
+  }, []);
+  const setCltAufschlag = useCallback((v: number) => {
+    setState((s) => ({ ...s, cltAufschlag: v }));
+  }, []);
+
+  // ─── Auer-Import ──────────────────────────────────────────────────────
+  const setAuerImport = useCallback((rows: AuerRow[]) => {
+    setState((s) => ({ ...s, auerImport: rows }));
+  }, []);
+
+  // ─── Eventlog (lokal) ─────────────────────────────────────────────────
+  const addEvent = useCallback((entry: EventlogEntry) => {
+    setState((s) => ({
+      ...s,
+      eventlog: [entry, ...s.eventlog].slice(0, 500),
+    }));
+  }, []);
+  const clearEventlog = useCallback(() => {
+    setState((s) => ({ ...s, eventlog: [] }));
   }, []);
 
   return {
@@ -229,5 +344,18 @@ export function useKalkulator(canWriteK3: boolean) {
     reset,
     loadAnfrage,
     setAnfrageId,
+    // Eigene Aufbauten
+    addEigenerAufbau,
+    updateEigenerAufbau,
+    setSchichtenAnzahl,
+    removeEigenerAufbau,
+    // CLT
+    setCltState,
+    setCltAufschlag,
+    // Auer
+    setAuerImport,
+    // Eventlog
+    addEvent,
+    clearEventlog,
   };
 }
