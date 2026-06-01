@@ -185,7 +185,11 @@ const ZUGAENGE = {
   "ADMIN-2026":    {rolle:"admin",       name:"Administrator"},
 };
 
-const WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxgMpGDtryFcWApk-xlcVgR0M4aN7xzHHJiQjWqYSqp9oL867OQCUlftyYjCglVW5Ur/exec";
+// Willroider-App-Bridge: K3-Saetze + Anfragen + Resend-Mail
+const BRIDGE_URL = "https://ylqbxnsxksbtsqrcwtuq.supabase.co/functions/v1/kalkulator-bridge";
+const WEBHOOK_URL = BRIDGE_URL;
+// Anon-Key der Willroider-Supabase-Instanz (public, ungefährlich, RLS schützt Daten)
+const SUPA_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlscWJ4bnN4a3NidHNxcmN3dHVxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyODM0MDYsImV4cCI6MjA5Mjg1OTQwNn0.XvOCZVQu3WR4Qfq3yCyOfq9tw1izIplDe_k1sGZGc5s";
 
 let SESSION = null;
 
@@ -221,9 +225,42 @@ function gz(g){const k=state.k3[g];return k.ggk+k.bauzinsen+k.wagnis+k.gewinn;}
   }catch(e){}
 })();
 
+// Synct K3-Saetze von der Willroider-App-Datenbank ueber die kalkulator-bridge
+// (Edge-Function). Schlaegt fehl -> lokale Werte (localStorage/defaults) bleiben.
+async function syncK3FromServer(){
+  try{
+    const r=await fetch(BRIDGE_URL,{method:'GET',headers:{apikey:SUPA_ANON}});
+    if(!r.ok) return;
+    const d=await r.json();
+    if(!d.ok || !Array.isArray(d.saetze)) return;
+    d.saetze.forEach(s=>{
+      if(state.k3[s.gruppe]) state.k3[s.gruppe]={
+        grundlohn:Number(s.grundlohn), lnk:Number(s.lnk), unprod:Number(s.unprod),
+        ggk:Number(s.ggk), bauzinsen:Number(s.bauzinsen),
+        wagnis:Number(s.wagnis), gewinn:Number(s.gewinn),
+      };
+    });
+    if(typeof render==='function' && SESSION) render();
+  }catch(e){ console.warn('K3-Sync fehlgeschlagen:', e); }
+}
+// Beim Boot direkt ziehen — auch ohne Login (Mitarbeiter-Tab nutzt sie)
+syncK3FromServer();
+
 function saveRates(){
   localStorage.setItem('willroider_rates',
     JSON.stringify({k3:state.k3,calc:state.calc,cltAufschlag:state.cltAufschlag,webhookUrl:state.webhookUrl}));
+}
+
+// Pusht den aktuellen K3-Satz einer Gruppe an die Bridge (nur erlaubt fuer
+// GF/Buero — andere bekommen 403, das ist OK, dann wirkt der Satz nur lokal).
+async function pushK3ToServer(gruppe){
+  const k=state.k3[gruppe]; if(!k) return;
+  try{
+    await fetch(BRIDGE_URL,{
+      method:'POST', headers:{'Content-Type':'application/json', apikey:SUPA_ANON},
+      body:JSON.stringify({action:'k3', gruppe, ...k}),
+    });
+  }catch(e){ console.warn('K3-Push fehlgeschlagen:', e); }
 }
 
 function nowStr(){
@@ -240,11 +277,9 @@ function logEvent(typ, extra){
     const log=JSON.parse(localStorage.getItem('willroider_eventlog')||'[]');
     log.unshift(e); localStorage.setItem('willroider_eventlog',JSON.stringify(log.slice(0,500)));
   }catch(_){}
-  const url=webhookUrl();
-  if(url){
-    try{ fetch(url,{method:'POST',mode:'no-cors',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(e)}); }catch(_){}
-  }
+  // Anfragen werden separat ueber sendMail() an die Bridge geschickt — hier
+  // also NICHT nochmal pushen (sonst Doppel-Insert). Logins/sonstige Events
+  // nur lokal protokollieren; eine zentrale Tabelle dafuer brauchen wir nicht.
 }
 function getLog(){ try{return JSON.parse(localStorage.getItem('willroider_eventlog')||'[]');}catch(_){return [];} }
 
@@ -585,13 +620,41 @@ function buildAnfrage(){
   L.push('GESAMTSUMME NETTO: '+eur(netto));
   return {text:L.join('\n'), netto:netto, posAnzahl:anz, eigenAnzahl:eig.length};
 }
-function sendMail(){
+async function sendMail(){
   const a=buildAnfrage();
+  const payload={
+    action:'anfrage',
+    kunde_name:SESSION.name,
+    kunde_rolle:SESSION.rolle||null,
+    kunde_code:SESSION.code||null,
+    summe_netto:a.netto,
+    positionen_anzahl:a.posAnzahl,
+    eigene_anzahl:a.eigenAnzahl,
+    bedarf_text:a.text,
+    projekt:state.proj,
+  };
+  // Lokal protokollieren (fallback) + serverseitig speichern via Bridge.
   logEvent('Anfrage', {projekt:'Bausatz', summe:eur(a.netto), positionen:a.posAnzahl,
     eigene:a.eigenAnzahl, bedarf:a.text});
-  const subject='Anfrage Bausatz-Kalkulation — '+SESSION.name;
-  const body=a.text+'\n\nBitte um Angebot. Mit freundlichen Grü—en\n'+SESSION.name;
-  window.location.href='mailto:'+DATA.firma.email+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
+  try{
+    const r=await fetch(BRIDGE_URL,{
+      method:'POST', headers:{'Content-Type':'application/json', apikey:SUPA_ANON},
+      body:JSON.stringify(payload),
+    });
+    const d=await r.json();
+    if(d.ok){
+      alert('Deine Anfrage wurde an das Büro übermittelt.\n'+
+        (d.mailSent?'Eine Bestätigungs-Mail wurde versendet.':'(Mail-Versand zurzeit deaktiviert — Anfrage ist trotzdem gespeichert.)'));
+      return;
+    }
+    throw new Error(d.error||'Unbekannter Fehler');
+  }catch(e){
+    // Fallback: alte mailto-Variante, damit die Anfrage trotzdem rausgeht.
+    console.warn('Bridge-POST fehlgeschlagen, fallback auf mailto:', e);
+    const subject='Anfrage Bausatz-Kalkulation — '+SESSION.name;
+    const body=a.text+'\n\nBitte um Angebot. Mit freundlichen Grüßen\n'+SESSION.name;
+    window.location.href='mailto:'+DATA.firma.email+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
+  }
 }
 
 function viewProtokoll(){
@@ -706,7 +769,11 @@ function bindInputs(){
     render();
   });
   document.querySelectorAll('[data-k3]').forEach(el=>el.onchange=()=>{
-    state.k3[el.dataset.k3][el.dataset.f]=num(el.value);saveRates();render();
+    const gruppe=el.dataset.k3;
+    state.k3[gruppe][el.dataset.f]=num(el.value);
+    saveRates();
+    pushK3ToServer(gruppe);
+    render();
   });
   document.querySelectorAll('[data-webhook]').forEach(el=>el.onchange=()=>{state.webhookUrl=el.value.trim();saveRates();render();});
   document.querySelectorAll('[data-eigen-name]').forEach(el=>el.oninput=()=>state.eigene[el.dataset.eigenName].name=el.value);

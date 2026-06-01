@@ -56,7 +56,11 @@ const STATUS_LABEL: Record<BaustellenStatus, string> = {
 export default function BaustelleDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { isAdmin, role } = useAuth();
+  /** Eine Baustelle endgültig zu löschen ist destruktiv und kaskadiert auf
+   *  Berichte/Stunden/Einteilungen. Erlaubt nur Geschäftsführung — entspricht
+   *  der RLS-Policy `baustellen_delete_gf_only`. */
+  const canDelete = role === "geschaeftsfuehrung";
   const { toast } = useToast();
   const [b, setB] = useState<Baustelle | null>(null);
   const [termine, setTermine] = useState<Termin[]>([]);
@@ -347,7 +351,7 @@ export default function BaustelleDetail() {
                 ))}
               </select>
             </div>
-            <div className="grid grid-cols-2 sm:flex gap-2">
+            <div className={`grid ${canDelete ? "grid-cols-2" : "grid-cols-1"} sm:flex gap-2`}>
               <Button
                 variant="outline"
                 onClick={() => setEditDialog(true)}
@@ -355,13 +359,16 @@ export default function BaustelleDetail() {
               >
                 <Pencil className="h-4 w-4 mr-1.5" /> Bearbeiten
               </Button>
-              <Button
-                variant="outline"
-                onClick={deleteBaustelle}
-                className="h-11 sm:h-10 border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground"
-              >
-                <Trash2 className="h-4 w-4 mr-1.5" /> Löschen
-              </Button>
+              {canDelete && (
+                <Button
+                  variant="outline"
+                  onClick={deleteBaustelle}
+                  className="h-11 sm:h-10 border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                  title="Endgültig löschen (nur Geschäftsführung)"
+                >
+                  <Trash2 className="h-4 w-4 mr-1.5" /> Löschen
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>

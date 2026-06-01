@@ -35,4 +35,16 @@ test.describe("Bausatz-Kalkulator", () => {
     // Sidebar (Desktop) hat den Link
     await expect(page.getByRole("link", { name: /^Kalkulator$/i }).first()).toBeVisible();
   });
+
+  test("/kalkulator/anfragen rendert Liste + Erklaerung", async ({ page }) => {
+    await page.goto("/kalkulator/anfragen");
+    await expect(page.locator("body")).toContainText(
+      /bausatz-anfragen|anfragen/i,
+      { timeout: 10000 },
+    );
+    // entweder leerer Zustand oder Tabelle vorhanden
+    await expect(page.locator("body")).toContainText(
+      /noch keine anfragen|kunde|status/i,
+    );
+  });
 });

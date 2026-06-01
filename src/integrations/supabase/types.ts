@@ -802,6 +802,49 @@ export type Database = {
         Update: Partial<Database['public']['Tables']['app_einstellungen']['Row']>;
         Relationships: [];
       };
+      kalkulator_k3_saetze: {
+        Row: {
+          gruppe: 'dach' | 'decken' | 'waende' | 'regie' | 'clt';
+          grundlohn: number;
+          lnk: number;
+          unprod: number;
+          ggk: number;
+          bauzinsen: number;
+          wagnis: number;
+          gewinn: number;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: Partial<Database['public']['Tables']['kalkulator_k3_saetze']['Row']> & {
+          gruppe: 'dach' | 'decken' | 'waende' | 'regie' | 'clt';
+        };
+        Update: Partial<Database['public']['Tables']['kalkulator_k3_saetze']['Row']>;
+        Relationships: [];
+      };
+      kalkulator_anfragen: {
+        Row: {
+          id: string;
+          erstellt_am: string;
+          kunde_name: string;
+          kunde_rolle: string | null;
+          kunde_code: string | null;
+          summe_netto: number | null;
+          positionen_anzahl: number | null;
+          eigene_anzahl: number | null;
+          bedarf_text: string | null;
+          raw_anfrage: any;
+          versendet_an_mail: string | null;
+          versendet_am: string | null;
+          status: 'eingegangen' | 'in_bearbeitung' | 'angeboten' | 'abgeschlossen' | 'storniert';
+          bearbeitet_von: string | null;
+          notiz_intern: string | null;
+        };
+        Insert: Partial<Database['public']['Tables']['kalkulator_anfragen']['Row']> & {
+          kunde_name: string;
+        };
+        Update: Partial<Database['public']['Tables']['kalkulator_anfragen']['Row']>;
+        Relationships: [];
+      };
       stunden_berichte: {
         Row: {
           id: string;

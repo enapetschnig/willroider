@@ -21,6 +21,7 @@ import {
   User as UserIcon,
   FileText,
   Calculator,
+  Mail,
 } from "lucide-react";
 import { InstallPromptDialog } from "./InstallPromptDialog";
 import { useAuth } from "@/contexts/AuthContext";
@@ -58,6 +59,7 @@ const NAV: NavItem[] = [
   { to: "/stundenberichte", label: "Stundenberichte", icon: FileSpreadsheet, roles: ["review"], end: false },
   { to: "/berichte", label: "Berichte", icon: FileText, roles: ["all"], end: false },
   { to: "/kalkulator", label: "Kalkulator", icon: Calculator, roles: ["gf"], end: true },
+  { to: "/kalkulator/anfragen", label: "Anfragen", icon: Mail, roles: ["gf"], end: true },
   { to: "/admin", label: "Verwaltung", icon: Settings, roles: ["admin"], end: false },
 ];
 

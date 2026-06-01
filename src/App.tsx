@@ -29,6 +29,7 @@ import Kalender from "@/pages/Kalender";
 import Evaluierung from "@/pages/Evaluierung";
 import Fahrzeuge from "@/pages/Fahrzeuge";
 import Kalkulator from "@/pages/Kalkulator";
+import KalkulatorAnfragen from "@/pages/KalkulatorAnfragen";
 import MeinTag from "@/pages/MeinTag";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 
@@ -113,6 +114,10 @@ const App = () => (
               <Route
                 path="/kalkulator"
                 element={<RequireRole role="gf"><Kalkulator /></RequireRole>}
+              />
+              <Route
+                path="/kalkulator/anfragen"
+                element={<RequireRole role="gf"><KalkulatorAnfragen /></RequireRole>}
               />
             </Route>
             <Route path="*" element={<NotFound />} />
