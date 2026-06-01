@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Holzbau Willroider GmbH — Bausatz-Kalkulator</title>
+<style>
+:root{
+  --green:#2E5E2E; --green-md:#3D7A3D; --green-lt:#D4EDDA;
+  --blue:#1F4E79; --yellow:#FFFACD; --gray:#F5F5F5; --line:#ddd;
+  --ink:#222; --muted:#888;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,Helvetica,sans-serif;color:var(--ink);background:#eef1ee;font-size:14px}
+h1,h2,h3{font-weight:bold}
+.hidden{display:none!important}
+
+/* LOGIN */
+#login{min-height:100vh;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,#2E5E2E,#1a3a1a)}
+.login-box{background:#fff;padding:40px;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,.3);
+  width:90%;max-width:420px;text-align:center}
+.login-box .logo{font-size:22px;font-weight:bold;color:var(--green);margin-bottom:6px}
+.login-box .sub{color:var(--muted);font-size:13px;margin-bottom:28px}
+.login-box input{width:100%;padding:14px;font-size:16px;border:2px solid var(--line);
+  border-radius:8px;text-align:center;letter-spacing:1px;margin-bottom:14px}
+.login-box input:focus{outline:none;border-color:var(--green)}
+.login-box button{width:100%;padding:14px;font-size:16px;font-weight:bold;color:#fff;
+  background:var(--green);border:none;border-radius:8px;cursor:pointer}
+.login-box button:hover{background:var(--green-md)}
+.login-err{color:#c0392b;font-size:13px;margin-top:12px;min-height:18px}
+.login-hint{margin-top:20px;font-size:11px;color:var(--muted);line-height:1.6}
+
+/* HEADER */
+header{background:var(--green);color:#fff;padding:12px 20px;display:flex;
+  align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;
+  position:sticky;top:0;z-index:50;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+header .brand{font-size:18px;font-weight:bold}
+header .brand small{display:block;font-size:11px;font-weight:normal;opacity:.85}
+header .userbox{display:flex;align-items:center;gap:12px;font-size:13px}
+.badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:bold;text-transform:uppercase}
+.badge.kunde{background:#5b9bd5;color:#fff}
+.badge.mitarbeiter{background:#e69138;color:#fff}
+.badge.admin{background:#cc0000;color:#fff}
+header button.logout{background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.4);
+  padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px}
+
+/* NAV */
+nav{background:#fff;border-bottom:1px solid var(--line);padding:0 12px;display:flex;
+  gap:2px;overflow-x:auto;position:sticky;top:56px;z-index:40}
+nav button{background:none;border:none;padding:12px 16px;cursor:pointer;font-size:13px;
+  font-weight:bold;color:#555;border-bottom:3px solid transparent;white-space:nowrap}
+nav button.active{color:var(--green);border-bottom-color:var(--green)}
+nav button:hover{background:var(--gray)}
+
+main{max-width:1200px;margin:0 auto;padding:20px 16px 80px}
+.panel{background:#fff;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.08);
+  margin-bottom:20px;overflow:hidden}
+.panel-head{background:var(--green);color:#fff;padding:12px 18px;font-size:15px;font-weight:bold}
+.panel-head.blue{background:var(--blue)}
+.panel-body{padding:16px 18px}
+.note{color:var(--muted);font-size:12px;font-style:italic;margin:6px 0}
+
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:7px 8px;border:1px solid var(--line);text-align:left;vertical-align:top}
+th{background:var(--blue);color:#fff;font-size:11px;text-align:center}
+tr.grp td{background:var(--green-lt);font-weight:bold;color:var(--green);font-size:12px}
+td.num{text-align:right;white-space:nowrap}
+td.ctr{text-align:center}
+.aufbau{font-size:11px;color:#555;line-height:1.5;white-space:pre-line}
+input.menge,input.calc,input.len{width:80px;padding:5px;border:1px solid #ccc;border-radius:4px;
+  text-align:right;background:var(--yellow)}
+input.calc{width:70px}
+input.len{width:60px}
+.ep{font-weight:bold;color:var(--green)}
+.gesamt{font-weight:bold}
+.calc-col{background:#fff4e6}
+.calc-head{background:#e69138!important}
+
+/* PROJEKTDATEN */
+.field{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid #eee;flex-wrap:wrap}
+.field label{flex:0 0 220px;font-weight:bold;font-size:13px}
+.field input,.field select{padding:8px;border:1px solid #ccc;border-radius:5px;background:var(--yellow);min-width:120px}
+.field .hint{color:var(--muted);font-size:12px;font-style:italic}
+.bgk-result{margin-top:14px;padding:12px;background:var(--green-lt);border-radius:8px;
+  font-size:16px;font-weight:bold;color:var(--green);display:flex;justify-content:space-between}
+
+/* SUMMARY */
+.sumrow{display:flex;justify-content:space-between;padding:10px 4px;border-bottom:1px solid #eee;font-size:14px}
+.sumrow.total{font-size:18px;font-weight:bold;color:var(--green);border-top:2px solid var(--green);
+  border-bottom:none;margin-top:6px;padding-top:14px}
+.sumrow .sub{color:var(--muted);font-size:12px;font-style:italic}
+
+/* BUTTONS */
+.btn{display:inline-block;padding:12px 22px;font-size:14px;font-weight:bold;border:none;
+  border-radius:8px;cursor:pointer;text-decoration:none}
+.btn-green{background:var(--green-md);color:#fff}
+.btn-green:hover{background:var(--green)}
+.btn-blue{background:var(--blue);color:#fff}
+.btn-gray{background:#e0e0e0;color:#333}
+.btn-row{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px}
+
+/* ADMIN */
+.rate-grid{display:grid;grid-template-columns:1fr repeat(3,110px);gap:8px;align-items:center;margin-bottom:6px}
+.rate-grid.head{font-weight:bold;font-size:11px;color:#fff;background:var(--blue);padding:6px;border-radius:5px}
+.rate-grid input{width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;text-align:right;background:var(--yellow)}
+.rate-label{font-size:13px;font-weight:bold}
+/* K3-Karten */
+.k3card{border:1px solid var(--line);border-radius:8px;margin-bottom:14px;overflow:hidden}
+.k3head{background:var(--green-lt);color:var(--green);padding:8px 12px;font-size:13px}
+.k3grid{display:flex;flex-wrap:wrap;gap:10px;padding:10px 12px;align-items:flex-end;border-top:1px dashed var(--line)}
+.k3sec{flex:0 0 100%;font-size:11px;font-weight:bold;color:var(--blue);text-transform:uppercase;margin-bottom:2px}
+.k3grid label{display:flex;flex-direction:column;font-size:11px;color:#555;gap:3px}
+.k3grid input{width:90px;padding:6px;border:1px solid #ccc;border-radius:4px;text-align:right;background:var(--yellow)}
+
+/* eigene Aufbauten */
+.eigen-block{border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:12px;background:var(--gray)}
+.eigen-block .top{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+.eigen-block input[type=text]{padding:6px;border:1px solid #ccc;border-radius:4px}
+.eigen-block select{padding:6px;border:1px solid #ccc;border-radius:4px;background:var(--yellow)}
+.layer{display:flex;gap:8px;align-items:center;margin:4px 0}
+.layer span{flex:0 0 70px;font-size:12px;color:#666}
+.layer select{flex:1;max-width:340px}
+.firma-card{text-align:center;padding:18px;background:var(--green-lt);border-radius:8px;margin-top:20px}
+.firma-card .nm{font-size:16px;font-weight:bold;color:var(--green)}
+.firma-card .dt{font-size:12px;color:#555;margin-top:4px;line-height:1.6}
+
+@media print{
+  header,nav,.btn-row,.no-print{display:none!important}
+  .panel{box-shadow:none;page-break-inside:avoid}
+  body{background:#fff}
+}
+@media(max-width:700px){
+  .field label{flex:1 1 100%}
+  nav{top:64px}
+}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login">
+  <div class="login-box">
+    <div class="logo">Holzbau Willroider GmbH</div>
+    <div class="sub">Bausatz-Kalkulator — Zugangscode eingeben</div>
+    <input type="text" id="codeInput" placeholder="Zugangscode" autocomplete="off"
+           onkeydown="if(event.key==='Enter')doLogin()">
+    <input type="text" id="nameInput" class="hidden" placeholder="Ihr Firmenname / Name" autocomplete="off"
+           onkeydown="if(event.key==='Enter')doLogin()">
+    <button onclick="doLogin()">Anmelden</button>
+    <div class="login-err" id="loginErr"></div>
+    <div class="login-hint">Code von Holzbau Willroider erhalten? Bei Fragen:<br>
+      holzbau@willroider.at</div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden">
+  <header>
+    <div class="brand">Holzbau Willroider GmbH
+      <small>Bausatz-Kalkulator · Zimmermeisterarbeiten</small></div>
+    <div class="userbox">
+      <span id="userName"></span>
+      <span class="badge" id="userBadge"></span>
+      <button class="logout" onclick="logout()">Abmelden</button>
+    </div>
+  </header>
+
+  <nav id="nav"></nav>
+  <main id="main"></main>
+</div>
+
+<script>
+const DATA = {"firma": {"name": "Holzbau Willroider GmbH", "strasse": "Willroiderstra—e 13", "plz_ort": "9500 Villach", "uid": "ATU 79881978", "fn": "FN 612643 x", "email": "holzbau@willroider.at", "iban": "AT10 1700 0001 5005 3005"}, "materialien": ["GKB 12,5mm", "GKF 12,5mm", "GKB 15mm", "GKF 15mm", "Fermacell 15mm", "Rigidur 15mm", "Installationsebene 42mm", "OSB 15mm", "OSB 18mm", "Riegel 80mm", "Riegel 100mm", "Riegel 120mm", "Riegel 140mm", "Riegel 160mm", "Riegel 180mm", "Riegel 200mm", "Riegel 240mm", "Riegel 280mm", "Dämmung Zellulose", "Dämmung Steinwolle", "Dämmung Glaswolle", "Holzweichfaser 40mm", "Holzweichfaser 60mm", "Agepan 16mm", "Winddichtung kein UV", "Winddichtung bis 20mm", "Winddichtung bis 50mm", "Lattung stehend 20mm", "Lattung stehend 30mm", "Lattung stehend 40mm", "Lattung stehend 50mm", "Lattung liegend 20mm", "Lattung liegend 30mm", "Lattung liegend 40mm", "Lattung liegend 50mm", "Fassade Fichte", "Fassade Lärche", "Freie Eingabe (direkt eintippen)"], "gruppen": {"dach": {"name": "Dachkonstruktionen (36 12)", "bgk": 0.15, "gw": 0.1, "mat": 0.05}, "decken": {"name": "Holzrahmenbaudecken (36 14)", "bgk": 0.15, "gw": 0.1, "mat": 0.05}, "waende": {"name": "Riegelwaende und Verkleidungen (36 15)", "bgk": 0.12, "gw": 0.08, "mat": 0.05}, "regie": {"name": "Regieleistungen (36 90)", "bgk": 0.1, "gw": 0.08, "mat": 0}}, "settings": {"sz_zimmerer": 35, "sz_vorarbeiter": 38}, "positionen": {"dach": [{"kind": "header", "pos": "36 12 01 — DACHKONSTRUKTIONEN", "bez": ""}, {"kind": "pos", "group": "dach", "pos": "36 12 01 A", "bez": "Walmdach", "aufbau": "— CNC-Abbund Walmdach\n— Bauholz/Leimholz\n— Vordach gehobelt", "eh": "m²", "base": 35.42, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "dach", "pos": "36 12 01 A1", "bez": "Satteldach", "aufbau": "— CNC-Abbund Satteldach\n— Bauholz/Leimholz\n— Vordach gehobelt", "eh": "m²", "base": 31.8, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "dach", "pos": "36 12 01 B", "bez": "Staubläden", "aufbau": "— Staubläden einfräsen\n   in Sparren", "eh": "lfm", "base": 24.07, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "dach", "pos": "36 12 01 C", "bez": "Stützen Leimholz", "aufbau": "— Leimholzstützen\n— Stützenfu— + Idefix\n— Länge: Eingabe —", "eh": "Stk", "base": 140.79, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": true}, {"kind": "pos", "group": "dach", "pos": "36 12 01 D", "bez": "Zangendecke", "aufbau": "— Zangendecke Leimholz\n   sichtbar", "eh": "m²", "base": 36.94, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "dach", "pos": "36 12 01 E", "bez": "AZ Gaupe", "aufbau": "— Gaupe (Pauschal)", "eh": "Pa", "base": 257.38, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "dach", "pos": "36 12 01 X", "bez": "AZ Schwalbenschwanz", "aufbau": "— Schwalbenschwanz-\n   verbindung", "eh": "Stk", "base": 5.1, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}], "decken": [{"kind": "header", "pos": "36 14 01 — DECKEN MIT ZELLULOSE", "bez": ""}, {"kind": "pos", "group": "decken", "pos": "36 14 01 A", "bez": "DE 15-200-24 RS", "aufbau": "— HWS-Platte 15mm\n— Deckenriegel 200mm (Zellulose)\n— Rauschalung 24mm", "eh": "m²", "base": 115.3, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "decken", "pos": "36 14 01 B", "bez": "DE 15-240-24 RS", "aufbau": "— HWS-Platte 15mm\n— Deckenriegel 240mm (Zellulose)\n— Rauschalung 24mm", "eh": "m²", "base": 122.84, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "decken", "pos": "36 14 01 C", "bez": "DE 15-280-24 RS", "aufbau": "— HWS-Platte 15mm\n— Deckenriegel 280mm (Zellulose)\n— Rauschalung 24mm", "eh": "m²", "base": 130.39, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "header", "pos": "36 14 07 — ZUSATZLEISTUNGEN", "bez": ""}, {"kind": "pos", "group": "decken", "pos": "36 14 07 A", "bez": "Unterzüge Decke", "aufbau": "— Unterzüge Leimholz (Ma—konstruktion)", "eh": "m³", "base": 928.97, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}], "waende": [{"kind": "header", "pos": "36 15 01 — AUSSENW—NDE PUTZTR—GER", "bez": ""}, {"kind": "pos", "group": "waende", "pos": "36 15 01 A", "bez": "AW 15-160-60 WF", "aufbau": "— OSB 15mm\n— Riegelwand 160mm (Zellulose)\n— HWF/DWD 60mm Putzträger", "eh": "m²", "base": 120.33, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 01 B", "bez": "AW 15-200-16 WF", "aufbau": "— OSB 15mm\n— Riegelwand 200mm (Zellulose)\n— HWF/DWD 16mm Putzträger", "eh": "m²", "base": 127.88, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 01 C", "bez": "AW 15-240-16 WF", "aufbau": "— OSB 15mm\n— Riegelwand 240mm (Zellulose)\n— HWF/DWD 16mm Putzträger", "eh": "m²", "base": 135.43, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "header", "pos": "36 15 02 — AUSSENW—NDE HINTERL—FTETE FASSADE", "bez": ""}, {"kind": "pos", "group": "waende", "pos": "36 15 02 A", "bez": "AW 15-160-16 DWD", "aufbau": "— OSB 15mm\n— Riegelwand 160mm (Zellulose)\n— DWD 16mm hinterlüftet", "eh": "m²", "base": 110.89, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 02 B", "bez": "AW 15-200-16 DWD", "aufbau": "— OSB 15mm\n— Riegelwand 200mm (Zellulose)\n— DWD 16mm hinterlüftet", "eh": "m²", "base": 118.44, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 02 C", "bez": "AW 15-240-16 DWD", "aufbau": "— OSB 15mm\n— Riegelwand 240mm (Zellulose)\n— DWD 16mm hinterlüftet", "eh": "m²", "base": 125.98, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "header", "pos": "36 15 04 — INNENW—NDE", "bez": ""}, {"kind": "pos", "group": "waende", "pos": "36 15 04 A", "bez": "IW 15-100-15", "aufbau": "— OSB 15mm\n— Riegelwand 100mm (Zellulose)\n— OSB 15mm", "eh": "m²", "base": 97.88, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 04 B", "bez": "IW 15-120-15", "aufbau": "— OSB 15mm\n— Riegelwand 120mm (Zellulose)\n— OSB 15mm", "eh": "m²", "base": 101.66, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 04 C", "bez": "IW 15-160-15", "aufbau": "— OSB 15mm\n— Riegelwand 160mm (Zellulose)\n— OSB 15mm", "eh": "m²", "base": 109.2, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 04 F", "bez": "IW 15-120 einseitig", "aufbau": "— Rigidur 15mm\n— Riegelwand 120mm (einseitig)", "eh": "m²", "base": 77.66, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "header", "pos": "36 15 06 — FASSADEN (Aufzahlung auf AW)", "bez": ""}, {"kind": "pos", "group": "waende", "pos": "36 15 06 A", "bez": "AZ Holzfassade Fichte", "aufbau": "— Lattung stehend\n— Fichte vorvergraut", "eh": "m²", "base": 89.17, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 06 B", "bez": "AZ Holzfassade Lärche", "aufbau": "— Lattung stehend\n— Lärche vorvergraut", "eh": "m²", "base": 114.01, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "header", "pos": "36 15 07/08 — AUFZAHLUNGEN", "bez": ""}, {"kind": "pos", "group": "waende", "pos": "36 15 07 C", "bez": "AZ 2. Abdichtungsebene Fensterbank", "aufbau": "— Purenitkeil\n— unter Fensterbank", "eh": "lfm", "base": 64.8, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 07 D", "bez": "AZ Unterkonstr. Rollokasten", "aufbau": "— Unterkonstruktion Rollokasten", "eh": "lfm", "base": 58.21, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "waende", "pos": "36 15 08 A", "bez": "AZ Gipskarton 12,5mm", "aufbau": "— GK-Platte 12,5mm (vormontiert)", "eh": "m²", "base": 13.45, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}], "regie": [{"kind": "pos", "group": "regie", "pos": "36 90 01 A", "bez": "Regiestunden Vorarbeiter", "aufbau": "Zimmerer Vorarbeiter", "eh": "h", "base": 65.0, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": true, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 B", "bez": "Regiestunden Facharbeiter", "aufbau": "Zimmerer Facharbeiter", "eh": "h", "base": 65.0, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 C", "bez": "Verladen der Bauteile", "aufbau": "Hallenkran und Stapler", "eh": "h", "base": 85.0, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 D", "bez": "Streicharbeiten", "aufbau": "2× Anstrich nach Wahl", "eh": "m²", "base": 16.63, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 E", "bez": "Untersicht 19mm Fichte NF", "aufbau": "naturbelassen", "eh": "m²", "base": 13.16, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 F", "bez": "Untersicht 27mm Fichte NF", "aufbau": "naturbelassen", "eh": "m²", "base": 16.85, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 G", "bez": "Rauschalung 23mm", "aufbau": "", "eh": "m²", "base": 6.94, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 H", "bez": "Konterlattung 50/80", "aufbau": "", "eh": "Stk", "base": 5.12, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 I", "bez": "Dachlatten 40/50", "aufbau": "", "eh": "Stk", "base": 2.51, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 J", "bez": "Naturholzplatten 19mm C/C", "aufbau": "Verzug", "eh": "m²", "base": 22.14, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 K", "bez": "Traufenlatten", "aufbau": "", "eh": "Stk", "base": 6.75, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "36 90 01 L", "bez": "AZ Farbe bauseitig", "aufbau": "-Abzug bei Kunden-Farbe", "eh": "m²", "base": -5.29, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}, {"kind": "pos", "group": "regie", "pos": "—", "bez": "Palettenmiete", "aufbau": "Eisenpaletten je Einsatz", "eh": "Woche", "base": 100.0, "material": 0.0, "lohn_h": 0.0, "geraete": 0.0, "isVA": false, "isStuetze": false}]}};
+// Hinweis: AUER, CLT, CLTZ-Datenb—nke wurden aus dem Original-Kalkulator entfernt,
+// um die HTML-Datei kompakt zu halten. Sie werden bei Bedarf nachgeladen.
+const AUER = [];
+const CLT = [];
+const CLTZ = { abbund: [], zusatz: [], planung: [], transport: [] };
+
+const ZUGAENGE = {
+  "KUNDE-2026":    {rolle:"kunde",       needsName:true},
+  "KUNDE-DEMO":    {rolle:"kunde",       name:"Demo-Kunde"},
+  "MA-2026":       {rolle:"mitarbeiter", needsName:true, prefix:"MA-"},
+  "ADMIN-2026":    {rolle:"admin",       name:"Administrator"},
+};
+
+const WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxgMpGDtryFcWApk-xlcVgR0M4aN7xzHHJiQjWqYSqp9oL867OQCUlftyYjCglVW5Ur/exec";
+
+let SESSION = null;
+
+function defK3(ggk,wagnis,gewinn){return {grundlohn:18.50,lnk:95,unprod:8,ggk:ggk,bauzinsen:0.5,wagnis:wagnis,gewinn:gewinn};}
+const state = {
+  proj: {wandflaeche:300, wandtypen:3, geschosse:1, laser:false, punktwolke:false, std3d:3},
+  k3: {
+    dach:   defK3(12,3,7),
+    decken: defK3(12,3,7),
+    waende: defK3(10,3,6),
+    regie:  defK3(10,2,6),
+    clt:    defK3(8,3,7),
+  },
+  menge: {},
+  calc: {},
+  stuetzeLen: 3,
+  eigene: [],
+  auerImport: [],
+  clt: { pos:[], zusatz:{}, transport:'', planung:[] },
+  cltAufschlag: 0,
+  webhookUrl: '',
+};
+
+function mlp(g){const k=state.k3[g];return k.grundlohn*(1+k.lnk/100)*(1+k.unprod/100);}
+function gz(g){const k=state.k3[g];return k.ggk+k.bauzinsen+k.wagnis+k.gewinn;}
+
+(function loadRates(){
+  try{
+    const s=localStorage.getItem('willroider_rates');
+    if(s){const r=JSON.parse(s); if(r.k3)state.k3=r.k3; if(r.calc)state.calc=r.calc;
+      if(typeof r.cltAufschlag==='number')state.cltAufschlag=r.cltAufschlag;
+      if(typeof r.webhookUrl==='string')state.webhookUrl=r.webhookUrl;}
+  }catch(e){}
+})();
+
+function saveRates(){
+  localStorage.setItem('willroider_rates',
+    JSON.stringify({k3:state.k3,calc:state.calc,cltAufschlag:state.cltAufschlag,webhookUrl:state.webhookUrl}));
+}
+
+function nowStr(){
+  const d=new Date();
+  const z=n=>String(n).padStart(2,'0');
+  return `${z(d.getDate())}.${z(d.getMonth()+1)}.${d.getFullYear()} ${z(d.getHours())}:${z(d.getMinutes())}`;
+}
+function webhookUrl(){ return (state.webhookUrl||'').trim() || WEBHOOK_URL; }
+function logEvent(typ, extra){
+  const e={typ, zeit:nowStr(),
+    name:SESSION?SESSION.name:'?', rolle:SESSION?SESSION.rolle:'',
+    code:SESSION?(SESSION.code||''):'', ...(extra||{})};
+  try{
+    const log=JSON.parse(localStorage.getItem('willroider_eventlog')||'[]');
+    log.unshift(e); localStorage.setItem('willroider_eventlog',JSON.stringify(log.slice(0,500)));
+  }catch(_){}
+  const url=webhookUrl();
+  if(url){
+    try{ fetch(url,{method:'POST',mode:'no-cors',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(e)}); }catch(_){}
+  }
+}
+function getLog(){ try{return JSON.parse(localStorage.getItem('willroider_eventlog')||'[]');}catch(_){return [];} }
+
+function doLogin(){
+  const codeRaw=document.getElementById('codeInput').value.trim();
+  const codeKey=codeRaw.toUpperCase();
+  const z=ZUGAENGE[codeRaw] || ZUGAENGE[codeKey];
+  const err=document.getElementById('loginErr');
+  if(!z){err.textContent='Ungültiger Code.';return;}
+
+  let name=z.name||'';
+  if(z.needsName){
+    const stored=localStorage.getItem('willroider_name_'+codeKey);
+    if(stored){ name=stored; }
+    else{
+      const nameField=document.getElementById('nameInput');
+      const eingabe=nameField.value.trim();
+      if(!eingabe){
+        nameField.classList.remove('hidden'); nameField.focus();
+        err.textContent='Bitte einmalig Ihren Firmennamen / Namen eingeben.';
+        return;
+      }
+      name=(z.prefix||'')+eingabe;
+      localStorage.setItem('willroider_name_'+codeKey, name);
+    }
+  }
+
+  SESSION={rolle:z.rolle, name:name, code:codeRaw};
+  document.getElementById('login').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('userName').textContent=name;
+  const b=document.getElementById('userBadge');
+  b.textContent=z.rolle; b.className='badge '+z.rolle;
+  logEvent('Login');
+  buildNav(); showTab('proj');
+}
+function logout(){location.reload();}
+
+const canCalc=()=>SESSION && (SESSION.rolle==='mitarbeiter'||SESSION.rolle==='admin');
+const isAdmin=()=>SESSION && SESSION.rolle==='admin';
+
+const TABS=[
+  {id:'proj',  label:'Projektdaten / BGK'},
+  {id:'dach',  label:'Dach'},
+  {id:'decken',label:'Decken'},
+  {id:'waende',label:'Wände'},
+  {id:'regie', label:'Regie'},
+  {id:'eigene',label:'Eigene Aufbauten'},
+  {id:'summe', label:'Zusammenfassung'},
+];
+function buildNav(){
+  const nav=document.getElementById('nav');
+  nav.innerHTML='';
+  let tabs=[...TABS];
+  if(isAdmin()) tabs.splice(5,0,{id:'admin',label:'Kalkulationssätze'},{id:'protokoll',label:'Zugriffe & Anfragen'});
+  tabs.forEach(t=>{
+    const btn=document.createElement('button');
+    btn.textContent=t.label; btn.dataset.tab=t.id;
+    btn.onclick=()=>showTab(t.id);
+    nav.appendChild(btn);
+  });
+}
+let curTab='proj';
+function showTab(id){
+  curTab=id;
+  document.querySelectorAll('#nav button').forEach(b=>
+    b.classList.toggle('active',b.dataset.tab===id));
+  render();
+}
+
+const eur=n=>(n||0).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' —';
+const r2=n=>Math.round((n+Number.EPSILON)*100)/100;
+const num=v=>{const x=parseFloat(String(v).replace(',','.'));return isNaN(x)?0:x;};
+
+function k7(p){
+  const c=state.calc[p.pos]||{};
+  const aw=num(c.aw), mat=num(c.material), ger=num(c.geraete), fr=num(c.fremd);
+  const lohn=aw*mlp(p.group);
+  const sonst=mat+ger+fr;
+  const hk=lohn+sonst;
+  const vk=r2(hk*(1+gz(p.group)/100));
+  return {aw,lohn,sonst,hk,vk,hasCost:(aw>0||sonst>0)};
+}
+function calcEP(p){
+  const k=k7(p);
+  return k.hasCost ? k.vk : p.base;
+}
+function displayEP(p){
+  let ep=calcEP(p);
+  if(p.isStuetze) ep=r2(ep/3*num(state.stuetzeLen));
+  return ep;
+}
+
+function calcBGK(){
+  const pj=state.proj;
+  const statik=num(pj.wandflaeche)*0.81;
+  let wh=num(pj.wandtypen)*2;
+  const ge=num(pj.geschosse);
+  wh += (ge===2?1:(ge>=3?2:0));
+  wh += (pj.laser?2:0);
+  wh=Math.max(4,wh);
+  const werkplan=wh*85;
+  const laser=pj.laser?num(pj.std3d)*99:0;
+  const punkt=pj.punktwolke?446.88:0;
+  return {statik,werkplan,laser,punkt,wh,total:statik+werkplan+laser+punkt};
+}
+
+function groupSum(group){
+  let s=0;
+  DATA.positionen[group].forEach(p=>{
+    if(p.kind!=='pos')return;
+    const m=num(state.menge[p.pos]);
+    if(m>0) s+=displayEP(p)*m;
+  });
+  return s;
+}
+
+function render(){
+  const m=document.getElementById('main');
+  if(curTab==='proj')   m.innerHTML=viewProj();
+  else if(curTab==='summe') m.innerHTML=viewSumme();
+  else if(curTab==='eigene') m.innerHTML=viewEigene();
+  else if(curTab==='admin') m.innerHTML=viewAdmin();
+  else if(curTab==='protokoll') m.innerHTML=viewProtokoll();
+  else m.innerHTML=viewPositions(curTab);
+  bindInputs();
+}
+
+function viewProj(){
+  const b=calcBGK(); const pj=state.proj;
+  return `<div class="panel"><div class="panel-head">Projektdaten — Baustellengemeinkosten (BGK 36 01)</div>
+  <div class="panel-body">
+    <p class="note">Die BGK werden automatisch aus Ihren Projektangaben berechnet.</p>
+    <div class="field"><label>Gesamte Wandfläche (m²)</label>
+      <input type="number" data-pj="wandflaeche" value="${pj.wandflaeche}">
+      <span class="hint">Basis Statik 0,81 —/m²</span></div>
+    <div class="field"><label>Anzahl Wandtypen</label>
+      <input type="number" data-pj="wandtypen" value="${pj.wandtypen}">
+      <span class="hint">je Typ 2 Werkplanungsstunden</span></div>
+    <div class="field"><label>Anzahl Geschosse</label>
+      <input type="number" data-pj="geschosse" value="${pj.geschosse}" min="1">
+      <span class="hint">2 — +1h · 3+ — +2h</span></div>
+    <div class="field"><label>3D Laseraufma—?</label>
+      <select data-pj="laser"><option value="nein"${!pj.laser?' selected':''}>Nein</option>
+        <option value="ja"${pj.laser?' selected':''}>Ja</option></select>
+      <span class="hint">EP 99,00 —/h · +2h Werkplanung</span></div>
+    <div class="field"><label>Stunden 3D-Aufma—</label>
+      <input type="number" data-pj="std3d" value="${pj.std3d}">
+      <span class="hint">Default 3h</span></div>
+    <div class="field"><label>Punktwolke (e57)?</label>
+      <select data-pj="punktwolke"><option value="nein"${!pj.punktwolke?' selected':''}>Nein</option>
+        <option value="ja"${pj.punktwolke?' selected':''}>Ja</option></select>
+      <span class="hint">Pauschal 446,88 —</span></div>
+
+    <div style="margin-top:16px;font-size:13px;color:#555">
+      <div class="sumrow"><span>36 01 01 A · Konstruktive Statik (${num(pj.wandflaeche)} m² — 0,81)</span><b>${eur(b.statik)}</b></div>
+      <div class="sumrow"><span>36 01 01 B · Werkplanung (${b.wh} h — 85,00)</span><b>${eur(b.werkplan)}</b></div>
+      <div class="sumrow"><span>36 01 01 C · 3D Laseraufma— ${pj.laser?'('+num(pj.std3d)+' h — 99,00)':'(nein)'}</span><b>${eur(b.laser)}</b></div>
+      <div class="sumrow"><span>36 01 01 D · Punktwolke ${pj.punktwolke?'(Pauschal)':'(nein)'}</span><b>${eur(b.punkt)}</b></div>
+    </div>
+    <div class="bgk-result"><span>BGK GESAMT (36 01)</span><span>${eur(b.total)}</span></div>
+  </div></div>`;
+}
+
+function viewPositions(group){
+  const titles={dach:'Dachkonstruktionen (36 12)',decken:'Holzrahmenbaudecken (36 14)',
+    waende:'Riegelwände und Verkleidungen (36 15)',regie:'Regieleistungen (36 90)'};
+  const showCalc=canCalc();
+  let head=`<tr><th style="width:80px">Pos-Nr</th><th>Bezeichnung / Aufbau</th>
+    <th style="width:46px">EH</th>`;
+  if(showCalc) head+=`<th class="calc-head" style="width:62px">AW<br>h/EH</th>
+    <th class="calc-head" style="width:70px">Material<br>—/EH</th>
+    <th class="calc-head" style="width:62px">Geräte<br>—/EH</th>
+    <th class="calc-head" style="width:62px">Fremd<br>—/EH</th>
+    <th style="width:70px">Lohn<br>—/EH</th>
+    <th style="width:70px">Sonst.<br>—/EH</th>`;
+  head+=`<th style="width:84px">EP —/EH</th><th style="width:74px">Menge</th>
+    <th style="width:100px">Gesamt —</th></tr>`;
+  const NCOL=showCalc?12:6;
+
+  let rows='';
+  DATA.positionen[group].forEach(p=>{
+    if(p.kind==='header'){
+      rows+=`<tr class="grp"><td colspan="${NCOL}">${p.pos}</td></tr>`;
+      return;
+    }
+    const ep=displayEP(p);
+    const m=num(state.menge[p.pos]);
+    const ges=m>0?ep*m:0;
+    const c=state.calc[p.pos]||{};
+    const k=k7(p);
+    let stuetzeField='';
+    if(p.isStuetze){
+      stuetzeField=`<div style="margin-top:4px;font-size:11px">Stützenlänge (m):
+        <input class="len" data-stuetze="1" value="${state.stuetzeLen}"></div>`;
+    }
+    rows+=`<tr><td class="ctr">${p.pos}</td>
+      <td><b>${p.bez}</b><div class="aufbau">${p.aufbau||''}</div>${stuetzeField}</td>
+      <td class="ctr">${p.eh}</td>`;
+    if(showCalc){
+      rows+=`<td class="calc-col"><input class="calc" data-calc="${p.pos}" data-f="aw" value="${c.aw??''}" placeholder="0"></td>
+        <td class="calc-col"><input class="calc" data-calc="${p.pos}" data-f="material" value="${c.material??''}" placeholder="0"></td>
+        <td class="calc-col"><input class="calc" data-calc="${p.pos}" data-f="geraete" value="${c.geraete??''}" placeholder="0"></td>
+        <td class="calc-col"><input class="calc" data-calc="${p.pos}" data-f="fremd" value="${c.fremd??''}" placeholder="0"></td>
+        <td class="num" style="font-size:12px;color:#555">${k.hasCost?eur(k.lohn):'-'}</td>
+        <td class="num" style="font-size:12px;color:#555">${k.hasCost?eur(k.sonst):'-'}</td>`;
+    }
+    rows+=`<td class="num ep">${eur(ep)}</td>
+      <td class="ctr"><input class="menge" data-menge="${p.pos}" value="${state.menge[p.pos]||''}"></td>
+      <td class="num gesamt">${ges>0?eur(ges):'-'}</td></tr>`;
+  });
+
+  const sum=groupSum(group);
+  let calcNote=showCalc?`<p class="note">K7-Preisermittlung: AW (h/EH) — Mittellohnpreis (${eur(mlp(group))}/h) = Lohn.
+    Material + Geräte + Fremd = Sonstiges. EP = (Lohn + Sonstiges) — (1 + Gesamtzuschlag ${gz(group).toFixed(1)} %).
+    Felder leer = hinterlegter Basispreis gilt.</p>`:'';
+  return `<div class="panel"><div class="panel-head">${titles[group]}</div>
+    <div class="panel-body">${calcNote}
+    <div style="overflow-x:auto"><table><thead>${head}</thead><tbody>${rows}</tbody>
+    <tfoot><tr style="background:var(--green-lt);font-weight:bold">
+      <td colspan="${NCOL-2}" style="text-align:right;color:var(--green)">SUMME ${titles[group]}</td>
+      <td></td><td class="num" style="color:var(--green)">${eur(sum)}</td></tr></tfoot>
+    </table></div></div></div>`;
+}
+
+function viewEigene(){
+  let blocks='';
+  state.eigene.forEach((e,i)=>{
+    let layers='';
+    for(let l=0;l<e.schichten.length;l++){
+      layers+=`<div class="layer"><span>Schicht ${l+1}</span>
+        <select data-eigen="${i}" data-layer="${l}">
+        <option value="">wählen</option>
+        ${DATA.materialien.map(m=>`<option${e.schichten[l]===m?' selected':''}>${m}</option>`).join('')}
+        </select></div>`;
+    }
+    blocks+=`<div class="eigen-block">
+      <div class="top">
+        <input type="text" placeholder="Bezeichnung" data-eigen-name="${i}" value="${e.name||''}" style="flex:1;min-width:180px">
+        <label style="font-size:12px">Schichten:
+        <select data-eigen-cnt="${i}">${[1,2,3,4,5,6,7,8].map(n=>`<option${e.schichten.length===n?' selected':''}>${n}</option>`).join('')}</select></label>
+        <label style="font-size:12px">Gruppe:
+        <select data-eigen-grp="${i}">
+          <option value="waende"${e.group==='waende'?' selected':''}>Wand</option>
+          <option value="decken"${e.group==='decken'?' selected':''}>Decke</option>
+          <option value="dach"${e.group==='dach'?' selected':''}>Dach</option>
+        </select></label>
+        <label style="font-size:12px">Menge (m²):
+        <input class="menge" data-eigen-menge="${i}" value="${e.menge||''}"></label>
+        <button class="btn btn-gray" style="padding:6px 12px" onclick="delEigen(${i})">x</button>
+      </div>
+      ${layers}
+      <div style="margin-top:6px;font-size:12px;color:#c0392b;font-weight:bold">EP: Auf Anfrage</div>
+    </div>`;
+  });
+  return `<div class="panel"><div class="panel-head blue">Eigene Aufbauten</div>
+    <div class="panel-body">
+    <p class="note">Stellen Sie eigene Aufbauten zusammen. Wählen Sie Anzahl Schichten und je Schicht das Material.
+      Der Preis wird von Holzbau Willroider auf Anfrage kalkuliert und in zukünftige Listen aufgenommen.</p>
+    ${blocks||'<p style="color:#888;padding:20px;text-align:center">Noch kein eigener Aufbau angelegt.</p>'}
+    <div class="btn-row">
+      <button class="btn btn-gray" onclick="addEigen()">+ Eigenen Aufbau hinzufügen</button>
+      <button class="btn btn-green" onclick="sendMail()">Speichern &amp; per E-Mail versenden</button>
+    </div>
+    <p class="note no-print">Speichern &amp; Versenden übermittelt Ihre komplette Anfrage (inkl. eigener Aufbauten) an Holzbau Willroider — per E-Mail und direkt ins System.</p>
+    </div></div>`;
+}
+function addEigen(){state.eigene.push({name:'',group:'waende',schichten:['','',''],menge:''});render();}
+function delEigen(i){state.eigene.splice(i,1);render();}
+
+function viewSumme(){
+  const b=calcBGK();
+  const sDach=groupSum('dach'), sDecken=groupSum('decken'),
+        sWaende=groupSum('waende'), sRegie=groupSum('regie');
+  const netto=b.total+sDach+sDecken+sWaende;
+  const eigeneCount=state.eigene.filter(e=>e.name||e.schichten.some(s=>s)).length;
+  const f=DATA.firma;
+  return `<div class="panel"><div class="panel-head">Projektkalkulation — Gesamtübersicht</div>
+    <div class="panel-body">
+    <div class="sumrow"><span>36 01 · Baustellengemeinkosten</span><b>${eur(b.total)}</b></div>
+    <div class="sumrow"><span>36 12 · Dachkonstruktionen</span><b>${eur(sDach)}</b></div>
+    <div class="sumrow"><span>36 14 · Decken</span><b>${eur(sDecken)}</b></div>
+    <div class="sumrow"><span>36 15 · Riegelwände</span><b>${eur(sWaende)}</b></div>
+    <div class="sumrow total"><span>GESAMTSUMME NETTO</span><span>${eur(netto)}</span></div>
+    <div class="sumrow"><span class="sub">36 90 · Regieleistungen (nur auf gesonderte Anordnung)</span>
+      <span class="sub">${eur(sRegie)} (nicht in Summe)</span></div>
+    ${eigeneCount>0?`<div class="sumrow"><span class="sub">${eigeneCount} eigene(r) Aufbau(ten)</span><span class="sub">Auf Anfrage</span></div>`:''}
+    <p class="note" style="margin-top:14px">Alle Preise exkl. MwSt. · Gültig vorbehaltlich Prüfung · Verbindungsmittel in EP enthalten ·
+      Abrechnung hohl für voll (IW) · —ffnungen &gt;4 m² Abzug bei AW</p>
+
+    <div class="btn-row">
+      <button class="btn btn-green" onclick="sendMail()">Anfrage per E-Mail senden</button>
+      <button class="btn btn-blue" onclick="window.print()">Drucken / PDF</button>
+    </div>
+    <p class="note no-print">Tipp: Speichern Sie die Kalkulation per Drucken &gt; Als PDF speichern und senden Sie das PDF mit.</p>
+
+    <div class="firma-card">
+      <div class="nm">${f.name}</div>
+      <div class="dt">${f.strasse} · ${f.plz_ort}<br>
+        ${f.email} · UID: ${f.uid} · ${f.fn}</div>
+    </div>
+    </div></div>`;
+}
+
+function buildAnfrage(){
+  const b=calcBGK();
+  const netto=b.total+groupSum('dach')+groupSum('decken')+groupSum('waende');
+  const L=[];
+  L.push('ANFRAGE BAUSATZ-KALKULATION');
+  L.push('Kunde: '+SESSION.name+(SESSION.code?' (Code: '+SESSION.code+')':''));
+  L.push('Datum: '+nowStr());
+  L.push('');
+  L.push('Projektdaten:');
+  L.push('- Wandfläche: '+state.proj.wandflaeche+' m²');
+  L.push('- Wandtypen: '+state.proj.wandtypen+' | Geschosse: '+state.proj.geschosse
+        +' | 3D-Aufma—: '+(state.proj.laser?'ja':'nein'));
+  L.push('');
+  L.push('Positionen:');
+  let anz=0;
+  ['dach','decken','waende','regie'].forEach(g=>{
+    DATA.positionen[g].forEach(p=>{
+      if(p.kind!=='pos')return;
+      const m=num(state.menge[p.pos]);
+      if(m>0){L.push('- '+p.pos+' '+p.bez+': '+m+' '+p.eh+' x '+eur(displayEP(p))+' = '+eur(displayEP(p)*m));anz++;}
+    });
+  });
+  const eig=state.eigene.filter(e=>e.name||e.schichten.some(s=>s));
+  if(eig.length){
+    L.push('');
+    L.push('EIGENE AUFBAUTEN (Preis auf Anfrage):');
+    eig.forEach(e=>{
+      L.push('- "'+(e.name||'ohne Bezeichnung')+'" ('+({waende:'Wand',decken:'Decke',dach:'Dach'}[e.group]||e.group)
+        +', '+(e.menge||'?')+' m²)');
+      e.schichten.forEach((s,i)=>{ if(s) L.push('    Schicht '+(i+1)+': '+s); });
+    });
+  }
+  L.push('');
+  L.push('GESAMTSUMME NETTO: '+eur(netto));
+  return {text:L.join('\n'), netto:netto, posAnzahl:anz, eigenAnzahl:eig.length};
+}
+function sendMail(){
+  const a=buildAnfrage();
+  logEvent('Anfrage', {projekt:'Bausatz', summe:eur(a.netto), positionen:a.posAnzahl,
+    eigene:a.eigenAnzahl, bedarf:a.text});
+  const subject='Anfrage Bausatz-Kalkulation — '+SESSION.name;
+  const body=a.text+'\n\nBitte um Angebot. Mit freundlichen Grü—en\n'+SESSION.name;
+  window.location.href='mailto:'+DATA.firma.email+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
+}
+
+function viewProtokoll(){
+  const log=getLog();
+  const url=webhookUrl();
+  const whStatus = url
+    ? `<span style="color:#2E5E2E;font-weight:bold">aktiv</span> - Zugriffe &amp; Anfragen werden zentral gespeichert.`
+    : `<span style="color:#c0392b;font-weight:bold">nicht eingerichtet</span> - derzeit nur lokales Protokoll + E-Mail.`;
+  let rows='';
+  log.forEach(e=>{
+    const badge = e.typ==='Anfrage'
+      ? `<span style="background:#3D7A3D;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px">Anfrage</span>`
+      : `<span style="background:#5b9bd5;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px">Login</span>`;
+    const detail = e.typ==='Anfrage'
+      ? `${e.positionen||0} Pos. · ${e.eigene||0} eigene · <b>${e.summe||''}</b>`+
+        (e.bedarf?`<div class="aufbau" style="margin-top:4px;white-space:pre-line;max-height:120px;overflow:auto">${e.bedarf}</div>`:'')
+      : `Code: ${e.code||'-'}`;
+    rows+=`<tr><td class="ctr" style="white-space:nowrap">${e.zeit}</td>
+      <td>${badge}</td>
+      <td><b>${e.name||'?'}</b> <span style="color:#888;font-size:11px">(${e.rolle||''})</span></td>
+      <td>${detail}</td></tr>`;
+  });
+  return `<div class="panel"><div class="panel-head blue">Zugriffe &amp; Anfragen</div>
+    <div class="panel-body">
+    <p class="note">Zentrale Rückmeldung: ${whStatus}</p>
+    <div class="field"><label>Webhook-URL (zentrale Tabelle)</label>
+      <input type="text" data-webhook value="${state.webhookUrl||''}" placeholder="https://script.google.com/macros/s/.../exec" style="flex:1;min-width:260px">
+    </div>
+    <div class="btn-row" style="margin-top:0">
+      <button class="btn btn-blue" onclick="testWebhook()">Webhook testen</button>
+      <button class="btn btn-gray" onclick="if(confirm('Lokales Protokoll auf diesem Gerät löschen?')){localStorage.removeItem('willroider_eventlog');render();}">Lokales Protokoll leeren</button>
+    </div>
+    <div style="overflow-x:auto"><table><thead><tr>
+      <th style="width:120px">Zeitpunkt</th><th style="width:80px">Typ</th><th style="width:180px">Wer</th><th>Details</th>
+    </tr></thead><tbody>${rows||'<tr><td colspan="4" style="text-align:center;color:#888">Noch keine Einträge auf diesem Gerät.</td></tr>'}</tbody></table></div>
+    </div></div>`;
+}
+function testWebhook(){
+  const url=webhookUrl();
+  if(!url){alert('Keine Webhook-URL hinterlegt.');return;}
+  logEvent('Login',{name:'__TEST__',hinweis:'Webhook-Test'});
+  alert('Test-Eintrag gesendet an:\n'+url);
+}
+
+const GRP_LABELS={dach:'Dach (36 12)',decken:'Decken (36 14)',waende:'Wände (36 15)',regie:'Regie (36 90)',clt:'CLT (ZMP-Aufschlag)'};
+function viewAdmin(){
+  const k3Block=(key)=>{
+    const k=state.k3[key];
+    return `<div class="k3card">
+      <div class="k3head">${GRP_LABELS[key]} &nbsp;-&nbsp; MLP: <b>${eur(mlp(key))}/h</b> &nbsp;·&nbsp; Gesamtzuschlag: <b>${gz(key).toFixed(1)} %</b></div>
+      <div class="k3grid">
+        <div class="k3sec">K3 - Mittellohnpreis</div>
+        <label>KV-Grundlohn —/h<input data-k3="${key}" data-f="grundlohn" value="${k.grundlohn}"></label>
+        <label>Lohnnebenkosten %<input data-k3="${key}" data-f="lnk" value="${k.lnk}"></label>
+        <label>Unprod. Zeiten %<input data-k3="${key}" data-f="unprod" value="${k.unprod}"></label>
+      </div>
+      <div class="k3grid">
+        <div class="k3sec">K3 - Zuschlagskalkulation (K2)</div>
+        <label>Geschäftsgemeinkosten %<input data-k3="${key}" data-f="ggk" value="${k.ggk}"></label>
+        <label>Bauzinsen %<input data-k3="${key}" data-f="bauzinsen" value="${k.bauzinsen}"></label>
+        <label>Wagnis %<input data-k3="${key}" data-f="wagnis" value="${k.wagnis}"></label>
+        <label>Gewinn %<input data-k3="${key}" data-f="gewinn" value="${k.gewinn}"></label>
+      </div>
+    </div>`;
+  };
+  return `<div class="panel"><div class="panel-head blue">K3 - Kalkulationssätze je Gruppe (—NORM B2061)</div>
+    <div class="panel-body">
+    <p class="note">Mittellohnpreis (MLP) = Grundlohn x (1+Lohnnebenkosten) x (1+unprod. Zeiten).
+      Gesamtzuschlag = GGK + Bauzinsen + Wagnis + Gewinn. Je Gruppe getrennt.</p>
+    ${k3Block('dach')}${k3Block('decken')}${k3Block('waende')}${k3Block('regie')}
+    <div class="btn-row">
+      <button class="btn btn-green" onclick="saveRates();alert('K3-Sätze gespeichert.')">Sätze speichern</button>
+      <button class="btn btn-blue" onclick="exportRates()">Exportieren</button>
+      <label class="btn btn-gray" style="cursor:pointer">Importieren
+        <input type="file" accept=".json" style="display:none" onchange="importRates(event)"></label>
+    </div>
+    </div></div>`;
+}
+function exportRates(){
+  const blob=new Blob([JSON.stringify({k3:state.k3,calc:state.calc,cltAufschlag:state.cltAufschlag},null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='willroider_k3_saetze.json';a.click();
+}
+function importRates(ev){
+  const file=ev.target.files[0];if(!file)return;
+  const rd=new FileReader();
+  rd.onload=()=>{try{const r=JSON.parse(rd.result);
+    if(r.k3)state.k3=r.k3; if(r.calc)state.calc=r.calc;
+    if(typeof r.cltAufschlag==='number')state.cltAufschlag=r.cltAufschlag;
+    saveRates();render();alert('K3-Sätze importiert.');
+  }catch(e){alert('Fehler beim Import.');}};
+  rd.readAsText(file);
+}
+
+function bindInputs(){
+  document.querySelectorAll('[data-pj]').forEach(el=>el.oninput=()=>{
+    const k=el.dataset.pj;
+    state.proj[k]=(k==='laser'||k==='punktwolke')?(el.value==='ja'):el.value;
+    if(curTab==='proj')render();
+  });
+  document.querySelectorAll('[data-menge]').forEach(el=>el.onchange=()=>{
+    state.menge[el.dataset.menge]=el.value; render();
+  });
+  document.querySelectorAll('[data-stuetze]').forEach(el=>el.onchange=()=>{
+    state.stuetzeLen=el.value; render();
+  });
+  document.querySelectorAll('[data-calc]').forEach(el=>el.onchange=()=>{
+    const p=el.dataset.calc,f=el.dataset.f;
+    if(!state.calc[p])state.calc[p]={};
+    state.calc[p][f]=el.value;
+    saveRates();
+    render();
+  });
+  document.querySelectorAll('[data-k3]').forEach(el=>el.onchange=()=>{
+    state.k3[el.dataset.k3][el.dataset.f]=num(el.value);saveRates();render();
+  });
+  document.querySelectorAll('[data-webhook]').forEach(el=>el.onchange=()=>{state.webhookUrl=el.value.trim();saveRates();render();});
+  document.querySelectorAll('[data-eigen-name]').forEach(el=>el.oninput=()=>state.eigene[el.dataset.eigenName].name=el.value);
+  document.querySelectorAll('[data-eigen-cnt]').forEach(el=>el.onchange=()=>{
+    const i=el.dataset.eigenCnt,n=parseInt(el.value),e=state.eigene[i];
+    while(e.schichten.length<n)e.schichten.push('');
+    e.schichten.length=n;render();
+  });
+  document.querySelectorAll('[data-eigen-grp]').forEach(el=>el.onchange=()=>state.eigene[el.dataset.eigenGrp].group=el.value);
+  document.querySelectorAll('[data-eigen-menge]').forEach(el=>el.oninput=()=>state.eigene[el.dataset.eigenMenge].menge=el.value);
+  document.querySelectorAll('[data-layer]').forEach(el=>el.onchange=()=>
+    state.eigene[el.dataset.eigen].schichten[el.dataset.layer]=el.value);
+}
+</script>
+</body>
+</html>

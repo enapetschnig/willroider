@@ -28,6 +28,7 @@ import BerichtDetail from "@/pages/BerichtDetail";
 import Kalender from "@/pages/Kalender";
 import Evaluierung from "@/pages/Evaluierung";
 import Fahrzeuge from "@/pages/Fahrzeuge";
+import Kalkulator from "@/pages/Kalkulator";
 import MeinTag from "@/pages/MeinTag";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 
@@ -42,11 +43,16 @@ function RequireRole({
   role,
   children,
 }: {
-  role: "admin" | "review";
+  role: "admin" | "review" | "gf";
   children: ReactNode;
 }) {
-  const { isAdmin, canReview } = useAuth();
-  const erlaubt = role === "admin" ? isAdmin : canReview;
+  const { isAdmin, canReview, role: userRole } = useAuth();
+  const erlaubt =
+    role === "admin"
+      ? isAdmin
+      : role === "review"
+        ? canReview
+        : userRole === "geschaeftsfuehrung";
   if (!erlaubt) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
@@ -104,6 +110,10 @@ const App = () => (
               <Route path="/berichte" element={<Berichte />} />
               <Route path="/berichte/:id" element={<BerichtDetail />} />
               <Route path="/mein-tag" element={<MeinTag />} />
+              <Route
+                path="/kalkulator"
+                element={<RequireRole role="gf"><Kalkulator /></RequireRole>}
+              />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

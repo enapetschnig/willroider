@@ -20,6 +20,7 @@ import {
   Smartphone,
   User as UserIcon,
   FileText,
+  Calculator,
 } from "lucide-react";
 import { InstallPromptDialog } from "./InstallPromptDialog";
 import { useAuth } from "@/contexts/AuthContext";
@@ -39,7 +40,7 @@ type NavItem = {
   to: string;
   label: string;
   icon: typeof LayoutDashboard;
-  roles?: ("admin" | "review" | "all")[];
+  roles?: ("admin" | "review" | "gf" | "all")[];
   /** end=true → highlight nur wenn Pfad EXAKT übereinstimmt. Default true. */
   end?: boolean;
 };
@@ -56,6 +57,7 @@ const NAV: NavItem[] = [
   { to: "/stunden/auswertung", label: "Auswertung", icon: BarChart3, roles: ["review"], end: true },
   { to: "/stundenberichte", label: "Stundenberichte", icon: FileSpreadsheet, roles: ["review"], end: false },
   { to: "/berichte", label: "Berichte", icon: FileText, roles: ["all"], end: false },
+  { to: "/kalkulator", label: "Kalkulator", icon: Calculator, roles: ["gf"], end: true },
   { to: "/admin", label: "Verwaltung", icon: Settings, roles: ["admin"], end: false },
 ];
 
@@ -91,6 +93,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (!n.roles || n.roles.includes("all")) return true;
     if (n.roles.includes("admin") && isAdmin) return true;
     if (n.roles.includes("review") && canReview) return true;
+    if (n.roles.includes("gf") && role === "geschaeftsfuehrung") return true;
     return false;
   });
 
