@@ -1,19 +1,19 @@
 /**
- * SummeTab — Übersicht der gesamten Kalkulation.
+ * SummeTab — Übersicht der Kalkulation + Anfrage SPEICHERN.
  *
- * Zeigt die Summen pro Bereich (BGK, Dach, Decken, Wände), die
- * Gesamt-Nettosumme (ohne Regie!) und Regie separat. Erlaubt das
- * Versenden einer Anfrage ans Büro über die Edge-Function
- * `kalkulator-bridge` (Action `anfrage`). Empfänger-Default wird aus
- * app_einstellungen.bsb_buero_mail gelesen, Fallback maurer@willroider.at.
+ * Kein Mail-Versand mehr. „Anfrage speichern" legt einen Entwurf in
+ * kalkulator_anfragen an (oder updated den bereits geladenen Entwurf,
+ * falls state.anfrageId gesetzt ist). Anfragen sind dann in der
+ * Anfragen-Liste sicht- und bearbeitbar.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -24,7 +24,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, Mail, Printer } from "lucide-react";
+import { Loader2, Printer, Save } from "lucide-react";
 import {
   calcBGK,
   displayEP,
@@ -56,15 +56,10 @@ interface TabProps {
   setStuetzeLen: (len: number) => void;
   setK3: (gruppe: keyof K3State, patch: Partial<K3Satz>) => void;
   k3SyncStatus: string;
+  setAnfrageId?: (id: string | null) => void;
 }
 
-const FALLBACK_EMPFAENGER = "maurer@willroider.at";
-
-/** Summiert alle Positionen eines Bereichs (Menge > 0) auf. */
-function bereichSumme(
-  bereich: Bereich,
-  state: KalkulatorState,
-): number {
+function bereichSumme(bereich: Bereich, state: KalkulatorState): number {
   const positionen = alleBereichPositionen(bereich);
   const k3 = state.k3[bereich];
   let s = 0;
@@ -77,7 +72,6 @@ function bereichSumme(
   return s;
 }
 
-/** Liste aller Positionen mit Menge > 0 (für Textauflistung). */
 function eingetragenePositionen(
   state: KalkulatorState,
 ): Array<{ p: Position; menge: number; ep: number; summe: number }> {
@@ -96,54 +90,46 @@ function eingetragenePositionen(
   return out;
 }
 
-function buildAnfrageText(
+function buildBedarfText(
   state: KalkulatorState,
   kundenName: string,
   summen: { bgk: number; dach: number; decken: number; waende: number; regie: number; netto: number },
 ): string {
-  const lines: string[] = [];
-  lines.push(`Anfrage Bausatz-Kalkulator`);
-  lines.push(`Kunde: ${kundenName}`);
-  lines.push("");
-  lines.push(`Projekt:`);
-  lines.push(`  Wandfläche: ${state.projekt.wandflaeche} m²`);
-  lines.push(`  Wandtypen: ${state.projekt.wandtypen}`);
-  lines.push(`  Geschosse: ${state.projekt.geschosse}`);
-  if (state.projekt.laser) lines.push(`  Laser-Einmessung (${state.projekt.std3d} h 3D)`);
-  if (state.projekt.punktwolke) lines.push(`  Punktwolke`);
-  lines.push("");
-  lines.push(`Positionen:`);
+  const L: string[] = [];
+  L.push("Anfrage Bausatz-Kalkulator");
+  L.push(`Kunde: ${kundenName}`);
+  L.push("");
+  L.push("Projekt:");
+  L.push(`  Wandfläche: ${state.projekt.wandflaeche} m²`);
+  L.push(`  Wandtypen: ${state.projekt.wandtypen}`);
+  L.push(`  Geschosse: ${state.projekt.geschosse}`);
+  if (state.projekt.laser) L.push(`  Laser-Einmessung (${state.projekt.std3d} h 3D)`);
+  if (state.projekt.punktwolke) L.push(`  Punktwolke`);
+  L.push("");
+  L.push("Positionen:");
   const pos = eingetragenePositionen(state);
-  if (pos.length === 0) {
-    lines.push(`  (keine Positionen eingetragen)`);
-  } else {
-    for (const e of pos) {
-      lines.push(
-        `  ${e.p.pos}  ${e.p.bez} — ${e.menge} ${e.p.eh} × ${eur(e.ep)} = ${eur(e.summe)}`,
-      );
-    }
-  }
-  lines.push("");
-  lines.push(`Summen (netto, exkl. MwSt.):`);
-  lines.push(`  36 01 Baustellengemeinkosten: ${eur(summen.bgk)}`);
-  lines.push(`  36 12 Dachkonstruktionen:     ${eur(summen.dach)}`);
-  lines.push(`  36 14 Decken:                 ${eur(summen.decken)}`);
-  lines.push(`  36 15 Riegelwände:            ${eur(summen.waende)}`);
-  lines.push(`  ------------------------------------------`);
-  lines.push(`  GESAMTSUMME NETTO:            ${eur(summen.netto)}`);
-  lines.push(`  36 90 Regie (separat):        ${eur(summen.regie)}`);
-  lines.push("");
-  lines.push(`Bitte um Angebot.`);
-  lines.push("");
-  lines.push(`— ${FIRMA.name}`);
-  return lines.join("\n");
+  if (pos.length === 0) L.push("  (keine Positionen eingetragen)");
+  else
+    for (const e of pos)
+      L.push(`  ${e.p.pos}  ${e.p.bez} — ${e.menge} ${e.p.eh} × ${eur(e.ep)} = ${eur(e.summe)}`);
+  L.push("");
+  L.push("Summen (netto, exkl. MwSt.):");
+  L.push(`  36 01 Baustellengemeinkosten: ${eur(summen.bgk)}`);
+  L.push(`  36 12 Dachkonstruktionen:     ${eur(summen.dach)}`);
+  L.push(`  36 14 Decken:                 ${eur(summen.decken)}`);
+  L.push(`  36 15 Riegelwände:            ${eur(summen.waende)}`);
+  L.push("  ------------------------------------------");
+  L.push(`  GESAMTSUMME NETTO:            ${eur(summen.netto)}`);
+  L.push(`  36 90 Regie (separat):        ${eur(summen.regie)}`);
+  L.push("");
+  L.push(`— ${FIRMA.name}`);
+  return L.join("\n");
 }
 
-export default function SummeTab({ state }: TabProps) {
+export default function SummeTab({ state, setAnfrageId }: TabProps) {
   const { toast } = useToast();
   const { profile, user } = useAuth();
 
-  // Berechnete Summen
   const bgk = useMemo(() => calcBGK(state.projekt).total, [state.projekt]);
   const sumDach = useMemo(() => bereichSumme("dach", state), [state]);
   const sumDecken = useMemo(() => bereichSumme("decken", state), [state]);
@@ -153,72 +139,24 @@ export default function SummeTab({ state }: TabProps) {
     () => bgk + sumDach + sumDecken + sumWaende,
     [bgk, sumDach, sumDecken, sumWaende],
   );
-
   const positionenAnzahl = useMemo(
     () => eingetragenePositionen(state).length,
     [state],
   );
 
-  // Kunden-Name (für Betreff und Body)
   const kundenName = useMemo(() => {
     if (!profile) return user?.email ?? "Unbekannt";
     const n = `${profile.vorname ?? ""} ${profile.nachname ?? ""}`.trim();
     return n || profile.email || user?.email || "Unbekannt";
   }, [profile, user]);
 
-  // Dialog-State
+  // Dialog
   const [open, setOpen] = useState(false);
-  const [empfaenger, setEmpfaenger] = useState("");
-  const [betreff, setBetreff] = useState("");
+  const [titel, setTitel] = useState("");
   const [body, setBody] = useState("");
-  const [sending, setSending] = useState(false);
-  const [loadingDefaults, setLoadingDefaults] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  // Beim Öffnen Default-Empfänger holen + Body neu generieren
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    (async () => {
-      setLoadingDefaults(true);
-      try {
-        const { data: setting } = await supabase
-          .from("app_einstellungen")
-          .select("wert")
-          .eq("schluessel", "bsb_buero_mail")
-          .maybeSingle();
-        const mail = ((setting as any)?.wert as string) || FALLBACK_EMPFAENGER;
-        if (cancelled) return;
-        setEmpfaenger(mail);
-      } catch {
-        if (!cancelled) setEmpfaenger(FALLBACK_EMPFAENGER);
-      } finally {
-        if (!cancelled) setLoadingDefaults(false);
-      }
-      if (cancelled) return;
-      setBetreff(`Anfrage Bausatz-Kalkulator — ${kundenName}`);
-      setBody(
-        buildAnfrageText(state, kundenName, {
-          bgk,
-          dach: sumDach,
-          decken: sumDecken,
-          waende: sumWaende,
-          regie: sumRegie,
-          netto,
-        }),
-      );
-    })();
-    return () => {
-      cancelled = true;
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  const empfaengerValid = useMemo(
-    () => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(empfaenger.trim()),
-    [empfaenger],
-  );
-
-  const handleOeffnen = useCallback(() => {
+  const oeffnen = useCallback(() => {
     if (positionenAnzahl === 0) {
       toast({
         variant: "destructive",
@@ -227,66 +165,85 @@ export default function SummeTab({ state }: TabProps) {
       });
       return;
     }
+    setTitel((t) =>
+      t || `Bausatz-Kalkulation ${new Date().toLocaleDateString("de-AT")}`,
+    );
+    setBody(
+      buildBedarfText(state, kundenName, {
+        bgk,
+        dach: sumDach,
+        decken: sumDecken,
+        waende: sumWaende,
+        regie: sumRegie,
+        netto,
+      }),
+    );
     setOpen(true);
-  }, [positionenAnzahl, toast]);
+  }, [positionenAnzahl, toast, state, kundenName, bgk, sumDach, sumDecken, sumWaende, sumRegie, netto]);
 
-  const handleSend = useCallback(async () => {
-    if (!empfaengerValid) {
-      toast({
-        variant: "destructive",
-        title: "Empfänger ungültig",
-        description: "Bitte gültige E-Mail-Adresse eintragen.",
-      });
-      return;
-    }
-    setSending(true);
+  const speichern = useCallback(async () => {
+    setSaving(true);
     try {
+      // Snapshot: kompletter State + Klartext-Bedarf
+      const snapshot = {
+        projekt: state.projekt,
+        mengen: state.mengen,
+        overrides: state.overrides,
+        stuetzeLen: state.stuetzeLen,
+        // K3 mit-speichern, damit der Snapshot auch in 6 Monaten
+        // identisch nachgerechnet werden kann, falls sich die Sätze ändern.
+        k3_snapshot: state.k3,
+        titel,
+      };
       const { data, error } = await supabase.functions.invoke(
         "kalkulator-bridge",
         {
           body: {
             action: "anfrage",
-            kunde_name: kundenName,
+            anfrageId: state.anfrageId ?? undefined,
+            kunde_name: titel.trim() || kundenName,
             summe_netto: netto,
             positionen_anzahl: positionenAnzahl,
             eigene_anzahl: 0,
             bedarf_text: body,
-            projekt: state.projekt,
-            empfaenger: empfaenger.trim(),
-            betreff,
+            ...snapshot,
           },
         },
       );
       if (error) throw error;
       const res = data as any;
-      if (res && res.ok === false) {
-        throw new Error(res.error ?? "Versand fehlgeschlagen");
+      if (res?.ok === false) throw new Error(res.error ?? "Speichern fehlgeschlagen");
+      if (res?.anfrageId && setAnfrageId) {
+        setAnfrageId(res.anfrageId);
       }
       toast({
-        title: "Anfrage gesendet",
-        description: "Das Büro hat sie erhalten.",
+        title: res?.updated ? "Anfrage aktualisiert" : "Anfrage gespeichert",
+        description:
+          "Die Anfrage liegt in der Anfragen-Liste und kann jederzeit weiter bearbeitet werden.",
       });
       setOpen(false);
     } catch (e) {
       toast({
         variant: "destructive",
-        title: "Versand nicht durchgekommen",
-        description:
-          (e as Error).message ||
-          "Bitte später noch einmal versuchen oder Admin informieren.",
+        title: "Speichern fehlgeschlagen",
+        description: (e as Error).message || "Bitte später nochmal probieren.",
       });
     } finally {
-      setSending(false);
+      setSaving(false);
     }
   }, [
-    empfaenger,
-    empfaengerValid,
-    betreff,
-    body,
+    state.projekt,
+    state.mengen,
+    state.overrides,
+    state.stuetzeLen,
+    state.k3,
+    state.anfrageId,
+    titel,
     kundenName,
     netto,
     positionenAnzahl,
-    state.projekt,
+    body,
+    setAnfrageId,
     toast,
   ]);
 
@@ -294,149 +251,112 @@ export default function SummeTab({ state }: TabProps) {
     <div className="space-y-4">
       <Card>
         <CardContent className="p-4 sm:p-6 space-y-4">
-          <div>
-            <h2 className="text-xl sm:text-2xl font-semibold">
-              Projektkalkulation — Übersicht
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Alle Preise exkl. MwSt. · gültig vorbehaltlich Prüfung
-            </p>
+          <div className="flex items-start justify-between gap-2 flex-wrap">
+            <div>
+              <h2 className="text-xl sm:text-2xl font-semibold">
+                Projektkalkulation — Übersicht
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Alle Preise exkl. MwSt. · gültig vorbehaltlich Prüfung
+              </p>
+            </div>
+            {state.anfrageId && (
+              <Badge variant="outline" className="text-[11px]">
+                Bearbeite gespeicherte Anfrage
+              </Badge>
+            )}
           </div>
 
-          {/* Sumrows */}
           <div className="space-y-0">
             <SumRow label="36 01 · Baustellengemeinkosten" value={bgk} />
             <SumRow label="36 12 · Dachkonstruktionen" value={sumDach} />
             <SumRow label="36 14 · Decken" value={sumDecken} />
             <SumRow label="36 15 · Riegelwände" value={sumWaende} />
-
-            {/* Gesamtsumme — fett, groß, grün */}
-            <div className="flex items-baseline justify-between gap-3 py-3 border-b-2 border-emerald-600">
-              <span className="text-base sm:text-lg font-bold text-emerald-700 dark:text-emerald-400">
+            <div className="flex justify-between items-baseline border-b-2 border-emerald-600 pt-3 pb-2">
+              <span className="text-lg font-bold text-emerald-700">
                 GESAMTSUMME NETTO
               </span>
-              <span className="text-lg sm:text-2xl font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
+              <span className="text-lg font-bold text-emerald-700 tabular-nums">
                 {eur(netto)}
               </span>
             </div>
-
-            {/* Regie separat */}
-            <div className="flex items-baseline justify-between gap-3 py-2 text-xs sm:text-sm italic text-muted-foreground">
-              <span>
-                36 90 · Regieleistungen{" "}
-                <span className="not-italic">(separat, nur auf Anordnung)</span>
-              </span>
-              <span className="tabular-nums">{eur(sumRegie)}</span>
-            </div>
-            <div className="text-[11px] text-muted-foreground italic">
-              Regie ist nicht in der Gesamtsumme enthalten.
+            <div className="flex justify-between text-sm text-muted-foreground italic pt-2">
+              <span>36 90 · Regie (separat, nur auf Anordnung)</span>
+              <span className="tabular-nums">{eur(sumRegie)} (nicht in Summe)</span>
             </div>
           </div>
 
-          {/* Aktionen */}
-          <div className="flex flex-col sm:flex-row gap-2 pt-2">
+          <div className="flex flex-wrap gap-2 pt-2">
             <Button
-              type="button"
-              onClick={handleOeffnen}
+              onClick={oeffnen}
+              disabled={positionenAnzahl === 0}
               className="min-h-[44px]"
             >
-              <Mail className="h-4 w-4 mr-2" />
-              Anfrage ans Büro senden
+              <Save className="h-4 w-4 mr-1.5" />
+              {state.anfrageId ? "Änderungen speichern" : "Anfrage speichern"}
             </Button>
             <Button
-              type="button"
               variant="outline"
               onClick={() => window.print()}
               className="min-h-[44px]"
             >
-              <Printer className="h-4 w-4 mr-2" />
-              Drucken / PDF
+              <Printer className="h-4 w-4 mr-1.5" /> Drucken / PDF
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Versenden-Dialog */}
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(o) => !o && !saving && setOpen(false)}>
         <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Mail className="h-4 w-4" />
-              Anfrage ans Büro senden
+            <DialogTitle>
+              {state.anfrageId
+                ? "Anfrage aktualisieren"
+                : "Anfrage speichern"}
             </DialogTitle>
           </DialogHeader>
-
-          {loadingDefaults ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground p-4">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Vorbereiten …
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              Die Anfrage wird in der App gespeichert. Du findest sie unter
+              „Anfragen" — dort kannst du sie öffnen, weiter bearbeiten und
+              später bei Bedarf manuell ans Büro weiterleiten.
+            </p>
+            <div>
+              <Label htmlFor="anf-titel">Bezeichnung</Label>
+              <Input
+                id="anf-titel"
+                value={titel}
+                onChange={(e) => setTitel(e.target.value)}
+                placeholder="z. B. EFH Müller · Velden"
+                className="mt-1"
+              />
             </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Empfänger (Büro) *</Label>
-                <Input
-                  type="email"
-                  value={empfaenger}
-                  onChange={(e) => setEmpfaenger(e.target.value)}
-                  placeholder="maurer@willroider.at"
-                  className={
-                    !empfaengerValid && empfaenger.length > 0
-                      ? "border-destructive"
-                      : undefined
-                  }
-                />
-                {!empfaengerValid && empfaenger.length > 0 && (
-                  <div className="text-[11px] text-destructive">
-                    Ungültige E-Mail-Adresse
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs">Betreff</Label>
-                <Input
-                  value={betreff}
-                  onChange={(e) => setBetreff(e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs">Nachricht</Label>
-                <Textarea
-                  rows={14}
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  className="font-mono text-xs"
-                />
-                <div className="text-[11px] text-muted-foreground">
-                  {positionenAnzahl} Position
-                  {positionenAnzahl === 1 ? "" : "en"} · Netto {eur(netto)}
-                </div>
-              </div>
+            <div>
+              <Label htmlFor="anf-body">Bedarfstext (wird im Detail angezeigt)</Label>
+              <Textarea
+                id="anf-body"
+                rows={12}
+                className="mt-1 font-mono text-xs"
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+              />
             </div>
-          )}
-
+          </div>
           <DialogFooter>
             <Button
               variant="outline"
               onClick={() => setOpen(false)}
-              disabled={sending}
+              disabled={saving}
             >
               Abbrechen
             </Button>
-            <Button
-              onClick={handleSend}
-              disabled={
-                sending || loadingDefaults || !empfaengerValid || !body.trim()
-              }
-            >
-              {sending ? (
+            <Button onClick={speichern} disabled={saving || !titel.trim()}>
+              {saving ? (
                 <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
               ) : (
-                <Mail className="h-4 w-4 mr-1.5" />
+                <Save className="h-4 w-4 mr-1.5" />
               )}
-              Jetzt senden
+              {state.anfrageId ? "Aktualisieren" : "Speichern"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -447,9 +367,9 @@ export default function SummeTab({ state }: TabProps) {
 
 function SumRow({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 py-2 border-b">
+    <div className="flex justify-between items-baseline py-2 border-b border-border/60">
       <span className="text-sm">{label}</span>
-      <span className="text-sm font-medium tabular-nums">{eur(value)}</span>
+      <span className="font-semibold tabular-nums">{eur(value)}</span>
     </div>
   );
 }

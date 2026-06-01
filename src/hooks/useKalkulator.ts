@@ -28,6 +28,10 @@ export interface KalkulatorState {
   mengen: MengenState;
   overrides: OverridesState;
   stuetzeLen: number;
+  /** Wenn gesetzt: wir bearbeiten eine bereits in der DB gespeicherte
+   *  Anfrage; Speichern UPDATEt diesen Datensatz statt einen neuen
+   *  anzulegen. */
+  anfrageId: string | null;
 }
 
 const INITIAL_STATE: KalkulatorState = {
@@ -36,6 +40,7 @@ const INITIAL_STATE: KalkulatorState = {
   mengen: {},
   overrides: {},
   stuetzeLen: 3,
+  anfrageId: null,
 };
 
 const LS_KEY = "willroider:kalkulator:v1";
@@ -178,6 +183,41 @@ export function useKalkulator(canWriteK3: boolean) {
     }
   }, []);
 
+  /** Lädt eine gespeicherte Anfrage komplett in den State (Projekt,
+   *  Mengen, Overrides, Stützenlänge, anfrageId). K3-Sätze werden NICHT
+   *  überschrieben — die sind global. */
+  const loadAnfrage = useCallback(async (anfrageId: string) => {
+    const { data, error } = await supabase
+      .from("kalkulator_anfragen")
+      .select("id, kunde_name, raw_anfrage")
+      .eq("id", anfrageId)
+      .maybeSingle();
+    if (error || !data) {
+      toast({
+        variant: "destructive",
+        title: "Anfrage nicht gefunden",
+        description: error?.message ?? "Bitte aus der Liste neu öffnen.",
+      });
+      return;
+    }
+    const raw = (data as any).raw_anfrage ?? {};
+    setState((s) => ({
+      ...s,
+      projekt: { ...DEFAULT_PROJEKT, ...(raw.projekt ?? {}) },
+      mengen: raw.mengen ?? {},
+      overrides: raw.overrides ?? {},
+      stuetzeLen: raw.stuetzeLen ?? 3,
+      anfrageId: (data as any).id,
+    }));
+  }, [toast]);
+
+  /** Setzt anfrageId für den aktuellen State. Wird beim Speichern in
+   *  SummeTab gefüllt, damit der nächste „Speichern"-Klick updated
+   *  statt neu anzulegen. */
+  const setAnfrageId = useCallback((id: string | null) => {
+    setState((s) => ({ ...s, anfrageId: id }));
+  }, []);
+
   return {
     state,
     setProjekt,
@@ -187,5 +227,7 @@ export function useKalkulator(canWriteK3: boolean) {
     setK3,
     k3SyncStatus,
     reset,
+    loadAnfrage,
+    setAnfrageId,
   };
 }

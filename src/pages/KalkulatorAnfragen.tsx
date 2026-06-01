@@ -27,10 +27,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Loader2, Mail, FileText } from "lucide-react";
+import { Loader2, Mail, FileText, Pencil } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { useNavigate } from "react-router-dom";
 
 type Anfrage = Database["public"]["Tables"]["kalkulator_anfragen"]["Row"];
 type Status = Anfrage["status"];
@@ -69,6 +70,7 @@ function fmtDt(iso: string): string {
 
 export default function KalkulatorAnfragen() {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [rows, setRows] = useState<Anfrage[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<Anfrage | null>(null);
@@ -131,9 +133,9 @@ export default function KalkulatorAnfragen() {
             {offene} offen
           </Badge>
           <span className="text-muted-foreground">
-            Anfragen werden automatisch eingespielt, sobald jemand im Kalkulator
-            „Anfrage per E-Mail senden" klickt. Eine Bestätigungs-Mail geht
-            automatisch an das Büro.
+            Hier landen alle im Kalkulator gespeicherten Anfragen. Klick auf
+            „Bearbeiten" öffnet die Anfrage wieder im Kalkulator — Positionen
+            und Mengen lassen sich jederzeit anpassen und neu speichern.
           </span>
         </CardContent>
       </Card>
@@ -191,7 +193,19 @@ export default function KalkulatorAnfragen() {
                         {STATUS_LABEL[a.status]}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right whitespace-nowrap">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 mr-1"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/kalkulator?anfrage=${a.id}`);
+                        }}
+                        title="Im Kalkulator bearbeiten"
+                      >
+                        <Pencil className="h-3.5 w-3.5 mr-1" /> Bearbeiten
+                      </Button>
                       <FileText className="h-4 w-4 inline text-muted-foreground" />
                     </TableCell>
                   </TableRow>

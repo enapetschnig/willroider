@@ -154,7 +154,9 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
 
-  // ── POST action=anfrage: Kundenanfrage speichern + Bestätigungs-Mail ─
+  // ── POST action=anfrage: Kundenanfrage SPEICHERN (neu oder update). ─
+  // KEIN Mail-Versand mehr — Anfragen sind Entwürfe, das Büro öffnet sie
+  // bei Bedarf und kann sie weiter bearbeiten.
   if (body?.action === "anfrage" || body?.typ === "Anfrage") {
     // Rate-Limit pro IP (siehe Top-of-File)
     const ip =
@@ -166,7 +168,7 @@ Deno.serve(async (req) => {
         {
           ok: false,
           error:
-            "Zu viele Anfragen in kurzer Zeit. Bitte später erneut versuchen.",
+            "Zu viele Speicherversuche in kurzer Zeit. Bitte später erneut versuchen.",
         },
         429,
       );
@@ -177,7 +179,6 @@ Deno.serve(async (req) => {
     if (!kundeName || kundeName.trim().length < 2) {
       return json({ ok: false, error: "Kunde-Name fehlt" }, 400);
     }
-    // Minimaler Inhaltscheck — keine komplett leeren Anfragen.
     if (
       (!a.positionen_anzahl || a.positionen_anzahl === 0) &&
       (!a.eigene_anzahl || a.eigene_anzahl === 0)
@@ -193,47 +194,33 @@ Deno.serve(async (req) => {
         : Number(String(a.summe ?? "").replace(/[^\d,.-]/g, "").replace(",", ".")) ||
           null;
 
+    const payload = {
+      kunde_name: kundeName,
+      kunde_rolle: a.rolle ?? a.kunde_rolle ?? null,
+      kunde_code: a.code ?? a.kunde_code ?? null,
+      summe_netto: summe,
+      positionen_anzahl: a.positionen ?? a.positionen_anzahl ?? null,
+      eigene_anzahl: a.eigene ?? a.eigene_anzahl ?? null,
+      bedarf_text: a.bedarf ?? a.bedarf_text ?? null,
+      raw_anfrage: a,
+    };
+
+    // Wenn anfrageId mitgegeben → Update. Sonst Insert mit Default-Status.
+    if (a.anfrageId && typeof a.anfrageId === "string") {
+      const { error } = await admin
+        .from("kalkulator_anfragen")
+        .update(payload)
+        .eq("id", a.anfrageId);
+      if (error) return json({ ok: false, error: error.message }, 500);
+      return json({ ok: true, anfrageId: a.anfrageId, updated: true });
+    }
     const { data: row, error } = await admin
       .from("kalkulator_anfragen")
-      .insert({
-        kunde_name: kundeName,
-        kunde_rolle: a.rolle ?? a.kunde_rolle ?? null,
-        kunde_code: a.code ?? a.kunde_code ?? null,
-        summe_netto: summe,
-        positionen_anzahl: a.positionen ?? a.positionen_anzahl ?? null,
-        eigene_anzahl: a.eigene ?? a.eigene_anzahl ?? null,
-        bedarf_text: a.bedarf ?? a.bedarf_text ?? null,
-        raw_anfrage: a,
-        status: "eingegangen",
-      })
+      .insert({ ...payload, status: "eingegangen" })
       .select("id")
       .single();
     if (error) return json({ ok: false, error: error.message }, 500);
-
-    // Bestätigungs-Mail ans Büro
-    const subj = `Neue Anfrage Bausatz-Kalkulator — ${kundeName}`;
-    const text =
-      `Eine neue Anfrage ist über den Bausatz-Kalkulator eingegangen.\n\n` +
-      `Kunde: ${kundeName}\n` +
-      `Rolle: ${a.rolle ?? a.kunde_rolle ?? "—"}\n` +
-      `Code:  ${a.code ?? a.kunde_code ?? "—"}\n\n` +
-      (a.bedarf ?? a.bedarf_text ?? "") +
-      `\n\n— automatisch versendet vom Willroider-System.`;
-
-    const mail = await sendMail({ to: KALK_MAIL_TO, subject: subj, text });
-    if (mail.ok) {
-      await admin
-        .from("kalkulator_anfragen")
-        .update({ versendet_an_mail: KALK_MAIL_TO, versendet_am: new Date().toISOString() })
-        .eq("id", (row as any).id);
-    }
-
-    return json({
-      ok: true,
-      anfrageId: (row as any).id,
-      mailSent: mail.ok,
-      mailError: mail.err ?? null,
-    });
+    return json({ ok: true, anfrageId: (row as any).id, updated: false });
   }
 
   // ── POST action=login (Audit): kleines Tracking, nicht in DB ────────
