@@ -92,7 +92,9 @@ export default function HalleErfassung() {
 
   const primaryUserId = user?.id ?? "";
 
-  const { data: taetigkeitenStamm = [] } = useTaetigkeitenStamm();
+  const { data: taetigkeitenStamm = [] } = useTaetigkeitenStamm({
+    bereich: "halle",
+  });
   const { sollPerMa } = useSollHoursForDayBulk(
     primaryUserId ? [primaryUserId] : [],
     date,

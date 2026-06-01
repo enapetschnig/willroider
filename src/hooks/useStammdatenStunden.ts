@@ -9,10 +9,17 @@ type ArbeitszeitLimitsRow = Database["public"]["Tables"]["arbeitszeit_limits"]["
 
 // ─── Tätigkeiten-Stammdaten ────────────────────────────────────────────────
 
-export function useTaetigkeitenStamm(opts?: { onlyActive?: boolean }) {
+export function useTaetigkeitenStamm(opts?: {
+  onlyActive?: boolean;
+  /** Filtert auf Tätigkeiten dieses Bereichs (plus 'beide'). Ohne Filter
+   *  werden alle Tätigkeiten geliefert — sinnvoll im BSB-Editor, wo
+   *  bestehende Buchungen aus Halle UND Baustelle erscheinen können. */
+  bereich?: "baustelle" | "halle";
+}) {
   const onlyActive = opts?.onlyActive ?? true;
+  const bereich = opts?.bereich;
   return useQuery<TaetigkeitStamm[]>({
-    queryKey: ["taetigkeiten_stamm", { onlyActive }],
+    queryKey: ["taetigkeiten_stamm", { onlyActive, bereich }],
     queryFn: async () => {
       let q = supabase
         .from("taetigkeiten_stamm")
@@ -20,6 +27,7 @@ export function useTaetigkeitenStamm(opts?: { onlyActive?: boolean }) {
         .order("sort_order")
         .order("bezeichnung");
       if (onlyActive) q = q.eq("is_active", true);
+      if (bereich) q = q.in("bereich", [bereich, "beide"]);
       const { data, error } = await q;
       if (error) throw error;
       return (data as TaetigkeitStamm[]) ?? [];
@@ -32,12 +40,17 @@ export function useTaetigkeitMutation() {
   const qc = useQueryClient();
   return {
     create: useMutation({
-      mutationFn: async (payload: { bezeichnung: string; sort_order?: number }) => {
+      mutationFn: async (payload: {
+        bezeichnung: string;
+        sort_order?: number;
+        bereich?: "baustelle" | "halle" | "beide";
+      }) => {
         const { data, error } = await supabase
           .from("taetigkeiten_stamm")
           .insert({
             bezeichnung: payload.bezeichnung,
             sort_order: payload.sort_order ?? 0,
+            bereich: payload.bereich ?? "baustelle",
           })
           .select()
           .single();
@@ -52,6 +65,7 @@ export function useTaetigkeitMutation() {
         bezeichnung?: string;
         sort_order?: number;
         is_active?: boolean;
+        bereich?: "baustelle" | "halle" | "beide";
       }) => {
         const { id, ...rest } = payload;
         const { error } = await supabase

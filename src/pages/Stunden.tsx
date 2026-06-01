@@ -215,7 +215,9 @@ export default function Stunden() {
   const istPolier = !!polierPartie;
   const primaryUserId = user?.id ?? "";
 
-  const { data: taetigkeitenStamm = [] } = useTaetigkeitenStamm();
+  const { data: taetigkeitenStamm = [] } = useTaetigkeitenStamm({
+    bereich: "baustelle",
+  });
   const { data: zulagenTypen = [] } = useZulagenTypen();
   const { data: erlaubteZulagenIds = [] } = useMitarbeiterZulagen(primaryUserId);
 

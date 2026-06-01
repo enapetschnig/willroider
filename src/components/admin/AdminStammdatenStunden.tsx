@@ -280,6 +280,7 @@ function TaetigkeitenStammCard() {
   const { data: list = [], isLoading } = useTaetigkeitenStamm({ onlyActive: false });
   const mut = useTaetigkeitMutation();
   const [newName, setNewName] = useState("");
+  const [newBereich, setNewBereich] = useState<"baustelle" | "halle" | "beide">("baustelle");
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
 
@@ -290,6 +291,7 @@ function TaetigkeitenStammCard() {
       await mut.create.mutateAsync({
         bezeichnung: newName.trim(),
         sort_order: maxSort + 10,
+        bereich: newBereich,
       });
       setNewName("");
       toast({ title: "Tätigkeit hinzugefügt" });
@@ -335,14 +337,24 @@ function TaetigkeitenStammCard() {
           <Tag className="h-4 w-4 text-primary" />
           Tätigkeiten ({list.filter((t) => t.is_active).length} aktiv)
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Input
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             placeholder="Neue Tätigkeit, z.B. Spengler-Arbeit"
             onKeyDown={(e) => e.key === "Enter" && add()}
-            className="h-10"
+            className="h-10 flex-1 min-w-[180px]"
           />
+          <select
+            value={newBereich}
+            onChange={(e) => setNewBereich(e.target.value as typeof newBereich)}
+            className="h-10 px-3 rounded-md border bg-background text-sm"
+            title="Wo soll diese Tätigkeit auswählbar sein?"
+          >
+            <option value="baustelle">Baustelle</option>
+            <option value="halle">Halle</option>
+            <option value="beide">Beide</option>
+          </select>
           <Button onClick={add} disabled={!newName.trim() || mut.create.isPending}>
             <Plus className="h-4 w-4 mr-1.5" /> Hinzufügen
           </Button>
@@ -379,6 +391,22 @@ function TaetigkeitenStammCard() {
               ) : (
                 <>
                   <div className="flex-1 text-sm">{t.bezeichnung}</div>
+                  <Badge
+                    variant="outline"
+                    className={`text-[10px] ${
+                      t.bereich === "halle"
+                        ? "border-amber-500 text-amber-800 bg-amber-50"
+                        : t.bereich === "beide"
+                          ? "border-violet-500 text-violet-800 bg-violet-50"
+                          : "border-blue-500 text-blue-800 bg-blue-50"
+                    }`}
+                  >
+                    {t.bereich === "halle"
+                      ? "Halle"
+                      : t.bereich === "beide"
+                        ? "Beide"
+                        : "Baustelle"}
+                  </Badge>
                   {!t.is_active && (
                     <Badge variant="outline" className="text-[10px]">
                       inaktiv

@@ -675,6 +675,7 @@ export type Database = {
           bezeichnung: string;
           sort_order: number;
           is_active: boolean;
+          bereich: 'baustelle' | 'halle' | 'beide';
           created_at: string;
           updated_at: string;
         };
