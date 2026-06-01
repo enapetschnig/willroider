@@ -38,11 +38,60 @@ const TYP_LABEL: Record<BerichtTyp, string> = {
 };
 
 const STATUS_BADGE: Record<BerichtStatus, { label: string; cls: string }> = {
-  entwurf: { label: "Entwurf", cls: "bg-slate-100 text-slate-900 border-slate-300" },
-  eingereicht: { label: "Eingereicht", cls: "bg-blue-100 text-blue-900 border-blue-300" },
-  freigegeben: { label: "Freigegeben", cls: "bg-emerald-100 text-emerald-900 border-emerald-300" },
-  archiviert: { label: "Archiviert", cls: "bg-gray-200 text-gray-900 border-gray-400" },
+  entwurf: {
+    label: "Entwurf — wird vom Polier geschrieben",
+    cls: "bg-slate-100 text-slate-900 border-slate-300",
+  },
+  eingereicht: {
+    label: "Eingereicht — wartet auf Bauleiter-Freigabe",
+    cls: "bg-blue-100 text-blue-900 border-blue-300",
+  },
+  freigegeben: {
+    label: "Freigegeben",
+    cls: "bg-emerald-100 text-emerald-900 border-emerald-300",
+  },
+  archiviert: {
+    label: "Archiviert",
+    cls: "bg-gray-200 text-gray-900 border-gray-400",
+  },
 };
+
+const fmtShortDate = (iso: string | null | undefined) => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit" });
+};
+
+function statusChangeInfo(b: {
+  status: BerichtStatus;
+  eingereicht_am: string | null;
+  freigegeben_am: string | null;
+  archiviert_am: string | null;
+  updated_at: string;
+  created_at: string;
+}): string | null {
+  switch (b.status) {
+    case "entwurf": {
+      const d = fmtShortDate(b.updated_at) ?? fmtShortDate(b.created_at);
+      return d ? `Entwurf seit ${d}` : null;
+    }
+    case "eingereicht": {
+      const d = fmtShortDate(b.eingereicht_am) ?? fmtShortDate(b.updated_at);
+      return d ? `Eingereicht am ${d}` : null;
+    }
+    case "freigegeben": {
+      const d = fmtShortDate(b.freigegeben_am) ?? fmtShortDate(b.updated_at);
+      return d ? `Freigegeben am ${d}` : null;
+    }
+    case "archiviert": {
+      const d = fmtShortDate(b.archiviert_am) ?? fmtShortDate(b.updated_at);
+      return d ? `Archiviert am ${d}` : null;
+    }
+    default:
+      return null;
+  }
+}
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -103,6 +152,21 @@ export default function Berichte() {
     const next = new URLSearchParams(params);
     if (val === null || val === "") next.delete(key);
     else next.set(key, val);
+    setParams(next, { replace: true });
+  };
+
+  // Sind echte Filter aktiv (über die Default-Werte hinaus)? Default = letzte 30 Tage,
+  // alle Status, alle Baustellen — wenn nichts davon abweicht, gilt der Empty-State
+  // als "noch keine Berichte angelegt" statt "Filter-leer".
+  const hatAktiveFilter =
+    !!params.get("status") ||
+    !!params.get("baustelle") ||
+    (params.get("from") != null && params.get("from") !== daysAgo(30)) ||
+    (params.get("to") != null && params.get("to") !== todayIso());
+
+  const resetFilter = () => {
+    const next = new URLSearchParams();
+    if (aktiverTyp === "regiebericht") next.set("typ", "regiebericht");
     setParams(next, { replace: true });
   };
 
@@ -208,9 +272,26 @@ export default function Berichte() {
         </Card>
       ) : berichte.length === 0 ? (
         <Card className="border-dashed">
-          <CardContent className="p-8 text-center text-sm text-muted-foreground">
-            <FileText className="h-10 w-10 mx-auto mb-2 opacity-30" />
-            Keine Berichte im Filter.
+          <CardContent className="p-8 text-center text-sm text-muted-foreground space-y-3">
+            <FileText className="h-10 w-10 mx-auto opacity-30" />
+            {hatAktiveFilter ? (
+              <>
+                <div>Keine Treffer für deinen Filter. Filter ändern oder zurücksetzen.</div>
+                <Button size="sm" variant="outline" onClick={resetFilter}>
+                  Filter zurücksetzen
+                </Button>
+              </>
+            ) : (
+              <div>
+                Noch keine{" "}
+                {aktiverTyp === "bautagesbericht" ? "Bautagesberichte" : "Regieberichte"}{" "}
+                angelegt. Klick auf „Neuer{" "}
+                {aktiverTyp === "bautagesbericht" ? "Bautagesbericht" : "Regiebericht"}" um
+                einen{" "}
+                {aktiverTyp === "bautagesbericht" ? "Bautagesbericht" : "Regiebericht"} zu
+                starten.
+              </div>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -219,6 +300,7 @@ export default function Berichte() {
             const bs = baustelleById.get(b.baustelle_id);
             const polier = b.erfasst_von ? profileById.get(b.erfasst_von) : null;
             const sb = STATUS_BADGE[b.status];
+            const statusInfo = statusChangeInfo(b);
             return (
               <Link
                 key={b.id}
@@ -247,6 +329,11 @@ export default function Berichte() {
                       <Building2 className="h-3.5 w-3.5 shrink-0" />
                       <span className="truncate">{bs?.bvh_name ?? "—"}</span>
                     </div>
+                    {statusInfo && (
+                      <div className="text-[11px] text-muted-foreground tabular-nums">
+                        {statusInfo}
+                      </div>
+                    )}
                     {polier && (
                       <div className="text-[11px] text-muted-foreground">
                         Polier: {polier.vorname} {polier.nachname}

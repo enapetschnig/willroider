@@ -191,8 +191,37 @@ export default function Baustellen() {
         })}
         {filtered.length === 0 && (
           <Card className="md:col-span-2 lg:col-span-3">
-            <CardContent className="p-8 text-center text-sm text-muted-foreground">
-              Keine Baustellen gefunden.
+            <CardContent className="p-8 text-center text-sm text-muted-foreground space-y-3">
+              {data.length === 0 ? (
+                <>
+                  <div>Noch keine Baustellen angelegt.</div>
+                  {canCreateBaustelle && (
+                    <div>
+                      <Button onClick={() => setDialogOpen(true)} size="sm">
+                        <Plus className="h-4 w-4 mr-2" /> Erste Baustelle anlegen
+                      </Button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div>
+                    Keine Baustellen passen zu deinem Filter. Filter ändern oder zurücksetzen.
+                  </div>
+                  <div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSearch("");
+                        setStatusFilter("alle");
+                      }}
+                    >
+                      Filter zurücksetzen
+                    </Button>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         )}

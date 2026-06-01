@@ -28,7 +28,7 @@ export default function ChangePasswordDialog() {
       toast({
         variant: "destructive",
         title: "Passwörter stimmen nicht überein",
-        description: "Bitte überprüfen Sie Ihre Eingabe.",
+        description: "Bitte überprüfe deine Eingabe.",
       });
       setLoading(false);
       return;
@@ -54,7 +54,7 @@ export default function ChangePasswordDialog() {
       toast({
         variant: "destructive",
         title: "Verifizierung nicht möglich",
-        description: "Konto ohne Email/Telefonnummer — bitte an den Administrator wenden.",
+        description: "Konto ohne Email/Telefonnummer — bitte wende dich an den Administrator.",
       });
       setLoading(false);
       return;
@@ -85,7 +85,7 @@ export default function ChangePasswordDialog() {
     } else {
       toast({
         title: "Passwort geändert",
-        description: "Ihr Passwort wurde erfolgreich aktualisiert.",
+        description: "Dein Passwort wurde erfolgreich aktualisiert.",
       });
       setOpen(false);
       (e.target as HTMLFormElement).reset();

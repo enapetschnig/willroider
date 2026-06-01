@@ -314,7 +314,7 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
           </>
         ) : (
           <div className="text-sm text-muted-foreground italic">
-            Heute keine Baustellen-Einteilung. Verwaltung kontaktieren.
+            Heute hast du keine Baustellen-Einteilung. Falls du in der Halle/Werkstatt eingeteilt bist, wird das hier nicht angezeigt — wechsle auf „Halle" oder frag im Büro nach, wenn du unsicher bist.
           </div>
         )}
       </CardContent>

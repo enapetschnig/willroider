@@ -117,8 +117,9 @@ export function BsbVersendenDialog({
         if (!cancelled) {
           toast({
             variant: "destructive",
-            title: "PDF-Erzeugung fehlgeschlagen",
-            description: (e as Error).message,
+            title: "Bericht konnte nicht vorbereitet werden",
+            description:
+              "Die PDF-Erstellung ist fehlgeschlagen. Die Berichte selbst sind in der App gespeichert — bitte App neu laden und erneut versuchen.",
           });
         }
       } finally {
@@ -187,17 +188,38 @@ export function BsbVersendenDialog({
       if (!res?.ok) {
         throw new Error(res?.error ?? "Versand fehlgeschlagen");
       }
-      toast({
-        title: `${res.count} Bericht${res.count === 1 ? "" : "e"} versendet`,
-        description: `an ${res.sentTo}`,
-      });
+      const fehlerArr = Array.isArray(res?.fehler) ? res.fehler : [];
+      if (fehlerArr.length > 0) {
+        toast({
+          variant: "destructive",
+          title: "Teilweise versendet",
+          description: `${res.count} versendet, ${fehlerArr.length} fehlgeschlagen — bitte einzeln nochmal versuchen.`,
+        });
+      } else {
+        toast({
+          title: `${res.count} Bericht${res.count === 1 ? "" : "e"} versendet`,
+          description: `an ${res.sentTo}`,
+        });
+      }
       onSent?.();
       onOpenChange(false);
     } catch (e) {
+      const msg = (e as Error).message ?? "";
+      let description = `Versand fehlgeschlagen: ${msg}. Die Berichte selbst sind gespeichert.`;
+      if (/JWT|session|Unauthorized/i.test(msg)) {
+        description =
+          "Sitzung abgelaufen — bitte Seite neu laden und nochmal versuchen.";
+      } else if (/Failed to fetch|NetworkError|Network request failed/i.test(msg)) {
+        description =
+          "Verbindung zum Server unterbrochen. Die Berichte sind gespeichert — bitte später nochmal versenden.";
+      } else if (/Resend/i.test(msg)) {
+        description =
+          "E-Mail-Versand ist beim Mail-Anbieter fehlgeschlagen. Bitte später nochmal probieren oder Admin informieren.";
+      }
       toast({
         variant: "destructive",
-        title: "Versand-Fehler",
-        description: (e as Error).message,
+        title: "Versand nicht durchgekommen",
+        description,
       });
     } finally {
       setSending(false);
@@ -242,6 +264,11 @@ export function BsbVersendenDialog({
                   value={empfaenger}
                   onChange={(e) => setEmpfaenger(e.target.value)}
                   placeholder="buero@willroider.at"
+                  className={
+                    !empfaengerValid && empfaenger.length > 0
+                      ? "border-destructive"
+                      : undefined
+                  }
                 />
                 {!empfaengerValid && empfaenger.length > 0 && (
                   <div className="text-[11px] text-destructive">
@@ -256,6 +283,7 @@ export function BsbVersendenDialog({
                   value={cc}
                   onChange={(e) => setCc(e.target.value)}
                   placeholder=""
+                  className={!ccValid ? "border-destructive" : undefined}
                 />
                 {!ccValid && (
                   <div className="text-[11px] text-destructive">

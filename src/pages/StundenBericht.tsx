@@ -74,19 +74,19 @@ const STATUS_BADGE: Record<
   { label: string; cls: string }
 > = {
   offen: {
-    label: "Offen — bitte durchsehen",
+    label: "Bitte durchsehen und unterschreiben",
     cls: "bg-slate-100 text-slate-800 border-slate-300",
   },
   unterschrieben: {
-    label: "Unterschrieben — bei der Kontrolle",
+    label: "Wartet auf Büro-Bestätigung",
     cls: "bg-blue-100 text-blue-900 border-blue-300",
   },
   bestaetigt: {
-    label: "Bestätigt & abgeschlossen",
+    label: "Bestätigt — bereit zum Versand",
     cls: "bg-emerald-100 text-emerald-900 border-emerald-300",
   },
   versendet: {
-    label: "Versendet ans Büro",
+    label: "Abgeschlossen — versendet",
     cls: "bg-emerald-600 text-white border-emerald-700",
   },
 };
@@ -96,6 +96,18 @@ const WD = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 function fmtTag(iso: string): string {
   const d = new Date(iso + "T00:00:00");
   return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.`;
+}
+
+/** Lesbarer Zeitstempel "dd.mm.yyyy, HH:MM" aus ISO-Timestamp. */
+function fmtTs(ts: string | null | undefined): string {
+  if (!ts) return "";
+  return new Date(ts).toLocaleString("de-AT", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 /** Synthetischer leerer Tag — für das Erfassen eines bisher leeren Datums. */
@@ -240,6 +252,22 @@ export default function StundenBericht() {
     [tage, zulagenTypen],
   );
 
+  /** Kompakte Versand-Vorschau: Stunden pro Baustelle + Gesamtsumme. Nur
+   *  Arbeit (Baustelle/Firma) wird summiert — Abwesenheiten zählen nicht. */
+  const versandPreview = useMemo(() => {
+    const arbeit = rows.filter(
+      (r) => r.art === "baustelle" || r.art === "firma",
+    );
+    const items = arbeit.map((r) => ({
+      key: r.key,
+      label: r.label,
+      kostenstelle: r.kostenstelle,
+      stunden: [...r.perDay.values()].reduce((s, v) => s + v, 0),
+    }));
+    const gesamt = items.reduce((s, i) => s + i.stunden, 0);
+    return { items, gesamt };
+  }, [rows]);
+
   if (isLoading) {
     return (
       <div className="p-6 flex items-center gap-2 text-sm text-muted-foreground">
@@ -322,6 +350,46 @@ export default function StundenBericht() {
     setVersendenOpen(true);
   };
 
+  const periodeLabel = `${new Date(bericht.von_datum).toLocaleDateString(
+    "de-AT",
+  )} – ${new Date(bericht.bis_datum).toLocaleDateString("de-AT")}`;
+
+  /** Kompakte Versand-Vorschau für „Bestätigen & ans Büro senden". Wird
+   *  oberhalb der Aktionen (Desktop) und im Mobile-Sticky-Footer gerendert. */
+  const versandPreviewBlock =
+    kannBestaetigen && versandPreview.items.length > 0 ? (
+      <div className="rounded-lg border bg-muted/40 p-3 space-y-1.5">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Versand-Vorschau · {periodeLabel}
+        </div>
+        <div className="space-y-0.5 text-xs">
+          {versandPreview.items.map((it) => (
+            <div
+              key={it.key}
+              className="flex items-center justify-between gap-2 tabular-nums"
+            >
+              <span className="truncate">
+                BVH {it.label}
+                {it.kostenstelle ? (
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · KST {it.kostenstelle}
+                  </span>
+                ) : null}
+              </span>
+              <span className="font-medium shrink-0">
+                {fmtHNum(it.stunden)} h
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center justify-between border-t pt-1.5 text-sm font-semibold tabular-nums">
+          <span>Gesamt</span>
+          <span>{fmtHNum(versandPreview.gesamt)} h</span>
+        </div>
+      </div>
+    ) : null;
+
   const handlePdf = async () => {
     setPdfBusy(true);
     try {
@@ -361,6 +429,48 @@ export default function StundenBericht() {
               {badge.label}
             </Badge>
           </div>
+          {(bericht.unterschrieben_am ||
+            bericht.bestaetigt_am ||
+            bericht.versendet_am) && (
+            <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs space-y-1">
+              {bericht.unterschrieben_am && (
+                <div>
+                  Du hast am{" "}
+                  <span className="font-semibold">
+                    {fmtTs(bericht.unterschrieben_am)}
+                  </span>{" "}
+                  unterschrieben.
+                </div>
+              )}
+              {bericht.bestaetigt_am && (
+                <div>
+                  Vom Büro bestätigt am{" "}
+                  <span className="font-semibold">
+                    {fmtTs(bericht.bestaetigt_am)}
+                  </span>
+                  .
+                </div>
+              )}
+              {bericht.versendet_am && (
+                <div>
+                  Ans Büro versendet am{" "}
+                  <span className="font-semibold">
+                    {fmtTs(bericht.versendet_am)}
+                  </span>
+                  {bericht.versendet_an_mail ? (
+                    <>
+                      {" "}
+                      an{" "}
+                      <span className="font-semibold">
+                        {bericht.versendet_an_mail}
+                      </span>
+                    </>
+                  ) : null}
+                  .
+                </div>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
             <div>
               <div className="text-muted-foreground">Pers.-Nr.</div>
@@ -762,6 +872,12 @@ export default function StundenBericht() {
         </Card>
       )}
 
+      {/* Versand-Vorschau (Desktop) — direkt über den Aktionen, wenn der Büro-
+          User bestätigen darf. So sieht er vorher, was insgesamt gebucht wird. */}
+      {versandPreviewBlock && (
+        <div className="hidden lg:block">{versandPreviewBlock}</div>
+      )}
+
       {/* Aktionen — Desktop inline, Mobile als Sticky-Footer mit Safe-Area */}
       <div className="hidden lg:flex flex-wrap gap-2">
         <Button
@@ -812,6 +928,7 @@ export default function StundenBericht() {
         style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 8px)" }}
       >
         <div className="px-3 pt-3 pb-1 space-y-2">
+          {versandPreviewBlock}
           {kannUnterschreiben && (
             <Button
               onClick={() => setSignOpen(true)}

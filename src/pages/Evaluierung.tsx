@@ -176,32 +176,48 @@ export default function Evaluierung() {
   };
 
   // Verteilung an Partie-Mitglieder: lege evaluierung_unterschriften pro Mitglied an,
-  // ohne Duplikate
-  const distributeToPartieMembers = async (evaluierungId: string, baustelleId: string) => {
+  // ohne Duplikate. Liefert auch Namen der verteilten Mitarbeiter + Anzahl der
+  // übersprungenen Mitarbeiter ohne Partie zurück.
+  const distributeToPartieMembers = async (
+    evaluierungId: string,
+    baustelleId: string,
+  ): Promise<{ count: number; names: string[]; skippedOhnePartie: number }> => {
     const baustelle = baustellen.find((b) => b.id === baustelleId);
-    if (!baustelle?.partie_id) return 0;
+    if (!baustelle?.partie_id) return { count: 0, names: [], skippedOhnePartie: 0 };
     const { data: members } = await supabase
       .from("profiles")
-      .select("id")
+      .select("id, vorname, nachname")
       .eq("partie_id", baustelle.partie_id)
       .eq("is_active", true);
-    if (!members || members.length === 0) return 0;
+    if (!members || members.length === 0) return { count: 0, names: [], skippedOhnePartie: 0 };
+    // Mitarbeiter OHNE Partie zählen (nur informativ für Admin/Polier)
+    const { data: ohnePartie } = await supabase
+      .from("profiles")
+      .select("id", { count: "exact", head: false })
+      .is("partie_id", null)
+      .eq("is_active", true);
+    const skippedOhnePartie = (ohnePartie ?? []).length;
     // Bereits existierende Einträge filtern
     const { data: existing } = await supabase
       .from("evaluierung_unterschriften")
       .select("mitarbeiter_id")
       .eq("evaluierung_id", evaluierungId);
     const have = new Set((existing ?? []).map((r: any) => r.mitarbeiter_id));
-    const toInsert = (members as { id: string }[])
-      .filter((m) => !have.has(m.id))
-      .map((m) => ({ evaluierung_id: evaluierungId, mitarbeiter_id: m.id }));
-    if (toInsert.length === 0) return 0;
+    const newMembers = (members as { id: string; vorname: string; nachname: string }[]).filter(
+      (m) => !have.has(m.id),
+    );
+    const toInsert = newMembers.map((m) => ({
+      evaluierung_id: evaluierungId,
+      mitarbeiter_id: m.id,
+    }));
+    if (toInsert.length === 0) return { count: 0, names: [], skippedOhnePartie };
     const { error } = await supabase.from("evaluierung_unterschriften").insert(toInsert as any);
     if (error) {
       toast({ variant: "destructive", title: "Fehler bei Verteilung", description: error.message });
-      return 0;
+      return { count: 0, names: [], skippedOhnePartie };
     }
-    return toInsert.length;
+    const names = newMembers.map((m) => `${m.vorname} ${m.nachname}`);
+    return { count: toInsert.length, names, skippedOhnePartie };
   };
 
   const save = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -244,12 +260,34 @@ export default function Evaluierung() {
     }
 
     // Verteilung an Partie-Mitglieder
-    const distributed = await distributeToPartieMembers(evalId!, baustelleId);
+    const { count: distributed, names, skippedOhnePartie } =
+      await distributeToPartieMembers(evalId!, baustelleId);
+
+    let description: string | undefined;
+    if (distributed > 0) {
+      // Namen anhängen — bei sehr vielen kürzen
+      const MAX_NAMES = 8;
+      const shown = names.slice(0, MAX_NAMES).join(", ");
+      const rest = names.length - MAX_NAMES;
+      const nameList = rest > 0 ? `${shown} … (+${rest} weitere)` : shown;
+      description = `An ${distributed} Mitarbeiter verteilt: ${nameList}`;
+    }
 
     toast({
       title: editing.id ? "Aktualisiert" : "Evaluierung angelegt",
-      description: distributed > 0 ? `An ${distributed} Mitarbeiter zur Unterschrift verteilt` : undefined,
+      description,
     });
+
+    // Warn-Toast für Admin/Polier, wenn Mitarbeiter ohne Partie übersprungen wurden
+    if ((isAdmin || isPolier) && skippedOhnePartie > 0) {
+      toast({
+        variant: "destructive",
+        title: `${skippedOhnePartie} Mitarbeiter ohne Partie übersprungen`,
+        description:
+          "Bitte Partie zuweisen, dann Unterweisung neu verteilen.",
+      });
+    }
+
     setEditing(null);
     load();
   };
@@ -445,13 +483,27 @@ export default function Evaluierung() {
         })}
         {rows.length === 0 && (
           <Card>
-            <CardContent className="p-8 text-center text-sm text-muted-foreground">
-              Noch keine Evaluierungen.
-              {canCreate && (
-                <div className="mt-2">
-                  <Button onClick={openNew} size="sm">
-                    <Plus className="h-4 w-4 mr-2" /> Erste Evaluierung anlegen
-                  </Button>
+            <CardContent className="p-8 text-center text-sm">
+              {canCreate ? (
+                <>
+                  <div className="text-muted-foreground">
+                    Noch keine Unterweisungen angelegt. Klick auf „Neue Evaluierung" oder
+                    „Mit KI aus Dokument", um eine zu starten.
+                  </div>
+                  <div className="mt-3 flex flex-wrap justify-center gap-2">
+                    <Button onClick={() => setKiOpen(true)} size="sm" variant="outline">
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Mit KI aus Dokument
+                    </Button>
+                    <Button onClick={openNew} size="sm">
+                      <Plus className="h-4 w-4 mr-2" /> Neue Evaluierung
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <div className="text-muted-foreground">
+                  Hier siehst du deine Sicherheitsunterweisungen. Dein Polier oder Admin
+                  verteilt sie. Solange nichts offen ist, brauchst du hier nichts zu tun.
                 </div>
               )}
             </CardContent>

@@ -30,19 +30,36 @@ import {
 import { BsbVersendenDialog } from "@/components/BsbVersendenDialog";
 
 const STATUS_BADGE: Record<StundenBerichtStatus, { label: string; cls: string }> = {
-  offen: { label: "Offen", cls: "bg-slate-100 text-slate-800 border-slate-300" },
+  offen: {
+    label: "Mitarbeiter unterschreibt noch",
+    cls: "bg-slate-100 text-slate-800 border-slate-300",
+  },
   unterschrieben: {
-    label: "Unterschrieben",
+    label: "Wartet auf Büro",
     cls: "bg-blue-100 text-blue-900 border-blue-300",
   },
   bestaetigt: {
-    label: "Bestätigt",
+    label: "Bestätigt (noch nicht versendet)",
     cls: "bg-emerald-100 text-emerald-900 border-emerald-300",
   },
   versendet: {
-    label: "Versendet",
+    label: "Abgeschlossen — versendet",
     cls: "bg-emerald-600 text-white border-emerald-700",
   },
+};
+
+const STATUS_ORDER: Record<StundenBerichtStatus, number> = {
+  offen: 0,
+  unterschrieben: 1,
+  bestaetigt: 2,
+  versendet: 3,
+};
+
+const fmtTag = (iso: string | null | undefined): string => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit" });
 };
 
 export default function StundenBerichteListe() {
@@ -60,7 +77,7 @@ export default function StundenBerichteListe() {
     return [y, m];
   }, [monatIso]);
 
-  const { data: berichte = [], isLoading } = useStundenBerichteList({
+  const { data: berichteRaw = [], isLoading } = useStundenBerichteList({
     jahr,
     monat,
     teil,
@@ -68,6 +85,19 @@ export default function StundenBerichteListe() {
   const aktionen = useStundenBerichtAktionen();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [versendenOpen, setVersendenOpen] = useState(false);
+
+  // Sortierung: nach Status (offen → unterschrieben → bestaetigt → versendet),
+  // innerhalb nach Mitarbeiter-Nachname.
+  const berichte = useMemo(() => {
+    return [...berichteRaw].sort((a, b) => {
+      const sa = STATUS_ORDER[a.status] ?? 99;
+      const sb = STATUS_ORDER[b.status] ?? 99;
+      if (sa !== sb) return sa - sb;
+      const na = (a.mitarbeiter?.nachname ?? "").toLowerCase();
+      const nb = (b.mitarbeiter?.nachname ?? "").toLowerCase();
+      return na.localeCompare(nb, "de-AT");
+    });
+  }, [berichteRaw]);
 
   // Versand erlaubt für alle Status außer „offen"
   const versendbar = berichte.filter((b) => b.status !== "offen");
@@ -240,6 +270,8 @@ export default function StundenBerichteListe() {
                 {berichte.map((b) => {
                   const badge = STATUS_BADGE[b.status];
                   const istVersendbar = b.status !== "offen";
+                  const unterschriebenTag = fmtTag(b.unterschrieben_am);
+                  const versendetTag = fmtTag(b.versendet_am);
                   return (
                     <TableRow
                       key={b.id}
@@ -258,9 +290,23 @@ export default function StundenBerichteListe() {
                         />
                       </TableCell>
                       <TableCell className="font-medium">
-                        {b.mitarbeiter
-                          ? `${b.mitarbeiter.nachname ?? ""} ${b.mitarbeiter.vorname ?? ""}`.trim()
-                          : "—"}
+                        <div>
+                          {b.mitarbeiter
+                            ? `${b.mitarbeiter.nachname ?? ""} ${b.mitarbeiter.vorname ?? ""}`.trim()
+                            : "—"}
+                        </div>
+                        {versendetTag ? (
+                          <div className="text-xs text-muted-foreground font-normal">
+                            Versendet am {versendetTag}
+                            {b.versendet_an_mail
+                              ? ` an ${b.versendet_an_mail}`
+                              : ""}
+                          </div>
+                        ) : unterschriebenTag ? (
+                          <div className="text-xs text-muted-foreground font-normal">
+                            Unterschrieben am {unterschriebenTag}
+                          </div>
+                        ) : null}
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={badge.cls}>

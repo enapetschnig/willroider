@@ -238,7 +238,10 @@ test.describe("Workflow: BSB → /stundenbericht/:id Rendering + Buttons", () =>
       /baustellenstundenbericht|stundenbericht/i,
       { timeout: 10000 },
     );
-    await expect(page.locator("body")).toContainText(/offen/i);
+    // Klartext-Status nach UX-Pass: enthält "durchsehen" oder "unterschreib"
+    await expect(page.locator("body")).toContainText(
+      /durchsehen|unterschreib/i,
+    );
     await expect(
       page.getByRole("button", { name: /unterschreiben.*abschicken/i }),
     ).toBeVisible();

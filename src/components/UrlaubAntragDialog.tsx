@@ -196,7 +196,20 @@ export function UrlaubAntragDialog({
     });
     setBusy(false);
     if (error) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      const msg = (error.message || "").toLowerCase();
+      const code = (error as { code?: string }).code ?? "";
+      let description = "Antrag konnte nicht gespeichert werden. Bitte Datum und Mitarbeiter prüfen.";
+      if (code === "23505" || msg.includes("duplicate") || msg.includes("unique")) {
+        description = "Für diesen Zeitraum existiert schon ein Antrag.";
+      } else if (
+        msg.includes("jwt") ||
+        msg.includes("network") ||
+        msg.includes("failed to fetch") ||
+        msg.includes("fetch")
+      ) {
+        description = "Konnte den Antrag nicht senden — bitte App neu laden und erneut versuchen.";
+      }
+      toast({ variant: "destructive", title: "Fehler", description });
       return;
     }
     toast({ title: "Antrag eingereicht" });

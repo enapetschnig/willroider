@@ -247,6 +247,34 @@ export function TagBearbeitenDialog({
     year: "numeric",
   });
 
+  const buchungStatus = tag?.tag.status;
+  const istFreigegeben =
+    buchungStatus === "buero_freigabe" || buchungStatus === "exportiert";
+  const istBestaetigt =
+    buchungStatus === "ma_bestaetigt" || buchungStatus === "zm_freigabe";
+  const istOffen = buchungStatus === "erfasst";
+  const istAbgelehnt = buchungStatus === "abgelehnt";
+  const statusLabel = istFreigegeben
+    ? "vom Büro freigegeben"
+    : istBestaetigt
+    ? "bestätigt"
+    : istAbgelehnt
+    ? "abgelehnt"
+    : istOffen
+    ? "offen"
+    : tag
+    ? (buchungStatus ?? "")
+    : "noch nicht erfasst";
+  const statusPillClass = istFreigegeben
+    ? "border-emerald-400 text-emerald-800 bg-emerald-50"
+    : istBestaetigt
+    ? "border-sky-300 text-sky-800 bg-sky-50"
+    : istAbgelehnt
+    ? "border-red-300 text-red-800 bg-red-50"
+    : istOffen
+    ? "border-amber-300 text-amber-800 bg-amber-50"
+    : "border-muted-foreground/30 text-muted-foreground bg-muted/40";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md max-h-[92vh] overflow-y-auto">
@@ -256,8 +284,22 @@ export function TagBearbeitenDialog({
             <div className="text-sm font-normal text-muted-foreground">
               {datumLabel}
             </div>
+            <div className="mt-1.5">
+              <span
+                className={`inline-block text-[10px] font-medium uppercase tracking-wide rounded-full border px-2 py-0.5 ${statusPillClass}`}
+              >
+                {statusLabel}
+              </span>
+            </div>
           </DialogTitle>
         </DialogHeader>
+
+        {istFreigegeben && (
+          <div className="text-[11px] rounded border border-emerald-200 bg-emerald-50 text-emerald-900 px-2 py-1.5 leading-snug">
+            Dieser Tag wurde vom Büro freigegeben und kann hier nicht mehr
+            geändert werden.
+          </div>
+        )}
 
         <div className="space-y-3">
           <StatusButtonsLeiste
