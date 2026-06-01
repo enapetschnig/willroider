@@ -1,61 +1,65 @@
 /**
- * Bausatz-Kalkulator — eigenständiges Holzbau-Kalkulationstool von
- * Holzbau Willroider, eingebunden als iframe. Sichtbar nur für die
- * Geschäftsführung.
+ * Bausatz-Kalkulator — vollständig native React-Page (kein iframe mehr).
+ * 4 Tabs: Projektdaten/BGK, Positionen (Dach/Decken/Wände/Regie),
+ * Zusammenfassung + Versand, Admin (K3-Sätze).
  *
- * Auto-Login: der iframe-Aufruf packt name + role als Query-Param mit,
- * damit das HTML direkt im Admin-Modus startet (kein zweiter Login mit
- * KUNDE-2026/MA-2026/ADMIN-2026 mehr nötig). Die K3-Sätze und der
- * Anfragen-Versand laufen über die Edge-Function kalkulator-bridge in
- * die App-Datenbank.
+ * Sichtbar/zugänglich nur für Geschäftsführung (route-protected via
+ * RequireRole role="gf" in App.tsx).
+ *
+ * State + DB-Sync: useKalkulator (Mengen/Overrides lokal,
+ * K3-Sätze persistent in Supabase, Anfragen via Edge-Function).
  */
 
 import { PageHeader } from "@/components/PageHeader";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/contexts/AuthContext";
-import { useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useKalkulator } from "@/hooks/useKalkulator";
+import ProjektTab from "@/components/kalkulator/ProjektTab";
+import PositionenTab from "@/components/kalkulator/PositionenTab";
+import SummeTab from "@/components/kalkulator/SummeTab";
+import AdminTab from "@/components/kalkulator/AdminTab";
 
 export default function Kalkulator() {
-  const { profile } = useAuth();
-  const navigate = useNavigate();
+  const { role } = useAuth();
+  const canWriteK3 = role === "geschaeftsfuehrung" || role === "buero";
 
-  const src = useMemo(() => {
-    if (!profile) return "/bausatz-kalkulator.html";
-    const name = `${profile.vorname ?? ""} ${profile.nachname ?? ""}`.trim() ||
-      profile.email ||
-      "Geschäftsführung";
-    const params = new URLSearchParams({ name, role: "admin" });
-    return `/bausatz-kalkulator.html?${params.toString()}`;
-  }, [profile]);
-
-  // Auf Logout-Klick im iframe reagieren — zurück aufs Dashboard
-  useEffect(() => {
-    const handler = (e: MessageEvent) => {
-      if (e.data && typeof e.data === "object" && e.data.type === "kalkulator:logout") {
-        navigate("/");
-      }
-    };
-    window.addEventListener("message", handler);
-    return () => window.removeEventListener("message", handler);
-  }, [navigate]);
+  const kalk = useKalkulator(canWriteK3);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <PageHeader
         title="Bausatz-Kalkulator"
         description="Holzbau Willroider — Zimmermeisterarbeiten · K3/K7-Preisermittlung nach ÖNORM B2061"
       />
-      <div className="rounded-md border bg-card overflow-hidden shadow-sm">
-        <iframe
-          src={src}
-          title="Bausatz-Kalkulator"
-          className="w-full"
-          // sandbox: erlaubt Skripte + Forms + same-origin (für fetch/localStorage),
-          // verbietet aber Top-Level-Navigation und Popups — Defense-in-Depth.
-          sandbox="allow-same-origin allow-scripts allow-forms allow-modals allow-downloads"
-          style={{ height: "calc(100vh - 200px)", minHeight: 600, border: 0 }}
-        />
-      </div>
+      <Tabs defaultValue="projekt" className="space-y-3">
+        <TabsList className="flex-wrap h-auto justify-start">
+          <TabsTrigger value="projekt" className="min-h-[44px]">
+            Projektdaten
+          </TabsTrigger>
+          <TabsTrigger value="positionen" className="min-h-[44px]">
+            Positionen
+          </TabsTrigger>
+          <TabsTrigger value="summe" className="min-h-[44px]">
+            Zusammenfassung
+          </TabsTrigger>
+          <TabsTrigger value="admin" className="min-h-[44px]">
+            K3-Sätze
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="projekt">
+          <ProjektTab {...kalk} />
+        </TabsContent>
+        <TabsContent value="positionen">
+          <PositionenTab {...kalk} canCalc={canWriteK3} />
+        </TabsContent>
+        <TabsContent value="summe">
+          <SummeTab {...kalk} />
+        </TabsContent>
+        <TabsContent value="admin">
+          <AdminTab {...kalk} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

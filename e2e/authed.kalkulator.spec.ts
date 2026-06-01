@@ -1,49 +1,66 @@
 import { test, expect } from "@playwright/test";
 
-/** Bausatz-Kalkulator — Smoke-Test
- *  - /kalkulator lädt für Geschäftsführung
- *  - PageHeader + iframe sichtbar
- *  - das eingebettete HTML wird direkt ausgeliefert (HTTP 200, Title korrekt)
- *  - Nav-Eintrag „Kalkulator" sichtbar
- */
+/** Bausatz-Kalkulator — native React-Page mit 4 Tabs.
+ *  Wir prüfen: Route lädt, Tabs sind sichtbar, Default-Tab zeigt das
+ *  Projekt-Formular, Wechsel auf Positionen + Admin funktioniert.
+ *  Nav-Eintrag in der Sidebar ist sichtbar. */
 
-test.describe("Bausatz-Kalkulator", () => {
-  test("statische HTML-Datei wird ausgeliefert mit korrektem Encoding", async ({
-    page,
-  }) => {
-    await page.goto("/bausatz-kalkulator.html");
-    await expect(page).toHaveTitle(/Bausatz-Kalkulator/);
-    // Umlaute korrekt? (Mojibake-Fix-Verifikation)
-    await expect(page.locator("body")).toContainText("Zugangscode");
+test.describe("Bausatz-Kalkulator (native React)", () => {
+  test("/kalkulator rendert mit 4 Tabs + Projekt-Default", async ({ page }) => {
+    await page.goto("/kalkulator");
+    await expect(page.locator("body")).toContainText(
+      /bausatz-kalkulator/i,
+      { timeout: 10000 },
+    );
+    // Tabs sichtbar
+    await expect(page.getByRole("tab", { name: /projektdaten/i })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /positionen/i })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /zusammenfassung/i })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /k3-sätze/i })).toBeVisible();
+    // Default-Inhalt: Projektdaten + BGK
+    await expect(page.locator("body")).toContainText(
+      /baustellengemeinkosten|BGK GESAMT/i,
+    );
   });
 
-  test("/kalkulator rendert PageHeader + iframe für Geschäftsführung", async ({
+  test("Tab-Wechsel zu Positionen zeigt Dach/Decken/Wände/Regie", async ({
     page,
   }) => {
     await page.goto("/kalkulator");
-    await expect(page.locator("body")).toContainText(/bausatz-kalkulator/i, {
-      timeout: 10000,
+    await page.getByRole("tab", { name: /positionen/i }).click();
+    // Innere Bereich-Tabs
+    await expect(page.getByRole("tab", { name: /^Dach$/i }).first()).toBeVisible({
+      timeout: 8000,
     });
-    // iframe-Src enthaelt jetzt Query-Params fuer Auto-Login (?name=&role=)
-    const iframe = page.locator('iframe[src*="bausatz-kalkulator.html"]');
-    await expect(iframe).toBeVisible();
+    await expect(page.getByRole("tab", { name: /^Decken$/i }).first()).toBeVisible();
+    await expect(page.getByRole("tab", { name: /^Wände$/i }).first()).toBeVisible();
+    await expect(page.getByRole("tab", { name: /^Regie$/i }).first()).toBeVisible();
+  });
+
+  test("Tab-Wechsel zu Admin zeigt K3-Sätze", async ({ page }) => {
+    await page.goto("/kalkulator");
+    await page.getByRole("tab", { name: /k3-sätze/i }).click();
+    await expect(page.locator("body")).toContainText(
+      /mittellohnpreis|gesamtzuschlag/i,
+      { timeout: 8000 },
+    );
   });
 
   test("Nav-Eintrag Kalkulator sichtbar fuer Geschaeftsfuehrung", async ({
     page,
   }) => {
     await page.goto("/");
-    // Sidebar (Desktop) hat den Link
-    await expect(page.getByRole("link", { name: /^Kalkulator$/i }).first()).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: /^Kalkulator$/i }).first(),
+    ).toBeVisible();
   });
 
-  test("/kalkulator/anfragen rendert Liste + Erklaerung", async ({ page }) => {
+  test("/kalkulator/anfragen rendert die Anfragen-Liste", async ({ page }) => {
     await page.goto("/kalkulator/anfragen");
     await expect(page.locator("body")).toContainText(
       /bausatz-anfragen|anfragen/i,
       { timeout: 10000 },
     );
-    // entweder leerer Zustand oder Tabelle vorhanden
     await expect(page.locator("body")).toContainText(
       /noch keine anfragen|kunde|status/i,
     );
