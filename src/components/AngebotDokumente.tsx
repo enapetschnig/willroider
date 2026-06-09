@@ -22,7 +22,10 @@ import {
   ArrowLeft,
   ChevronRight,
   Home,
+  Mail,
 } from "lucide-react";
+import { DocViewerDialog, type DocViewerItem } from "@/components/dokumente/DocViewerDialog";
+import { DocSendDialog, type DocSendItem } from "@/components/dokumente/DocSendDialog";
 import type {
   Database,
   AngebotOrdnerEnum,
@@ -65,8 +68,8 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
   const [loading, setLoading] = useState(true);
   const [currentFolder, setCurrentFolder] = useState<"root" | AngebotOrdnerKey>("root");
   const [currentSubpath, setCurrentSubpath] = useState<string>("");
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewName, setPreviewName] = useState<string>("");
+  const [viewerItem, setViewerItem] = useState<DocViewerItem | null>(null);
+  const [sendItems, setSendItems] = useState<DocSendItem[] | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState<{
     name: string;
@@ -236,27 +239,26 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
     return uploadItems(items, folder);
   };
 
-  const openFile = async (d: Dokument) => {
-    if (isImage(d.mimetype)) {
-      const { data, error } = await supabase.storage
-        .from("angebote")
-        .createSignedUrl(d.storage_path, 300);
-      if (error || !data) {
-        toast({ variant: "destructive", title: "Fehler", description: error?.message });
-        return;
-      }
-      setPreviewUrl(data.signedUrl);
-      setPreviewName(d.dateiname);
-    } else {
-      const { data, error } = await supabase.storage
-        .from("angebote")
-        .createSignedUrl(d.storage_path, 300, { download: d.dateiname });
-      if (error || !data) {
-        toast({ variant: "destructive", title: "Fehler", description: error?.message });
-        return;
-      }
-      window.open(data.signedUrl, "_blank");
-    }
+  const openFile = (d: Dokument) => {
+    setViewerItem({
+      bucket: "angebote",
+      storage_path: d.storage_path,
+      dateiname: d.dateiname,
+      mimetype: d.mimetype,
+    });
+  };
+
+  const sendFile = (d: Dokument, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setSendItems([
+      {
+        bucket: "angebote",
+        storage_path: d.storage_path,
+        dateiname: d.dateiname,
+        groesse: d.groesse,
+        mimetype: d.mimetype,
+      },
+    ]);
   };
 
   const remove = async (d: Dokument, e?: React.MouseEvent) => {
@@ -593,6 +595,7 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
                   d={d}
                   onOpen={() => openFile(d)}
                   onDelete={(e) => remove(d, e)}
+                  onSend={(e) => sendFile(d, e)}
                 />
               ))}
             </div>
@@ -600,20 +603,16 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
         </div>
       )}
 
-      <Dialog open={!!previewUrl} onOpenChange={(o) => !o && setPreviewUrl(null)}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle className="text-sm">{previewName}</DialogTitle>
-          </DialogHeader>
-          {previewUrl && (
-            <img
-              src={previewUrl}
-              alt={previewName}
-              className="w-full max-h-[70vh] object-contain rounded"
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+      <DocViewerDialog
+        open={!!viewerItem}
+        onOpenChange={(o) => !o && setViewerItem(null)}
+        item={viewerItem}
+      />
+      <DocSendDialog
+        open={!!sendItems}
+        onOpenChange={(o) => !o && setSendItems(null)}
+        items={sendItems ?? []}
+      />
 
       <Dialog open={newFolderOpen} onOpenChange={setNewFolderOpen}>
         <DialogContent className="max-w-sm">
@@ -722,10 +721,12 @@ function FileCard({
   d,
   onOpen,
   onDelete,
+  onSend,
 }: {
   d: Dokument;
   onOpen: () => void;
   onDelete: (e: React.MouseEvent) => void;
+  onSend: (e: React.MouseEvent) => void;
 }) {
   const [thumb, setThumb] = useState<string | null>(null);
   const isImg = isImage(d.mimetype);
@@ -774,13 +775,24 @@ function FileCard({
           </div>
         </div>
       </button>
-      <button
-        onClick={onDelete}
-        className="absolute top-1.5 right-1.5 bg-background/90 hover:bg-destructive hover:text-white rounded p-1.5 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition shadow"
-        aria-label="Löschen"
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
+      <div className="absolute top-1.5 right-1.5 flex gap-1 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition">
+        <button
+          onClick={onSend}
+          className="bg-background/90 hover:bg-primary hover:text-primary-foreground rounded p-1.5 shadow"
+          aria-label="Per Mail senden"
+          title="Per Mail senden"
+        >
+          <Mail className="h-4 w-4" />
+        </button>
+        <button
+          onClick={onDelete}
+          className="bg-background/90 hover:bg-destructive hover:text-white rounded p-1.5 shadow"
+          aria-label="Löschen"
+          title="Löschen"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
     </div>
   );
 }

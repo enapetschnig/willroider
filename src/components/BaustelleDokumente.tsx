@@ -24,7 +24,10 @@ import {
   ArrowLeft,
   ChevronRight,
   Home,
+  Mail,
 } from "lucide-react";
+import { DocViewerDialog, type DocViewerItem } from "@/components/dokumente/DocViewerDialog";
+import { DocSendDialog, type DocSendItem } from "@/components/dokumente/DocSendDialog";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -81,8 +84,8 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const [uploadFolder, setUploadFolder] = useState<FolderKey>("fotos");
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewName, setPreviewName] = useState<string>("");
+  const [viewerItem, setViewerItem] = useState<DocViewerItem | null>(null);
+  const [sendItems, setSendItems] = useState<DocSendItem[] | null>(null);
   const [visibility, setVisibility] = useState<Visibility>(DEFAULT_VISIBILITY);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState<{
@@ -294,30 +297,26 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     return uploadItems(items, folder);
   };
 
-  const open = async (d: Dokument) => {
-    // Bilder ohne `download`-Param → werden inline angezeigt.
-    // Andere Dateien mit `download: d.dateiname` → Browser nimmt den
-    // Original-Filename (inkl. Umlauten) für den Download.
-    if (isImage(d.mimetype)) {
-      const { data, error } = await supabase.storage
-        .from("baustellen")
-        .createSignedUrl(d.storage_path, 300);
-      if (error || !data) {
-        toast({ variant: "destructive", title: "Fehler", description: error?.message });
-        return;
-      }
-      setPreviewUrl(data.signedUrl);
-      setPreviewName(d.dateiname);
-    } else {
-      const { data, error } = await supabase.storage
-        .from("baustellen")
-        .createSignedUrl(d.storage_path, 300, { download: d.dateiname });
-      if (error || !data) {
-        toast({ variant: "destructive", title: "Fehler", description: error?.message });
-        return;
-      }
-      window.open(data.signedUrl, "_blank");
-    }
+  const open = (d: Dokument) => {
+    setViewerItem({
+      bucket: "baustellen",
+      storage_path: d.storage_path,
+      dateiname: d.dateiname,
+      mimetype: d.mimetype,
+    });
+  };
+
+  const sendOne = (d: Dokument, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setSendItems([
+      {
+        bucket: "baustellen",
+        storage_path: d.storage_path,
+        dateiname: d.dateiname,
+        groesse: d.groesse,
+        mimetype: d.mimetype,
+      },
+    ]);
   };
 
   const remove = async (d: Dokument, e?: React.MouseEvent) => {
@@ -704,6 +703,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
                   d={d}
                   onOpen={() => open(d)}
                   onDelete={(e) => remove(d, e)}
+                  onSend={(e) => sendOne(d, e)}
                 />
               ))}
             </div>
@@ -750,20 +750,16 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!previewUrl} onOpenChange={(o) => !o && setPreviewUrl(null)}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle className="text-sm">{previewName}</DialogTitle>
-          </DialogHeader>
-          {previewUrl && (
-            <img
-              src={previewUrl}
-              alt={previewName}
-              className="w-full max-h-[70vh] object-contain rounded"
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+      <DocViewerDialog
+        open={!!viewerItem}
+        onOpenChange={(o) => !o && setViewerItem(null)}
+        item={viewerItem}
+      />
+      <DocSendDialog
+        open={!!sendItems}
+        onOpenChange={(o) => !o && setSendItems(null)}
+        items={sendItems ?? []}
+      />
     </div>
   );
 }
@@ -834,10 +830,12 @@ function FileCard({
   d,
   onOpen,
   onDelete,
+  onSend,
 }: {
   d: Dokument;
   onOpen: () => void;
   onDelete: (e: React.MouseEvent) => void;
+  onSend: (e: React.MouseEvent) => void;
 }) {
   const [thumb, setThumb] = useState<string | null>(null);
   const isImg = isImage(d.mimetype);
@@ -888,14 +886,25 @@ function FileCard({
           </div>
         </div>
       </button>
-      {/* Delete */}
-      <button
-        onClick={onDelete}
-        className="absolute top-1.5 right-1.5 bg-background/90 hover:bg-destructive hover:text-white rounded p-1.5 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition shadow"
-        aria-label="Löschen"
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
+      {/* Action-Buttons */}
+      <div className="absolute top-1.5 right-1.5 flex gap-1 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition">
+        <button
+          onClick={onSend}
+          className="bg-background/90 hover:bg-primary hover:text-primary-foreground rounded p-1.5 shadow"
+          aria-label="Per Mail senden"
+          title="Per Mail senden"
+        >
+          <Mail className="h-4 w-4" />
+        </button>
+        <button
+          onClick={onDelete}
+          className="bg-background/90 hover:bg-destructive hover:text-white rounded p-1.5 shadow"
+          aria-label="Löschen"
+          title="Löschen"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
     </div>
   );
 }

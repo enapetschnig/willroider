@@ -14,11 +14,12 @@ import {
   Monitor,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-};
+import {
+  getCachedInstallPrompt,
+  subscribeInstallPrompt,
+  clearCachedInstallPrompt,
+  type BeforeInstallPromptEvent,
+} from "@/lib/pwaInstall";
 
 type Platform = "ios-safari" | "ios-chrome" | "android" | "desktop";
 
@@ -60,11 +61,12 @@ export function InstallGuide({ onInstalled }: { onInstalled?: () => void }) {
     setStandalone(isStandalone());
     setPlatform(detectPlatform());
 
-    const handler = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e as BeforeInstallPromptEvent);
-    };
-    window.addEventListener("beforeinstallprompt", handler);
+    // Aktueller Cache-Stand sofort übernehmen (Event wurde u. U. schon
+    // vor Mount in main.tsx abgefangen).
+    setDeferredPrompt(getCachedInstallPrompt());
+
+    // Spätere Updates des globalen Caches abonnieren.
+    const unsubscribe = subscribeInstallPrompt((e) => setDeferredPrompt(e));
 
     const installedHandler = () => {
       setStandalone(true);
@@ -77,7 +79,7 @@ export function InstallGuide({ onInstalled }: { onInstalled?: () => void }) {
     window.addEventListener("appinstalled", installedHandler);
 
     return () => {
-      window.removeEventListener("beforeinstallprompt", handler);
+      unsubscribe();
       window.removeEventListener("appinstalled", installedHandler);
     };
   }, [toast, onInstalled]);
@@ -89,6 +91,7 @@ export function InstallGuide({ onInstalled }: { onInstalled?: () => void }) {
     if (choice.outcome === "accepted") {
       onInstalled?.();
     }
+    clearCachedInstallPrompt();
     setDeferredPrompt(null);
   };
 
