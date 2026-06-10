@@ -317,12 +317,17 @@ export function Thumbnail({
     "absolute inset-0 h-full w-full object-cover bg-white";
 
   if (src) {
+    // Bei Foto-Thumbnails ist Mitte ok, bei Dokument-Renderings (A4-
+    // Hochformat) zeigen wir den oberen Teil — sonst landet die Mitte
+    // der Seite im quadratischen Tile und der Anfang ist abgeschnitten.
+    const isPortraitDoc = kind === "pdf" || kind === "docx";
     return (
       <img
         src={src}
         alt={dateiname}
         loading="lazy"
         className={baseClass}
+        style={isPortraitDoc ? { objectPosition: "top" } : undefined}
       />
     );
   }
