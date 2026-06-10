@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { DocViewerDialog, type DocViewerItem } from "@/components/dokumente/DocViewerDialog";
 import { DocSendDialog, type DocSendItem } from "@/components/dokumente/DocSendDialog";
+import { Thumbnail } from "@/components/dokumente/Thumbnail";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -837,23 +838,6 @@ function FileCard({
   onDelete: (e: React.MouseEvent) => void;
   onSend: (e: React.MouseEvent) => void;
 }) {
-  const [thumb, setThumb] = useState<string | null>(null);
-  const isImg = isImage(d.mimetype);
-
-  useEffect(() => {
-    if (!isImg) return;
-    let active = true;
-    supabase.storage
-      .from("baustellen")
-      .createSignedUrl(d.storage_path, 600)
-      .then(({ data }) => {
-        if (active && data) setThumb(data.signedUrl);
-      });
-    return () => {
-      active = false;
-    };
-  }, [d.storage_path, isImg]);
-
   return (
     <div className="group relative">
       <button
@@ -862,20 +846,12 @@ function FileCard({
       >
         {/* Visual */}
         <div className="aspect-square bg-muted relative">
-          {isImg && thumb ? (
-            <img src={thumb} alt={d.dateiname} loading="lazy" className="h-full w-full object-cover" />
-          ) : (
-            <div className="h-full w-full flex flex-col items-center justify-center gap-1 p-2">
-              {isPdf(d.mimetype) ? (
-                <FileText className="h-10 w-10 text-muted-foreground" />
-              ) : (
-                <FileIcon className="h-10 w-10 text-muted-foreground" />
-              )}
-              <div className="text-[10px] uppercase font-bold tracking-wide text-muted-foreground">
-                {(d.dateiname.split(".").pop() ?? "").slice(0, 4) || "FILE"}
-              </div>
-            </div>
-          )}
+          <Thumbnail
+            bucket="baustellen"
+            storagePath={d.storage_path}
+            dateiname={d.dateiname}
+            mimetype={d.mimetype}
+          />
         </div>
         {/* Meta */}
         <div className="p-2">
