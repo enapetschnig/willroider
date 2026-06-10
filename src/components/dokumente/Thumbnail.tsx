@@ -121,6 +121,94 @@ async function renderXlsxThumbnail(url: string): Promise<string> {
   return canvas.toDataURL("image/jpeg", 0.75);
 }
 
+async function renderDocxThumbnail(url: string): Promise<string> {
+  // mammoth lazy importieren — nur User mit DOCX-Dateien zahlen den
+  // Bundle-Preis (~250 KB minified+gzipped).
+  const mammoth = await import("mammoth/mammoth.browser");
+  const buf = await (await fetch(url)).arrayBuffer();
+  const { value: html } = await mammoth.convertToHtml({ arrayBuffer: buf });
+
+  // HTML in offscreen DOM parsen, plain text + struktur extrahieren.
+  const div = document.createElement("div");
+  div.innerHTML = html;
+  type Line = { text: string; bold: boolean; size: number };
+  const lines: Line[] = [];
+  const visit = (node: Element) => {
+    const tag = node.tagName.toLowerCase();
+    if (tag === "h1") lines.push({ text: node.textContent ?? "", bold: true, size: 18 });
+    else if (tag === "h2") lines.push({ text: node.textContent ?? "", bold: true, size: 15 });
+    else if (tag === "h3") lines.push({ text: node.textContent ?? "", bold: true, size: 13 });
+    else if (tag === "p" || tag === "li") {
+      const t = (node.textContent ?? "").trim();
+      if (t) lines.push({ text: tag === "li" ? "• " + t : t, bold: false, size: 11 });
+    } else {
+      for (const child of Array.from(node.children)) visit(child);
+    }
+  };
+  for (const child of Array.from(div.children)) visit(child);
+
+  // Canvas im A4-Hochformat-Verhältnis (1:√2 ≈ 1:1.41).
+  const W = 480;
+  const H = 680;
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d")!;
+
+  // „Papier"-Hintergrund mit subtiler Vignette.
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = "#e5e7eb";
+  ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
+
+  // Sanfter Schatten oben links
+  ctx.fillStyle = "rgba(0,0,0,0.03)";
+  ctx.fillRect(0, 0, W, 6);
+
+  const padX = 32;
+  let y = 48;
+  const maxW = W - 2 * padX;
+  const lineH = 17;
+
+  const wrapText = (text: string, fontPx: number, bold: boolean) => {
+    ctx.font = `${bold ? "bold " : ""}${fontPx}px "Times New Roman", serif`;
+    const words = text.split(/\s+/);
+    const out: string[] = [];
+    let cur = "";
+    for (const w of words) {
+      const test = cur ? `${cur} ${w}` : w;
+      if (ctx.measureText(test).width > maxW) {
+        if (cur) out.push(cur);
+        cur = w;
+      } else {
+        cur = test;
+      }
+    }
+    if (cur) out.push(cur);
+    return out;
+  };
+
+  ctx.fillStyle = "#111827";
+  for (const line of lines) {
+    if (y > H - lineH) break;
+    const wrapped = wrapText(line.text, line.size, line.bold);
+    ctx.font = `${line.bold ? "bold " : ""}${line.size}px "Times New Roman", serif`;
+    for (const w of wrapped) {
+      if (y > H - lineH) break;
+      ctx.fillText(w, padX, y);
+      y += Math.max(lineH, line.size + 4);
+    }
+    if (line.size >= 15) y += 6; // Headings bekommen Atmen
+  }
+
+  // Word-typisches Footer-Label
+  ctx.fillStyle = "#2563eb";
+  ctx.font = "bold 10px -apple-system, system-ui, sans-serif";
+  ctx.fillText("DOCX", padX, H - 14);
+
+  return canvas.toDataURL("image/jpeg", 0.8);
+}
+
 async function renderVideoThumbnail(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const video = document.createElement("video");
@@ -167,7 +255,13 @@ export function Thumbnail({
       setSrc(cache.get(cacheKey)!);
       return;
     }
-    if (kind === "docx" || kind === "pptx" || kind === "other") {
+    if (kind === "pptx" || kind === "other") {
+      setLoading(false);
+      return;
+    }
+    // .doc (alt) lässt sich nicht mit mammoth lesen — nur .docx.
+    const ext = (dateiname.split(".").pop() ?? "").toLowerCase();
+    if (kind === "docx" && ext !== "docx") {
       setLoading(false);
       return;
     }
@@ -193,6 +287,11 @@ export function Thumbnail({
           setSrc(dataUrl);
         } else if (kind === "xlsx") {
           const dataUrl = await renderXlsxThumbnail(data.signedUrl);
+          if (aborted.current) return;
+          cache.set(cacheKey, dataUrl);
+          setSrc(dataUrl);
+        } else if (kind === "docx") {
+          const dataUrl = await renderDocxThumbnail(data.signedUrl);
           if (aborted.current) return;
           cache.set(cacheKey, dataUrl);
           setSrc(dataUrl);
