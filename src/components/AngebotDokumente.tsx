@@ -273,12 +273,16 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
 
   const triggerUpload = () => fileRef.current?.click();
 
-  const defaultDropFolder: AngebotOrdnerKey =
-    currentFolder === "root" ? "angebotsunterlagen" : currentFolder;
+  // Im Root-View KEIN Default-Ordner — User muss direkt auf eine
+  // Folder-Zeile droppen. Sonst landet zu vieles versehentlich im
+  // ersten Ordner (Windows-Explorer-Verhalten).
+  const defaultDropFolder: AngebotOrdnerKey | null =
+    currentFolder === "root" ? null : currentFolder;
 
   const onDragOver = (e: React.DragEvent) => {
     if (e.dataTransfer?.types?.includes("Files")) {
       e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
       setDragOver(true);
     }
   };
@@ -288,6 +292,17 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
+    if (defaultDropFolder === null) {
+      const dropped = await readDropFiles(e);
+      if (dropped.length > 0) {
+        toast({
+          title: "Bitte direkt auf einen Ordner ziehen",
+          description:
+            "In der Übersicht haben wir keinen Default-Ordner — direkt auf einer Ordner-Zeile fallen lassen.",
+        });
+      }
+      return;
+    }
     const dropped = await readDropFiles(e);
     if (dropped.length === 0) return;
     const items: UploadItem[] = dropped.map((d) => ({
@@ -338,7 +353,11 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
       const files = e.clipboardData?.files;
       if (!files || files.length === 0) return;
       e.preventDefault();
-      upload(files, defaultDropFolder);
+      if (defaultDropFolder === null) {
+        upload(files, "angebotsunterlagen");
+      } else {
+        upload(files, defaultDropFolder);
+      }
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
@@ -392,12 +411,28 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
       }`}
     >
       {dragOver && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-primary/10 border-2 border-dashed border-primary">
+        <div
+          className={`pointer-events-none absolute inset-0 z-10 flex items-start justify-center pt-4 rounded-lg border-2 border-dashed ${
+            defaultDropFolder === null
+              ? "bg-amber-50/70 border-amber-400"
+              : "bg-primary/10 border-primary"
+          }`}
+        >
           <div className="text-center bg-background/95 px-4 py-3 rounded-md shadow">
-            <Upload className="h-6 w-6 mx-auto mb-1 text-primary" />
-            <div className="text-sm font-semibold">Dateien hier ablegen</div>
+            <Upload
+              className={`h-6 w-6 mx-auto mb-1 ${
+                defaultDropFolder === null ? "text-amber-700" : "text-primary"
+              }`}
+            />
+            <div className="text-sm font-semibold">
+              {defaultDropFolder === null
+                ? "Auf einen Ordner unten ablegen"
+                : "Dateien hier ablegen"}
+            </div>
             <div className="text-[11px] text-muted-foreground">
-              → Ordner: {meta(defaultDropFolder).label}
+              {defaultDropFolder === null
+                ? "→ Whitespace zählt nicht — direkt auf eine Zeile ziehen"
+                : `→ Ordner: ${meta(defaultDropFolder).label}${currentSubpath ? ` / ${currentSubpath}` : ""}`}
             </div>
           </div>
         </div>
@@ -408,7 +443,11 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
         ref={fileRef}
         className="hidden"
         onChange={(e) => {
-          upload(e.target.files, defaultDropFolder);
+          // Hochladen-Button erscheint nur im Folder-View, daher ist
+          // defaultDropFolder hier nie null. Fallback auf
+          // 'angebotsunterlagen', falls jemand das hidden input
+          // außerhalb des normalen Flows triggert.
+          upload(e.target.files, defaultDropFolder ?? "angebotsunterlagen");
           if (fileRef.current) fileRef.current.value = "";
         }}
       />
@@ -538,6 +577,7 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
                       latest={stats.latest}
                       onOpen={() => setCurrentFolder(f.key)}
                       onDrop={dropOnTopFolder(f.key)}
+                      dragActive={dragOver}
                     />
                   );
                 })}
@@ -581,6 +621,7 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
                         latest={st.latest}
                         onOpen={() => enterSubfolder(name)}
                         onDrop={dropOnSubfolder(name)}
+                        dragActive={dragOver}
                       />
                     );
                   })}
@@ -662,12 +703,14 @@ function FolderRow({
   latest,
   onOpen,
   onDrop,
+  dragActive = false,
 }: {
   label: string;
   count: number;
   latest: string | null;
   onOpen: () => void;
   onDrop: (e: React.DragEvent) => void;
+  dragActive?: boolean;
 }) {
   const [hover, setHover] = useState(false);
   return (
@@ -677,6 +720,7 @@ function FolderRow({
         if (e.dataTransfer?.types?.includes("Files")) {
           e.preventDefault();
           e.stopPropagation();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
           setHover(true);
         }
       }}
@@ -686,7 +730,11 @@ function FolderRow({
         onDrop(e);
       }}
       className={`flex items-center gap-3 px-3 sm:px-4 py-2.5 cursor-pointer transition ${
-        hover ? "bg-primary/10" : "hover:bg-muted/50"
+        hover
+          ? "bg-primary/15 ring-2 ring-primary"
+          : dragActive
+            ? "bg-primary/[0.04] ring-1 ring-primary/30"
+            : "hover:bg-muted/50"
       }`}
       role="button"
       tabIndex={0}

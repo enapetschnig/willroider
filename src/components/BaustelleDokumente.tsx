@@ -340,14 +340,21 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     fileRef.current?.click();
   };
 
-  // Aktueller Drop-Target-Ordner (z.B. für Paste oder globalen Drop)
-  const defaultDropFolder: FolderKey =
-    currentFolder === "root" ? "fotos" : currentFolder;
+  // Aktueller Drop-Target-Ordner für Folder-View (Paste oder Whitespace-
+  // Drop landet im aktuellen Sub-Pfad). Im Root-View gibt es bewusst
+  // KEINEN Default mehr — Drops müssen explizit auf einer Folder-Zeile
+  // landen, sonst Toast.
+  const defaultDropFolder: FolderKey | null =
+    currentFolder === "root" ? null : currentFolder;
 
-  // Drag&Drop für die gesamte Component
+  // Drag&Drop für die gesamte Component (Windows-Explorer-Verhalten):
+  //  - Root-View: nur die Folder-Rows sind echte Drop-Targets; Whitespace-
+  //    Drop zeigt einen Hinweis-Toast und tut sonst nichts.
+  //  - Folder-View: Whitespace-Drop lädt in den aktuellen (Sub-)Ordner.
   const onDragOver = (e: React.DragEvent) => {
     if (e.dataTransfer?.types?.includes("Files")) {
       e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
       setDragOver(true);
     }
   };
@@ -358,6 +365,19 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
+    if (defaultDropFolder === null) {
+      // Root-View: Whitespace-Drop ist KEIN Upload — der User soll
+      // direkt auf einen der Ordner zielen.
+      const dropped = await readDropFiles(e);
+      if (dropped.length > 0) {
+        toast({
+          title: "Bitte direkt auf einen Ordner ziehen",
+          description:
+            "In der Übersicht haben wir keinen Default-Ordner — direkt auf eine Ordner-Zeile (z. B. 1-Baustellenmanagement oder Fotos) fallen lassen.",
+        });
+      }
+      return;
+    }
     const dropped = await readDropFiles(e);
     if (dropped.length === 0) return;
     const items: UploadItem[] = dropped.map((d) => ({
@@ -412,7 +432,13 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       const files = e.clipboardData?.files;
       if (!files || files.length === 0) return;
       e.preventDefault();
-      upload(files, defaultDropFolder);
+      if (defaultDropFolder === null) {
+        // Im Root-View: Paste landet kommentarlos im Fotos-Ordner —
+        // ist die gängigste Erwartung beim Screenshot-Einfügen.
+        upload(files, "fotos");
+      } else {
+        upload(files, defaultDropFolder);
+      }
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
@@ -474,12 +500,28 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       }`}
     >
       {dragOver && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-primary/10 border-2 border-dashed border-primary">
+        <div
+          className={`pointer-events-none absolute inset-0 z-10 flex items-start justify-center pt-4 rounded-lg border-2 border-dashed ${
+            defaultDropFolder === null
+              ? "bg-amber-50/70 border-amber-400"
+              : "bg-primary/10 border-primary"
+          }`}
+        >
           <div className="text-center bg-background/95 px-4 py-3 rounded-md shadow">
-            <Upload className="h-6 w-6 mx-auto mb-1 text-primary" />
-            <div className="text-sm font-semibold">Dateien hier ablegen</div>
+            <Upload
+              className={`h-6 w-6 mx-auto mb-1 ${
+                defaultDropFolder === null ? "text-amber-700" : "text-primary"
+              }`}
+            />
+            <div className="text-sm font-semibold">
+              {defaultDropFolder === null
+                ? "Auf einen Ordner unten ablegen"
+                : "Dateien hier ablegen"}
+            </div>
             <div className="text-[11px] text-muted-foreground">
-              → Ordner: {folderMeta(defaultDropFolder).label}
+              {defaultDropFolder === null
+                ? "→ Whitespace zählt nicht — direkt auf eine Zeile ziehen"
+                : `→ Ordner: ${folderMeta(defaultDropFolder).label}${currentSubpath ? ` / ${currentSubpath}` : ""}`}
             </div>
           </div>
         </div>
@@ -646,6 +688,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
                       latest={stats.latest}
                       onOpen={() => setCurrentFolder(f.key)}
                       onDrop={dropOnTopFolder(f.key)}
+                      dragActive={dragOver}
                     />
                   );
                 })}
@@ -689,6 +732,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
                         latest={st.latest}
                         onOpen={() => enterSubfolder(name)}
                         onDrop={dropOnSubfolder(name)}
+                        dragActive={dragOver}
                       />
                     );
                   })}
@@ -771,12 +815,17 @@ function FolderRow({
   latest,
   onOpen,
   onDrop,
+  dragActive = false,
 }: {
   label: string;
   count: number;
   latest: string | null;
   onOpen: () => void;
   onDrop: (e: React.DragEvent) => void;
+  /** Wenn true: irgendwo im Wrapper läuft gerade ein File-Drag; die
+   *  Zeile bekommt einen subtilen Akzent, damit sie klar als Drop-Ziel
+   *  erkennbar ist. */
+  dragActive?: boolean;
 }) {
   const [hover, setHover] = useState(false);
   return (
@@ -786,6 +835,7 @@ function FolderRow({
         if (e.dataTransfer?.types?.includes("Files")) {
           e.preventDefault();
           e.stopPropagation();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
           setHover(true);
         }
       }}
@@ -794,8 +844,12 @@ function FolderRow({
         setHover(false);
         onDrop(e);
       }}
-      className={`flex items-center gap-3 px-3 sm:px-4 py-2.5 cursor-pointer transition ${
-        hover ? "bg-primary/10" : "hover:bg-muted/50"
+      className={`flex items-center gap-3 px-3 sm:px-4 py-2.5 cursor-pointer transition relative ${
+        hover
+          ? "bg-primary/15 ring-2 ring-primary"
+          : dragActive
+            ? "bg-primary/[0.04] ring-1 ring-primary/30"
+            : "hover:bg-muted/50"
       }`}
       role="button"
       tabIndex={0}
