@@ -727,6 +727,63 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     return () => window.removeEventListener("paste", onPaste);
   }, [baustelleId, currentFolder, currentSubpath]);
 
+  // Windows-Explorer-Tastatur: Entf, F2, Strg+A, Esc — aber nur, wenn
+  // gerade kein Input/Textarea/contentEditable den Fokus hat.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      // Nur im File-View aktiv (nicht im Wurzel-Ordner-Picker).
+      if (currentFolder === "root") return;
+
+      // Strg/Cmd + A → alle im aktuellen Folder markieren
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        if (filtered.length === 0) return;
+        e.preventDefault();
+        selectAll();
+        return;
+      }
+      // Esc → Auswahl löschen oder Rename abbrechen
+      if (e.key === "Escape") {
+        if (renamingId) {
+          cancelRename();
+          return;
+        }
+        if (selected.size > 0) {
+          e.preventDefault();
+          clearSelection();
+        }
+        return;
+      }
+      // Entf → ausgewählte löschen
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (selected.size === 0) return;
+        e.preventDefault();
+        deleteSelected();
+        return;
+      }
+      // F2 → genau 1 ausgewählt → umbenennen
+      if (e.key === "F2") {
+        if (selected.size !== 1) return;
+        const d = filtered.find((x) => selected.has(x.id));
+        if (!d) return;
+        e.preventDefault();
+        startRename(d);
+        return;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentFolder, currentSubpath, selected, renamingId, filtered]);
+
   // Neuer Unterordner anlegen (Marker in DB)
   const createSubfolder = async () => {
     if (currentFolder === "root") return;
