@@ -30,6 +30,11 @@ import {
   Eye,
   X,
   CheckSquare,
+  LayoutGrid,
+  List as ListIcon,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { DocViewerDialog, type DocViewerItem } from "@/components/dokumente/DocViewerDialog";
 import { DocSendDialog, type DocSendItem } from "@/components/dokumente/DocSendDialog";
@@ -44,6 +49,14 @@ import {
   ContextMenuSubTrigger,
   ContextMenuSubContent,
 } from "@/components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
@@ -112,6 +125,28 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const [renameValue, setRenameValue] = useState("");
   /** Dateien zum Verschieben — öffnet einen Ordner-Picker. */
   const [moveItems, setMoveItems] = useState<Dokument[] | null>(null);
+  /** Anzeige-Modus & Sortierung — Windows-Explorer-Stil. */
+  type ViewMode = "tiles" | "list";
+  type SortKey = "date" | "name" | "size" | "type";
+  type SortDir = "asc" | "desc";
+  const [viewMode, setViewMode] = useState<ViewMode>(
+    () => (localStorage.getItem("willroider:dokViewMode") as ViewMode) || "tiles",
+  );
+  const [sortBy, setSortBy] = useState<SortKey>(
+    () => (localStorage.getItem("willroider:dokSortBy") as SortKey) || "date",
+  );
+  const [sortDir, setSortDir] = useState<SortDir>(
+    () => (localStorage.getItem("willroider:dokSortDir") as SortDir) || "desc",
+  );
+  useEffect(() => {
+    localStorage.setItem("willroider:dokViewMode", viewMode);
+  }, [viewMode]);
+  useEffect(() => {
+    localStorage.setItem("willroider:dokSortBy", sortBy);
+  }, [sortBy]);
+  useEffect(() => {
+    localStorage.setItem("willroider:dokSortDir", sortDir);
+  }, [sortDir]);
   const [uploading, setUploading] = useState<{
     name: string;
     idx: number;
@@ -204,12 +239,25 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   // Dateien im aktuellen Top-Folder + Subpath (exakt)
   const filtered = useMemo(() => {
     if (currentFolder === "root") return [] as Dokument[];
-    return docs.filter(
+    const list = docs.filter(
       (d) =>
         (d.ordner ?? "92-sonstiges") === currentFolder &&
-        (d.subpath ?? "") === currentSubpath
+        (d.subpath ?? "") === currentSubpath,
     );
-  }, [docs, currentFolder, currentSubpath]);
+    // Sortierung nach gewähltem Key (mit secondary fallback auf name asc).
+    const collator = new Intl.Collator("de-AT", { sensitivity: "base", numeric: true });
+    const ext = (n: string) => (n.split(".").pop() ?? "").toLowerCase();
+    const sorted = [...list].sort((a, b) => {
+      let cmp = 0;
+      if (sortBy === "name") cmp = collator.compare(a.dateiname, b.dateiname);
+      else if (sortBy === "size") cmp = (a.groesse ?? 0) - (b.groesse ?? 0);
+      else if (sortBy === "type") cmp = collator.compare(ext(a.dateiname), ext(b.dateiname));
+      else cmp = (a.created_at > b.created_at ? 1 : a.created_at < b.created_at ? -1 : 0);
+      if (cmp === 0) cmp = collator.compare(a.dateiname, b.dateiname);
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return sorted;
+  }, [docs, currentFolder, currentSubpath, sortBy, sortDir]);
 
   // Direkte Unterordner im aktuellen Pfad (aus Files + leeren Folder-Markern)
   const subfolders = useMemo(() => {
@@ -977,6 +1025,78 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
           )}
           {filtered.length > 0 && (
             <>
+              {/* Toolbar: Sortieren + Ansicht */}
+              <div className="flex items-center gap-2 flex-wrap text-xs">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-8">
+                      <ArrowUpDown className="h-3.5 w-3.5 mr-1.5" />
+                      Sortieren:{" "}
+                      {sortBy === "name"
+                        ? "Name"
+                        : sortBy === "size"
+                          ? "Größe"
+                          : sortBy === "type"
+                            ? "Typ"
+                            : "Datum"}
+                      {sortDir === "asc" ? (
+                        <ArrowUp className="h-3 w-3 ml-1" />
+                      ) : (
+                        <ArrowDown className="h-3 w-3 ml-1" />
+                      )}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuLabel className="text-[10px] uppercase">Sortieren nach</DropdownMenuLabel>
+                    {(["name", "date", "size", "type"] as const).map((k) => (
+                      <DropdownMenuItem
+                        key={k}
+                        onSelect={() => setSortBy(k)}
+                        className={sortBy === k ? "font-semibold" : ""}
+                      >
+                        {k === "name"
+                          ? "Name"
+                          : k === "date"
+                            ? "Geändert"
+                            : k === "size"
+                              ? "Größe"
+                              : "Typ"}
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={() => setSortDir("asc")} className={sortDir === "asc" ? "font-semibold" : ""}>
+                      <ArrowUp className="h-3.5 w-3.5 mr-2" /> Aufsteigend
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setSortDir("desc")} className={sortDir === "desc" ? "font-semibold" : ""}>
+                      <ArrowDown className="h-3.5 w-3.5 mr-2" /> Absteigend
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <div className="ml-auto flex items-center rounded-md border h-8 p-0.5 bg-card">
+                  <button
+                    onClick={() => setViewMode("tiles")}
+                    className={`px-2 h-7 rounded inline-flex items-center gap-1.5 transition ${
+                      viewMode === "tiles" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-muted"
+                    }`}
+                    aria-label="Kachel-Ansicht"
+                    title="Kacheln"
+                  >
+                    <LayoutGrid className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setViewMode("list")}
+                    className={`px-2 h-7 rounded inline-flex items-center gap-1.5 transition ${
+                      viewMode === "list" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-muted"
+                    }`}
+                    aria-label="Listen-Ansicht"
+                    title="Liste"
+                  >
+                    <ListIcon className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+
               {selected.size > 0 && (
                 <div className="sticky top-2 z-20 rounded-md border bg-primary/5 border-primary/30 px-3 py-2 flex items-center gap-2 flex-wrap">
                   <CheckSquare className="h-4 w-4 text-primary" />
@@ -1027,38 +1147,74 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
                   </div>
                 </div>
               )}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-3">
-                {filtered.map((d) => (
-                  <FileCard
-                    key={d.id}
-                    d={d}
-                    isSelected={selected.has(d.id)}
-                    isRenaming={renamingId === d.id}
-                    renameValue={renameValue}
-                    onRenameChange={setRenameValue}
-                    onRenameCommit={commitRename}
-                    onRenameCancel={cancelRename}
-                    onOpen={() => open(d)}
-                    onClick={(e) => toggleSelection(d.id, e)}
-                    onDoubleClick={() => open(d)}
-                    onDelete={(e) => remove(d, e)}
-                    onSend={(e) => sendOne(d, e)}
-                    onStartRename={() => startRename(d)}
-                    onMove={() => {
-                      // Wenn nicht in der Selektion → erst markieren
-                      if (!selected.has(d.id)) {
-                        setSelected(new Set([d.id]));
-                      }
-                      setMoveItems(
-                        selected.has(d.id) && selected.size > 1
-                          ? filtered.filter((x) => selected.has(x.id))
-                          : [d],
-                      );
-                    }}
-                    onDragStart={(e) => handleFileDragStart(e, d)}
-                  />
-                ))}
-              </div>
+              {viewMode === "tiles" ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-3">
+                  {filtered.map((d) => (
+                    <FileCard
+                      key={d.id}
+                      d={d}
+                      isSelected={selected.has(d.id)}
+                      isRenaming={renamingId === d.id}
+                      renameValue={renameValue}
+                      onRenameChange={setRenameValue}
+                      onRenameCommit={commitRename}
+                      onRenameCancel={cancelRename}
+                      onOpen={() => open(d)}
+                      onClick={(e) => toggleSelection(d.id, e)}
+                      onDoubleClick={() => open(d)}
+                      onDelete={(e) => remove(d, e)}
+                      onSend={(e) => sendOne(d, e)}
+                      onStartRename={() => startRename(d)}
+                      onMove={() => {
+                        if (!selected.has(d.id)) {
+                          setSelected(new Set([d.id]));
+                        }
+                        setMoveItems(
+                          selected.has(d.id) && selected.size > 1
+                            ? filtered.filter((x) => selected.has(x.id))
+                            : [d],
+                        );
+                      }}
+                      onDragStart={(e) => handleFileDragStart(e, d)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <FileListView
+                  files={filtered}
+                  selected={selected}
+                  renamingId={renamingId}
+                  renameValue={renameValue}
+                  onRenameChange={setRenameValue}
+                  onRenameCommit={commitRename}
+                  onRenameCancel={cancelRename}
+                  onRowClick={(d, e) => toggleSelection(d.id, e)}
+                  onRowDoubleClick={(d) => open(d)}
+                  onStartRename={(d) => startRename(d)}
+                  onDelete={(d) => remove(d)}
+                  onSend={(d) => sendOne(d)}
+                  onMove={(d) => {
+                    if (!selected.has(d.id)) setSelected(new Set([d.id]));
+                    setMoveItems(
+                      selected.has(d.id) && selected.size > 1
+                        ? filtered.filter((x) => selected.has(x.id))
+                        : [d],
+                    );
+                  }}
+                  onOpen={(d) => open(d)}
+                  onDragStart={(d, e) => handleFileDragStart(e, d)}
+                  sortBy={sortBy}
+                  sortDir={sortDir}
+                  onSort={(k) => {
+                    if (sortBy === k) {
+                      setSortDir(sortDir === "asc" ? "desc" : "asc");
+                    } else {
+                      setSortBy(k);
+                      setSortDir("asc");
+                    }
+                  }}
+                />
+              )}
             </>
           )}
         </div>
@@ -1394,5 +1550,241 @@ function FileCard({
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
+  );
+}
+
+/** Tabellarische („Details-")Ansicht — wie Windows-Explorer List/Details.
+ *  Sortier-Klick auf Spaltenkopf, Multi-Select, Inline-Rename,
+ *  Rechtsklick-Menü pro Zeile. */
+type SortKeyDoc = "name" | "date" | "size" | "type";
+function FileListView({
+  files,
+  selected,
+  renamingId,
+  renameValue,
+  onRenameChange,
+  onRenameCommit,
+  onRenameCancel,
+  onRowClick,
+  onRowDoubleClick,
+  onStartRename,
+  onDelete,
+  onSend,
+  onMove,
+  onOpen,
+  onDragStart,
+  sortBy,
+  sortDir,
+  onSort,
+}: {
+  files: Dokument[];
+  selected: Set<string>;
+  renamingId: string | null;
+  renameValue: string;
+  onRenameChange: (v: string) => void;
+  onRenameCommit: () => void;
+  onRenameCancel: () => void;
+  onRowClick: (d: Dokument, e: React.MouseEvent) => void;
+  onRowDoubleClick: (d: Dokument) => void;
+  onStartRename: (d: Dokument) => void;
+  onDelete: (d: Dokument) => void;
+  onSend: (d: Dokument) => void;
+  onMove: (d: Dokument) => void;
+  onOpen: (d: Dokument) => void;
+  onDragStart: (d: Dokument, e: React.DragEvent) => void;
+  sortBy: SortKeyDoc;
+  sortDir: "asc" | "desc";
+  onSort: (k: SortKeyDoc) => void;
+}) {
+  const SortIcon = ({ k }: { k: SortKeyDoc }) =>
+    sortBy === k ? (
+      sortDir === "asc" ? (
+        <ArrowUp className="h-3 w-3 inline ml-1" />
+      ) : (
+        <ArrowDown className="h-3 w-3 inline ml-1" />
+      )
+    ) : (
+      <span className="inline-block w-3 ml-1" />
+    );
+  return (
+    <div className="rounded-md border bg-card overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/40 border-b text-[11px] uppercase tracking-wide text-muted-foreground">
+          <tr>
+            <th className="w-8 px-2 py-2"></th>
+            <th className="w-10 px-1 py-2"></th>
+            <th
+              className="text-left px-2 py-2 font-medium cursor-pointer hover:text-foreground"
+              onClick={() => onSort("name")}
+            >
+              Name <SortIcon k="name" />
+            </th>
+            <th
+              className="text-left px-2 py-2 font-medium cursor-pointer hover:text-foreground hidden sm:table-cell w-32"
+              onClick={() => onSort("date")}
+            >
+              Geändert <SortIcon k="date" />
+            </th>
+            <th
+              className="text-right px-2 py-2 font-medium cursor-pointer hover:text-foreground hidden sm:table-cell w-24"
+              onClick={() => onSort("size")}
+            >
+              Größe <SortIcon k="size" />
+            </th>
+            <th
+              className="text-left px-2 py-2 font-medium cursor-pointer hover:text-foreground hidden md:table-cell w-20"
+              onClick={() => onSort("type")}
+            >
+              Typ <SortIcon k="type" />
+            </th>
+            <th className="w-10 px-1 py-2"></th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {files.map((d) => {
+            const ext = (d.dateiname.split(".").pop() ?? "").toUpperCase();
+            const isSel = selected.has(d.id);
+            const isRen = renamingId === d.id;
+            return (
+              <ContextMenu key={d.id}>
+                <ContextMenuTrigger asChild>
+                  <tr
+                    draggable={!isRen}
+                    onDragStart={(e) => onDragStart(d, e)}
+                    onClick={(e) => {
+                      if (isRen) return;
+                      onRowClick(d, e);
+                    }}
+                    onDoubleClick={() => {
+                      if (isRen) return;
+                      onRowDoubleClick(d);
+                    }}
+                    className={`cursor-pointer transition ${
+                      isSel
+                        ? "bg-primary/10 hover:bg-primary/15"
+                        : "hover:bg-muted/40"
+                    }`}
+                  >
+                    <td
+                      className="px-2 py-1.5"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Checkbox
+                        checked={isSel}
+                        onCheckedChange={() =>
+                          onRowClick(d, { ctrlKey: true } as React.MouseEvent)
+                        }
+                        aria-label={`${d.dateiname} auswählen`}
+                      />
+                    </td>
+                    <td className="px-1 py-1.5">
+                      <div className="h-8 w-8 rounded bg-muted overflow-hidden flex items-center justify-center relative">
+                        <Thumbnail
+                          bucket="baustellen"
+                          storagePath={d.storage_path}
+                          dateiname={d.dateiname}
+                          mimetype={d.mimetype}
+                        />
+                      </div>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {isRen ? (
+                        <input
+                          autoFocus
+                          value={renameValue}
+                          onChange={(e) => onRenameChange(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === "Enter") onRenameCommit();
+                            else if (e.key === "Escape") onRenameCancel();
+                          }}
+                          onBlur={onRenameCommit}
+                          className="w-full text-sm border rounded px-1 py-0.5 bg-background"
+                        />
+                      ) : (
+                        <span className="font-medium">{d.dateiname}</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5 hidden sm:table-cell text-xs text-muted-foreground tabular-nums">
+                      {new Date(d.created_at).toLocaleDateString("de-AT")}
+                    </td>
+                    <td className="px-2 py-1.5 hidden sm:table-cell text-xs text-right tabular-nums">
+                      {d.groesse
+                        ? d.groesse < 1024 * 1024
+                          ? `${(d.groesse / 1024).toFixed(0)} KB`
+                          : `${(d.groesse / 1024 / 1024).toFixed(1)} MB`
+                        : "—"}
+                    </td>
+                    <td className="px-2 py-1.5 hidden md:table-cell text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
+                      {ext.slice(0, 5)}
+                    </td>
+                    <td
+                      className="px-1 py-1.5 text-right"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            className="h-7 w-7 rounded hover:bg-muted inline-flex items-center justify-center"
+                            aria-label="Aktionen"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onSelect={() => onOpen(d)}>
+                            <Eye className="h-3.5 w-3.5 mr-2" /> Öffnen
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => onSend(d)}>
+                            <Mail className="h-3.5 w-3.5 mr-2" /> Per Mail
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onSelect={() => onStartRename(d)}>
+                            <Pencil className="h-3.5 w-3.5 mr-2" /> Umbenennen
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => onMove(d)}>
+                            <FolderInput className="h-3.5 w-3.5 mr-2" /> Verschieben …
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onSelect={() => onDelete(d)}
+                            className="text-destructive"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-2" /> Löschen
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                  </tr>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-48">
+                  <ContextMenuItem onSelect={() => onOpen(d)}>
+                    <Eye className="h-3.5 w-3.5 mr-2" /> Öffnen
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={() => onSend(d)}>
+                    <Mail className="h-3.5 w-3.5 mr-2" /> Per Mail senden
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem onSelect={() => onStartRename(d)}>
+                    <Pencil className="h-3.5 w-3.5 mr-2" /> Umbenennen
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={() => onMove(d)}>
+                    <FolderInput className="h-3.5 w-3.5 mr-2" /> Verschieben …
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    onSelect={() => onDelete(d)}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-2" /> Löschen
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
