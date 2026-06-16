@@ -451,22 +451,93 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   };
   const performMove = async (targetOrdner: FolderKey, targetSubpath: string) => {
     if (!moveItems) return;
-    const ids = moveItems.map((d) => d.id);
+    await moveByIds(moveItems.map((d) => d.id), targetOrdner, targetSubpath);
+    setMoveItems(null);
+  };
+  /** Direkter Move per IDs — wird sowohl vom Verschieben-Dialog als auch
+   *  von Drag&Drop verwendet. */
+  const moveByIds = async (
+    ids: string[],
+    targetOrdner: FolderKey,
+    targetSubpath: string,
+  ) => {
+    if (ids.length === 0) return;
     const { error } = await supabase
       .from("dokumente")
       .update({ ordner: targetOrdner, subpath: targetSubpath || null })
       .in("id", ids);
     if (error) {
-      toast({ variant: "destructive", title: "Verschieben fehlgeschlagen", description: error.message });
+      toast({
+        variant: "destructive",
+        title: "Verschieben fehlgeschlagen",
+        description: error.message,
+      });
       return;
     }
     toast({
-      title: `${moveItems.length} Datei(en) verschoben`,
+      title: `${ids.length} Datei(en) verschoben`,
       description: `→ ${folderMeta(targetOrdner).label}${targetSubpath ? ` / ${targetSubpath}` : ""}`,
     });
-    setMoveItems(null);
     clearSelection();
     load();
+  };
+
+  /** Custom MIME-Type, um interne File-Drags von externen
+   *  Browser-File-Drops zu unterscheiden. */
+  const INTERNAL_DRAG_MIME = "application/x-willroider-files";
+
+  /** Beim Start eines internen File-Drags: alle aktuell selektierten
+   *  IDs (oder die einzelne gerade-gedragte ID) als Quelle speichern. */
+  const handleFileDragStart = (
+    e: React.DragEvent,
+    d: Dokument,
+  ) => {
+    // Wenn die gezogene Datei nicht in der Selektion ist, ziehen wir
+    // nur diese eine — Windows-Verhalten.
+    const ids = selected.has(d.id) && selected.size > 1
+      ? [...selected]
+      : [d.id];
+    e.dataTransfer.setData(INTERNAL_DRAG_MIME, JSON.stringify(ids));
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  /** Drop-Handler-Wrapper: erkennt internal (Move) vs external (Upload). */
+  const handleDropOnFolder = (
+    targetOrdner: FolderKey,
+    targetSubpath: string,
+  ) => async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    // Internal drag → move
+    const raw = e.dataTransfer.getData(INTERNAL_DRAG_MIME);
+    if (raw) {
+      try {
+        const ids = JSON.parse(raw) as string[];
+        // Selbst-Drops ignorieren (alle Files schon im Ziel)
+        const movable = docs.filter(
+          (d) =>
+            ids.includes(d.id) &&
+            ((d.ordner ?? "92-sonstiges") !== targetOrdner ||
+              (d.subpath ?? "") !== targetSubpath),
+        );
+        if (movable.length === 0) return;
+        await moveByIds(movable.map((d) => d.id), targetOrdner, targetSubpath);
+        return;
+      } catch {
+        /* fallthrough auf upload */
+      }
+    }
+    // External drag → upload
+    const dropped = await readDropFiles(e);
+    if (dropped.length === 0) return;
+    const items: UploadItem[] = dropped.map((dd) => ({
+      file: dd.file,
+      subpath: targetSubpath
+        ? joinSubpath(targetSubpath, dd.relativePath)
+        : dd.relativePath,
+    }));
+    uploadItems(items, targetOrdner);
   };
 
   const remove = async (d: Dokument, e?: React.MouseEvent) => {
@@ -501,9 +572,14 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   //    Drop zeigt einen Hinweis-Toast und tut sonst nichts.
   //  - Folder-View: Whitespace-Drop lädt in den aktuellen (Sub-)Ordner.
   const onDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer?.types?.includes("Files")) {
+    const types = e.dataTransfer?.types;
+    const isExternal = types?.includes("Files");
+    const isInternal = types?.includes(INTERNAL_DRAG_MIME);
+    if (isExternal || isInternal) {
       e.preventDefault();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = isInternal ? "move" : "copy";
+      }
       setDragOver(true);
     }
   };
@@ -514,6 +590,34 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
+    // Interner Drag (Datei wird umsortiert) ── hat Vorrang vor externen
+    // Files (Cross-Browser sind beide manchmal gleichzeitig sichtbar).
+    const internalRaw = e.dataTransfer.getData(INTERNAL_DRAG_MIME);
+    if (internalRaw) {
+      if (defaultDropFolder === null) {
+        toast({
+          title: "Bitte direkt auf einen Ordner ziehen",
+          description:
+            "Im Übersichts-Modus brauchst du einen konkreten Ziel-Ordner — fall auf eine Ordner-Zeile.",
+        });
+        return;
+      }
+      // In den aktuellen (Sub)folder droppen.
+      try {
+        const ids = JSON.parse(internalRaw) as string[];
+        const movable = docs.filter(
+          (d) =>
+            ids.includes(d.id) &&
+            ((d.ordner ?? "92-sonstiges") !== defaultDropFolder ||
+              (d.subpath ?? "") !== currentSubpath),
+        );
+        if (movable.length === 0) return;
+        await moveByIds(movable.map((d) => d.id), defaultDropFolder, currentSubpath);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     if (defaultDropFolder === null) {
       // Root-View: Whitespace-Drop ist KEIN Upload — der User soll
       // direkt auf einen der Ordner zielen.
@@ -536,33 +640,15 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     uploadItems(items, defaultDropFolder);
   };
 
-  // Drop direkt auf eine Top-Folder-Zeile (Wurzel) ODER Unterordner-Zeile
-  const dropOnTopFolder = (folder: FolderKey) => async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(false);
-    const dropped = await readDropFiles(e);
-    if (dropped.length === 0) return;
-    const items: UploadItem[] = dropped.map((d) => ({
-      file: d.file,
-      subpath: d.relativePath,
-    }));
-    uploadItems(items, folder);
-  };
-
-  const dropOnSubfolder = (folderName: string) => async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(false);
+  // Drop auf einer Top-Folder-Zeile (im Wurzel-View): immer in den
+  // jeweiligen Top-Ordner, ohne Subpath.
+  const dropOnTopFolder = (folder: FolderKey) => handleDropOnFolder(folder, "");
+  // Drop auf einer Unterordner-Zeile: in den aktuellen Top-Folder, in
+  // den angegebenen subpath (oder dessen Sub-Pfad-Joiner).
+  const dropOnSubfolder = (folderName: string) => (e: React.DragEvent) => {
     if (currentFolder === "root") return;
     const target = joinSubpath(currentSubpath, folderName);
-    const dropped = await readDropFiles(e);
-    if (dropped.length === 0) return;
-    const items: UploadItem[] = dropped.map((d) => ({
-      file: d.file,
-      subpath: joinSubpath(target, d.relativePath),
-    }));
-    uploadItems(items, currentFolder);
+    return handleDropOnFolder(currentFolder, target)(e);
   };
 
   // Paste aus Zwischenablage (z.B. Screenshot)
@@ -969,6 +1055,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
                           : [d],
                       );
                     }}
+                    onDragStart={(e) => handleFileDragStart(e, d)}
                   />
                 ))}
               </div>
@@ -1094,10 +1181,13 @@ function FolderRow({
     <li
       onClick={onOpen}
       onDragOver={(e) => {
-        if (e.dataTransfer?.types?.includes("Files")) {
+        const t = e.dataTransfer?.types;
+        const isExt = t?.includes("Files");
+        const isInt = t?.includes("application/x-willroider-files");
+        if (isExt || isInt) {
           e.preventDefault();
           e.stopPropagation();
-          if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+          if (e.dataTransfer) e.dataTransfer.dropEffect = isInt ? "move" : "copy";
           setHover(true);
         }
       }}
@@ -1158,6 +1248,7 @@ interface FileCardProps {
   onSend: (e: React.MouseEvent) => void;
   onStartRename: () => void;
   onMove: () => void;
+  onDragStart: (e: React.DragEvent) => void;
 }
 
 function FileCard({
@@ -1175,11 +1266,14 @@ function FileCard({
   onSend,
   onStartRename,
   onMove,
+  onDragStart,
 }: FileCardProps) {
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
+          draggable={!isRenaming}
+          onDragStart={onDragStart}
           className={`group relative rounded-md border overflow-hidden transition-all cursor-pointer ${
             isSelected
               ? "border-primary ring-2 ring-primary/40 bg-primary/5"
