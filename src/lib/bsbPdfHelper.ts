@@ -57,10 +57,19 @@ export interface BuildBerichtPdfResult {
   maName: string;
 }
 
+export interface BuildBerichtPdfOptions {
+  /** Wenn beim Versand die frisch unterschriebene Büro-Signatur noch
+   *  nicht in der DB steht (wird erst beim selben Versand-Schritt
+   *  persistiert), kann sie hier übergeben werden — das PDF zeigt
+   *  sie dann sofort im „geprüft"-Bereich. */
+  bueroSignaturOverride?: string;
+}
+
 /** Hauptfunktion: nimmt eine `stunden_berichte.id` und liefert das fertige
  *  PDF + den vorgeschlagenen Dateinamen + den Mitarbeiter-Namen. */
 export async function buildBerichtPdf(
   berichtId: string,
+  opts: BuildBerichtPdfOptions = {},
 ): Promise<BuildBerichtPdfResult> {
   // 1) Bericht inkl. MA + Aenderungen
   const { data: bRaw, error: bErr } = await supabase
@@ -256,7 +265,9 @@ export async function buildBerichtPdf(
       : null,
     bestaetigtAm: bericht.bestaetigt_am
       ? new Date(bericht.bestaetigt_am).toLocaleDateString("de-AT")
-      : null,
+      : new Date().toLocaleDateString("de-AT"),
+    bestaetigtUnterschrift:
+      opts.bueroSignaturOverride ?? bericht.bestaetigt_unterschrift_data ?? null,
   });
 
   const safeNa = maName.replace(/[^a-zA-Z0-9-]+/g, "_");

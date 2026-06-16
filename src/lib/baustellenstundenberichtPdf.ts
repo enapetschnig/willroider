@@ -38,6 +38,8 @@ export interface BsbPdfInput {
   unterschrift: string | null; // Base64-PNG
   unterschriebenAm: string | null;
   bestaetigtAm: string | null;
+  /** Base64-PNG Unterschrift des Büro-/Maurer-Users (optional). */
+  bestaetigtUnterschrift?: string | null;
   /** Wenn true, werden geänderte Tagesspalten grün („geprüft") statt
    *  gelb („bitte durchschauen") gezeichnet. Defaultet zu false, damit
    *  Aufrufer ohne Status-Info das alte Verhalten erhalten. */
@@ -238,6 +240,22 @@ export async function makeBaustellenstundenberichtPdf(
   );
 
   // geprüft (Büro)
+  if (input.bestaetigtUnterschrift) {
+    try {
+      doc.addImage(
+        input.bestaetigtUnterschrift,
+        "PNG",
+        margin + colW,
+        y,
+        38,
+        14,
+        undefined,
+        "FAST",
+      );
+    } catch {
+      /* ignore */
+    }
+  }
   doc.line(margin + colW, y + 15, margin + 2 * colW - 8, y + 15);
   doc.text(
     `geprüft am: ${input.bestaetigtAm ?? ""}`,

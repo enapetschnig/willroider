@@ -22,6 +22,9 @@ interface VersendenRequest {
   html?: string;
   attachments: { filename: string; contentBase64: string }[];
   berichtIds: string[];
+  /** Base64-DataURL einer Büro-Unterschrift; falls gesetzt, wird sie
+   *  pro Bericht in der RPC stunden_bericht_versenden mitgespeichert. */
+  bueroSignature?: string | null;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -115,6 +118,7 @@ Deno.serve(async (req) => {
       const { error } = await admin.rpc("stunden_bericht_versenden" as any, {
         p_id: id,
         p_mail: body.empfaenger.trim(),
+        p_unterschrift: body.bueroSignature ?? null,
       });
       if (error) fehler.push({ id, err: error.message });
       else versendet.push(id);

@@ -185,6 +185,10 @@ export default function StundenBericht() {
   const [signOpen, setSignOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [versendenOpen, setVersendenOpen] = useState(false);
+  /** Wenn gesetzt: Büro-User hat im Bestätigen-Dialog unterschrieben und
+   *  der Versand-Dialog soll mit dieser Signatur an die RPC. */
+  const [bueroSignature, setBueroSignature] = useState<string | null>(null);
+  const [bueroSignOpen, setBueroSignOpen] = useState(false);
 
   const geaendert = useMemo(
     () => geaenderteTage(bericht?.snapshot as BerichtSnapshot | undefined, tage),
@@ -347,10 +351,16 @@ export default function StundenBericht() {
     }
   };
 
-  /** Klick auf „Bestätigen & ans Büro senden" — Versand-Dialog öffnen.
-   *  Die eigentliche Bestätigung (Status `bestaetigt` + ZA-Buchung)
-   *  passiert atomar mit dem Versand im RPC `stunden_bericht_versenden`. */
+  /** Klick auf „Bestätigen & ans Büro senden" — zuerst Unterschrift des
+   *  Büro-/Maurer-Users sammeln, dann Versand-Dialog öffnen. Die
+   *  Signatur wird mit dem Versand zur RPC durchgereicht. */
   const handleBestaetigen = () => {
+    setBueroSignOpen(true);
+  };
+
+  const handleBueroUnterschrift = (dataUrl: string) => {
+    setBueroSignature(dataUrl);
+    setBueroSignOpen(false);
     setVersendenOpen(true);
   };
 
@@ -848,7 +858,21 @@ export default function StundenBericht() {
             <div className="text-xs font-semibold uppercase text-muted-foreground">
               Geprüft (Büro)
             </div>
-            {bericht.bestaetigt_am ? (
+            {(bericht as any).bestaetigt_unterschrift_data ? (
+              <>
+                <img
+                  src={(bericht as any).bestaetigt_unterschrift_data}
+                  alt="Büro-Unterschrift"
+                  className="h-16 border rounded bg-white"
+                />
+                <div className="text-xs text-muted-foreground">
+                  Bestätigt am{" "}
+                  {bericht.bestaetigt_am
+                    ? new Date(bericht.bestaetigt_am).toLocaleDateString("de-AT")
+                    : ""}
+                </div>
+              </>
+            ) : bericht.bestaetigt_am ? (
               <div className="text-sm">
                 Bestätigt am{" "}
                 {new Date(bericht.bestaetigt_am).toLocaleDateString("de-AT")}
@@ -1018,7 +1042,7 @@ export default function StundenBericht() {
         }}
       />
 
-      {/* Unterschrift */}
+      {/* MA-Unterschrift („aufgestellt") */}
       <UnterschriftDialog
         open={signOpen}
         onOpenChange={setSignOpen}
@@ -1027,14 +1051,28 @@ export default function StundenBericht() {
         busy={aktionen.unterschreiben.isPending}
       />
 
+      {/* Büro/Maurer-Unterschrift („geprüft") — Schritt 1 von „Bestätigen
+          & ans Büro senden": erst Signatur sammeln, dann Versand-Dialog. */}
+      <UnterschriftDialog
+        open={bueroSignOpen}
+        onOpenChange={setBueroSignOpen}
+        onSave={handleBueroUnterschrift}
+        titel="Bestätigung unterschreiben"
+      />
+
       {/* Versenden ans Büro (bestätigt im selben Schritt, falls nötig) */}
       <BsbVersendenDialog
         open={versendenOpen}
-        onOpenChange={setVersendenOpen}
+        onOpenChange={(o) => {
+          setVersendenOpen(o);
+          if (!o) setBueroSignature(null);
+        }}
         berichtIds={[bericht.id]}
-        onSent={() =>
-          qc.invalidateQueries({ queryKey: ["stunden_bericht", bericht.id] })
-        }
+        bueroSignature={bueroSignature}
+        onSent={() => {
+          setBueroSignature(null);
+          qc.invalidateQueries({ queryKey: ["stunden_bericht", bericht.id] });
+        }}
       />
     </div>
   );

@@ -43,11 +43,15 @@ export function BsbVersendenDialog({
   onOpenChange,
   berichtIds,
   onSent,
+  bueroSignature,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   berichtIds: string[];
   onSent?: () => void;
+  /** Base64-PNG-Unterschrift des bestätigenden Büro-Users (Maurer/GF).
+   *  Wird im PDF direkt eingebaut und an die RPC durchgereicht. */
+  bueroSignature?: string | null;
 }) {
   const { toast } = useToast();
   const [prepared, setPrepared] = useState<PreparedAttachment[]>([]);
@@ -81,7 +85,9 @@ export function BsbVersendenDialog({
         // PDFs der gewählten Berichte bauen (parallel, ca. 50–100 KB pro PDF)
         const built = await Promise.all(
           berichtIds.map(async (id) => {
-            const { doc, fileName, maName } = await buildBerichtPdf(id);
+            const { doc, fileName, maName } = await buildBerichtPdf(id, {
+              bueroSignaturOverride: bueroSignature ?? undefined,
+            });
             const blob = doc.output("blob") as Blob;
             const dataUrl = doc.output("datauristring") as unknown as string;
             const contentBase64 = dataUrl.split(",")[1] ?? "";
@@ -180,6 +186,7 @@ export function BsbVersendenDialog({
               contentBase64: p.contentBase64,
             })),
             berichtIds: prepared.map((p) => p.berichtId),
+            bueroSignature: bueroSignature ?? undefined,
           },
         },
       );
