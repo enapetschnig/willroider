@@ -25,10 +25,26 @@ import {
   ChevronRight,
   Home,
   Mail,
+  Pencil,
+  FolderInput,
+  Eye,
+  X,
+  CheckSquare,
 } from "lucide-react";
 import { DocViewerDialog, type DocViewerItem } from "@/components/dokumente/DocViewerDialog";
 import { DocSendDialog, type DocSendItem } from "@/components/dokumente/DocSendDialog";
 import { Thumbnail } from "@/components/dokumente/Thumbnail";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+  ContextMenuSub,
+  ContextMenuSubTrigger,
+  ContextMenuSubContent,
+} from "@/components/ui/context-menu";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -89,6 +105,13 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const [sendItems, setSendItems] = useState<DocSendItem[] | null>(null);
   const [visibility, setVisibility] = useState<Visibility>(DEFAULT_VISIBILITY);
   const [dragOver, setDragOver] = useState(false);
+  /** IDs aktuell selektierter Dateien (Multi-Select à la Windows). */
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  /** Datei wird gerade umbenannt — bekommt Inline-Input statt Klick. */
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  /** Dateien zum Verschieben — öffnet einen Ordner-Picker. */
+  const [moveItems, setMoveItems] = useState<Dokument[] | null>(null);
   const [uploading, setUploading] = useState<{
     name: string;
     idx: number;
@@ -318,6 +341,132 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         mimetype: d.mimetype,
       },
     ]);
+  };
+
+  // ─── Selection-Helpers (Windows-Explorer-Verhalten) ──────────────────
+  /** Toggle einer einzelnen ID — mit Ctrl/Meta erweitert, ohne setzt nur diese. */
+  const toggleSelection = (id: string, e?: React.MouseEvent) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (e?.ctrlKey || e?.metaKey) {
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+      } else if (e?.shiftKey && filtered.length > 0) {
+        // Range-Select: zwischen letzter-selektierter und id im aktuellen filtered
+        const ids = filtered.map((d) => d.id);
+        const last = [...next].pop();
+        if (last) {
+          const a = ids.indexOf(last);
+          const b = ids.indexOf(id);
+          if (a >= 0 && b >= 0) {
+            const [lo, hi] = a < b ? [a, b] : [b, a];
+            for (let i = lo; i <= hi; i++) next.add(ids[i]);
+            return next;
+          }
+        }
+        next.add(id);
+      } else {
+        next.clear();
+        next.add(id);
+      }
+      return next;
+    });
+  };
+  const clearSelection = () => setSelected(new Set());
+  const selectAll = () => setSelected(new Set(filtered.map((d) => d.id)));
+
+  const selectedDocs = useMemo(
+    () => filtered.filter((d) => selected.has(d.id)),
+    [filtered, selected],
+  );
+
+  /** Mehrere Dateien per Mail senden (Bulk). */
+  const sendSelected = () => {
+    if (selectedDocs.length === 0) return;
+    setSendItems(
+      selectedDocs.map((d) => ({
+        bucket: "baustellen",
+        storage_path: d.storage_path,
+        dateiname: d.dateiname,
+        groesse: d.groesse,
+        mimetype: d.mimetype,
+      })),
+    );
+  };
+
+  /** Mehrere Dateien löschen (Bulk). */
+  const deleteSelected = async () => {
+    if (selectedDocs.length === 0) return;
+    const ok = window.confirm(
+      selectedDocs.length === 1
+        ? `Datei "${selectedDocs[0].dateiname}" löschen?`
+        : `${selectedDocs.length} Dateien löschen?`,
+    );
+    if (!ok) return;
+    const paths = selectedDocs.map((d) => d.storage_path);
+    const ids = selectedDocs.map((d) => d.id);
+    await supabase.storage.from("baustellen").remove(paths);
+    await supabase.from("dokumente").delete().in("id", ids);
+    toast({ title: `${selectedDocs.length} Datei(en) gelöscht` });
+    clearSelection();
+    load();
+  };
+
+  /** Inline-Umbenennen einer einzelnen Datei. */
+  const startRename = (d: Dokument) => {
+    setRenamingId(d.id);
+    setRenameValue(d.dateiname);
+  };
+  const commitRename = async () => {
+    if (!renamingId) return;
+    const newName = renameValue.trim();
+    if (!newName) {
+      setRenamingId(null);
+      return;
+    }
+    const current = docs.find((x) => x.id === renamingId);
+    if (!current || current.dateiname === newName) {
+      setRenamingId(null);
+      return;
+    }
+    const { error } = await supabase
+      .from("dokumente")
+      .update({ dateiname: newName })
+      .eq("id", renamingId);
+    if (error) {
+      toast({ variant: "destructive", title: "Umbenennen fehlgeschlagen", description: error.message });
+    } else {
+      toast({ title: "Umbenannt", description: newName });
+    }
+    setRenamingId(null);
+    load();
+  };
+  const cancelRename = () => setRenamingId(null);
+
+  /** Dateien in einen anderen Ordner verschieben — DB-only (Storage-Pfad
+   *  bleibt; Frontend liest nur ordner+subpath). */
+  const moveSelected = () => {
+    if (selectedDocs.length === 0) return;
+    setMoveItems(selectedDocs);
+  };
+  const performMove = async (targetOrdner: FolderKey, targetSubpath: string) => {
+    if (!moveItems) return;
+    const ids = moveItems.map((d) => d.id);
+    const { error } = await supabase
+      .from("dokumente")
+      .update({ ordner: targetOrdner, subpath: targetSubpath || null })
+      .in("id", ids);
+    if (error) {
+      toast({ variant: "destructive", title: "Verschieben fehlgeschlagen", description: error.message });
+      return;
+    }
+    toast({
+      title: `${moveItems.length} Datei(en) verschoben`,
+      description: `→ ${folderMeta(targetOrdner).label}${targetSubpath ? ` / ${targetSubpath}` : ""}`,
+    });
+    setMoveItems(null);
+    clearSelection();
+    load();
   };
 
   const remove = async (d: Dokument, e?: React.MouseEvent) => {
@@ -741,17 +890,89 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
             </Card>
           )}
           {filtered.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-3">
-              {filtered.map((d) => (
-                <FileCard
-                  key={d.id}
-                  d={d}
-                  onOpen={() => open(d)}
-                  onDelete={(e) => remove(d, e)}
-                  onSend={(e) => sendOne(d, e)}
-                />
-              ))}
-            </div>
+            <>
+              {selected.size > 0 && (
+                <div className="sticky top-2 z-20 rounded-md border bg-primary/5 border-primary/30 px-3 py-2 flex items-center gap-2 flex-wrap">
+                  <CheckSquare className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">
+                    {selected.size} ausgewählt
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    · {selectedDocs.length === 1
+                      ? selectedDocs[0].dateiname
+                      : `${selectedDocs.reduce((s, d) => s + (d.groesse ?? 0), 0) / 1024 < 1024
+                          ? `${(selectedDocs.reduce((s, d) => s + (d.groesse ?? 0), 0) / 1024).toFixed(0)} KB`
+                          : `${(selectedDocs.reduce((s, d) => s + (d.groesse ?? 0), 0) / 1024 / 1024).toFixed(1)} MB`}`}
+                  </span>
+                  <div className="ml-auto flex items-center gap-1.5 flex-wrap">
+                    {selectedDocs.length === 1 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        onClick={() => startRename(selectedDocs[0])}
+                      >
+                        <Pencil className="h-3.5 w-3.5 mr-1.5" /> Umbenennen
+                      </Button>
+                    )}
+                    <Button size="sm" variant="outline" className="h-8" onClick={moveSelected}>
+                      <FolderInput className="h-3.5 w-3.5 mr-1.5" /> Verschieben
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-8" onClick={sendSelected}>
+                      <Mail className="h-3.5 w-3.5 mr-1.5" /> Per Mail
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-destructive border-destructive/40 hover:bg-destructive hover:text-destructive-foreground"
+                      onClick={deleteSelected}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Löschen
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8"
+                      onClick={clearSelection}
+                      aria-label="Auswahl aufheben"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-3">
+                {filtered.map((d) => (
+                  <FileCard
+                    key={d.id}
+                    d={d}
+                    isSelected={selected.has(d.id)}
+                    isRenaming={renamingId === d.id}
+                    renameValue={renameValue}
+                    onRenameChange={setRenameValue}
+                    onRenameCommit={commitRename}
+                    onRenameCancel={cancelRename}
+                    onOpen={() => open(d)}
+                    onClick={(e) => toggleSelection(d.id, e)}
+                    onDoubleClick={() => open(d)}
+                    onDelete={(e) => remove(d, e)}
+                    onSend={(e) => sendOne(d, e)}
+                    onStartRename={() => startRename(d)}
+                    onMove={() => {
+                      // Wenn nicht in der Selektion → erst markieren
+                      if (!selected.has(d.id)) {
+                        setSelected(new Set([d.id]));
+                      }
+                      setMoveItems(
+                        selected.has(d.id) && selected.size > 1
+                          ? filtered.filter((x) => selected.has(x.id))
+                          : [d],
+                      );
+                    }}
+                  />
+                ))}
+              </div>
+            </>
           )}
         </div>
       )}
@@ -805,6 +1026,47 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         onOpenChange={(o) => !o && setSendItems(null)}
         items={sendItems ?? []}
       />
+
+      {/* Verschieben-Dialog: Folder-Picker für die selektierten Dateien */}
+      <Dialog open={!!moveItems} onOpenChange={(o) => !o && setMoveItems(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {moveItems?.length === 1
+                ? `„${moveItems[0].dateiname}" verschieben`
+                : `${moveItems?.length ?? 0} Dateien verschieben`}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1 max-h-[50vh] overflow-y-auto">
+            {visibleFolders.map((f) => (
+              <button
+                key={f.key}
+                onClick={() => performMove(f.key, "")}
+                disabled={
+                  f.key === currentFolder && !currentSubpath
+                }
+                className="w-full text-left px-3 py-2.5 rounded-md hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-3 transition"
+              >
+                <Folder
+                  className="h-5 w-5 shrink-0"
+                  style={{ color: FOLDER_COLOR }}
+                  fill={FOLDER_COLOR}
+                  fillOpacity={0.25}
+                />
+                <span className="text-sm font-medium flex-1">{f.label}</span>
+                {f.key === currentFolder && !currentSubpath && (
+                  <span className="text-[10px] text-muted-foreground">aktueller Ordner</span>
+                )}
+              </button>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMoveItems(null)} className="w-full">
+              Abbrechen
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -881,60 +1143,162 @@ function FolderRow({
   );
 }
 
-function FileCard({
-  d,
-  onOpen,
-  onDelete,
-  onSend,
-}: {
+interface FileCardProps {
   d: Dokument;
+  isSelected: boolean;
+  isRenaming: boolean;
+  renameValue: string;
+  onRenameChange: (v: string) => void;
+  onRenameCommit: () => void;
+  onRenameCancel: () => void;
   onOpen: () => void;
+  onClick: (e: React.MouseEvent) => void;
+  onDoubleClick: () => void;
   onDelete: (e: React.MouseEvent) => void;
   onSend: (e: React.MouseEvent) => void;
-}) {
+  onStartRename: () => void;
+  onMove: () => void;
+}
+
+function FileCard({
+  d,
+  isSelected,
+  isRenaming,
+  renameValue,
+  onRenameChange,
+  onRenameCommit,
+  onRenameCancel,
+  onOpen,
+  onClick,
+  onDoubleClick,
+  onDelete,
+  onSend,
+  onStartRename,
+  onMove,
+}: FileCardProps) {
   return (
-    <div className="group relative">
-      <button
-        onClick={onOpen}
-        className="block w-full text-left rounded-md border bg-card overflow-hidden hover:shadow-md hover:border-primary/40 transition-all"
-      >
-        {/* Visual */}
-        <div className="aspect-square bg-muted relative">
-          <Thumbnail
-            bucket="baustellen"
-            storagePath={d.storage_path}
-            dateiname={d.dateiname}
-            mimetype={d.mimetype}
-          />
-        </div>
-        {/* Meta */}
-        <div className="p-2">
-          <div className="text-xs font-medium truncate">{d.dateiname}</div>
-          <div className="text-[10px] text-muted-foreground">
-            {new Date(d.created_at).toLocaleDateString("de-AT")}
-            {d.groesse ? ` · ${(d.groesse / 1024).toFixed(0)} KB` : ""}
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          className={`group relative rounded-md border overflow-hidden transition-all cursor-pointer ${
+            isSelected
+              ? "border-primary ring-2 ring-primary/40 bg-primary/5"
+              : "bg-card hover:shadow-md hover:border-primary/40"
+          }`}
+          onClick={(e) => {
+            if (isRenaming) return;
+            onClick(e);
+          }}
+          onDoubleClick={() => {
+            if (isRenaming) return;
+            onDoubleClick();
+          }}
+        >
+          {/* Visual */}
+          <div className="aspect-square bg-muted relative">
+            <Thumbnail
+              bucket="baustellen"
+              storagePath={d.storage_path}
+              dateiname={d.dateiname}
+              mimetype={d.mimetype}
+            />
+            {/* Selection-Checkbox-Overlay (immer sichtbar bei Selektion, sonst on-hover) */}
+            <div
+              className={`absolute top-1.5 left-1.5 transition-opacity ${
+                isSelected ? "opacity-100" : "sm:opacity-0 sm:group-hover:opacity-100 opacity-100"
+              }`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClick(e);
+              }}
+            >
+              <Checkbox
+                checked={isSelected}
+                className="bg-background/95 border-primary"
+                aria-label={`${d.dateiname} auswählen`}
+              />
+            </div>
           </div>
+          {/* Meta */}
+          <div className="p-2">
+            {isRenaming ? (
+              <input
+                autoFocus
+                value={renameValue}
+                onChange={(e) => onRenameChange(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") onRenameCommit();
+                  else if (e.key === "Escape") onRenameCancel();
+                }}
+                onBlur={onRenameCommit}
+                className="w-full text-xs font-medium border rounded px-1 py-0.5 bg-background"
+              />
+            ) : (
+              <div className="text-xs font-medium truncate">{d.dateiname}</div>
+            )}
+            <div className="text-[10px] text-muted-foreground">
+              {new Date(d.created_at).toLocaleDateString("de-AT")}
+              {d.groesse ? ` · ${(d.groesse / 1024).toFixed(0)} KB` : ""}
+            </div>
+          </div>
+          {/* Quick-Actions (on hover, NICHT bei Selektion sichtbar) */}
+          {!isSelected && !isRenaming && (
+            <div className="absolute top-1.5 right-1.5 flex gap-1 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpen();
+                }}
+                className="bg-background/90 hover:bg-primary hover:text-primary-foreground rounded p-1.5 shadow"
+                aria-label="Öffnen"
+                title="Öffnen"
+              >
+                <Eye className="h-4 w-4" />
+              </button>
+              <button
+                onClick={onSend}
+                className="bg-background/90 hover:bg-primary hover:text-primary-foreground rounded p-1.5 shadow"
+                aria-label="Per Mail senden"
+                title="Per Mail senden"
+              >
+                <Mail className="h-4 w-4" />
+              </button>
+              <button
+                onClick={onDelete}
+                className="bg-background/90 hover:bg-destructive hover:text-white rounded p-1.5 shadow"
+                aria-label="Löschen"
+                title="Löschen"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          )}
         </div>
-      </button>
-      {/* Action-Buttons */}
-      <div className="absolute top-1.5 right-1.5 flex gap-1 sm:opacity-0 sm:group-hover:opacity-100 opacity-100 transition">
-        <button
-          onClick={onSend}
-          className="bg-background/90 hover:bg-primary hover:text-primary-foreground rounded p-1.5 shadow"
-          aria-label="Per Mail senden"
-          title="Per Mail senden"
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-48">
+        <ContextMenuItem onSelect={onOpen}>
+          <Eye className="h-3.5 w-3.5 mr-2" /> Öffnen
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={onSend as any}>
+          <Mail className="h-3.5 w-3.5 mr-2" /> Per Mail senden
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={onStartRename}>
+          <Pencil className="h-3.5 w-3.5 mr-2" /> Umbenennen
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={onMove}>
+          <FolderInput className="h-3.5 w-3.5 mr-2" /> Verschieben …
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          onSelect={onDelete as any}
+          className="text-destructive focus:text-destructive"
         >
-          <Mail className="h-4 w-4" />
-        </button>
-        <button
-          onClick={onDelete}
-          className="bg-background/90 hover:bg-destructive hover:text-white rounded p-1.5 shadow"
-          aria-label="Löschen"
-          title="Löschen"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
-      </div>
-    </div>
+          <Trash2 className="h-3.5 w-3.5 mr-2" /> Löschen
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
