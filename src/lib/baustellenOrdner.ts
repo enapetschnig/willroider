@@ -6,7 +6,7 @@ export type OrdnerKey =
   | "2-schriftverkehr"
   | "3-aktenvermerke"
   | "4-vertrag"
-  | "5-subunternehmer"
+  | "5-subunternehmer-professionisten"
   | "6-abrechnung"
   | "7-lieferanten"
   | "8-kalkulation"
@@ -29,7 +29,7 @@ export const BAUSTELLEN_ORDNER: OrdnerDef[] = [
   { key: "2-schriftverkehr", label: "2-Schriftverkehr", color: "#0ea5e9" },
   { key: "3-aktenvermerke", label: "3-Aktenvermerke", color: "#8b5cf6" },
   { key: "4-vertrag", label: "4-Vertrag", color: "#10b981" },
-  { key: "5-subunternehmer", label: "5-Subunternehmer-Professionisten", color: "#f59e0b" },
+  { key: "5-subunternehmer-professionisten", label: "5-Subunternehmer-Professionisten", color: "#f59e0b" },
   { key: "6-abrechnung", label: "6-Abrechnung", color: "#ef4444" },
   { key: "7-lieferanten", label: "7-Lieferanten", color: "#06b6d4" },
   { key: "8-kalkulation", label: "8-Kalkulation", color: "#84cc16" },
@@ -58,7 +58,7 @@ export const DEFAULT_VISIBILITY: Record<string, OrdnerKey[]> = {
     "1-baustellenmanagement",
     "2-schriftverkehr",
     "3-aktenvermerke",
-    "5-subunternehmer",
+    "5-subunternehmer-professionisten",
     "7-lieferanten",
     "91-plaene",
     "92-sonstiges",
@@ -71,7 +71,7 @@ export const DEFAULT_VISIBILITY: Record<string, OrdnerKey[]> = {
     "1-baustellenmanagement",
     "2-schriftverkehr",
     "3-aktenvermerke",
-    "5-subunternehmer",
+    "5-subunternehmer-professionisten",
     "7-lieferanten",
     "91-plaene",
     "92-sonstiges",
