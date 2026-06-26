@@ -25,8 +25,9 @@ import ProtokollTab from "@/components/kalkulator/ProtokollTab";
 import { Plus } from "lucide-react";
 
 export default function Kalkulator() {
-  const { role } = useAuth();
-  const canWriteK3 = role === "geschaeftsfuehrung" || role === "buero";
+  const { hasPermission } = useAuth();
+  const canWriteK3 = hasPermission("kalkulator.edit_k3");
+  const canSeeAdmin = hasPermission("kalkulator.edit_k3") || hasPermission("kalkulator.anfragen_verwalten");
   const kalk = useKalkulator(canWriteK3);
   const [params, setParams] = useSearchParams();
 
@@ -77,12 +78,12 @@ export default function Kalkulator() {
           <TabsTrigger value="summe" className="min-h-[44px]">
             Zusammenfassung
           </TabsTrigger>
-          {role === "geschaeftsfuehrung" && (
+          {canSeeAdmin && (
             <TabsTrigger value="admin" className="min-h-[44px]">
               K3-Sätze
             </TabsTrigger>
           )}
-          {role === "geschaeftsfuehrung" && (
+          {canSeeAdmin && (
             <TabsTrigger value="protokoll" className="min-h-[44px]">
               Protokoll
             </TabsTrigger>
@@ -104,12 +105,12 @@ export default function Kalkulator() {
         <TabsContent value="summe">
           <SummeTab {...kalk} setAnfrageId={kalk.setAnfrageId} />
         </TabsContent>
-        {role === "geschaeftsfuehrung" && (
+        {canSeeAdmin && (
           <TabsContent value="admin">
             <AdminTab {...kalk} />
           </TabsContent>
         )}
-        {role === "geschaeftsfuehrung" && (
+        {canSeeAdmin && (
           <TabsContent value="protokoll">
             <ProtokollTab {...kalk} />
           </TabsContent>

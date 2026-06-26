@@ -77,9 +77,21 @@ const MODUL_LABEL: Record<string, string> = {
 };
 
 export function AdminBerechtigungen() {
-  const { user } = useAuth();
+  const { user, hasPermission, permissionsLoaded } = useAuth();
   const { refresh: refreshOwnPerms } = usePermissionContext();
   const { toast } = useToast();
+
+  // URL-Direct-Access blocken: auch wenn Tab versteckt ist, muss der
+  // Component selbst prüfen (defense in depth).
+  if (permissionsLoaded && !hasPermission("system.manage_permissions")) {
+    return (
+      <Card>
+        <CardContent className="p-6 text-center text-sm text-muted-foreground">
+          Du hast keine Berechtigung diesen Bereich zu sehen.
+        </CardContent>
+      </Card>
+    );
+  }
 
   const [rollen, setRollen] = useState<Rolle[]>([]);
   const [perms, setPerms] = useState<Berechtigung[]>([]);

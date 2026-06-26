@@ -130,9 +130,9 @@ function isSetupFehler(error: { message?: string; code?: string } | null): boole
 // ─── Page ─────────────────────────────────────────────────────────────────
 
 export default function Tagesplanung() {
-  const { user, isAdmin, role } = useAuth();
-  /** Nur Büro + Geschäftsführung dürfen freigeben/zurücknehmen. */
-  const darfFreigeben = role === "buero" || role === "geschaeftsfuehrung";
+  const { user, isAdmin, hasPermission } = useAuth();
+  /** Permission-gesteuert — Custom-Rollen wirken auch. */
+  const darfFreigeben = hasPermission("tagesplanung.freigeben");
   const { toast } = useToast();
   const qc = useQueryClient();
   const [datum, setDatum] = useState<string>(todayIso());

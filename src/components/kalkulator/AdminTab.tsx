@@ -52,8 +52,8 @@ export default function AdminTab({
   setCltAufschlag,
   setAuerImport,
 }: TabProps) {
-  const { role } = useAuth();
-  const canWriteK3 = role === "geschaeftsfuehrung" || role === "buero";
+  const { hasPermission } = useAuth();
+  const canWriteK3 = hasPermission("kalkulator.edit_k3");
   const { toast } = useToast();
   const [q, setQ] = useState("");
 

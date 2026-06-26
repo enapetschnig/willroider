@@ -56,11 +56,11 @@ const STATUS_LABEL: Record<BaustellenStatus, string> = {
 export default function BaustelleDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { isAdmin, role } = useAuth();
+  const { isAdmin, hasPermission } = useAuth();
   /** Eine Baustelle endgültig zu löschen ist destruktiv und kaskadiert auf
    *  Berichte/Stunden/Einteilungen. Erlaubt nur Geschäftsführung — entspricht
    *  der RLS-Policy `baustellen_delete_gf_only`. */
-  const canDelete = role === "geschaeftsfuehrung";
+  const canDelete = hasPermission("baustellen.delete");
   const { toast } = useToast();
   const [b, setB] = useState<Baustelle | null>(null);
   const [termine, setTermine] = useState<Termin[]>([]);
