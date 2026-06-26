@@ -59,7 +59,7 @@ const ALT_TAB: Record<string, TabKey> = {
 };
 
 export default function Admin() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, hasPermission } = useAuth();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const rawTab = params.get("tab") || "uebersicht";
@@ -70,6 +70,11 @@ export default function Admin() {
   }, [isAdmin, navigate]);
 
   if (!isAdmin) return null;
+
+  // Berechtigungen-Tab nur sichtbar für User mit system.manage_permissions
+  const visibleTabs = TABS.filter((t) =>
+    t.key === "berechtigungen" ? hasPermission("system.manage_permissions") : true,
+  );
 
   const setTab = (k: TabKey) => {
     const p = new URLSearchParams(params);
@@ -84,7 +89,7 @@ export default function Admin() {
       {/* Tab-Auswahl */}
       <Card>
         <CardContent className="p-2 flex flex-wrap gap-1.5">
-          {TABS.map((t) => {
+          {visibleTabs.map((t) => {
             const active = t.key === tab;
             const Icon = t.icon;
             return (

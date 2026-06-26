@@ -48,13 +48,21 @@ function RequireRole({
   role: "admin" | "review" | "gf";
   children: ReactNode;
 }) {
-  const { isAdmin, canReview, role: userRole } = useAuth();
+  const { isAdmin, canReview, hasPermission, permissionsLoaded } = useAuth();
+  // Während Permissions laden: nicht voreilig redirecten
+  if (!permissionsLoaded) {
+    return (
+      <div className="flex items-center justify-center min-h-[40vh] text-sm text-muted-foreground">
+        Lade Berechtigungen …
+      </div>
+    );
+  }
   const erlaubt =
     role === "admin"
       ? isAdmin
       : role === "review"
         ? canReview
-        : userRole === "geschaeftsfuehrung";
+        : hasPermission("kalkulator.view");
   if (!erlaubt) return <Navigate to="/" replace />;
   return <>{children}</>;
 }

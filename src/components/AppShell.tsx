@@ -41,30 +41,34 @@ type NavItem = {
   to: string;
   label: string;
   icon: typeof LayoutDashboard;
+  /** Legacy-Group für Sichtbarkeit. Neue Items nutzen besser `perm`. */
   roles?: ("admin" | "review" | "gf" | "all")[];
+  /** Permission-Key — wenn gesetzt, MUSS der User diese Permission haben.
+   *  Überschreibt `roles`. */
+  perm?: import("@/lib/permissionKeys").PermissionKey;
   /** end=true → highlight nur wenn Pfad EXAKT übereinstimmt. Default true. */
   end?: boolean;
 };
 
 const NAV: NavItem[] = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["all"], end: true },
-  { to: "/mein-tag", label: "Mein Tag", icon: ClipboardList, roles: ["all"], end: true },
-  { to: "/arbeitsplanung", label: "Jahresplanung", icon: CalendarDays, roles: ["admin"], end: true },
-  { to: "/tagesplanung", label: "Tagesplanung", icon: ClipboardCheck, roles: ["admin"], end: true },
-  { to: "/angebote", label: "Angebote", icon: Briefcase, roles: ["admin"], end: false },
-  { to: "/baustellen", label: "Baustellen", icon: Building2, roles: ["all"], end: false },
-  { to: "/stunden", label: "Zeiterfassung", icon: Clock, roles: ["all"], end: true },
-  { to: "/halle", label: "Halle", icon: Wrench, roles: ["all"], end: true },
-  { to: "/stunden/auswertung", label: "Auswertung", icon: BarChart3, roles: ["review"], end: true },
-  { to: "/stundenberichte", label: "Stundenberichte", icon: FileSpreadsheet, roles: ["review"], end: false },
-  { to: "/berichte", label: "Berichte", icon: FileText, roles: ["all"], end: false },
-  { to: "/kalkulator", label: "Kalkulator", icon: Calculator, roles: ["gf"], end: true },
-  { to: "/kalkulator/anfragen", label: "Anfragen", icon: Mail, roles: ["gf"], end: true },
-  { to: "/admin", label: "Verwaltung", icon: Settings, roles: ["admin"], end: false },
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, perm: "dashboard.view", end: true },
+  { to: "/mein-tag", label: "Mein Tag", icon: ClipboardList, perm: "meintag.view", end: true },
+  { to: "/arbeitsplanung", label: "Jahresplanung", icon: CalendarDays, perm: "arbeitsplanung.view", end: true },
+  { to: "/tagesplanung", label: "Tagesplanung", icon: ClipboardCheck, perm: "tagesplanung.view", end: true },
+  { to: "/angebote", label: "Angebote", icon: Briefcase, perm: "angebote.view", end: false },
+  { to: "/baustellen", label: "Baustellen", icon: Building2, perm: "baustellen.view", end: false },
+  { to: "/stunden", label: "Zeiterfassung", icon: Clock, perm: "stunden.view_eigene", end: true },
+  { to: "/halle", label: "Halle", icon: Wrench, perm: "stunden.view_eigene", end: true },
+  { to: "/stunden/auswertung", label: "Auswertung", icon: BarChart3, perm: "stunden.view_alle", end: true },
+  { to: "/stundenberichte", label: "Stundenberichte", icon: FileSpreadsheet, perm: "stunden.bsb.bestaetigen", end: false },
+  { to: "/berichte", label: "Berichte", icon: FileText, perm: "berichte.view", end: false },
+  { to: "/kalkulator", label: "Kalkulator", icon: Calculator, perm: "kalkulator.view", end: true },
+  { to: "/kalkulator/anfragen", label: "Anfragen", icon: Mail, perm: "kalkulator.anfragen_verwalten", end: true },
+  { to: "/admin", label: "Verwaltung", icon: Settings, perm: "admin.view", end: false },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { profile, role, isAdmin, canReview, signOut } = useAuth();
+  const { profile, role, isAdmin, canReview, hasPermission, signOut } = useAuth();
   const navigate = useNavigate();
   const [installOpen, setInstallOpen] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
@@ -92,6 +96,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   const visibleNav = NAV.filter((n) => {
+    // Wenn perm gesetzt: das ist die einzige Quelle der Wahrheit.
+    if (n.perm) return hasPermission(n.perm);
+    // Fallback: alte roles-Logik (für Items ohne perm).
     if (!n.roles || n.roles.includes("all")) return true;
     if (n.roles.includes("admin") && isAdmin) return true;
     if (n.roles.includes("review") && canReview) return true;
