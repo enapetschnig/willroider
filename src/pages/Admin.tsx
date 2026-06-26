@@ -12,6 +12,7 @@ import {
   Clock,
   HeartPulse,
   FileText,
+  KeyRound,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { AdminUebersicht } from "@/components/admin/AdminUebersicht";
@@ -20,6 +21,7 @@ import { AdminZaKonten } from "@/components/admin/AdminZaKonten";
 import { AdminArbeitszeit } from "@/components/admin/AdminArbeitszeit";
 import { AdminKrankmeldungen } from "@/components/admin/AdminKrankmeldungen";
 import { AdminLohnzettel } from "@/components/admin/AdminLohnzettel";
+import { AdminBerechtigungen } from "@/components/admin/AdminBerechtigungen";
 import Mitarbeiter from "@/pages/Mitarbeiter";
 import Fahrzeuge from "@/pages/Fahrzeuge";
 import Evaluierung from "@/pages/Evaluierung";
@@ -33,7 +35,8 @@ type TabKey =
   | "krankmeldungen"
   | "lohnzettel"
   | "fahrzeuge"
-  | "evaluierung";
+  | "evaluierung"
+  | "berechtigungen";
 
 const TABS: { key: TabKey; label: string; icon: typeof Users }[] = [
   { key: "uebersicht", label: "Übersicht", icon: LayoutDashboard },
@@ -45,6 +48,7 @@ const TABS: { key: TabKey; label: string; icon: typeof Users }[] = [
   { key: "lohnzettel", label: "Lohnzettel", icon: FileText },
   { key: "fahrzeuge", label: "Fahrzeuge", icon: Truck },
   { key: "evaluierung", label: "Evaluierung", icon: ShieldCheck },
+  { key: "berechtigungen", label: "Berechtigungen", icon: KeyRound },
 ];
 
 /** Alt-Tab-Keys (vor der Zusammenführung) → neuer Arbeitszeit-Tab. */
@@ -111,6 +115,7 @@ export default function Admin() {
         {tab === "lohnzettel" && <AdminLohnzettel />}
         {tab === "fahrzeuge" && <Fahrzeuge />}
         {tab === "evaluierung" && <Evaluierung />}
+        {tab === "berechtigungen" && <AdminBerechtigungen />}
       </div>
     </div>
   );
