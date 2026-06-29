@@ -51,7 +51,8 @@ export default function AngebotDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { isAdmin } = useAuth();
+  const { isAdmin, hasPermission } = useAuth();
+  const canChangeStatus = hasPermission("angebote.status_aendern");
   const [angebot, setAngebot] = useState<Angebot | null>(null);
   const [bearbeiterOptions, setBearbeiterOptions] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -351,12 +352,14 @@ export default function AngebotDetail() {
                 <button
                   key={s}
                   type="button"
-                  onClick={() => upd("status", s)}
+                  disabled={!canChangeStatus}
+                  onClick={() => canChangeStatus && upd("status", s)}
                   className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition ${
                     (form.status ?? angebot.status) === s
                       ? "bg-primary text-primary-foreground border-primary"
                       : "bg-background hover:bg-muted"
-                  }`}
+                  } ${!canChangeStatus ? "opacity-60 cursor-not-allowed" : ""}`}
+                  title={canChangeStatus ? undefined : "Keine Berechtigung zum Status-Wechsel"}
                 >
                   {STATUS_LABEL[s]}
                 </button>

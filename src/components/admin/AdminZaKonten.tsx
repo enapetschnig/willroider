@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Hourglass, Trash2, Plus } from "lucide-react";
 import type { Database, ZaBuchungArt } from "@/integrations/supabase/types";
@@ -22,6 +23,8 @@ type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type ZaBuchung = Database["public"]["Tables"]["za_buchungen"]["Row"];
 
 export function AdminZaKonten() {
+  const { hasPermission } = useAuth();
+  const canEditAlle = hasPermission("konten.edit_alle");
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [salden, setSalden] = useState<Record<string, number>>({});
   const [letzte, setLetzte] = useState<Record<string, string | null>>({});
@@ -145,12 +148,14 @@ export function AdminZaKonten() {
               </strong>
             </div>
           </DialogHeader>
-          <div className="px-4 pb-2">
-            <Button onClick={() => setNewBuchungOpen(true)} size="sm">
-              <Plus className="h-4 w-4 mr-1" />
-              Manuelle Buchung
-            </Button>
-          </div>
+          {canEditAlle && (
+            <div className="px-4 pb-2">
+              <Button onClick={() => setNewBuchungOpen(true)} size="sm">
+                <Plus className="h-4 w-4 mr-1" />
+                Manuelle Buchung
+              </Button>
+            </div>
+          )}
           <div className="flex-1 overflow-y-auto px-4 pb-4">
             <table className="w-full text-xs">
               <thead className="bg-muted">
@@ -183,7 +188,7 @@ export function AdminZaKonten() {
                       {b.notiz ?? ""}
                     </td>
                     <td className="px-2 py-1 text-right">
-                      {b.art !== "monatsabschluss" && (
+                      {canEditAlle && b.art !== "monatsabschluss" && (
                         <button
                           onClick={async () => {
                             if (!confirm("Buchung löschen?")) return;

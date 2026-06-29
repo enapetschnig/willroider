@@ -33,6 +33,7 @@ import Kalkulator from "@/pages/Kalkulator";
 import KalkulatorAnfragen from "@/pages/KalkulatorAnfragen";
 import MeinTag from "@/pages/MeinTag";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { RequirePermission } from "@/components/RequirePermission";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } },
@@ -79,56 +80,29 @@ const App = () => (
             <Route path="/auth" element={<Auth />} />
             <Route path="/registriert" element={<RegistrierungBestaetigung />} />
             <Route element={<ProtectedRoute />}>
-              <Route path="/" element={<Dashboard />} />
-              <Route
-                path="/arbeitsplanung"
-                element={<RequireRole role="admin"><Arbeitsplanung /></RequireRole>}
-              />
-              <Route
-                path="/tagesplanung"
-                element={<RequireRole role="admin"><Tagesplanung /></RequireRole>}
-              />
-              <Route path="/baustellen" element={<Baustellen />} />
-              <Route path="/baustellen/:id" element={<BaustelleDetail />} />
-              <Route
-                path="/angebote"
-                element={<RequireRole role="admin"><Angebote /></RequireRole>}
-              />
-              <Route
-                path="/angebote/:id"
-                element={<RequireRole role="admin"><AngebotDetail /></RequireRole>}
-              />
-              <Route
-                path="/admin"
-                element={<RequireRole role="admin"><Admin /></RequireRole>}
-              />
+              <Route path="/" element={<RequirePermission perm="dashboard.view"><Dashboard /></RequirePermission>} />
+              <Route path="/arbeitsplanung" element={<RequirePermission perm="arbeitsplanung.view"><Arbeitsplanung /></RequirePermission>} />
+              <Route path="/tagesplanung" element={<RequirePermission perm="tagesplanung.view"><Tagesplanung /></RequirePermission>} />
+              <Route path="/baustellen" element={<RequirePermission perm="baustellen.view"><Baustellen /></RequirePermission>} />
+              <Route path="/baustellen/:id" element={<RequirePermission perm="baustellen.view"><BaustelleDetail /></RequirePermission>} />
+              <Route path="/angebote" element={<RequirePermission perm="angebote.view"><Angebote /></RequirePermission>} />
+              <Route path="/angebote/:id" element={<RequirePermission perm="angebote.view"><AngebotDetail /></RequirePermission>} />
+              <Route path="/admin" element={<RequirePermission perm="admin.view"><Admin /></RequirePermission>} />
               {/* Alte Routen leiten in den Admin-Bereich um (Backwards-Compat) */}
               <Route path="/mitarbeiter" element={<Navigate to="/admin?tab=mitarbeiter" replace />} />
               <Route path="/fahrzeuge" element={<Navigate to="/admin?tab=fahrzeuge" replace />} />
               <Route path="/kalender" element={<Navigate to="/admin?tab=kalender" replace />} />
               <Route path="/evaluierung" element={<Navigate to="/admin?tab=evaluierung" replace />} />
-              <Route path="/stunden" element={<Stunden />} />
-              <Route path="/halle" element={<HalleErfassung />} />
-              <Route
-                path="/stunden/auswertung"
-                element={<RequireRole role="review"><Stundenauswertung /></RequireRole>}
-              />
-              <Route
-                path="/stundenberichte"
-                element={<RequireRole role="review"><StundenBerichteListe /></RequireRole>}
-              />
-              <Route path="/stundenbericht/:id" element={<StundenBericht />} />
-              <Route path="/berichte" element={<Berichte />} />
-              <Route path="/berichte/:id" element={<BerichtDetail />} />
-              <Route path="/mein-tag" element={<MeinTag />} />
-              <Route
-                path="/kalkulator"
-                element={<RequireRole role="gf"><Kalkulator /></RequireRole>}
-              />
-              <Route
-                path="/kalkulator/anfragen"
-                element={<RequireRole role="gf"><KalkulatorAnfragen /></RequireRole>}
-              />
+              <Route path="/stunden" element={<RequirePermission perm="stunden.view_eigene"><Stunden /></RequirePermission>} />
+              <Route path="/halle" element={<RequirePermission perm="stunden.view_eigene"><HalleErfassung /></RequirePermission>} />
+              <Route path="/stunden/auswertung" element={<RequirePermission perm="stunden.view_alle"><Stundenauswertung /></RequirePermission>} />
+              <Route path="/stundenberichte" element={<RequirePermission perm="stunden.bsb.bestaetigen"><StundenBerichteListe /></RequirePermission>} />
+              <Route path="/stundenbericht/:id" element={<RequirePermission perm="stunden.view_eigene"><StundenBericht /></RequirePermission>} />
+              <Route path="/berichte" element={<RequirePermission perm="berichte.view"><Berichte /></RequirePermission>} />
+              <Route path="/berichte/:id" element={<RequirePermission perm="berichte.view"><BerichtDetail /></RequirePermission>} />
+              <Route path="/mein-tag" element={<RequirePermission perm="meintag.view"><MeinTag /></RequirePermission>} />
+              <Route path="/kalkulator" element={<RequirePermission perm="kalkulator.view"><Kalkulator /></RequirePermission>} />
+              <Route path="/kalkulator/anfragen" element={<RequirePermission perm="kalkulator.anfragen_verwalten"><KalkulatorAnfragen /></RequirePermission>} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

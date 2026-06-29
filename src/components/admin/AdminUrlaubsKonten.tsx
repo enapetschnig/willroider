@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Sun, Trash2, RotateCcw, Plus } from "lucide-react";
 import { AdminUrlaubsantraegeCard } from "@/components/UrlaubAntragDialog";
@@ -24,6 +25,8 @@ type UrlaubsBuchung = Database["public"]["Tables"]["urlaubs_buchungen"]["Row"];
 
 export function AdminUrlaubsKonten() {
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
+  const canEditAlle = hasPermission("konten.edit_alle");
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [salden, setSalden] = useState<Record<string, number>>({});
   const [letzte, setLetzte] = useState<Record<string, string | null>>({});
@@ -96,9 +99,11 @@ export function AdminUrlaubsKonten() {
           <span className="text-xs text-muted-foreground">
             {profiles.length} aktive Mitarbeiter
           </span>
-          <Button onClick={fillUp} variant="outline" size="sm" className="ml-auto">
-            Fällige Gutschriften nachholen
-          </Button>
+          {canEditAlle && (
+            <Button onClick={fillUp} variant="outline" size="sm" className="ml-auto">
+              Fällige Gutschriften nachholen
+            </Button>
+          )}
         </CardContent>
       </Card>
 
@@ -170,10 +175,12 @@ export function AdminUrlaubsKonten() {
             </div>
           </DialogHeader>
           <div className="px-4 pb-2">
-            <Button onClick={() => setNewBuchungOpen(true)} size="sm">
-              <Plus className="h-4 w-4 mr-1" />
-              Manuelle Buchung
-            </Button>
+            {canEditAlle && (
+              <Button onClick={() => setNewBuchungOpen(true)} size="sm">
+                <Plus className="h-4 w-4 mr-1" />
+                Manuelle Buchung
+              </Button>
+            )}
           </div>
           <div className="flex-1 overflow-y-auto px-4 pb-4">
             <table className="w-full text-xs">
@@ -203,7 +210,7 @@ export function AdminUrlaubsKonten() {
                     </td>
                     <td className="px-2 py-1 text-muted-foreground">{b.notiz ?? ""}</td>
                     <td className="px-2 py-1 text-right">
-                      {(b.art !== "urlaub_genommen" || !b.stundenbuchung_id) && (
+                      {canEditAlle && (b.art !== "urlaub_genommen" || !b.stundenbuchung_id) && (
                         <button
                           onClick={async () => {
                             if (!confirm("Buchung löschen?")) return;

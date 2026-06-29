@@ -75,4 +75,11 @@ export type PermissionKey =
   | "admin.lohnzettel_verwalten"
   | "system.admin_panel"
   | "system.manage_permissions"
-  | "system.view_audit";
+  | "system.view_audit"
+  // Phase 5c (2026-06-29)
+  | "berichte.freigeben"
+  | "berichte.archivieren"
+  | "mitarbeiter.einladung_resend"
+  | "baustellen.edit_partie"
+  | "baustellen.edit_status"
+  | "angebote.status_aendern";

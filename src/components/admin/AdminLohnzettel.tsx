@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import {
   FileText,
@@ -49,6 +50,8 @@ function fmtMonatJahr(l: Lohnzettel): string {
 
 export function AdminLohnzettel() {
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
+  const canManage = hasPermission("admin.lohnzettel_verwalten");
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [selectedMa, setSelectedMa] = useState<Profile | null>(null);
   const [items, setItems] = useState<Lohnzettel[]>([]);
@@ -264,6 +267,7 @@ export function AdminLohnzettel() {
         {selectedMa ? (
           <>
             {/* Upload-Form */}
+            {canManage && (
             <Card>
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-center gap-1.5 text-sm font-semibold">
@@ -326,6 +330,7 @@ export function AdminLohnzettel() {
                 </Button>
               </CardContent>
             </Card>
+            )}
 
             {/* Liste */}
             <Card>
@@ -378,14 +383,16 @@ export function AdminLohnzettel() {
                           <Paperclip className="h-3.5 w-3.5 mr-1.5" />
                           Öffnen
                         </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-destructive h-8 w-8 p-0"
-                          onClick={() => remove(l)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {canManage && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-destructive h-8 w-8 p-0"
+                            onClick={() => remove(l)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     ))}
                   </div>

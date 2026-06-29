@@ -25,6 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { CheckCircle2, XCircle, Plus, Edit, Trash2, AlertTriangle, UserPlus, MessageSquare } from "lucide-react";
 import type { Database, AppRole } from "@/integrations/supabase/types";
@@ -119,6 +120,9 @@ const ROLES: { value: AppRole; label: string }[] = [
 
 export default function Mitarbeiter() {
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
+  const canResendInvite = hasPermission("mitarbeiter.einladung_resend");
+  const canDeleteMa = hasPermission("mitarbeiter.delete");
   const [params, setParams] = useSearchParams();
   const initialTab =
     params.get("tab") === "partien"
@@ -514,7 +518,7 @@ export default function Mitarbeiter() {
                       >
                         {p.is_active ? "Deaktivieren" : "Freischalten"}
                       </Button>
-                      {p.telefon && (
+                      {p.telefon && canResendInvite && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -536,16 +540,18 @@ export default function Mitarbeiter() {
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-10 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        onClick={() => openDelete(p)}
-                        aria-label="Endgültig löschen"
-                        title="Endgültig löschen (mit allen Buchungen)"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {canDeleteMa && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-10 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          onClick={() => openDelete(p)}
+                          aria-label="Endgültig löschen"
+                          title="Endgültig löschen (mit allen Buchungen)"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -638,7 +644,7 @@ export default function Mitarbeiter() {
                           >
                             {p.is_active ? "Deaktivieren" : "Freischalten"}
                           </Button>
-                          {p.telefon && (
+                          {p.telefon && canResendInvite && (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -658,16 +664,18 @@ export default function Mitarbeiter() {
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                            onClick={() => openDelete(p)}
-                            aria-label="Endgültig löschen"
-                            title="Endgültig löschen (inkl. aller Buchungen)"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          {canDeleteMa && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              onClick={() => openDelete(p)}
+                              aria-label="Endgültig löschen"
+                              title="Endgültig löschen (inkl. aller Buchungen)"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     );

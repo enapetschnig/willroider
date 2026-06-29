@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Plus,
@@ -38,6 +39,9 @@ const KATEGORIEN: { key: FahrzeugKategorie; label: string; color: string; icon: 
 
 export default function Fahrzeuge() {
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
+  const canEdit = hasPermission("fahrzeuge.edit") || hasPermission("fahrzeuge.create");
+  const canDelete = hasPermission("fahrzeuge.delete");
   const [data, setData] = useState<Fahrzeug[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [editing, setEditing] = useState<Partial<Fahrzeug> | null>(null);
@@ -144,9 +148,11 @@ export default function Fahrzeuge() {
         title="Fahrzeuge & Anlagen"
         description="Werkstatt-Anlagen, Baustellen-Fahrzeuge und Bauleiter-PKW. Standard-Fahrer werden bei Einteilungen automatisch vorgeschlagen."
         actions={
-          <Button onClick={() => setEditing({ aktiv: true, kategorie: tab } as any)}>
-            <Plus className="h-4 w-4 mr-2" /> Neues Fahrzeug
-          </Button>
+          hasPermission("fahrzeuge.create") ? (
+            <Button onClick={() => setEditing({ aktiv: true, kategorie: tab } as any)}>
+              <Plus className="h-4 w-4 mr-2" /> Neues Fahrzeug
+            </Button>
+          ) : undefined
         }
       />
 
@@ -266,14 +272,20 @@ export default function Fahrzeuge() {
                     {f.notizen}
                   </div>
                 )}
-                <div className="flex gap-2 pt-1">
-                  <Button variant="outline" size="sm" onClick={() => setEditing(f)}>
-                    <Edit className="h-3 w-3 mr-1" /> Bearbeiten
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => remove(f.id)}>
-                    <Trash2 className="h-3 w-3 mr-1" /> Löschen
-                  </Button>
-                </div>
+                {(canEdit || canDelete) && (
+                  <div className="flex gap-2 pt-1">
+                    {canEdit && (
+                      <Button variant="outline" size="sm" onClick={() => setEditing(f)}>
+                        <Edit className="h-3 w-3 mr-1" /> Bearbeiten
+                      </Button>
+                    )}
+                    {canDelete && (
+                      <Button variant="ghost" size="sm" onClick={() => remove(f.id)}>
+                        <Trash2 className="h-3 w-3 mr-1" /> Löschen
+                      </Button>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           );

@@ -61,6 +61,9 @@ export default function BaustelleDetail() {
    *  Berichte/Stunden/Einteilungen. Erlaubt nur Geschäftsführung — entspricht
    *  der RLS-Policy `baustellen_delete_gf_only`. */
   const canDelete = hasPermission("baustellen.delete");
+  const canEditStatus = hasPermission("baustellen.edit_status");
+  const canEditPartie = hasPermission("baustellen.edit_partie");
+  const canEdit = hasPermission("baustellen.edit");
   const { toast } = useToast();
   const [b, setB] = useState<Baustelle | null>(null);
   const [termine, setTermine] = useState<Termin[]>([]);
@@ -327,38 +330,44 @@ export default function BaustelleDetail() {
       <PageHeader
         title={b.bvh_name}
         description={[b.kostenstelle, b.ort, b.bauherr].filter(Boolean).join(" · ")}
-        actions={!isAdmin ? <Badge>{STATUS_LABEL[b.status]}</Badge> : undefined}
+        actions={
+          !canEditStatus ? <Badge>{STATUS_LABEL[b.status]}</Badge> : undefined
+        }
       />
 
-      {/* Admin-Toolbar — Status, Bearbeiten, Löschen jeweils klar beschriftet */}
-      {isAdmin && (
+      {/* Toolbar — Status / Bearbeiten / Löschen jeweils nach Permission */}
+      {(canEditStatus || canEdit || canDelete) && (
         <Card>
           <CardContent className="p-3 flex flex-col sm:flex-row gap-2 sm:items-center">
-            <div className="flex items-center gap-2 sm:flex-1">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground shrink-0">
-                Status
-              </Label>
-              <select
-                value={b.status}
-                onChange={(e) => updateStatus(e.target.value as BaustellenStatus)}
-                className="h-11 sm:h-10 px-3 rounded-md border bg-background text-sm font-medium flex-1 sm:flex-none sm:min-w-[180px]"
-                aria-label="Status ändern"
-              >
-                {Object.entries(STATUS_LABEL).map(([v, l]) => (
-                  <option key={v} value={v}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className={`grid ${canDelete ? "grid-cols-2" : "grid-cols-1"} sm:flex gap-2`}>
-              <Button
-                variant="outline"
-                onClick={() => setEditDialog(true)}
-                className="h-11 sm:h-10"
-              >
-                <Pencil className="h-4 w-4 mr-1.5" /> Bearbeiten
-              </Button>
+            {canEditStatus && (
+              <div className="flex items-center gap-2 sm:flex-1">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground shrink-0">
+                  Status
+                </Label>
+                <select
+                  value={b.status}
+                  onChange={(e) => updateStatus(e.target.value as BaustellenStatus)}
+                  className="h-11 sm:h-10 px-3 rounded-md border bg-background text-sm font-medium flex-1 sm:flex-none sm:min-w-[180px]"
+                  aria-label="Status ändern"
+                >
+                  {Object.entries(STATUS_LABEL).map(([v, l]) => (
+                    <option key={v} value={v}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="grid sm:flex gap-2 sm:ml-auto">
+              {canEdit && (
+                <Button
+                  variant="outline"
+                  onClick={() => setEditDialog(true)}
+                  className="h-11 sm:h-10"
+                >
+                  <Pencil className="h-4 w-4 mr-1.5" /> Bearbeiten
+                </Button>
+              )}
               {canDelete && (
                 <Button
                   variant="outline"
@@ -496,8 +505,8 @@ export default function BaustelleDetail() {
 
         <TabsContent value="team">
           <div className="space-y-3">
-            {/* Partie-Zuordnung (Admin-only) */}
-            {isAdmin && (
+            {/* Partie-Zuordnung */}
+            {canEditPartie && (
               <Card>
                 <CardContent className="p-3 space-y-2">
                   <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">

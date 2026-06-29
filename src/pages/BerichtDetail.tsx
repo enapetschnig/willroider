@@ -1348,6 +1348,10 @@ function StatusBar({
 }) {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  const canFreigeben = hasPermission("berichte.freigeben");
+  const canArchivieren = hasPermission("berichte.archivieren");
+  const canDelete = hasPermission("berichte.delete");
   const statusMut = useSetBerichtStatus();
   const updateMut = useUpdateBerichtFelder();
   const deleteMut = useDeleteBericht();
@@ -1548,7 +1552,7 @@ function StatusBar({
               <Send className="h-4 w-4 mr-1.5" /> Einreichen
             </Button>
           )}
-          {bericht.status === "eingereicht" && isAdmin && (
+          {bericht.status === "eingereicht" && canFreigeben && (
             <Button onClick={freigeben} disabled={statusMut.isPending || pdfBusy}>
               {(statusMut.isPending || pdfBusy) && (
                 <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
@@ -1556,27 +1560,31 @@ function StatusBar({
               <CheckCircle2 className="h-4 w-4 mr-1.5" /> Freigeben + PDF erstellen
             </Button>
           )}
-          {bericht.status === "freigegeben" && isAdmin && (
+          {bericht.status === "freigegeben" && (canFreigeben || canArchivieren) && (
             <>
-              <Button onClick={generatePdf} disabled={pdfBusy} variant="outline">
-                {pdfBusy && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
-                <RefreshCw className="h-4 w-4 mr-1.5" /> PDF neu erstellen
-              </Button>
+              {canFreigeben && (
+                <Button onClick={generatePdf} disabled={pdfBusy} variant="outline">
+                  {pdfBusy && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+                  <RefreshCw className="h-4 w-4 mr-1.5" /> PDF neu erstellen
+                </Button>
+              )}
               <Button onClick={mailto} variant="outline">
                 <Mail className="h-4 w-4 mr-1.5" /> Per Mail teilen
               </Button>
-              <Button onClick={archivieren} variant="outline">
-                Archivieren
-              </Button>
+              {canArchivieren && (
+                <Button onClick={archivieren} variant="outline">
+                  Archivieren
+                </Button>
+              )}
             </>
           )}
           {(bericht.status === "eingereicht" || bericht.status === "freigegeben") &&
-            isAdmin && (
+            canFreigeben && (
               <Button onClick={reopen} variant="ghost" className="text-amber-700">
                 <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Zurück auf Entwurf
               </Button>
             )}
-          {isAdmin && (
+          {canDelete && (
             <Button
               onClick={loeschen}
               disabled={deleteMut.isPending}

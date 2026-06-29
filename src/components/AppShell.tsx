@@ -244,15 +244,17 @@ export function AppShell({ children }: { children: ReactNode }) {
           className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-card border-t flex"
           style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
         >
-          {[
-            { to: "/", label: "Start", icon: LayoutDashboard, end: true },
-            isAdmin
-              ? { to: "/arbeitsplanung", label: "Plan", icon: CalendarDays, end: false }
-              : { to: "/mein-tag", label: "Heute", icon: ClipboardList, end: false },
-            { to: "/stunden", label: "Stunden", icon: Clock, end: false },
-            { to: "/berichte", label: "Berichte", icon: FileText, end: false },
-            { to: "/baustellen", label: "Baustellen", icon: Building2, end: false },
-          ].map((item) => (
+          {([
+            { to: "/", label: "Start", icon: LayoutDashboard, end: true, perm: "dashboard.view" as const },
+            hasPermission("arbeitsplanung.view")
+              ? { to: "/arbeitsplanung", label: "Plan", icon: CalendarDays, end: false, perm: "arbeitsplanung.view" as const }
+              : { to: "/mein-tag", label: "Heute", icon: ClipboardList, end: false, perm: "meintag.view" as const },
+            { to: "/stunden", label: "Stunden", icon: Clock, end: false, perm: "stunden.view_eigene" as const },
+            { to: "/berichte", label: "Berichte", icon: FileText, end: false, perm: "berichte.view" as const },
+            { to: "/baustellen", label: "Baustellen", icon: Building2, end: false, perm: "baustellen.view" as const },
+          ] as const)
+            .filter((item) => hasPermission(item.perm))
+            .map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

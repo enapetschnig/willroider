@@ -113,7 +113,11 @@ function emptyForm(): ErfassungForm {
 }
 
 export default function Stunden() {
-  const { user, profile, isAdmin } = useAuth();
+  const { user, profile, isAdmin, hasPermission } = useAuth();
+  /** Custom-Rolle "Bauleiter-Vertretung" o. ä. mit stunden.create_andere
+   *  darf wie ein Admin für jeden MA Stunden schreiben — unabhängig von
+   *  einer Polier-Beziehung. */
+  const canCreateForOthers = isAdmin || hasPermission("stunden.create_andere");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -210,7 +214,7 @@ export default function Stunden() {
     })();
   }, [polierPartie, profile, isAdmin]);
 
-  const mode: Mode = isAdmin ? "admin" : polierPartie ? "polier" : "self";
+  const mode: Mode = canCreateForOthers ? "admin" : polierPartie ? "polier" : "self";
   const hasPicker = mode !== "self";
   const istPolier = !!polierPartie;
   const primaryUserId = user?.id ?? "";
