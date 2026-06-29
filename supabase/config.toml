@@ -5,3 +5,8 @@ verify_jwt = true
 
 [functions.admin-create-employee]
 verify_jwt = true
+
+# Send-SMS-Hook für Supabase Auth — wird OHNE User-JWT aufgerufen
+# (Auth verifiziert via Webhook-Secret-Header). Daher verify_jwt = false.
+[functions.send-sms-hook]
+verify_jwt = false
