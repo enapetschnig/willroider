@@ -159,7 +159,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const appUrl = Deno.env.get('APP_URL') || 'https://willroider.app';
+    const appUrl = Deno.env.get('APP_URL') || 'https://holzerleben.app';
 
     // ─── Magic-Link (nur wenn echte Email vorhanden) ───────────────────
     // Beim Import wurden Fake-Adressen "pers-XXX@willroider.invalid" gesetzt

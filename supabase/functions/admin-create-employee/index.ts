@@ -231,7 +231,7 @@ Deno.serve(async (req) => {
   }
 
   // ─── Magic Link generieren (nur wenn Email vorhanden) ─────────────────
-  const appUrl = Deno.env.get('APP_URL') || 'https://willroider.app';
+  const appUrl = Deno.env.get('APP_URL') || 'https://holzerleben.app';
   let magicLink: string | null = null;
   if (emailInput) {
     try {
