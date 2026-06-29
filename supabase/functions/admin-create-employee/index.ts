@@ -15,6 +15,11 @@
 // muss aktiviert + mit Twilio (gleiche Creds wie unten) konfiguriert sein.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.79.0';
+import {
+  normalizeAtPhone as sharedNormalizeAtPhone,
+  generateReadablePassword as sharedGenerateReadablePassword,
+  composeInvitationSms,
+} from '../_shared/sms.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -55,32 +60,8 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function normalizeAtPhone(input: string | null | undefined): string | null {
-  if (!input) return null;
-  const cleaned = input.trim().replace(/[\s\-()/.]/g, '');
-  if (!cleaned) return null;
-  if (cleaned.startsWith('+')) {
-    const digits = cleaned.slice(1);
-    return /^\d{6,15}$/.test(digits) ? `+${digits}` : null;
-  }
-  if (cleaned.startsWith('00')) {
-    const digits = cleaned.slice(2);
-    return /^\d{6,15}$/.test(digits) ? `+${digits}` : null;
-  }
-  if (cleaned.startsWith('0')) {
-    const digits = cleaned.slice(1);
-    return /^\d{5,14}$/.test(digits) ? `+43${digits}` : null;
-  }
-  if (/^\d{5,14}$/.test(cleaned)) return `+43${cleaned}`;
-  return null;
-}
-
-function generateReadablePassword(length = 10): string {
-  const chars = 'abcdefghkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const arr = new Uint32Array(length);
-  crypto.getRandomValues(arr);
-  return Array.from(arr, (n) => chars[n % chars.length]).join('');
-}
+const normalizeAtPhone = sharedNormalizeAtPhone;
+const generateReadablePassword = sharedGenerateReadablePassword;
 
 const ALLOWED_ROLES: AppRole[] = [
   'geschaeftsfuehrung',
@@ -280,26 +261,14 @@ Deno.serve(async (req) => {
       smsStatus = 'error';
       smsError = 'Twilio-Credentials nicht konfiguriert';
     } else {
-      // SMS-Template: bei Email → Magic-Link-Variante, sonst Telefon-OTP-Anleitung
-      const smsLines: string[] = [];
-      smsLines.push(`Hallo ${vorname},`, '', 'deine Holzbau-Willroider-App ist bereit.');
-      if (magicLink) {
-        smsLines.push('', `Sofort-Login: ${magicLink}`);
-        smsLines.push('', 'Falls Link nicht klappt:');
-        smsLines.push(`• App-Login mit Telefon ${telefonE164} → Code anfordern`);
-        smsLines.push(`• Oder mit E-Mail ${emailInput} + Passwort ${initialPassword}`);
-      } else {
-        smsLines.push('', 'So loggst du dich ein:');
-        smsLines.push(`1. App öffnen: ${appUrl}/auth?phone=${encodeURIComponent(telefonE164)}`);
-        smsLines.push('2. "Code anfordern" tippen');
-        smsLines.push('3. Du bekommst einen 6-stelligen Code');
-        smsLines.push('4. Code eingeben → fertig');
-        smsLines.push('', `Backup-Passwort (Telefon + Passwort): ${initialPassword}`);
-      }
-      smsLines.push('', 'App aufs Handy bringen:');
-      smsLines.push('iPhone (Safari): Teilen → Zum Home-Bildschirm');
-      smsLines.push('Android (Chrome): Menü → App installieren');
-      const smsText = smsLines.join('\n');
+      const smsText = composeInvitationSms({
+        vorname,
+        telefon: telefonE164,
+        email: emailInput || null,
+        magicLink,
+        initialPassword,
+        appUrl,
+      });
 
       try {
         const twilioRes = await fetch(

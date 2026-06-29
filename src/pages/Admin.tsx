@@ -13,6 +13,7 @@ import {
   HeartPulse,
   FileText,
   KeyRound,
+  Send,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { AdminUebersicht } from "@/components/admin/AdminUebersicht";
@@ -22,6 +23,7 @@ import { AdminArbeitszeit } from "@/components/admin/AdminArbeitszeit";
 import { AdminKrankmeldungen } from "@/components/admin/AdminKrankmeldungen";
 import { AdminLohnzettel } from "@/components/admin/AdminLohnzettel";
 import { AdminBerechtigungen } from "@/components/admin/AdminBerechtigungen";
+import { AdminZugangVerschicken } from "@/components/admin/AdminZugangVerschicken";
 import Mitarbeiter from "@/pages/Mitarbeiter";
 import Fahrzeuge from "@/pages/Fahrzeuge";
 import Evaluierung from "@/pages/Evaluierung";
@@ -29,6 +31,7 @@ import Evaluierung from "@/pages/Evaluierung";
 type TabKey =
   | "uebersicht"
   | "mitarbeiter"
+  | "zugang"
   | "urlaub"
   | "za"
   | "arbeitszeit"
@@ -41,6 +44,7 @@ type TabKey =
 const TABS: { key: TabKey; label: string; icon: typeof Users }[] = [
   { key: "uebersicht", label: "Übersicht", icon: LayoutDashboard },
   { key: "mitarbeiter", label: "Mitarbeiter & Partien", icon: Users },
+  { key: "zugang", label: "Zugang senden", icon: Send },
   { key: "urlaub", label: "Urlaubs-Konten", icon: Sun },
   { key: "za", label: "ZA-Konten", icon: Hourglass },
   { key: "arbeitszeit", label: "Arbeitszeit", icon: Clock },
@@ -71,10 +75,14 @@ export default function Admin() {
 
   if (!isAdmin) return null;
 
-  // Berechtigungen-Tab nur sichtbar für User mit system.manage_permissions
-  const visibleTabs = TABS.filter((t) =>
-    t.key === "berechtigungen" ? hasPermission("system.manage_permissions") : true,
-  );
+  // Tabs an Permissions binden:
+  // - berechtigungen → system.manage_permissions
+  // - zugang → mitarbeiter.einladung_resend
+  const visibleTabs = TABS.filter((t) => {
+    if (t.key === "berechtigungen") return hasPermission("system.manage_permissions");
+    if (t.key === "zugang") return hasPermission("mitarbeiter.einladung_resend");
+    return true;
+  });
 
   const setTab = (k: TabKey) => {
     const p = new URLSearchParams(params);
@@ -113,6 +121,7 @@ export default function Admin() {
       <div>
         {tab === "uebersicht" && <AdminUebersicht onNavigate={setTab} />}
         {tab === "mitarbeiter" && <Mitarbeiter />}
+        {tab === "zugang" && <AdminZugangVerschicken />}
         {tab === "urlaub" && <AdminUrlaubsKonten />}
         {tab === "za" && <AdminZaKonten />}
         {tab === "arbeitszeit" && <AdminArbeitszeit />}

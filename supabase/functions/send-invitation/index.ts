@@ -1,13 +1,28 @@
-// SMS-Einladung an einen (neuen oder bestehenden) Mitarbeiter.
-// Wird von Frontend (Re-Send-Button in Mitarbeiter-Liste) oder intern von
-// der admin-create-employee Edge Function aufgerufen.
+// SMS-Zugang neu verschicken für manuell angelegte Mitarbeiter.
 //
-// Liefert: bei Erfolg HTTP 200 { success: true, twilio_sid }
-//          bei Fehler HTTP 200 { success: false, error: '…' }
-//          (HTTP-200 + success-Flag, damit supabase.functions.invoke
-//          ohne Throw zurückkommt und das Frontend den Fehler sauber anzeigt.)
+// Aufgerufen vom Admin-UI „Zugang senden" (AdminZugangVerschicken).
+// Tut atomar:
+//   1. Hard-Gate: nur profiles.angelegt_manuell = TRUE → schützt selbst-
+//      registrierte User vor versehentlichem Passwort-Reset.
+//   2. Telefonnummer übernehmen (falls vorher leer): profiles.telefon updaten +
+//      bei auth.users phone setzen (mit phone_confirm).
+//   3. Neues lesbares Initial-Passwort generieren + via
+//      auth.admin.updateUserById() setzen.
+//   4. Magic-Link generieren (nur wenn Email vorhanden) — sonst Telefon-OTP-
+//      Anleitung in der SMS.
+//   5. SMS via Twilio versenden + invitation_logs-Eintrag schreiben.
+//
+// Antwort: 200 + { success, twilio_sid, telefon, initial_password,
+//                  magic_link, sms_status, sms_error }
+// Bei Fehler: 200 + { success: false, error } (kein Throw, damit Frontend
+// per supabase.functions.invoke sauber rendern kann).
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.79.0';
+import {
+  normalizeAtPhone,
+  generateReadablePassword,
+  composeInvitationSms,
+} from '../_shared/sms.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,64 +30,11 @@ const corsHeaders = {
 };
 
 interface InvitationRequest {
-  /** Telefonnummer in E.164 oder AT-Format (0664…, +43664…). Wird normalisiert. */
-  telefonnummer: string;
-  /** Optional: für Logging-Verknüpfung in invitation_logs */
-  profile_id?: string;
-  /** Optional: persönliche Anrede + Magic-Link/Passwort, sonst werden Fallbacks gesetzt */
-  vorname?: string;
-  email?: string;
-  /** Falls vom Aufrufer bereitgestellt (admin-create-employee) — sonst hier generiert */
-  magic_link?: string;
-  /** Initial-Passwort als Backup für SMS (nur Aufruf von admin-create-employee) */
-  initial_password?: string;
-}
-
-/** AT-Phone-Normalisierung — Spiegel von src/lib/phone.ts für die Edge Function. */
-function normalizeAtPhone(input: string | null | undefined): string | null {
-  if (!input) return null;
-  const cleaned = input.trim().replace(/[\s\-()/.]/g, '');
-  if (!cleaned) return null;
-  if (cleaned.startsWith('+')) {
-    const digits = cleaned.slice(1);
-    return /^\d{6,15}$/.test(digits) ? `+${digits}` : null;
-  }
-  if (cleaned.startsWith('00')) {
-    const digits = cleaned.slice(2);
-    return /^\d{6,15}$/.test(digits) ? `+${digits}` : null;
-  }
-  if (cleaned.startsWith('0')) {
-    const digits = cleaned.slice(1);
-    return /^\d{5,14}$/.test(digits) ? `+43${digits}` : null;
-  }
-  if (/^\d{5,14}$/.test(cleaned)) return `+43${cleaned}`;
-  return null;
-}
-
-function composeSmsText(opts: {
-  vorname?: string;
-  magicLink: string;
-  email?: string;
-  initialPassword?: string;
-}): string {
-  const lines: string[] = [];
-  const greeting = opts.vorname ? `Hallo ${opts.vorname},` : 'Hallo,';
-  lines.push(greeting);
-  lines.push('');
-  lines.push('deine Holzbau-Willroider-App ist bereit.');
-  lines.push('');
-  lines.push(`Login: ${opts.magicLink}`);
-  if (opts.email && opts.initialPassword) {
-    lines.push('');
-    lines.push('Falls Link nicht klappt:');
-    lines.push(`Mail: ${opts.email}`);
-    lines.push(`Passwort: ${opts.initialPassword}`);
-  }
-  lines.push('');
-  lines.push('App aufs Handy bringen:');
-  lines.push('iPhone (Safari): Teilen → Zum Home-Bildschirm');
-  lines.push('Android (Chrome): Menü → App installieren');
-  return lines.join('\n');
+  /** Profil-ID (= auth.users.id). Pflicht — Hard-Gate prüft angelegt_manuell. */
+  profile_id: string;
+  /** Optional: neue/abweichende Telefonnummer. Format: AT (0664…) oder E.164.
+   *  Wird normalisiert und in profiles.telefon + auth.users.phone übernommen. */
+  telefon_override?: string;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -104,8 +66,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ success: false, error: 'Unauthorized' }, 401);
     }
 
-    // Admin-Check via is_admin_role-RPC (decken alle Admin-Rollen ab:
-    // geschaeftsfuehrung, bauleiter, buero).
+    // Admin-Check via is_admin_role-RPC
     const { data: isAdmin, error: roleError } = await supabase.rpc('is_admin_role', {
       _user_id: user.id,
     });
@@ -115,8 +76,33 @@ Deno.serve(async (req) => {
     }
 
     const body: InvitationRequest = await req.json();
+    if (!body.profile_id) {
+      return jsonResponse({ success: false, error: 'profile_id fehlt' });
+    }
 
-    const telefonE164 = normalizeAtPhone(body.telefonnummer);
+    // ─── Profil laden + Hard-Gate ──────────────────────────────────────
+    const { data: profile, error: profileErr } = await supabase
+      .from('profiles')
+      .select('id, vorname, nachname, email, telefon, angelegt_manuell, is_active')
+      .eq('id', body.profile_id)
+      .maybeSingle();
+
+    if (profileErr || !profile) {
+      console.error('Profile lookup failed:', profileErr);
+      return jsonResponse({ success: false, error: 'Mitarbeiter nicht gefunden' });
+    }
+
+    if (!profile.angelegt_manuell) {
+      return jsonResponse({
+        success: false,
+        error:
+          'Dieser Mitarbeiter hat sich selbst registriert. Zugang per SMS verschicken ist nur für manuell angelegte Mitarbeiter erlaubt.',
+      });
+    }
+
+    // ─── Telefonnummer ermitteln (Override > Profil) ───────────────────
+    const telefonRaw = body.telefon_override ?? profile.telefon ?? '';
+    const telefonE164 = normalizeAtPhone(telefonRaw);
     if (!telefonE164) {
       return jsonResponse({
         success: false,
@@ -124,62 +110,88 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Twilio-Credentials prüfen
+    // Wenn Override angegeben oder Profil-Telefon abweicht: aktualisieren
+    if (telefonE164 !== profile.telefon) {
+      const { error: updErr } = await supabase
+        .from('profiles')
+        .update({ telefon: telefonE164 })
+        .eq('id', profile.id);
+      if (updErr) {
+        console.error('profiles.telefon update failed:', updErr);
+        return jsonResponse({
+          success: false,
+          error: `Telefonnummer konnte nicht gespeichert werden: ${updErr.message}`,
+        });
+      }
+    }
+
+    // ─── Neues Initial-Passwort setzen ─────────────────────────────────
+    const initialPassword = generateReadablePassword(10);
+    const updatePayload: Record<string, unknown> = {
+      password: initialPassword,
+    };
+    // Auch die phone-Spalte in auth.users syncen, falls geändert
+    if (telefonE164 !== profile.telefon) {
+      updatePayload.phone = telefonE164;
+      updatePayload.phone_confirm = true;
+    }
+    const { error: pwErr } = await supabase.auth.admin.updateUserById(
+      profile.id,
+      updatePayload,
+    );
+    if (pwErr) {
+      console.error('updateUserById failed:', pwErr);
+      return jsonResponse({
+        success: false,
+        error: `Passwort-Reset fehlgeschlagen: ${pwErr.message}`,
+      });
+    }
+
+    // ─── Twilio-Credentials prüfen ─────────────────────────────────────
     const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
     const twilioToken = Deno.env.get('TWILIO_AUTH_TOKEN');
     const twilioFrom = Deno.env.get('TWILIO_PHONE_NUMBER');
     if (!twilioSid || !twilioToken || !twilioFrom) {
       return jsonResponse({
         success: false,
-        error: 'Twilio-Credentials nicht konfiguriert. Bitte TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER in Supabase-Secrets setzen.',
+        error:
+          'Twilio-Credentials nicht konfiguriert. TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER in Supabase-Secrets setzen.',
       });
     }
 
-    const appUrl = Deno.env.get('APP_URL') || 'https://holzerleben.app';
+    const appUrl = Deno.env.get('APP_URL') || 'https://willroider.app';
 
-    // Magic Link: vom Aufrufer übergeben oder hier generieren
-    let magicLink = body.magic_link;
-    let resolvedEmail = body.email;
-    if (!magicLink) {
-      // Email aus profile holen falls nicht im Body und profile_id vorhanden
-      if (!resolvedEmail && body.profile_id) {
-        const { data: p } = await supabase
-          .from('profiles')
-          .select('email, vorname')
-          .eq('id', body.profile_id)
-          .maybeSingle();
-        if (p?.email) resolvedEmail = p.email;
-        if (p?.vorname && !body.vorname) body.vorname = p.vorname;
-      }
-      if (!resolvedEmail) {
-        return jsonResponse({
-          success: false,
-          error: 'Email fehlt — kein Magic-Link generierbar.',
-        });
-      }
+    // ─── Magic-Link (nur wenn echte Email vorhanden) ───────────────────
+    // Beim Import wurden Fake-Adressen "pers-XXX@willroider.invalid" gesetzt
+    // als Platzhalter. Die sollen den MA in der SMS nicht verwirren und
+    // sollen auch nicht für Magic-Links missbraucht werden.
+    const hasRealEmail =
+      !!profile.email && !profile.email.endsWith('@willroider.invalid');
+    let magicLink: string | null = null;
+    if (hasRealEmail) {
       const { data: linkRes, error: linkErr } = await supabase.auth.admin.generateLink({
         type: 'magiclink',
-        email: resolvedEmail,
+        email: profile.email!,
         options: { redirectTo: `${appUrl}/` },
       });
-      if (linkErr || !linkRes?.properties?.action_link) {
-        console.error('generateLink error:', linkErr);
-        return jsonResponse({
-          success: false,
-          error: `Magic-Link konnte nicht erstellt werden: ${linkErr?.message ?? 'unbekannt'}`,
-        });
+      if (linkErr) {
+        console.warn('generateLink warn (non-fatal):', linkErr);
+      } else {
+        magicLink = linkRes?.properties?.action_link ?? null;
       }
-      magicLink = linkRes.properties.action_link;
     }
 
-    const smsText = composeSmsText({
-      vorname: body.vorname,
+    // ─── SMS-Text bauen ────────────────────────────────────────────────
+    const smsText = composeInvitationSms({
+      vorname: profile.vorname || undefined,
+      telefon: telefonE164,
+      email: hasRealEmail ? profile.email : null,
       magicLink,
-      email: resolvedEmail,
-      initialPassword: body.initial_password,
+      initialPassword,
+      appUrl,
     });
 
-    // Twilio-Aufruf
+    // ─── Twilio-Aufruf ─────────────────────────────────────────────────
     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
     const twilioResponse = await fetch(twilioUrl, {
       method: 'POST',
@@ -197,9 +209,8 @@ Deno.serve(async (req) => {
 
     if (!twilioResponse.ok) {
       console.error('Twilio error:', twilioData);
-      // Log als Fehler
       await supabase.from('invitation_logs').insert({
-        profile_id: body.profile_id ?? null,
+        profile_id: profile.id,
         telefonnummer: telefonE164,
         gesendet_von: user.id,
         status: 'fehler',
@@ -209,12 +220,16 @@ Deno.serve(async (req) => {
       return jsonResponse({
         success: false,
         error: `SMS-Versand fehlgeschlagen: ${twilioData?.message ?? 'unbekannt'}`,
+        initial_password: initialPassword, // Passwort wurde gesetzt — Admin kann es mündlich weitergeben
+        magic_link: magicLink,
+        sms_status: 'error',
+        sms_error: twilioData?.message ?? 'unbekannt',
       });
     }
 
-    // Erfolgreich loggen
+    // Erfolg loggen
     await supabase.from('invitation_logs').insert({
-      profile_id: body.profile_id ?? null,
+      profile_id: profile.id,
       telefonnummer: telefonE164,
       gesendet_von: user.id,
       status: 'gesendet',
@@ -225,7 +240,15 @@ Deno.serve(async (req) => {
     return jsonResponse({
       success: true,
       twilio_sid: twilioData.sid,
-      telefonnummer: telefonE164,
+      telefon: telefonE164,
+      email: profile.email,
+      initial_password: initialPassword,
+      magic_link: magicLink,
+      sms_status: 'sent',
+      sms_error: null,
+      vorname: profile.vorname,
+      nachname: profile.nachname,
+      user_id: profile.id,
     });
   } catch (error) {
     console.error('send-invitation error:', error);

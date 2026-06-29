@@ -27,7 +27,7 @@ import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { CheckCircle2, XCircle, Plus, Edit, Trash2, AlertTriangle, UserPlus, MessageSquare } from "lucide-react";
+import { CheckCircle2, XCircle, Plus, Edit, Trash2, AlertTriangle, UserPlus } from "lucide-react";
 import type { Database, AppRole } from "@/integrations/supabase/types";
 import {
   BAUSTELLEN_ORDNER,
@@ -121,7 +121,6 @@ const ROLES: { value: AppRole; label: string }[] = [
 export default function Mitarbeiter() {
   const { toast } = useToast();
   const { hasPermission } = useAuth();
-  const canResendInvite = hasPermission("mitarbeiter.einladung_resend");
   const canDeleteMa = hasPermission("mitarbeiter.delete");
   const [params, setParams] = useSearchParams();
   const initialTab =
@@ -153,40 +152,6 @@ export default function Mitarbeiter() {
   const [deleting, setDeleting] = useState<boolean>(false);
   const [newOpen, setNewOpen] = useState<boolean>(false);
   const [credentials, setCredentials] = useState<CredentialsResult | null>(null);
-  const [resendingId, setResendingId] = useState<string | null>(null);
-
-  const resendInvite = async (p: Profile) => {
-    if (!p.telefon) {
-      toast({
-        variant: "destructive",
-        title: "Keine Telefonnummer",
-        description: "Erst eine Telefonnummer im Profil hinterlegen.",
-      });
-      return;
-    }
-    if (!window.confirm(`SMS-Einladung an ${p.vorname} ${p.nachname} (${p.telefon}) senden?`)) {
-      return;
-    }
-    setResendingId(p.id);
-    const { data, error } = await supabase.functions.invoke("send-invitation", {
-      body: {
-        profile_id: p.id,
-        telefonnummer: p.telefon,
-        vorname: p.vorname,
-        email: p.email,
-      },
-    });
-    setResendingId(null);
-    if (error || data?.success === false) {
-      toast({
-        variant: "destructive",
-        title: "SMS-Versand fehlgeschlagen",
-        description: data?.error ?? error?.message ?? "Unbekannter Fehler",
-      });
-      return;
-    }
-    toast({ title: "SMS-Einladung gesendet", description: data?.telefonnummer });
-  };
 
   const load = async () => {
     const [profRes, partRes, roleRes] = await Promise.all([
@@ -518,19 +483,6 @@ export default function Mitarbeiter() {
                       >
                         {p.is_active ? "Deaktivieren" : "Freischalten"}
                       </Button>
-                      {p.telefon && canResendInvite && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-10"
-                          onClick={() => resendInvite(p)}
-                          disabled={resendingId === p.id}
-                          aria-label="SMS-Einladung senden"
-                          title={`SMS-Einladung an ${p.telefon} senden`}
-                        >
-                          <MessageSquare className="h-4 w-4" />
-                        </Button>
-                      )}
                       <Button
                         variant="outline"
                         size="sm"
@@ -644,18 +596,6 @@ export default function Mitarbeiter() {
                           >
                             {p.is_active ? "Deaktivieren" : "Freischalten"}
                           </Button>
-                          {p.telefon && canResendInvite && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => resendInvite(p)}
-                              disabled={resendingId === p.id}
-                              aria-label="SMS-Einladung senden"
-                              title={`SMS-Einladung an ${p.telefon} senden`}
-                            >
-                              <MessageSquare className="h-4 w-4" />
-                            </Button>
-                          )}
                           <Button
                             variant="ghost"
                             size="sm"
