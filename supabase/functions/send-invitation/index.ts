@@ -191,6 +191,13 @@ Deno.serve(async (req) => {
       appUrl,
     });
 
+    // Log-Version des SMS-Texts: Passwort maskieren, damit keine Klartext-
+    // Zugangsdaten dauerhaft in invitation_logs liegen.
+    const smsTextLog = smsText.replace(
+      /(Passwort[^:]*: ?)\S+/g,
+      '$1[redigiert]',
+    );
+
     // ─── Twilio-Aufruf ─────────────────────────────────────────────────
     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
     const twilioResponse = await fetch(twilioUrl, {

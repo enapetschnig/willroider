@@ -179,7 +179,16 @@ export default function Kalender() {
       });
     }
     if (insertRows.length > 0) {
-      await supabase.from("arbeitszeitkalender").insert(insertRows as any);
+      // Insert-Fehler nicht verschlucken — sonst kommt der Erfolgs-Toast trotz leerem Jahr
+      const { error } = await supabase.from("arbeitszeitkalender").insert(insertRows as any);
+      if (error) {
+        toast({
+          variant: "destructive",
+          title: "Initialisierung fehlgeschlagen",
+          description: error.message,
+        });
+        return;
+      }
       toast({ title: `${insertRows.length} Wochen für ${year} angelegt` });
       load();
     } else {

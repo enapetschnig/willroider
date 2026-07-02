@@ -616,6 +616,10 @@ export default function Stunden() {
     let taggeldKurzCount = 0;
     let taggeldLangCount = 0;
     const errors: string[] = [];
+    // Namen der fehlgeschlagenen Personen (für den Toast) und IDs der
+    // erfolgreich gespeicherten (um sie aus der Auswahl zu entfernen).
+    const failedNames: string[] = [];
+    const savedUids: string[] = [];
 
     try {
       const { data: existing } = await supabase
@@ -776,12 +780,14 @@ export default function Stunden() {
             fahrt: fahrtToSave,
           });
           savedCount++;
+          savedUids.push(uid);
           if (fahrtToSave) {
             taggeldKurzCount += fahrtToSave.taggeld_kurz;
             taggeldLangCount += fahrtToSave.taggeld_lang;
           }
         } catch (e) {
           errors.push(`${maName}: ${(e as Error).message}`);
+          failedNames.push(maName);
         }
       }
 
@@ -794,26 +800,46 @@ export default function Stunden() {
       toast({
         title:
           errors.length > 0
-            ? `${savedCount} von ${total} gespeichert`
+            ? `${savedCount} von ${total} gespeichert — Fehler bei: ${failedNames.join(", ")}`
             : skippedCount > 0
             ? `${savedCount} gespeichert · ${skippedCount} übersprungen${taggeldInfo}`
             : `${savedCount} ${savedCount === 1 ? "Eintrag" : "Einträge"} gespeichert${taggeldInfo}`,
-        description: errors.length > 0 ? errors.join(", ") : undefined,
+        description:
+          errors.length > 0
+            ? `${errors.join(", ")} — Eingaben bleiben erhalten, bitte erneut speichern.`
+            : undefined,
         variant: errors.length > 0 ? "destructive" : undefined,
       });
 
-      refetchTage();
       queryClient.invalidateQueries({ queryKey: ["stunden_status_for_date"] });
-      if (!aktuellerEigenerTag) {
-        setForm({
-          ...emptyForm(),
-          maEintraege: Object.fromEntries(
-            Array.from(forUserIds).map((uid) => [uid, [] as EintragRow[]]),
-          ),
-        });
-        const next = new Date(date);
-        next.setDate(next.getDate() + 1);
-        setDate(localIso(next));
+      if (errors.length > 0) {
+        // TEILFEHLER: Formular NICHT leeren und Datum NICHT weiterschalten —
+        // die Eingaben der fehlgeschlagenen Personen müssen erhalten bleiben,
+        // damit der Polier nur erneut speichern muss statt alles neu zu
+        // tippen. Nur die erfolgreich gespeicherten aus der Auswahl nehmen.
+        // Bewusst KEIN refetchTage(): würde aktuellerEigenerTag ändern und
+        // damit den Form-Reset-Effect auslösen, der die Eingaben der
+        // fehlgeschlagenen Personen wegwerfen würde.
+        if (savedUids.length > 0) {
+          setForUserIds((prev) => {
+            const next = new Set(prev);
+            for (const uid of savedUids) next.delete(uid);
+            return next;
+          });
+        }
+      } else {
+        refetchTage();
+        if (!aktuellerEigenerTag) {
+          setForm({
+            ...emptyForm(),
+            maEintraege: Object.fromEntries(
+              Array.from(forUserIds).map((uid) => [uid, [] as EintragRow[]]),
+            ),
+          });
+          const next = new Date(date);
+          next.setDate(next.getDate() + 1);
+          setDate(localIso(next));
+        }
       }
     } finally {
       setBusy(false);

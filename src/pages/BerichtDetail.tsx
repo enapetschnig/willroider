@@ -201,10 +201,14 @@ export default function BerichtDetail() {
   const istFreigegeben = b.status === "freigegeben";
   const istArchiviert = b.status === "archiviert";
   const istEigen = b.erfasst_von === user?.id;
-  const kannEditieren =
-    isAdmin ||
-    (istEntwurf && istEigen) ||
-    (istEingereicht && (isAdmin || istEigen)); // Polier kann auch nach Einreichung nochmal
+  // Entscheidung: kannEditieren spiegelt exakt die RLS. Die WITH-CHECK-Policies
+  // der bericht_*-Tabellen erlauben Nicht-Admins Writes nur im Status 'entwurf' —
+  // im Status 'eingereicht' liefen Polier-Edits still ins Leere (0 Zeilen, kein
+  // Fehler) und verschwanden kommentarlos beim Reload. Statt an allen 10+
+  // Insert/Update/Delete-Stellen (Mitarbeiter/Tätigkeiten/Aufmaß/Fotos/Wetter)
+  // den Row-Count zu prüfen, ist Editieren für Nicht-Admins auf 'entwurf'
+  // beschränkt; wer nachbessern will, nimmt den Bericht zurück auf Entwurf.
+  const kannEditieren = isAdmin || (istEntwurf && istEigen);
   const istRegie = b.typ === "regiebericht";
   const sb = STATUS_BADGE[b.status];
 
@@ -1402,8 +1406,12 @@ function StatusBar({
     })();
   }, [bericht.pdf_dokument_id]);
 
-  const generatePdf = async () => {
-    if (!baustelle || !bericht_full) return;
+  /** Erzeugt das PDF und legt es im Schriftverkehr ab. Wirft nie — liefert
+   *  null bei Erfolg, sonst den Fehler (Toast wird hier bereits gezeigt).
+   *  freigeben() braucht den Rückgabewert für den Status-Rollback. */
+  const generatePdf = async (): Promise<Error | null> => {
+    if (!baustelle || !bericht_full)
+      return new Error("Bericht ist noch nicht vollständig geladen");
     setPdfBusy(true);
     try {
       const fotoSignedUrls = await Promise.all(
@@ -1460,12 +1468,14 @@ function StatusBar({
       });
       onChange();
       toast({ title: "PDF erstellt und im Schriftverkehr abgelegt" });
+      return null;
     } catch (e) {
       toast({
         variant: "destructive",
         title: "PDF-Erstellung fehlgeschlagen",
         description: (e as Error).message,
       });
+      return e as Error;
     } finally {
       setPdfBusy(false);
     }
@@ -1487,21 +1497,21 @@ function StatusBar({
       )
         return;
     }
-    // PDF zuerst generieren — wenn das fehlschlägt, NICHT auf "freigegeben" wechseln.
-    // Sonst hätte der Bericht Status="freigegeben" ohne PDF, was den Workflow blockiert.
-    try {
-      await generatePdf();
-    } catch (e) {
+    // Erst freigeben, dann PDF erzeugen (das PDF gehört zum freigegebenen
+    // Bericht). Achtung: generatePdf wirft nie — Fehler kommen als Rückgabewert,
+    // ein try/catch hier wäre toter Code. Schlägt die PDF-Erzeugung fehl, wird
+    // die Freigabe zurückgenommen (Rollback auf "eingereicht"), sonst bliebe
+    // der Bericht dauerhaft freigegeben ohne PDF und der Workflow hinge fest.
+    await statusMut.mutateAsync({ id: bericht.id, newStatus: "freigegeben" });
+    const pdfFehler = await generatePdf();
+    if (pdfFehler) {
+      await statusMut.mutateAsync({ id: bericht.id, newStatus: "eingereicht" });
       toast({
         variant: "destructive",
-        title: "PDF-Generierung fehlgeschlagen",
-        description:
-          "Bericht NICHT freigegeben — PDF muss erst erstellt werden können. " +
-          (e as Error).message,
+        title: "Freigabe zurückgenommen",
+        description: `PDF konnte nicht erstellt werden: ${pdfFehler.message}`,
       });
-      return;
     }
-    await statusMut.mutateAsync({ id: bericht.id, newStatus: "freigegeben" });
     onChange();
   };
 

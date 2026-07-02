@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,8 +21,19 @@ type PhoneMode = "request-code" | "verify-code" | "password";
 
 export default function Auth() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
   const [params] = useSearchParams();
+
+  // Deep-Link-Ziel: ProtectedRoute legt beim Redirect das ursprüngliche
+  // location-Objekt in state.from ab — nur interne Pfade ("/…") akzeptieren.
+  const fromState = (
+    location.state as { from?: { pathname?: string; search?: string; hash?: string } } | null
+  )?.from;
+  const redirectTo =
+    fromState?.pathname && fromState.pathname.startsWith("/")
+      ? `${fromState.pathname}${fromState.search ?? ""}${fromState.hash ?? ""}`
+      : "/";
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<Tab>("telefon");
   const [emailMode, setEmailMode] = useState<EmailMode>("login");
@@ -56,11 +67,23 @@ export default function Auth() {
 
   // ─── nach erfolgreichem Login: is_active prüfen + weiterleiten ─────────
   const finalizeLogin = async (userId: string) => {
-    const { data: profile } = await supabase
+    const { data: profile, error } = await supabase
       .from("profiles")
       .select("is_active")
       .eq("id", userId)
       .maybeSingle();
+
+    // Query-Fehler (Netzwerk/RLS) NICHT mit "nicht freigeschaltet" verwechseln —
+    // das Konto kann aktiv sein, nur die Prüfung ist fehlgeschlagen.
+    if (error) {
+      await supabase.auth.signOut({ scope: "local" });
+      toast({
+        variant: "destructive",
+        title: "Anmeldung fehlgeschlagen",
+        description: `Bitte nochmal versuchen: ${error.message}`,
+      });
+      return;
+    }
 
     if (!profile?.is_active) {
       await supabase.auth.signOut({ scope: "local" });
@@ -73,7 +96,8 @@ export default function Auth() {
       return;
     }
     toast({ title: "Willkommen zurück!" });
-    navigate("/");
+    // Zurück zum ursprünglichen Deep-Link (state.from), sonst Startseite
+    navigate(redirectTo, { replace: true });
   };
 
   // ─── Telefon: Code anfordern (OTP per SMS) ─────────────────────────────

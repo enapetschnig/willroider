@@ -208,12 +208,32 @@ export default function BaustelleDetail() {
         evaluierung_id: evalData.id,
         mitarbeiter_id: m.id,
       }));
-      await supabase.from("evaluierung_unterschriften").insert(rows as any);
+      // Fehler prüfen — sonst existiert die Unterweisung ohne Unterschriften-Liste
+      const { error: sigErr } = await supabase
+        .from("evaluierung_unterschriften")
+        .insert(rows as any);
+      if (sigErr) {
+        toast({
+          variant: "destructive",
+          title: "Unterschriften konnten nicht angelegt werden",
+          description: sigErr.message,
+        });
+        return;
+      }
     }
-    await supabase
+    // Verknüpfung zur Baustelle ebenfalls prüfen — sonst ist die Unterweisung halb angelegt
+    const { error: updErr } = await supabase
       .from("baustellen")
       .update({ pflicht_evaluierung_id: evalData.id })
       .eq("id", b.id);
+    if (updErr) {
+      toast({
+        variant: "destructive",
+        title: "Baustelle konnte nicht verknüpft werden",
+        description: updErr.message,
+      });
+      return;
+    }
     toast({
       title: "Pflicht-Unterweisung angelegt",
       description: `${members?.length ?? 0} Mitarbeiter müssen unterschreiben.`,

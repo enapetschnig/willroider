@@ -15,6 +15,9 @@ export default defineConfig(({ mode }) => ({
     mode === "development" && componentTagger(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Registrierung erfolgt manuell in src/main.tsx (registerSW mit
+      // periodischem Update-Check) — Plugin soll nichts zusätzlich injizieren.
+      injectRegister: null,
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'],
       manifest: {
         name: 'Holzbau Willroider',

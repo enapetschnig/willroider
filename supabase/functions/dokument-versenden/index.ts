@@ -59,6 +59,16 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: false, error: "Unauthorized" }, 401);
     }
 
+    // Rollen-Check: ohne den war die Function ein offenes Mail-Relay über
+    // die Firmendomain — jeder authentifizierte User konnte beliebige
+    // Anhänge an beliebige Adressen schicken.
+    const { data: isAdmin } = await admin.rpc("is_admin_role", {
+      _user_id: user.id,
+    });
+    if (!isAdmin) {
+      return jsonResponse({ ok: false, error: "Forbidden: Admin only" }, 403);
+    }
+
     const body = (await req.json()) as VersendenRequest;
     if (!body?.empfaenger || !body.attachments?.length) {
       return jsonResponse({ ok: false, error: "Felder fehlen" }, 400);

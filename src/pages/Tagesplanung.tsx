@@ -413,17 +413,25 @@ export default function Tagesplanung() {
     await markManuell("einteilungen", einteilungId);
 
     // 2) MA aus eventuellen anderen heutigen Einteilungen entfernen (ohne Refresh dazwischen)
+    // Hinweis: insert-vor-delete scheitert am UNIQUE(einteilung_id, mitarbeiter_id) beim
+    // erneuten Zuweisen auf dieselbe Baustelle — daher delete+insert mit sauberem Fehler-Handling.
     const altEinteilungIds = (plan?.einteilungen ?? []).map((e) => e.einteilung.id);
     if (altEinteilungIds.length > 0) {
-      await supabase
+      const { error: delErr } = await supabase
         .from("einteilung_mitarbeiter")
         .delete()
         .eq("mitarbeiter_id", maId)
         .in("einteilung_id", altEinteilungIds);
+      if (delErr) {
+        toast({ variant: "destructive", title: "Umplanen fehlgeschlagen", description: delErr.message });
+        refresh(); // echten Zustand aus der DB anzeigen
+        return;
+      }
     }
 
-    // 3) In neue Einteilung einfügen
-    const { data: inserted } = await supabase
+    // 3) In neue Einteilung einfügen — Insert-Fehler MUSS behandelt werden,
+    // sonst ist der MA nach dem Delete komplett aus der Planung verschwunden.
+    const { data: inserted, error: insErr } = await supabase
       .from("einteilung_mitarbeiter")
       .insert({
         einteilung_id: einteilungId,
@@ -431,9 +439,16 @@ export default function Tagesplanung() {
       })
       .select("id")
       .single();
-    if (inserted) {
-      await markManuell("einteilung_mitarbeiter", (inserted as any).id);
+    if (insErr || !inserted) {
+      toast({
+        variant: "destructive",
+        title: "Einteilen fehlgeschlagen",
+        description: insErr?.message ?? "Mitarbeiter konnte nicht eingeteilt werden.",
+      });
+      refresh(); // Daten neu laden, damit die UI den echten Zustand zeigt
+      return;
     }
+    await markManuell("einteilung_mitarbeiter", (inserted as any).id);
     refresh();
   }
 

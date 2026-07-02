@@ -81,18 +81,6 @@ export function AdminBerechtigungen() {
   const { refresh: refreshOwnPerms } = usePermissionContext();
   const { toast } = useToast();
 
-  // URL-Direct-Access blocken: auch wenn Tab versteckt ist, muss der
-  // Component selbst prüfen (defense in depth).
-  if (permissionsLoaded && !hasPermission("system.manage_permissions")) {
-    return (
-      <Card>
-        <CardContent className="p-6 text-center text-sm text-muted-foreground">
-          Du hast keine Berechtigung diesen Bereich zu sehen.
-        </CardContent>
-      </Card>
-    );
-  }
-
   const [rollen, setRollen] = useState<Rolle[]>([]);
   const [perms, setPerms] = useState<Berechtigung[]>([]);
   const [rb, setRb] = useState<Record<string, Set<string>>>({}); // rolle_id → Set<berechtigung_id>
@@ -230,6 +218,20 @@ export function AdminBerechtigungen() {
   const reset = () => setDraft(new Set(savedSnapshot));
 
   // ── Render ────────────────────────────────────────────────────────
+  // URL-Direct-Access blocken: auch wenn Tab versteckt ist, muss der
+  // Component selbst prüfen (defense in depth). WICHTIG: dieser bedingte
+  // Early-Return muss NACH allen Hook-Aufrufen stehen, sonst ändert sich
+  // die Hook-Reihenfolge zwischen Renders ("Rendered fewer hooks"-Crash).
+  if (permissionsLoaded && !hasPermission("system.manage_permissions")) {
+    return (
+      <Card>
+        <CardContent className="p-6 text-center text-sm text-muted-foreground">
+          Du hast keine Berechtigung diesen Bereich zu sehen.
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (loading) return <div className="p-6 text-muted-foreground">Lade Berechtigungen …</div>;
 
   return (

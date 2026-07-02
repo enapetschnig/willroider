@@ -166,16 +166,32 @@ export default function AngebotDetail() {
       )
     )
       return;
-    // Storage-Dateien sammeln und löschen
+    // Storage-Pfade VOR dem DB-Delete sammeln (Dokument-Zeilen werden per Cascade mitgelöscht)
     const { data: docs } = await supabase
       .from("angebot_dokumente")
       .select("storage_path")
       .eq("angebot_id", angebot.id);
     const paths = (docs ?? []).map((d: any) => d.storage_path).filter(Boolean);
-    if (paths.length > 0) {
-      await supabase.storage.from("angebote").remove(paths);
+    // ERST der DB-Delete — mit Row-Count-Check, denn ein RLS-Block liefert 0 Zeilen OHNE error.
+    // Erst wenn das Angebot sicher weg ist, dürfen die Storage-Dateien entfernt werden.
+    const { data: deleted, error: delErr } = await supabase
+      .from("angebote")
+      .delete()
+      .eq("id", angebot.id)
+      .select("id");
+    if (delErr || !deleted || deleted.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Löschen fehlgeschlagen",
+        description: delErr?.message ?? "Keine Berechtigung oder Angebot nicht gefunden.",
+      });
+      return;
     }
-    await supabase.from("angebote").delete().eq("id", angebot.id);
+    // Storage-Cleanup NACH erfolgreichem DB-Delete; Fehler hier nur loggen (nicht blockierend)
+    if (paths.length > 0) {
+      const { error: storageErr } = await supabase.storage.from("angebote").remove(paths);
+      if (storageErr) console.error("Storage-Cleanup fehlgeschlagen:", storageErr);
+    }
     toast({ title: "Angebot gelöscht" });
     navigate("/angebote");
   };

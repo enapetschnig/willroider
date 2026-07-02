@@ -263,9 +263,16 @@ export async function buildBerichtPdf(
     unterschriebenAm: bericht.unterschrieben_am
       ? new Date(bericht.unterschrieben_am).toLocaleDateString("de-AT")
       : null,
+    // „geprüft am" nur mit echtem Bestätigungsdatum drucken — sonst stünde
+    // fälschlich das heutige Datum im PDF, obwohl das Büro noch gar nicht
+    // bestätigt hat. Einzige Ausnahme: beim Versand mit frischer Büro-Signatur
+    // (Override) passiert die Bestätigung im selben Schritt, dann ist heute
+    // korrekt. Ohne Datum bleibt die Zeile im PDF leer.
     bestaetigtAm: bericht.bestaetigt_am
       ? new Date(bericht.bestaetigt_am).toLocaleDateString("de-AT")
-      : new Date().toLocaleDateString("de-AT"),
+      : opts.bueroSignaturOverride
+        ? new Date().toLocaleDateString("de-AT")
+        : null,
     bestaetigtUnterschrift:
       opts.bueroSignaturOverride ?? bericht.bestaetigt_unterschrift_data ?? null,
   });

@@ -42,6 +42,25 @@ const todayIso = () => {
   ].join("-");
 };
 
+/**
+ * Liest die echte Fehlermeldung einer fehlgeschlagenen Edge Function aus.
+ * supabase.functions.invoke wirft FunctionsHttpError mit dem Response-Objekt
+ * in error.context — dort steckt im JSON-Body das .error-Feld (z.B.
+ * "Telefonnummer schon vergeben"). Fallback: generische error.message.
+ */
+async function edgeFunctionErrorMessage(error: unknown): Promise<string> {
+  const err = error as { message?: string; context?: Response };
+  try {
+    if (err?.context && typeof err.context.json === "function") {
+      const body = await err.context.json();
+      if (body?.error) return String(body.error);
+    }
+  } catch {
+    // Body kein JSON / nicht lesbar → Fallback unten
+  }
+  return err?.message ?? "Unbekannter Fehler";
+}
+
 export interface CredentialsResult {
   user_id: string;
   telefon: string;
@@ -173,7 +192,8 @@ export function NewMitarbeiterDialog({
       toast({
         variant: "destructive",
         title: "Anlegen fehlgeschlagen",
-        description: error.message ?? "Unbekannter Fehler",
+        // Echte Fehlermeldung aus dem Response-Body statt "non-2xx status code"
+        description: await edgeFunctionErrorMessage(error),
       });
       return;
     }

@@ -107,7 +107,7 @@ Deno.serve(async (req) => {
   if (proVerantw.size > 0) {
     const { data: profiles } = await admin
       .from("profiles")
-      .select("id, vorname, nachname, telefonnummer")
+      .select("id, vorname, nachname, telefon")
       .in("id", Array.from(proVerantw.keys()));
     for (const p of (profiles ?? []) as any[]) {
       const g = proVerantw.get(p.id);
@@ -118,17 +118,17 @@ Deno.serve(async (req) => {
   // 5) Optional SMS via Twilio — nur wenn alle Twilio-ENV-Vars gesetzt sind
   const twilioSid = Deno.env.get("TWILIO_ACCOUNT_SID");
   const twilioToken = Deno.env.get("TWILIO_AUTH_TOKEN");
-  const twilioFrom = Deno.env.get("TWILIO_FROM");
+  const twilioFrom = Deno.env.get("TWILIO_PHONE_NUMBER");
   const smsAktiv = !!twilioSid && !!twilioToken && !!twilioFrom;
   let smsSent = 0;
   if (smsAktiv) {
     const { data: profiles } = await admin
       .from("profiles")
-      .select("id, telefonnummer")
+      .select("id, telefon")
       .in("id", Array.from(proVerantw.keys()));
     for (const p of (profiles ?? []) as any[]) {
       const g = proVerantw.get(p.id);
-      if (!g || !p.telefonnummer) continue;
+      if (!g || !p.telefon) continue;
       const baustellen = Array.from(new Set(g.faelle.map((f) => f.bvh_name))).slice(0, 4);
       const msg = `Holzbau Willroider: ${g.faelle.length} offene Unterweisung(en) auf ${baustellen.join(", ")}. Bitte im Dashboard prüfen.`;
       try {
@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
             },
             body: new URLSearchParams({
               From: twilioFrom!,
-              To: p.telefonnummer,
+              To: p.telefon,
               Body: msg,
             }),
           },

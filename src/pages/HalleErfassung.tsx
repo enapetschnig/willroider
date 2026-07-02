@@ -309,8 +309,24 @@ export default function HalleErfassung() {
           }
         : null;
 
+      // aktuellerEigenerTag kennt nur die letzten 14 Tage. Existiert für das
+      // Datum bereits ein ÄLTERER Tag (außerhalb der Liste), würde der Save
+      // ohne id in einen INSERT laufen und am Unique-Constraint
+      // (mitarbeiter_id + datum) scheitern — daher die id des bestehenden
+      // Tags direkt aus der DB nachschlagen.
+      let tagId = aktuellerEigenerTag?.tag.id;
+      if (!tagId) {
+        const { data: vorhandener } = await supabase
+          .from("stunden_tage")
+          .select("id")
+          .eq("mitarbeiter_id", primaryUserId)
+          .eq("datum", date)
+          .maybeSingle();
+        tagId = vorhandener?.id;
+      }
+
       await saveMut.mutateAsync({
-        id: aktuellerEigenerTag?.tag.id,
+        id: tagId,
         mitarbeiter_id: primaryUserId,
         datum: date,
         arbeitsbeginn: arbeitsbeginn || null,
