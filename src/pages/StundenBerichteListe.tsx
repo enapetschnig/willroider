@@ -82,12 +82,12 @@ export default function StundenBerichteListe() {
     monat,
     teil,
   });
-  /** Monat-übergreifende Sicht auf alle noch nicht abgeschlossenen Berichte
-   *  (unterschrieben = wartet auf Büro, bestaetigt = noch nicht versendet).
-   *  Wird oben permanent angezeigt, damit alte Berichte nicht in Vormonaten
-   *  hängen bleiben. */
+  /** Monat-übergreifende Sicht auf ALLE noch nicht versendeten Berichte:
+   *  offen = wartet auf MA-Unterschrift, unterschrieben = wartet auf Büro,
+   *  bestaetigt = noch nicht versendet. Wird oben permanent angezeigt,
+   *  damit der Beta-Rückstand aus Vormonaten nicht unsichtbar bleibt. */
   const { data: offeneBerichte = [] } = useStundenBerichteList({
-    status: ["unterschrieben", "bestaetigt"],
+    status: ["offen", "unterschrieben", "bestaetigt"],
   });
   const aktionen = useStundenBerichtAktionen();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -195,7 +195,9 @@ export default function StundenBerichteListe() {
                         </span>
                       </div>
                       <div className="text-[11px] text-muted-foreground">
-                        Unterschrieben am {fmtTag(b.unterschrieben_am)}
+                        {b.unterschrieben_am
+                          ? `Unterschrieben am ${fmtTag(b.unterschrieben_am)}`
+                          : "Wartet auf Mitarbeiter-Unterschrift"}
                       </div>
                     </div>
                     <Badge variant="outline" className={`${badge.cls} text-[10px]`}>
