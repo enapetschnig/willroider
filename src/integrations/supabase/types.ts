@@ -1049,7 +1049,8 @@ export type Database = {
       tagesplanung_freigaben: {
         Row: {
           datum: string;
-          freigegeben_am: string;
+          // Nullable: NULL = Zeile existiert (z. B. nur Notiz), aber Plan NICHT freigegeben
+          freigegeben_am: string | null;
           freigegeben_von: string | null;
           notiz: string | null;
         };

@@ -98,6 +98,9 @@ export function useTagesplanung(datum: string) {
           .from("tagesplanung_freigaben")
           .select("*")
           .lte("datum", datum)
+          // Notiz-only-Zeilen (freigegeben_am NULL) zählen nicht als
+          // "zuletzt freigegebener Plan".
+          .not("freigegeben_am", "is", null)
           .order("datum", { ascending: false })
           .limit(1)
           .maybeSingle()

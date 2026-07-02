@@ -453,12 +453,15 @@ export default function Tagesplanung() {
   }
 
   async function saveSonstigeHinweise(text: string) {
+    // WICHTIG: NUR die Notiz upserten — freigegeben_am/freigegeben_von dürfen hier
+    // NICHT gesetzt werden, sonst würde das Tippen einer Notiz den halbfertigen Plan
+    // veröffentlichen (RLS zeigt den Plan den MA, sobald freigegeben_am gesetzt ist).
+    // Upsert überschreibt nur die mitgegebenen Spalten: bestehende Freigabe bleibt
+    // erhalten, eine neue Zeile entsteht mit freigegeben_am = NULL (= nicht freigegeben).
     const { error } = await supabase.from("tagesplanung_freigaben").upsert(
       {
         datum,
         notiz: text || null,
-        freigegeben_von: plan?.freigabe?.freigegeben_von ?? user?.id ?? null,
-        freigegeben_am: plan?.freigabe?.freigegeben_am ?? new Date().toISOString(),
       },
       { onConflict: "datum" },
     );
@@ -827,9 +830,12 @@ export default function Tagesplanung() {
       )
     )
       return;
+    // Kein DELETE: die Zeile trägt auch die "Sonstigen Hinweise" (notiz), die bei
+    // einer Rücknahme erhalten bleiben müssen. Es wird nur die Freigabe-Markierung
+    // entfernt — RLS versteckt den Plan, sobald freigegeben_am NULL ist.
     const { error } = await supabase
       .from("tagesplanung_freigaben")
-      .delete()
+      .update({ freigegeben_am: null, freigegeben_von: null })
       .eq("datum", datum);
     if (error) {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
@@ -839,7 +845,9 @@ export default function Tagesplanung() {
     refresh();
   }
 
-  const freigegeben = !!plan?.freigabe;
+  // Freigegeben nur, wenn freigegeben_am gesetzt ist — die bloße Existenz der
+  // Zeile (z. B. durch eine gespeicherte Notiz) zählt NICHT als Freigabe.
+  const freigegeben = !!plan?.freigabe?.freigegeben_am;
 
   // ─── Drag & Drop ────────────────────────────────────────────────────────
 
@@ -1175,7 +1183,8 @@ export default function Tagesplanung() {
             style={{ fontStyle: "italic" }}
           >
             Plan freigegeben am{" "}
-            {new Date(plan!.freigabe!.freigegeben_am).toLocaleString("de-AT", {
+            {/* freigegeben_am ist hier garantiert gesetzt (siehe `freigegeben`) */}
+            {new Date(plan!.freigabe!.freigegeben_am!).toLocaleString("de-AT", {
               day: "2-digit",
               month: "2-digit",
               year: "numeric",
@@ -1212,12 +1221,16 @@ const SETUP_SQL = `-- Einmaliges Setup für „Plan freigeben" + WhatsApp-Sharin
 -- Kann gefahrlos mehrfach ausgeführt werden (idempotent).
 
 -- 1) Tabelle für Plan-Freigaben + „sonstige Hinweise"
+-- freigegeben_am ist NULLABLE ohne Default: NULL = nur Notiz, Plan NICHT freigegeben.
 CREATE TABLE IF NOT EXISTS public.tagesplanung_freigaben (
   datum date PRIMARY KEY,
-  freigegeben_am timestamptz NOT NULL DEFAULT now(),
+  freigegeben_am timestamptz,
   freigegeben_von uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
   notiz text
 );
+-- Bestehende Installationen auf nullable/ohne Default migrieren (idempotent)
+ALTER TABLE public.tagesplanung_freigaben ALTER COLUMN freigegeben_am DROP NOT NULL;
+ALTER TABLE public.tagesplanung_freigaben ALTER COLUMN freigegeben_am DROP DEFAULT;
 ALTER TABLE public.tagesplanung_freigaben ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tpf_sel ON public.tagesplanung_freigaben;
 CREATE POLICY tpf_sel ON public.tagesplanung_freigaben FOR SELECT USING (true);

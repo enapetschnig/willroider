@@ -206,12 +206,25 @@ Deno.serve(async (req) => {
     };
 
     // Wenn anfrageId mitgegeben → Update. Sonst Insert mit Default-Status.
+    // Der Update-Pfad ist bewusst eng: nur unbearbeitete ('eingegangen'),
+    // höchstens 24h alte Anfragen sind überschreibbar. Der Endpoint ist
+    // öffentlich — ohne diesen Guard könnte jeder mit einer erratenen ID
+    // beliebige (auch bereits bearbeitete) Anfragen überschreiben.
     if (a.anfrageId && typeof a.anfrageId === "string") {
-      const { error } = await admin
+      const { data: updated, error } = await admin
         .from("kalkulator_anfragen")
         .update(payload)
-        .eq("id", a.anfrageId);
+        .eq("id", a.anfrageId)
+        .eq("status", "eingegangen")
+        .gte("erstellt_am", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+        .select("id");
       if (error) return json({ ok: false, error: error.message }, 500);
+      if (!updated || updated.length === 0) {
+        return json(
+          { ok: false, error: "Anfrage nicht mehr änderbar" },
+          409,
+        );
+      }
       return json({ ok: true, anfrageId: a.anfrageId, updated: true });
     }
     const { data: row, error } = await admin

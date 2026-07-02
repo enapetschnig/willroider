@@ -92,7 +92,10 @@ const App = () => (
               <Route path="/mitarbeiter" element={<Navigate to="/admin?tab=mitarbeiter" replace />} />
               <Route path="/fahrzeuge" element={<Navigate to="/admin?tab=fahrzeuge" replace />} />
               <Route path="/kalender" element={<Navigate to="/admin?tab=kalender" replace />} />
-              <Route path="/evaluierung" element={<Navigate to="/admin?tab=evaluierung" replace />} />
+              {/* Echte Route statt Redirect auf /admin: Poliere/Zimmermeister mit
+                  evaluierungen.view haben kein admin.view, und der ?baustelle=-Parameter
+                  ging beim Redirect verloren. Der Admin-Tab bleibt daneben bestehen. */}
+              <Route path="/evaluierung" element={<RequirePermission perm="evaluierungen.view"><Evaluierung /></RequirePermission>} />
               <Route path="/stunden" element={<RequirePermission perm="stunden.view_eigene"><Stunden /></RequirePermission>} />
               <Route path="/halle" element={<RequirePermission perm="stunden.view_eigene"><HalleErfassung /></RequirePermission>} />
               <Route path="/stunden/auswertung" element={<RequirePermission perm="stunden.view_alle"><Stundenauswertung /></RequirePermission>} />

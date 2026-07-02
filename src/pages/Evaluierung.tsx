@@ -229,14 +229,18 @@ export default function Evaluierung() {
       toast({ variant: "destructive", title: "Baustelle wählen" });
       return;
     }
+    const isUpdate = !!editing.id;
     const payload = {
       baustelle_id: baustelleId,
       datum: fd.get("datum") as string,
       typ: (fd.get("typ") as EvaluierungTyp) || "baustelle",
-      vortragender_id: user?.id ?? null,
+      // Beim Bearbeiten Original-Werte behalten: sonst würde eine bereits
+      // abgeschlossene Unterweisung auf "Offen" zurückgesetzt und der echte
+      // Vortragende überschrieben. Nur beim Neuanlegen gelten die Defaults.
+      vortragender_id: isUpdate ? (editing.vortragender_id ?? null) : (user?.id ?? null),
       checkliste: checklist as unknown as Json,
       notizen: (fd.get("notizen") as string) || null,
-      abgeschlossen: false,
+      abgeschlossen: isUpdate ? (editing.abgeschlossen ?? false) : false,
     };
 
     let evalId = editing.id;
@@ -259,7 +263,12 @@ export default function Evaluierung() {
       evalId = data!.id;
     }
 
-    // Verteilung an Partie-Mitglieder
+    // Verteilung an Partie-Mitglieder — bewusst AUCH beim Bearbeiten:
+    // distributeToPartieMembers ist idempotent (bestehende Unterschriften
+    // werden übersprungen) und das erneute Speichern ist der dokumentierte
+    // Weg, um nach nachträglicher Partie-Zuweisung "neu zu verteilen"
+    // (siehe Warn-Toast unten). Eine Begrenzung auf den Insert-Fall würde
+    // diesen Workflow brechen.
     const { count: distributed, names, skippedOhnePartie } =
       await distributeToPartieMembers(evalId!, baustelleId);
 

@@ -100,10 +100,37 @@ export function KrankmeldungenCard({ userId }: { userId: string }) {
   const remove = async (k: Krankmeldung) => {
     if (!window.confirm("Krankmeldung wirklich löschen?")) return;
     try {
+      // ERST die Krankmeldung in der DB löschen (mit Row-Count-Check),
+      // damit das Attest bei einem Fehlschlag (z.B. RLS) nicht verloren geht.
+      const { data: deleted, error } = await supabase
+        .from("krankmeldungen")
+        .delete()
+        .eq("id", k.id)
+        .select("id");
+      if (error) throw error;
+      if (!deleted || deleted.length === 0) {
+        // RLS blockiert den Delete ohne Fehler → 0 Zeilen gelöscht
+        toast({
+          variant: "destructive",
+          title: "Löschen nicht möglich",
+          description: "Die Krankmeldung wurde nicht gelöscht (fehlende Berechtigung).",
+        });
+        return;
+      }
+      // NUR bei Erfolg: Attest-Dokument aus dem Storage entfernen
       const d = k.dokument_id ? doks[k.dokument_id] : null;
-      if (d) await deleteMaDokument(d.id, d.storage_path);
-      await supabase.from("krankmeldungen").delete().eq("id", k.id);
-      toast({ title: "Krankmeldung gelöscht" });
+      if (d) {
+        try {
+          await deleteMaDokument(d.id, d.storage_path);
+        } catch (storageErr) {
+          // Storage-Fehler nicht eskalieren – die Krankmeldung ist bereits gelöscht
+          console.error("Attest-Dokument konnte nicht gelöscht werden:", storageErr);
+        }
+      }
+      toast({
+        title: "Krankmeldung gelöscht",
+        description: "Automatisch erzeugte Krank-Tage wurden entfernt.",
+      });
     } catch (e) {
       toast({
         variant: "destructive",

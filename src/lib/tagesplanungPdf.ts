@@ -193,7 +193,8 @@ export function makeTagesplanungPdf(plan: TagesPlanData): jsPDF {
   y = (doc as any).lastAutoTable.finalY + 6;
 
   // ─── Footer mit Freigabe-Info ────────────────────────────────────────
-  if (plan.freigabe) {
+  // Notiz-only-Zeile (freigegeben_am NULL) hat keine Freigabe-Info.
+  if (plan.freigabe?.freigegeben_am) {
     doc.setFont("times", "italic");
     doc.setFontSize(9);
     doc.setTextColor(80);

@@ -70,10 +70,13 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
     setLoading(true);
     // Strategie: erst heute, sonst letzten freigegebenen Tag suchen
     const datumKandidaten: string[] = [today];
+    // Nur ECHT freigegebene Tage zählen (freigegeben_am gesetzt) — eine
+    // Zeile kann seit der Notiz-Entkopplung auch nur Hinweise tragen.
     const { data: letzte } = await supabase
       .from("tagesplanung_freigaben")
       .select("datum")
       .lte("datum", today)
+      .not("freigegeben_am", "is", null)
       .order("datum", { ascending: false })
       .limit(3);
     (letzte ?? []).forEach((r: any) => {
@@ -85,6 +88,7 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
         .from("tagesplanung_freigaben")
         .select("datum")
         .eq("datum", datum)
+        .not("freigegeben_am", "is", null)
         .maybeSingle();
       if (datum !== today && !frei) continue;
 
@@ -347,7 +351,12 @@ function VorschauCard({ userId }: { userId: string }) {
     const bis = tage[tage.length - 1];
 
     const [{ data: frei }, { data: ems }] = await Promise.all([
-      supabase.from("tagesplanung_freigaben").select("datum").gte("datum", von).lte("datum", bis),
+      supabase
+        .from("tagesplanung_freigaben")
+        .select("datum")
+        .gte("datum", von)
+        .lte("datum", bis)
+        .not("freigegeben_am", "is", null),
       supabase
         .from("einteilung_mitarbeiter")
         .select(

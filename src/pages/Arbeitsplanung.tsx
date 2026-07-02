@@ -16,7 +16,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
 import { useToast } from "@/hooks/use-toast";
-import type { Database } from "@/integrations/supabase/types";
+import type { Database, TagStatus } from "@/integrations/supabase/types";
 import {
   feiertagAt,
   isWerktag,
@@ -76,6 +76,23 @@ const FEHLZEIT_COLOR: Record<string, string> = {
   F: "#8b5cf6",
   SW: "#f59e0b",
 };
+// Mapping Planungs-Code → stunden_tage.tag_status (Enum der Zeiterfassung).
+// Fehlzeiten werden in stunden_tage geschrieben — die einzige Tabelle, die
+// Zeiterfassung/BSB/Auswertung/Lohn lesen (stundenbuchungen ist Legacy).
+const FEHLZEIT_TAG_STATUS: Record<string, TagStatus> = {
+  U: "urlaub",
+  K: "krank",
+  F: "feiertag",
+  SW: "schlechtwetter",
+};
+// Rück-Mapping tag_status → Planungs-Code (für Anzeige im Gantt)
+const TAG_STATUS_CODE: Record<string, string> = {
+  urlaub: "U",
+  krank: "K",
+  feiertag: "F",
+  schlechtwetter: "SW",
+};
+const FEHLZEIT_TAG_STATI = Object.keys(TAG_STATUS_CODE) as TagStatus[];
 
 const cellKey = (workerId: string, iso: string) => `${workerId}:${iso}`;
 const isoDate = (d: Date) => localIso(d);
@@ -126,6 +143,9 @@ export default function Arbeitsplanung() {
   const [assignments, setAssignments] = useState<Map<string, AssignmentCell>>(new Map());
   // Lock gegen Doppelklick auf Bestätigungs-Dialoge (assignBaustelle/setFehlzeit/clearCells)
   const assignBusyRef = useRef(false);
+  // Busy-State für setFehlzeit/clearCells: guarded gegen Doppelklick
+  // (erzeugte doppelte Zeilen) und disabled die Popover-Buttons
+  const [cellActionBusy, setCellActionBusy] = useState(false);
   const [selectionAnchor, setSelectionAnchor] = useState<{ workerId: string; iso: string } | null>(
     null
   );
@@ -191,12 +211,14 @@ export default function Arbeitsplanung() {
         )
         .gte("einteilungen.datum", startIso)
         .lte("einteilungen.datum", endIso),
+      // Fehlzeiten aus stunden_tage — dieselbe Quelle, die auch
+      // Zeiterfassung/BSB/Lohn lesen (stundenbuchungen ist Legacy)
       supabase
-        .from("stundenbuchungen")
-        .select("id, mitarbeiter_id, datum, fehlzeit_typ, status")
+        .from("stunden_tage")
+        .select("id, mitarbeiter_id, datum, tag_status, status")
         .gte("datum", startIso)
         .lte("datum", endIso)
-        .not("fehlzeit_typ", "is", null),
+        .in("tag_status", FEHLZEIT_TAG_STATI),
     ]);
     const map = new Map<string, AssignmentCell>();
     (emRows ?? []).forEach((r: any) => {
@@ -218,9 +240,10 @@ export default function Arbeitsplanung() {
       map.set(cellKey(r.mitarbeiter_id, r.datum), {
         source: "fehlzeit",
         refId: r.id,
-        fehlzeitTyp: r.fehlzeit_typ,
+        fehlzeitTyp: TAG_STATUS_CODE[r.tag_status] ?? r.tag_status,
         status: r.status,
-        isReadOnly: r.status !== "offen",
+        // Bereits im Freigabe-Workflow → Planung darf nicht mehr ändern
+        isReadOnly: r.status !== "erfasst" && r.status !== "ma_bestaetigt",
       });
     });
     setAssignments(map);
@@ -234,7 +257,7 @@ export default function Arbeitsplanung() {
       .on("postgres_changes", { event: "*", schema: "public", table: "baustellen" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "jahresplan_einteilungen" }, () => loadAssignments())
       .on("postgres_changes", { event: "*", schema: "public", table: "jahresplan_mitarbeiter" }, () => loadAssignments())
-      .on("postgres_changes", { event: "*", schema: "public", table: "stundenbuchungen" }, () => loadAssignments())
+      .on("postgres_changes", { event: "*", schema: "public", table: "stunden_tage" }, () => loadAssignments())
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
@@ -548,13 +571,26 @@ export default function Arbeitsplanung() {
         neueCells.some((n) => n.workerId === c.workerId && n.iso === c.iso),
       );
     if (sameSet) return;
-    await clearCellsRaw(alteCells);
+    // Beide Schritte prüfen: schlägt das Löschen fehl, gar nicht erst neu
+    // schreiben; schlägt das Schreiben fehl, zeigt der Reload den echten
+    // DB-Zustand (vorher radierte ein Teilfehler den Block stillschweigend aus)
+    if (!(await clearCellsRaw(alteCells))) {
+      loadAssignments();
+      return;
+    }
+    let ok = true;
     if (bar.source === "einteilung" && bar.baustelleId) {
-      await assignBaustelle(neueCells, bar.baustelleId, {
+      ok = await assignBaustelle(neueCells, bar.baustelleId, {
         wochenendeIncluden: false,
       });
     } else if (bar.source === "fehlzeit" && bar.fehlzeitTyp) {
-      await setFehlzeit(neueCells, bar.fehlzeitTyp);
+      ok = await setFehlzeit(neueCells, bar.fehlzeitTyp);
+    }
+    if (!ok) {
+      // Fehler-Toast kam bereits aus assignBaustelle/setFehlzeit —
+      // hier nur sicherstellen, dass die UI den echten Zustand zeigt
+      loadAssignments();
+      return;
     }
     loadAssignments();
   };
@@ -1009,16 +1045,23 @@ export default function Arbeitsplanung() {
   };
 
   // ─── Cell-Aktionen: Mitarbeiter pro Tag einteilen / Fehlzeit setzen ───
-  const clearCellsRaw = async (cells: { workerId: string; iso: string }[]) => {
-    if (cells.length === 0) return;
+  // Gibt false zurück, wenn ein Schritt fehlschlug (Caller muss dann neu laden).
+  const clearCellsRaw = async (
+    cells: { workerId: string; iso: string }[],
+  ): Promise<boolean> => {
+    if (cells.length === 0) return true;
     const workerIds = Array.from(new Set(cells.map((c) => c.workerId)));
     const dates = Array.from(new Set(cells.map((c) => c.iso)));
     // Jahresplan-Mitarbeiter-Einträge für (worker, datum) löschen
-    const { data: emToDelete } = await supabase
+    const { data: emToDelete, error: emSelErr } = await supabase
       .from("jahresplan_mitarbeiter")
       .select("id, mitarbeiter_id, einteilung_id, einteilungen:jahresplan_einteilungen!inner(datum)")
       .in("mitarbeiter_id", workerIds)
       .in("einteilungen.datum", dates);
+    if (emSelErr) {
+      toast({ variant: "destructive", title: "Fehler beim Entfernen", description: emSelErr.message });
+      return false;
+    }
     const emIds = (emToDelete ?? [])
       .filter((r: any) =>
         cells.some(
@@ -1027,31 +1070,62 @@ export default function Arbeitsplanung() {
       )
       .map((r: any) => r.id);
     if (emIds.length > 0) {
-      await supabase.from("jahresplan_mitarbeiter").delete().in("id", emIds);
+      const { error: emDelErr } = await supabase
+        .from("jahresplan_mitarbeiter")
+        .delete()
+        .in("id", emIds);
+      if (emDelErr) {
+        toast({ variant: "destructive", title: "Fehler beim Entfernen", description: emDelErr.message });
+        return false;
+      }
     }
-    // Fehlzeit-Einträge mit Status offen löschen
-    const { data: fzToDelete } = await supabase
-      .from("stundenbuchungen")
+    // Fehlzeit-Tage in stunden_tage löschen — NUR noch nicht freigegebene
+    // reine Fehlzeit-Tage (Freigabe-Workflow bleibt unangetastet)
+    const { data: ftRows, error: ftSelErr } = await supabase
+      .from("stunden_tage")
       .select("id, mitarbeiter_id, datum")
       .in("mitarbeiter_id", workerIds)
       .in("datum", dates)
-      .not("fehlzeit_typ", "is", null)
-      .eq("status", "offen");
-    const fzIds = (fzToDelete ?? [])
-      .filter((r: any) => cells.some((c) => c.workerId === r.mitarbeiter_id && c.iso === r.datum))
-      .map((r: any) => r.id);
-    if (fzIds.length > 0) {
-      await supabase.from("stundenbuchungen").delete().in("id", fzIds);
+      .in("tag_status", FEHLZEIT_TAG_STATI)
+      .in("status", ["erfasst", "ma_bestaetigt"]);
+    if (ftSelErr) {
+      toast({ variant: "destructive", title: "Fehler beim Entfernen", description: ftSelErr.message });
+      return false;
     }
+    let ftIds = (ftRows ?? [])
+      .filter((r: any) => cells.some((c) => c.workerId === r.mitarbeiter_id && c.iso === r.datum))
+      .map((r: any) => r.id as string);
+    if (ftIds.length > 0) {
+      // Tage mit erfassten Tätigkeiten NICHT löschen — dort hängen echte Stunden dran
+      const { data: ttRows, error: ttSelErr } = await supabase
+        .from("stunden_taetigkeiten")
+        .select("stunden_tag_id")
+        .in("stunden_tag_id", ftIds);
+      if (ttSelErr) {
+        toast({ variant: "destructive", title: "Fehler beim Entfernen", description: ttSelErr.message });
+        return false;
+      }
+      const mitTaetigkeiten = new Set((ttRows ?? []).map((r: any) => r.stunden_tag_id));
+      ftIds = ftIds.filter((id) => !mitTaetigkeiten.has(id));
+    }
+    if (ftIds.length > 0) {
+      const { error: ftDelErr } = await supabase.from("stunden_tage").delete().in("id", ftIds);
+      if (ftDelErr) {
+        toast({ variant: "destructive", title: "Fehler beim Entfernen", description: ftDelErr.message });
+        return false;
+      }
+    }
+    return true;
   };
 
+  // Gibt false zurück, wenn nichts (vollständig) geschrieben wurde.
   const assignBaustelle = async (
     cellsInput: { workerId: string; iso: string }[],
     baustelleId: string,
     options?: { wochenendeIncluden?: boolean },
-  ) => {
-    if (!isAdmin || cellsInput.length === 0) return;
-    if (assignBusyRef.current) return; // Doppelklick-Schutz
+  ): Promise<boolean> => {
+    if (!isAdmin || cellsInput.length === 0) return false;
+    if (assignBusyRef.current) return false; // Doppelklick-Schutz
     assignBusyRef.current = true;
     try {
     let cells = cellsInput;
@@ -1069,7 +1143,7 @@ export default function Arbeitsplanung() {
             title: "Keine Werktage in Auswahl",
             description: "Sa/So/Feiertage werden standardmäßig übersprungen.",
           });
-          return;
+          return false;
         }
         // User bestätigt Wochenend-Override → ursprüngliche cells behalten
       } else {
@@ -1083,7 +1157,11 @@ export default function Arbeitsplanung() {
       }
     }
 
-    await clearCellsRaw(cells);
+    // Alte Zellen räumen — bei Fehler abbrechen und echten Zustand zeigen
+    if (!(await clearCellsRaw(cells))) {
+      loadAssignments();
+      return false;
+    }
 
     // Jahresplan-Einteilungen pro datum sicherstellen, dann
     // jahresplan_mitarbeiter Insert
@@ -1108,7 +1186,9 @@ export default function Arbeitsplanung() {
             .single();
           if (error) {
             toast({ variant: "destructive", title: "Fehler", description: error.message });
-            return;
+            // Alte Zellen sind schon gelöscht → echten Zustand nachladen
+            loadAssignments();
+            return false;
           }
           einteilungId = created!.id;
         }
@@ -1120,61 +1200,156 @@ export default function Arbeitsplanung() {
       const { error } = await supabase.from("jahresplan_mitarbeiter").insert(inserts as any);
       if (error) {
         toast({ variant: "destructive", title: "Fehler", description: error.message });
-        return;
+        // Alte Zellen sind schon gelöscht → echten Zustand nachladen
+        loadAssignments();
+        return false;
       }
     }
     toast({ title: `${cells.length} Tag${cells.length === 1 ? "" : "e"} eingeteilt` });
     loadAssignments();
+    return true;
     } finally {
       assignBusyRef.current = false;
     }
   };
 
+  // Fehlzeit direkt in stunden_tage schreiben (Muster: UrlaubAntragDialog.genehmigen).
+  // stundenbuchungen ist Legacy — dort landende Fehlzeiten erreichten Lohn/
+  // Abschluss nie. Gibt false zurück, wenn nichts (vollständig) gesetzt wurde.
   const setFehlzeit = async (
     cellsInput: { workerId: string; iso: string }[],
     typ: string,
-  ) => {
-    if (!isAdmin || cellsInput.length === 0) return;
-    // Wochenenden/Feiertage rausfiltern — Urlaub/Krank gilt nur an Werktagen
-    let cells = cellsInput.filter((c) => isWerktag(c.iso));
-    const skipped = cellsInput.length - cells.length;
-    if (cells.length === 0) {
+  ): Promise<boolean> => {
+    if (!isAdmin || cellsInput.length === 0) return false;
+    // Doppelklick-Schutz — ohne Lock erzeugte ein Doppelklick doppelte Zeilen
+    if (cellActionBusy || assignBusyRef.current) return false;
+    const tagStatus = FEHLZEIT_TAG_STATUS[typ];
+    if (!tagStatus) {
+      toast({ variant: "destructive", title: "Unbekannter Fehlzeit-Typ", description: typ });
+      return false;
+    }
+    assignBusyRef.current = true;
+    setCellActionBusy(true);
+    try {
+      // Wochenenden/Feiertage rausfiltern — Urlaub/Krank gilt nur an Werktagen
+      const cells = cellsInput.filter((c) => isWerktag(c.iso));
+      const skipped = cellsInput.length - cells.length;
+      if (cells.length === 0) {
+        toast({
+          title: "Keine Werktage in Auswahl",
+          description: `${FEHLZEIT_LABEL[typ] ?? typ} kann nur an Werktagen gebucht werden.`,
+        });
+        return false;
+      }
+      if (skipped > 0) {
+        toast({
+          title: `${skipped} Wochenend-/Feiertage übersprungen`,
+        });
+      }
+      // Einteilungen/alte Fehlzeiten des Bereichs räumen
+      if (!(await clearCellsRaw(cells))) {
+        loadAssignments();
+        return false;
+      }
+      // Pro Mitarbeiter: existierende stunden_tage laden, fehlende Tage
+      // einfügen, überschreibbare (erfasst/ma_bestaetigt) umstellen
+      const datesByWorker = new Map<string, string[]>();
+      for (const c of cells) {
+        const arr = datesByWorker.get(c.workerId) ?? [];
+        arr.push(c.iso);
+        datesByWorker.set(c.workerId, arr);
+      }
+      for (const [mitarbeiterId, dates] of datesByWorker) {
+        const { data: existing, error: exErr } = await supabase
+          .from("stunden_tage")
+          .select("id, datum, status")
+          .eq("mitarbeiter_id", mitarbeiterId)
+          .in("datum", dates);
+        if (exErr) {
+          toast({ variant: "destructive", title: "Fehler beim Laden der Stunden-Tage", description: exErr.message });
+          loadAssignments();
+          return false;
+        }
+        const existingSet = new Set((existing ?? []).map((r: any) => r.datum));
+        const toInsert = dates.filter((d) => !existingSet.has(d));
+        if (toInsert.length > 0) {
+          const { error: insErr } = await supabase.from("stunden_tage").insert(
+            toInsert.map((datum) => ({
+              mitarbeiter_id: mitarbeiterId,
+              datum,
+              tag_status: tagStatus,
+              netto_stunden: 0,
+              status: "erfasst" as const,
+            })),
+          );
+          if (insErr) {
+            toast({ variant: "destructive", title: "Fehlzeit setzen fehlgeschlagen", description: insErr.message });
+            loadAssignments();
+            return false;
+          }
+        }
+        // Bestehende (noch nicht freigegebene) Tage auf Fehlzeit umstellen.
+        // WICHTIG: deren stunden_taetigkeiten löschen — sonst rechnet der
+        // Recompute-Trigger beim nächsten Edit die alten Stunden zurück.
+        const ueberschreibbar = (existing ?? []).filter(
+          (r: any) => r.status === "erfasst" || r.status === "ma_bestaetigt",
+        );
+        if (ueberschreibbar.length > 0) {
+          const tagIds = ueberschreibbar.map((r: any) => r.id);
+          const { error: ttDelErr } = await supabase
+            .from("stunden_taetigkeiten")
+            .delete()
+            .in("stunden_tag_id", tagIds);
+          if (ttDelErr) {
+            toast({ variant: "destructive", title: "Fehlzeit setzen fehlgeschlagen", description: ttDelErr.message });
+            loadAssignments();
+            return false;
+          }
+          const { error: updErr } = await supabase
+            .from("stunden_tage")
+            .update({ tag_status: tagStatus, netto_stunden: 0 })
+            .in("id", tagIds);
+          if (updErr) {
+            toast({ variant: "destructive", title: "Fehlzeit setzen fehlgeschlagen", description: updErr.message });
+            loadAssignments();
+            return false;
+          }
+        }
+      }
       toast({
-        title: "Keine Werktage in Auswahl",
-        description: `${FEHLZEIT_LABEL[typ] ?? typ} kann nur an Werktagen gebucht werden.`,
+        title: `${FEHLZEIT_LABEL[typ] ?? typ} für ${cells.length} Tag${cells.length === 1 ? "" : "e"} gesetzt`,
+        // Admin-Direkteintrag bucht bewusst KEIN Urlaubskonto —
+        // dafür ist der Urlaubsantrags-Flow zuständig
+        description:
+          typ === "U"
+            ? "Hinweis: Kein Urlaubskonto-Abzug — dafür Urlaubsantrag verwenden."
+            : undefined,
       });
-      return;
+      loadAssignments();
+      return true;
+    } finally {
+      assignBusyRef.current = false;
+      setCellActionBusy(false);
     }
-    if (skipped > 0) {
-      toast({
-        title: `${skipped} Wochenend-/Feiertage übersprungen`,
-      });
-    }
-    await clearCellsRaw(cells);
-    const rows = cells.map((c) => ({
-      mitarbeiter_id: c.workerId,
-      datum: c.iso,
-      fehlzeit_typ: typ,
-      fehlzeit_stunden: 8,
-      arbeitsstunden: 0,
-      status: "offen",
-    }));
-    const { error } = await supabase.from("stundenbuchungen").insert(rows as any);
-    if (error) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
-      return;
-    }
-    toast({
-      title: `${FEHLZEIT_LABEL[typ] ?? typ} für ${cells.length} Tag${cells.length === 1 ? "" : "e"} gesetzt`,
-    });
-    loadAssignments();
   };
 
   const clearCells = async (cells: { workerId: string; iso: string }[]) => {
     if (!isAdmin || cells.length === 0) return;
-    await clearCellsRaw(cells);
-    toast({ title: `${cells.length} Eintrag${cells.length === 1 ? "" : "e"} entfernt` });
-    loadAssignments();
+    // Doppelklick-Schutz — ohne Lock konnten parallele Löschläufe kollidieren
+    if (cellActionBusy || assignBusyRef.current) return;
+    assignBusyRef.current = true;
+    setCellActionBusy(true);
+    try {
+      if (!(await clearCellsRaw(cells))) {
+        loadAssignments();
+        return;
+      }
+      toast({ title: `${cells.length} Eintrag${cells.length === 1 ? "" : "e"} entfernt` });
+      loadAssignments();
+    } finally {
+      assignBusyRef.current = false;
+      setCellActionBusy(false);
+    }
   };
 
   const weekHeaders = useMemo(() => {
@@ -1944,6 +2119,7 @@ export default function Arbeitsplanung() {
             closePopover();
           }}
           onClose={closePopover}
+          busy={cellActionBusy}
         />
       )}
 
@@ -2455,6 +2631,7 @@ function CellPopover({
   onClear,
   onSavedEinteilung,
   onClose,
+  busy,
 }: {
   anchor: { x: number; y: number };
   cells: { workerId: string; iso: string }[];
@@ -2468,7 +2645,9 @@ function CellPopover({
   onClear: () => void;
   onSavedEinteilung: () => void;
   onClose: () => void;
+  busy: boolean;
 }) {
+  const { toast } = useToast();
   const hasExisting = cells.some((c) => assignments.get(cellKey(c.workerId, c.iso)));
   // Wenn alle ausgewählten Cells zur gleichen Einteilung gehören, zeigen wir den
   // Tätigkeit + Fahrzeug-Editor inline.
@@ -2483,73 +2662,95 @@ function CellPopover({
   const [taetigkeit, setTaetigkeit] = useState("");
   const [selectedFahrzeuge, setSelectedFahrzeuge] = useState<Set<string>>(new Set());
   const [savingDetails, setSavingDetails] = useState(false);
-  // Existierende Werte laden + Bauleiter-Auto-Vorschlag wenn leer
-  useEffect(() => {
+  // Existierende Werte laden + Bauleiter-Auto-Vorschlag wenn leer.
+  // Als benannte Funktion, damit sie nach einem Speicherfehler den
+  // echten DB-Zustand zurückholen kann.
+  const ladeDetails = async () => {
     if (!singleEinteilungId) {
       setTaetigkeit("");
       setSelectedFahrzeuge(new Set());
       return;
     }
-    (async () => {
-      const [{ data: e }, { data: ef }] = await Promise.all([
-        supabase
-          .from("jahresplan_einteilungen")
-          .select("taetigkeit")
-          .eq("id", singleEinteilungId)
-          .maybeSingle(),
-        supabase
-          .from("jahresplan_fahrzeuge")
-          .select("fahrzeug_id")
-          .eq("einteilung_id", singleEinteilungId),
-      ]);
-      setTaetigkeit((e?.taetigkeit as string) ?? "");
-      const existing = new Set(
-        ((ef ?? []) as any[]).map((r) => r.fahrzeug_id as string)
-      );
-      // Auto-Vorschlag: wenn keine Fahrzeuge gesetzt, aber ein
-      // Bauleiter (Worker mit standard_fahrer_id auf einem
-      // bauleiter-Fahrzeug) in den Zellen ist → vorschlagen
-      if (existing.size === 0) {
-        const workerIds = new Set(cells.map((c) => c.workerId));
-        fahrzeuge.forEach((f) => {
-          if (
-            f.kategorie === "bauleiter" &&
-            f.standard_fahrer_id &&
-            workerIds.has(f.standard_fahrer_id)
-          ) {
-            existing.add(f.id);
-          }
-        });
-      }
-      setSelectedFahrzeuge(existing);
-    })();
+    const [{ data: e }, { data: ef }] = await Promise.all([
+      supabase
+        .from("jahresplan_einteilungen")
+        .select("taetigkeit")
+        .eq("id", singleEinteilungId)
+        .maybeSingle(),
+      supabase
+        .from("jahresplan_fahrzeuge")
+        .select("fahrzeug_id")
+        .eq("einteilung_id", singleEinteilungId),
+    ]);
+    setTaetigkeit((e?.taetigkeit as string) ?? "");
+    const existing = new Set(
+      ((ef ?? []) as any[]).map((r) => r.fahrzeug_id as string)
+    );
+    // Auto-Vorschlag: wenn keine Fahrzeuge gesetzt, aber ein
+    // Bauleiter (Worker mit standard_fahrer_id auf einem
+    // bauleiter-Fahrzeug) in den Zellen ist → vorschlagen
+    if (existing.size === 0) {
+      const workerIds = new Set(cells.map((c) => c.workerId));
+      fahrzeuge.forEach((f) => {
+        if (
+          f.kategorie === "bauleiter" &&
+          f.standard_fahrer_id &&
+          workerIds.has(f.standard_fahrer_id)
+        ) {
+          existing.add(f.id);
+        }
+      });
+    }
+    setSelectedFahrzeuge(existing);
+  };
+  useEffect(() => {
+    void ladeDetails();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [singleEinteilungId, cells, fahrzeuge]);
 
   const saveDetails = async () => {
     if (!singleEinteilungId) return;
     setSavingDetails(true);
-    // 1) Tätigkeit aktualisieren
-    await supabase
-      .from("jahresplan_einteilungen")
-      .update({ taetigkeit: taetigkeit.trim() || null })
-      .eq("id", singleEinteilungId);
-    // 2) Fahrzeug-Set ersetzen (delete-all + insert)
-    await supabase
-      .from("jahresplan_fahrzeuge")
-      .delete()
-      .eq("einteilung_id", singleEinteilungId);
-    if (selectedFahrzeuge.size > 0) {
-      await supabase
+    try {
+      // 1) Tätigkeit aktualisieren
+      const { error: updErr } = await supabase
+        .from("jahresplan_einteilungen")
+        .update({ taetigkeit: taetigkeit.trim() || null })
+        .eq("id", singleEinteilungId);
+      if (updErr) {
+        toast({ variant: "destructive", title: "Speichern fehlgeschlagen", description: updErr.message });
+        return;
+      }
+      // 2) Fahrzeug-Set ersetzen (delete-all + insert) — jeder Schritt geprüft,
+      // sonst verschwanden Fahrzeuge bei Teilfehlern stillschweigend
+      const { error: delErr } = await supabase
         .from("jahresplan_fahrzeuge")
-        .insert(
-          Array.from(selectedFahrzeuge).map((fid) => ({
-            einteilung_id: singleEinteilungId,
-            fahrzeug_id: fid,
-          })) as any
-        );
+        .delete()
+        .eq("einteilung_id", singleEinteilungId);
+      if (delErr) {
+        toast({ variant: "destructive", title: "Fahrzeuge speichern fehlgeschlagen", description: delErr.message });
+        void ladeDetails(); // echten DB-Zustand anzeigen
+        return;
+      }
+      if (selectedFahrzeuge.size > 0) {
+        const { error: insErr } = await supabase
+          .from("jahresplan_fahrzeuge")
+          .insert(
+            Array.from(selectedFahrzeuge).map((fid) => ({
+              einteilung_id: singleEinteilungId,
+              fahrzeug_id: fid,
+            })) as any
+          );
+        if (insErr) {
+          toast({ variant: "destructive", title: "Fahrzeuge speichern fehlgeschlagen", description: insErr.message });
+          void ladeDetails(); // Delete war schon durch → echten DB-Zustand anzeigen
+          return;
+        }
+      }
+      onSavedEinteilung();
+    } finally {
+      setSavingDetails(false);
     }
-    setSavingDetails(false);
-    onSavedEinteilung();
   };
   const [w] = [320]; // popover width — breit genug für volle Baustellen-Namen
   // Position: clamp innerhalb viewport, mit margin oben + unten
@@ -2670,7 +2871,8 @@ function CellPopover({
             <button
               key={k}
               onClick={() => onSetFehlzeit(k)}
-              className="text-xs px-2 py-2 rounded text-white font-medium"
+              disabled={busy}
+              className="text-xs px-2 py-2 rounded text-white font-medium disabled:opacity-50"
               style={{ background: FEHLZEIT_COLOR[k] }}
             >
               {k} · {l}
@@ -2743,7 +2945,8 @@ function CellPopover({
         {hasExisting && (
           <button
             onClick={onClear}
-            className="w-full text-xs px-2 py-2.5 rounded border border-destructive/40 text-destructive font-semibold hover:bg-destructive hover:text-destructive-foreground flex items-center justify-center gap-1.5 mb-1 transition"
+            disabled={busy}
+            className="w-full text-xs px-2 py-2.5 rounded border border-destructive/40 text-destructive font-semibold hover:bg-destructive hover:text-destructive-foreground flex items-center justify-center gap-1.5 mb-1 transition disabled:opacity-50 disabled:pointer-events-none"
           >
             <Trash2 className="h-3.5 w-3.5" />
             {(() => {
