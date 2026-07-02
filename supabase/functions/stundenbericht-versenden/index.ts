@@ -49,7 +49,14 @@ Deno.serve(async (req) => {
     }
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const admin = createClient(supabaseUrl, serviceKey);
+    // User-scoped Client: die RPC stunden_bericht_versenden prüft intern
+    // is_admin_role(auth.uid()) — mit dem Service-Role-Client wäre
+    // auth.uid() NULL und die RPC wirft IMMER 'nicht berechtigt'.
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: auth } },
+    });
 
     const token = auth.replace("Bearer ", "");
     const {
@@ -77,6 +84,38 @@ Deno.serve(async (req) => {
         { ok: false, error: "RESEND_API_KEY nicht konfiguriert" },
         500,
       );
+    }
+
+    // Vorab-Validierung ALLER Berichte, BEVOR die Mail rausgeht — sonst ist
+    // bei einem Status-Konflikt die Mail schon versendet, der Status aber
+    // nicht gesetzt, und ein Retry erzeugt eine Doppel-Mail beim Büro.
+    const { data: berichteRows, error: berichteErr } = await admin
+      .from("stunden_berichte")
+      .select("id, status")
+      .in("id", body.berichtIds);
+    if (berichteErr) {
+      return jsonResponse(
+        { ok: false, error: `Berichte-Check fehlgeschlagen: ${berichteErr.message}` },
+        500,
+      );
+    }
+    const rowById = new Map((berichteRows ?? []).map((r) => [r.id, r]));
+    const vorabFehler: { id: string; err: string }[] = [];
+    for (const id of body.berichtIds) {
+      const row = rowById.get(id);
+      if (!row) vorabFehler.push({ id, err: "Bericht nicht gefunden" });
+      else if (row.status === "offen")
+        vorabFehler.push({
+          id,
+          err: "Bericht ist noch offen — der Mitarbeiter muss zuerst unterschreiben",
+        });
+    }
+    if (vorabFehler.length > 0) {
+      return jsonResponse({
+        ok: false,
+        error: `${vorabFehler.length} Bericht(e) nicht versendbar: ${vorabFehler[0].err}`,
+        fehler: vorabFehler,
+      });
     }
 
     // Resend-Payload
@@ -111,11 +150,12 @@ Deno.serve(async (req) => {
     }
     const resendJson = await resendRes.json();
 
-    // Status pro Bericht auf 'versendet' setzen
+    // Status pro Bericht auf 'versendet' setzen — mit dem USER-Client,
+    // damit auth.uid() in der RPC den echten Admin liefert.
     const versendet: string[] = [];
     const fehler: { id: string; err: string }[] = [];
     for (const id of body.berichtIds) {
-      const { error } = await admin.rpc("stunden_bericht_versenden" as any, {
+      const { error } = await userClient.rpc("stunden_bericht_versenden" as any, {
         p_id: id,
         p_mail: body.empfaenger.trim(),
         p_unterschrift: body.bueroSignature ?? null,
