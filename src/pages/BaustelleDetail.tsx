@@ -980,7 +980,7 @@ export default function BaustelleDetail() {
                 autoComplete="off"
                 value={deleteConfirm}
                 onChange={(e) => setDeleteConfirm(e.target.value)}
-                placeholder={b.bvh_name}
+                placeholder="Name hier eintippen"
                 className={`h-11 ${
                   deleteConfirm && deleteConfirm.trim() !== b.bvh_name
                     ? "border-destructive focus-visible:ring-destructive"

@@ -197,10 +197,22 @@ export function BsbVersendenDialog({
       }
       const fehlerArr = Array.isArray(res?.fehler) ? res.fehler : [];
       if (fehlerArr.length > 0) {
+        // Ersten konkreten Fehlertext anzeigen — vorher stand hier nur
+        // "1 fehlgeschlagen", was zum Rätselraten geführt hat.
+        const ersterFehler = fehlerArr[0]?.err ?? "unbekannter Fehler";
+        // Vollständige Fehler-Liste in die Console, für Diagnose.
+        // eslint-disable-next-line no-console
+        console.error("BSB-Versand teilweise fehlgeschlagen:", fehlerArr);
         toast({
           variant: "destructive",
-          title: "Teilweise versendet",
-          description: `${res.count} versendet, ${fehlerArr.length} fehlgeschlagen — bitte einzeln nochmal versuchen.`,
+          title:
+            res.count > 0
+              ? `${res.count} versendet, ${fehlerArr.length} fehlgeschlagen`
+              : `Versand fehlgeschlagen (${fehlerArr.length})`,
+          description:
+            fehlerArr.length === 1
+              ? ersterFehler
+              : `Erster Fehler: ${ersterFehler} (weitere in der Browser-Console)`,
         });
       } else {
         toast({

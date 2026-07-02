@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Sparkles, ChevronRight, Mail } from "lucide-react";
+import { Loader2, Sparkles, ChevronRight, Mail, AlertCircle } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { StundenBerichtStatus } from "@/integrations/supabase/types";
 import {
@@ -81,6 +81,13 @@ export default function StundenBerichteListe() {
     jahr,
     monat,
     teil,
+  });
+  /** Monat-übergreifende Sicht auf alle noch nicht abgeschlossenen Berichte
+   *  (unterschrieben = wartet auf Büro, bestaetigt = noch nicht versendet).
+   *  Wird oben permanent angezeigt, damit alte Berichte nicht in Vormonaten
+   *  hängen bleiben. */
+  const { data: offeneBerichte = [] } = useStundenBerichteList({
+    status: ["unterschrieben", "bestaetigt"],
   });
   const aktionen = useStundenBerichtAktionen();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -147,9 +154,61 @@ export default function StundenBerichteListe() {
     }
   };
 
+  const periodeLabelKurz = (jahr: number, monat: number, teil: number) =>
+    `${new Date(jahr, monat - 1, 1).toLocaleDateString("de-AT", {
+      month: "short",
+      year: "numeric",
+    })} · ${teil === 1 ? "T I" : "T II"}`;
+
   return (
     <div className="space-y-4 max-w-3xl mx-auto">
       <PageHeader title="Baustellenstundenberichte" />
+
+      {/* Permanenter „Noch zu bearbeiten"-Block — zeigt monatsübergreifend
+          alle Berichte im Status unterschrieben/bestaetigt. Damit bleiben
+          alte Berichte nicht in Vormonaten unsichtbar. */}
+      {offeneBerichte.length > 0 && (
+        <Card className="border-amber-300 bg-amber-50/60">
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-center gap-1.5 text-sm font-semibold text-amber-900">
+              <AlertCircle className="h-4 w-4" />
+              {offeneBerichte.length} Bericht
+              {offeneBerichte.length === 1 ? "" : "e"} warten auf Bearbeitung
+            </div>
+            <div className="divide-y divide-amber-200/70">
+              {offeneBerichte.map((b) => {
+                const badge = STATUS_BADGE[b.status];
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => navigate(`/stundenbericht/${b.id}`)}
+                    className="w-full flex items-center gap-2 py-1.5 text-left hover:bg-amber-100/60 rounded px-1"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">
+                        {b.mitarbeiter
+                          ? `${b.mitarbeiter.nachname ?? ""} ${b.mitarbeiter.vorname ?? ""}`.trim()
+                          : "—"}
+                        <span className="ml-2 text-xs text-muted-foreground font-normal">
+                          {periodeLabelKurz(b.jahr, b.monat, b.teil)}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Unterschrieben am {fmtTag(b.unterschrieben_am)}
+                      </div>
+                    </div>
+                    <Badge variant="outline" className={`${badge.cls} text-[10px]`}>
+                      {badge.label}
+                    </Badge>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                  </button>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Periodenauswahl + Erzeugen */}
       <Card>
