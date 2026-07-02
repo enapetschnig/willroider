@@ -230,6 +230,19 @@ export default function HalleErfassung() {
   // Firma, Feiertag) unverändert übernehmen.
   const submit = async () => {
     if (!primaryUserId) return;
+    // Freigegebene/exportierte Tage sind gesperrt — gleiche Regel wie
+    // TagBearbeitenDialog. Die RLS blockt das inzwischen auch DB-seitig,
+    // aber ohne diesen Guard käme ein verwirrender Fehler statt Klartext.
+    const tagStatus = aktuellerEigenerTag?.tag.status;
+    if (tagStatus === "buero_freigabe" || tagStatus === "exportiert") {
+      toast({
+        variant: "destructive",
+        title: "Tag ist freigegeben",
+        description:
+          "Dieser Tag wurde vom Büro bereits freigegeben und kann nicht mehr geändert werden.",
+      });
+      return;
+    }
     setBusy(true);
     try {
       // Halle-Einträge aus dem Form

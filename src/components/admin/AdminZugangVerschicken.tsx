@@ -38,12 +38,23 @@ export function AdminZugangVerschicken() {
     setLoading(true);
     // Profile + letzte gesendete Einladung. Zwei Queries, weil
     // wir das letzte gesendete Datum pro Profil brauchen.
-    const { data: profileRows } = await supabase
+    const { data: profileRows, error: profErr } = await supabase
       .from("profiles")
       .select("id, vorname, nachname, telefon, email")
       .eq("angelegt_manuell", true)
       .eq("is_active", true)
       .order("nachname");
+    if (profErr) {
+      // Ohne diesen Check zeigte ein Query-Fehler "Keine Mitarbeiter
+      // gefunden" — falsche Aussage statt Fehlermeldung.
+      toast({
+        variant: "destructive",
+        title: "Laden fehlgeschlagen",
+        description: profErr.message,
+      });
+      setLoading(false);
+      return;
+    }
 
     const { data: logRows } = await supabase
       .from("invitation_logs")

@@ -178,7 +178,10 @@ export default function Stunden() {
         .maybeSingle();
       setPolierPartie((p as Partie) ?? null);
 
-      if (isAdmin) {
+      // canCreateForOthers (nicht nur isAdmin): eine Custom-Rolle mit
+      // stunden.create_andere bekam sonst einen sichtbaren, aber LEEREN
+      // PersonPicker — mode war "admin", Members wurden nie geladen.
+      if (canCreateForOthers) {
         const [{ data: members }, { data: partien }] = await Promise.all([
           supabase.from("profiles").select("*").eq("is_active", true).order("nachname"),
           supabase.from("partien").select("*").order("name"),
@@ -197,7 +200,7 @@ export default function Stunden() {
       }
       setRollenGeladen(true);
     })();
-  }, [user, isAdmin]);
+  }, [user, canCreateForOthers]);
 
   // Baustellen
   useEffect(() => {

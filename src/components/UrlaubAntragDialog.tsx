@@ -279,6 +279,8 @@ export function AdminUrlaubsantraegeCard() {
   const [antraege, setAntraege] = useState<
     (Antrag & { mitarbeiter?: { vorname: string; nachname: string } | null })[]
   >([]);
+  /** Antrag-ID die gerade verarbeitet wird — Doppelklick-Schutz. */
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = async () => {
     const { data } = await supabase
@@ -301,89 +303,142 @@ export function AdminUrlaubsantraegeCard() {
   }, []);
 
   const genehmigen = async (a: Antrag) => {
-    const { data: u } = await supabase.auth.getUser();
-    // 1) Antrag-Status setzen
-    const { error: err1 } = await supabase
-      .from("urlaubsantraege")
-      .update({
-        status: "genehmigt",
-        entschieden_von: u.user?.id ?? null,
-        entschieden_am: new Date().toISOString(),
-      })
-      .eq("id", a.id);
-    if (err1) {
-      toast({ variant: "destructive", title: "Fehler", description: err1.message });
-      return;
-    }
-    // 2) Konto-Buchung
-    if (a.arbeitstage && a.arbeitstage > 0) {
-      await supabase.from("urlaubs_buchungen").insert({
-        mitarbeiter_id: a.mitarbeiter_id,
-        art: "urlaub_genommen",
-        tage: -Math.abs(Number(a.arbeitstage)),
-        wirksam_am: a.von,
-        notiz: `Antrag: ${a.von} – ${a.bis}`,
-        erstellt_von: u.user?.id ?? null,
-      });
-    }
-    // 3) Pro Werktag im Range UPSERT stunden_tage.tag_status='urlaub'
-    const werktageInRange: string[] = [];
-    let d = new Date(a.von + "T00:00:00");
-    const ende = new Date(a.bis + "T00:00:00");
-    while (d <= ende) {
-      if (isWerktag(d)) werktageInRange.push(localIso(d));
-      d.setDate(d.getDate() + 1);
-    }
-    if (werktageInRange.length > 0) {
-      // existierende Einträge laden, dann nur INSERT für fehlende (vermeidet duplicate-Key)
-      const { data: existing } = await supabase
-        .from("stunden_tage")
-        .select("datum")
-        .eq("mitarbeiter_id", a.mitarbeiter_id)
-        .in("datum", werktageInRange);
-      const existingSet = new Set((existing ?? []).map((r: any) => r.datum));
-      const toInsert = werktageInRange.filter((d) => !existingSet.has(d));
-      if (toInsert.length > 0) {
-        await supabase.from("stunden_tage").insert(
-          toInsert.map((datum) => ({
-            mitarbeiter_id: a.mitarbeiter_id,
-            datum,
-            tag_status: "urlaub" as const,
-            netto_stunden: 0,
-            status: "ma_bestaetigt" as const,
-          })),
-        );
+    if (busyId) return;
+    setBusyId(a.id);
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      // 1) Antrag-Status setzen — MIT Status-Guard + Row-Count-Check.
+      //    Ohne Guard buchte ein Doppelklick (oder zwei Admins parallel)
+      //    die Urlaubstage DOPPELT vom Konto ab.
+      const { data: claimed, error: err1 } = await supabase
+        .from("urlaubsantraege")
+        .update({
+          status: "genehmigt",
+          entschieden_von: u.user?.id ?? null,
+          entschieden_am: new Date().toISOString(),
+        })
+        .eq("id", a.id)
+        .eq("status", "offen")
+        .select("id");
+      if (err1) {
+        toast({ variant: "destructive", title: "Fehler", description: err1.message });
+        return;
       }
-      // Bestehende Einträge auf 'urlaub' überschreiben (nur falls status='erfasst')
-      // WICHTIG: netto_stunden=0 setzen, sonst bleibt eine alte Arbeitszeit-Buchung
-      // erhalten obwohl der Tag jetzt als Urlaub gilt.
-      if (existing && existing.length > 0) {
-        await supabase
+      if (!claimed || claimed.length === 0) {
+        toast({
+          title: "Bereits entschieden",
+          description: "Dieser Antrag wurde inzwischen schon bearbeitet.",
+        });
+        void load();
+        return;
+      }
+      // 2) Konto-Buchung
+      if (a.arbeitstage && a.arbeitstage > 0) {
+        const { error: buchErr } = await supabase.from("urlaubs_buchungen").insert({
+          mitarbeiter_id: a.mitarbeiter_id,
+          art: "urlaub_genommen",
+          tage: -Math.abs(Number(a.arbeitstage)),
+          wirksam_am: a.von,
+          notiz: `Antrag: ${a.von} – ${a.bis}`,
+          erstellt_von: u.user?.id ?? null,
+        });
+        if (buchErr) {
+          toast({
+            variant: "destructive",
+            title: "Konto-Buchung fehlgeschlagen",
+            description: `${buchErr.message} — Antrag ist genehmigt, bitte Buchung manuell im Urlaubs-Konto nachtragen.`,
+          });
+        }
+      }
+      // 3) Pro Werktag im Range UPSERT stunden_tage.tag_status='urlaub'
+      const werktageInRange: string[] = [];
+      let d = new Date(a.von + "T00:00:00");
+      const ende = new Date(a.bis + "T00:00:00");
+      while (d <= ende) {
+        if (isWerktag(d)) werktageInRange.push(localIso(d));
+        d.setDate(d.getDate() + 1);
+      }
+      if (werktageInRange.length > 0) {
+        // existierende Einträge laden, dann nur INSERT für fehlende (vermeidet duplicate-Key)
+        const { data: existing } = await supabase
           .from("stunden_tage")
-          .update({ tag_status: "urlaub", netto_stunden: 0 })
+          .select("id, datum, status")
           .eq("mitarbeiter_id", a.mitarbeiter_id)
-          .in("datum", werktageInRange)
-          .eq("status", "erfasst");
+          .in("datum", werktageInRange);
+        const existingSet = new Set((existing ?? []).map((r: any) => r.datum));
+        const toInsert = werktageInRange.filter((d) => !existingSet.has(d));
+        if (toInsert.length > 0) {
+          const { error: insErr } = await supabase.from("stunden_tage").insert(
+            toInsert.map((datum) => ({
+              mitarbeiter_id: a.mitarbeiter_id,
+              datum,
+              tag_status: "urlaub" as const,
+              netto_stunden: 0,
+              status: "ma_bestaetigt" as const,
+            })),
+          );
+          if (insErr) console.error("Urlaubs-Tage-Insert:", insErr);
+        }
+        // Bestehende (noch nicht freigegebene) Einträge auf Urlaub umstellen.
+        // WICHTIG: auch die stunden_taetigkeiten der Tage löschen — sonst
+        // rechnet der Recompute-Trigger beim nächsten Edit die alten
+        // Arbeitsstunden zurück und der Urlaub verschwindet. Das Löschen
+        // entfernt auch alte TAG:-Auto-Urlaubsbuchungen (verhindert
+        // Doppelabzug zusätzlich zur Antrags-Buchung).
+        const ueberschreibbar = (existing ?? []).filter(
+          (r: any) => r.status === "erfasst" || r.status === "ma_bestaetigt",
+        );
+        if (ueberschreibbar.length > 0) {
+          const tagIds = ueberschreibbar.map((r: any) => r.id);
+          const { error: ttDelErr } = await supabase
+            .from("stunden_taetigkeiten")
+            .delete()
+            .in("stunden_tag_id", tagIds);
+          if (ttDelErr) console.error("Taetigkeiten-Cleanup:", ttDelErr);
+          const { error: updErr } = await supabase
+            .from("stunden_tage")
+            .update({ tag_status: "urlaub", netto_stunden: 0 })
+            .in("id", tagIds);
+          if (updErr) console.error("Urlaubs-Tage-Update:", updErr);
+        }
       }
+      toast({ title: "Antrag genehmigt" });
+    } finally {
+      setBusyId(null);
     }
-    toast({ title: "Antrag genehmigt" });
   };
 
   const ablehnen = async (a: Antrag) => {
-    const { data: u } = await supabase.auth.getUser();
-    const { error } = await supabase
-      .from("urlaubsantraege")
-      .update({
-        status: "abgelehnt",
-        entschieden_von: u.user?.id ?? null,
-        entschieden_am: new Date().toISOString(),
-      })
-      .eq("id", a.id);
-    if (error) {
-      toast({ variant: "destructive", title: "Fehler", description: error.message });
-      return;
+    if (busyId) return;
+    setBusyId(a.id);
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      const { data: claimed, error } = await supabase
+        .from("urlaubsantraege")
+        .update({
+          status: "abgelehnt",
+          entschieden_von: u.user?.id ?? null,
+          entschieden_am: new Date().toISOString(),
+        })
+        .eq("id", a.id)
+        .eq("status", "offen")
+        .select("id");
+      if (error) {
+        toast({ variant: "destructive", title: "Fehler", description: error.message });
+        return;
+      }
+      if (!claimed || claimed.length === 0) {
+        toast({
+          title: "Bereits entschieden",
+          description: "Dieser Antrag wurde inzwischen schon bearbeitet.",
+        });
+        void load();
+        return;
+      }
+      toast({ title: "Antrag abgelehnt" });
+    } finally {
+      setBusyId(null);
     }
-    toast({ title: "Antrag abgelehnt" });
   };
 
   if (antraege.length === 0) return null;
@@ -425,6 +480,7 @@ export function AdminUrlaubsantraegeCard() {
                   variant="outline"
                   className="h-7 text-xs"
                   onClick={() => ablehnen(a)}
+                  disabled={busyId !== null}
                 >
                   Ablehnen
                 </Button>
@@ -432,8 +488,9 @@ export function AdminUrlaubsantraegeCard() {
                   size="sm"
                   className="h-7 text-xs"
                   onClick={() => genehmigen(a)}
+                  disabled={busyId !== null}
                 >
-                  Genehmigen
+                  {busyId === a.id ? "Verarbeite…" : "Genehmigen"}
                 </Button>
               </div>
             </div>

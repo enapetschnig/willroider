@@ -442,7 +442,12 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     );
   };
 
-  /** Mehrere Dateien löschen (Bulk). */
+  /** Mehrere Dateien löschen (Bulk).
+   *  Reihenfolge bewusst: ERST DB-Zeilen löschen (mit RLS-Count-Check via
+   *  .select()), NUR die tatsächlich gelöschten danach aus dem Storage
+   *  entfernen. Vorher wurde das Storage-Objekt zuerst gelöscht — wenn
+   *  RLS den DB-Delete dann still blockte (0 rows, kein error), blieb
+   *  eine Geisterzeile mit unwiederbringlich zerstörter Datei zurück. */
   const deleteSelected = async () => {
     if (selectedDocs.length === 0) return;
     const ok = window.confirm(
@@ -451,11 +456,46 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         : `${selectedDocs.length} Dateien löschen?`,
     );
     if (!ok) return;
-    const paths = selectedDocs.map((d) => d.storage_path);
     const ids = selectedDocs.map((d) => d.id);
-    await supabase.storage.from("baustellen").remove(paths);
-    await supabase.from("dokumente").delete().in("id", ids);
-    toast({ title: `${selectedDocs.length} Datei(en) gelöscht` });
+    const { data: deleted, error } = await supabase
+      .from("dokumente")
+      .delete()
+      .in("id", ids)
+      .select("id, storage_path");
+    if (error) {
+      toast({
+        variant: "destructive",
+        title: "Löschen fehlgeschlagen",
+        description: error.message,
+      });
+      return;
+    }
+    const deletedRows = deleted ?? [];
+    if (deletedRows.length > 0) {
+      const paths = deletedRows
+        .map((d) => d.storage_path)
+        .filter(Boolean) as string[];
+      if (paths.length > 0) {
+        const { error: storageErr } = await supabase.storage
+          .from("baustellen")
+          .remove(paths);
+        if (storageErr) console.error("Storage-Delete-Fehler:", storageErr);
+      }
+    }
+    const blocked = ids.length - deletedRows.length;
+    if (blocked > 0) {
+      toast({
+        variant: "destructive",
+        title:
+          deletedRows.length > 0
+            ? `${deletedRows.length} gelöscht, ${blocked} nicht erlaubt`
+            : "Keine Berechtigung",
+        description:
+          "Dateien anderer Benutzer können nur Admins löschen.",
+      });
+    } else {
+      toast({ title: `${deletedRows.length} Datei(en) gelöscht` });
+    }
     clearSelection();
     load();
   };
@@ -591,8 +631,26 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const remove = async (d: Dokument, e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (!confirm(`Datei "${d.dateiname}" löschen?`)) return;
-    await supabase.storage.from("baustellen").remove([d.storage_path]);
-    await supabase.from("dokumente").delete().eq("id", d.id);
+    // Erst DB (mit RLS-Count-Check), dann Storage — siehe deleteSelected.
+    const { data: deleted, error } = await supabase
+      .from("dokumente")
+      .delete()
+      .eq("id", d.id)
+      .select("id");
+    if (error || !deleted || deleted.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Löschen fehlgeschlagen",
+        description:
+          error?.message ??
+          "Keine Berechtigung — Dateien anderer Benutzer können nur Admins löschen.",
+      });
+      return;
+    }
+    const { error: storageErr } = await supabase.storage
+      .from("baustellen")
+      .remove([d.storage_path]);
+    if (storageErr) console.error("Storage-Delete-Fehler:", storageErr);
     toast({ title: "Datei gelöscht" });
     load();
   };

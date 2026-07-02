@@ -52,14 +52,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const realtimeRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const loadPermissions = useCallback(async () => {
-    const { data, error } = await supabase.rpc("my_permissions");
-    if (error) {
-      // RPC fehlt (Edge-Case: Migration noch nicht deployed) — leeres Set.
-      console.warn("[AuthContext] my_permissions failed:", error.message);
-      setPermissions(new Set());
-    } else {
-      setPermissions(new Set((data ?? []) as PermissionKey[]));
+    // Ein transienter RPC-Fehler (Netzwerk, Token-Refresh-Race) darf NICHT
+    // als "User hat keine Rechte" enden — sonst redirecten alle Route-
+    // Guards zur leeren Startseite. Bis zu 3 Versuche mit Backoff; erst
+    // wenn alle scheitern, markieren wir geladen (mit leerem Set als
+    // Least-Privilege-Fallback) und loggen laut.
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const { data, error } = await supabase.rpc("my_permissions");
+      if (!error) {
+        setPermissions(new Set((data ?? []) as PermissionKey[]));
+        setPermissionsLoaded(true);
+        return;
+      }
+      console.warn(
+        `[AuthContext] my_permissions failed (Versuch ${attempt}/3):`,
+        error.message,
+      );
+      if (attempt < 3) {
+        await new Promise((r) => window.setTimeout(r, attempt * 700));
+      }
     }
+    setPermissions(new Set());
     setPermissionsLoaded(true);
   }, []);
 

@@ -58,21 +58,21 @@ Deno.serve(async (req) => {
   const headers: Record<string, string> = {};
   req.headers.forEach((v, k) => (headers[k] = v));
 
+  // Fail-CLOSED: ohne konfiguriertes Secret verweigern wir den Dienst.
+  // Vorher wurde unsigniertes JSON akzeptiert — die Function wäre bei
+  // fehlender ENV-Variable ein offenes SMS-Relay auf Firmenkosten gewesen.
+  if (!HOOK_SECRET) {
+    console.error('SEND_SMS_HOOK_SECRET fehlt — Hook verweigert.');
+    return errorResponse(500, 'Hook-Secret nicht konfiguriert');
+  }
+
   let payload: SmsHookPayload;
-  if (HOOK_SECRET) {
-    try {
-      const wh = new Webhook(HOOK_SECRET);
-      payload = wh.verify(body, headers) as SmsHookPayload;
-    } catch (e) {
-      console.error('Webhook-Signatur ungültig:', e);
-      return errorResponse(401, 'Invalid webhook signature');
-    }
-  } else {
-    try {
-      payload = JSON.parse(body) as SmsHookPayload;
-    } catch {
-      return errorResponse(400, 'Body ist kein gültiges JSON');
-    }
+  try {
+    const wh = new Webhook(HOOK_SECRET);
+    payload = wh.verify(body, headers) as SmsHookPayload;
+  } catch (e) {
+    console.error('Webhook-Signatur ungültig:', e);
+    return errorResponse(401, 'Invalid webhook signature');
   }
 
   const phone = payload.user?.phone;

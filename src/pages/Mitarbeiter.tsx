@@ -254,14 +254,31 @@ export default function Mitarbeiter() {
   };
 
   const setRole = async (userId: string, role: AppRole) => {
-    await supabase.from("user_roles").delete().eq("user_id", userId);
-    const { error } = await supabase.from("user_roles").insert({ user_id: userId, role });
+    // Atomares UPDATE statt delete+insert: schlug der Insert fehl (z.B.
+    // RLS beim Ändern der EIGENEN Rolle), hatte der User GAR KEINE Rolle
+    // mehr — beim Admin selbst ein kompletter Lockout.
+    // Der Sync-Trigger zieht rolle_id aus dem role-ENUM nach.
+    const { data: updated, error } = await supabase
+      .from("user_roles")
+      .update({ role })
+      .eq("user_id", userId)
+      .select("user_id");
     if (error) {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
-    } else {
-      toast({ title: "Rolle aktualisiert" });
-      load();
+      return;
     }
+    if (!updated || updated.length === 0) {
+      // Kein user_roles-Eintrag vorhanden (Alt-Datenbestand) → anlegen.
+      const { error: insErr } = await supabase
+        .from("user_roles")
+        .insert({ user_id: userId, role });
+      if (insErr) {
+        toast({ variant: "destructive", title: "Fehler", description: insErr.message });
+        return;
+      }
+    }
+    toast({ title: "Rolle aktualisiert" });
+    load();
   };
 
   const saveProfile = async (e: React.FormEvent<HTMLFormElement>) => {

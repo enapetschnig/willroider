@@ -132,11 +132,20 @@ export function useSaveStundenTag() {
       };
 
       if (tagId) {
-        const { error } = await supabase
+        // .select() erzwingt Row-Count: ein RLS-Block liefert sonst
+        // error=null bei 0 geänderten Zeilen — der Save sähe erfolgreich
+        // aus, obwohl der Tag gesperrt/freigegeben ist.
+        const { data: updated, error } = await supabase
           .from("stunden_tage")
           .update(tagPayload)
-          .eq("id", tagId);
+          .eq("id", tagId)
+          .select("id");
         if (error) throw error;
+        if (!updated || updated.length === 0) {
+          throw new Error(
+            "Tag kann nicht geändert werden — er ist freigegeben oder der Monat ist abgeschlossen.",
+          );
+        }
       } else {
         const { data: { user } } = await supabase.auth.getUser();
         const { data, error } = await supabase
@@ -149,8 +158,13 @@ export function useSaveStundenTag() {
       }
       if (!tagId) throw new Error("Tag-ID fehlt nach Save");
 
-      // Tätigkeiten komplett ersetzen
-      await supabase.from("stunden_taetigkeiten").delete().eq("stunden_tag_id", tagId);
+      // Tätigkeiten komplett ersetzen — Delete-Fehler MUSS abbrechen,
+      // sonst verdoppeln die nachfolgenden Inserts die Einträge.
+      const { error: delErr } = await supabase
+        .from("stunden_taetigkeiten")
+        .delete()
+        .eq("stunden_tag_id", tagId);
+      if (delErr) throw delErr;
       if (input.taetigkeiten.length > 0) {
         const { error: tErr } = await supabase.from("stunden_taetigkeiten").insert(
           input.taetigkeiten.map((t, idx) => ({
@@ -168,7 +182,11 @@ export function useSaveStundenTag() {
       }
 
       // Zulagen komplett ersetzen
-      await supabase.from("stunden_zulagen").delete().eq("stunden_tag_id", tagId);
+      const { error: zDelErr } = await supabase
+        .from("stunden_zulagen")
+        .delete()
+        .eq("stunden_tag_id", tagId);
+      if (zDelErr) throw zDelErr;
       if (input.zulagen.length > 0) {
         const { error: zErr } = await supabase.from("stunden_zulagen").insert(
           input.zulagen.map((z) => ({
@@ -188,7 +206,11 @@ export function useSaveStundenTag() {
           .upsert({ stunden_tag_id: tagId!, ...input.fahrt });
         if (fErr) throw fErr;
       } else {
-        await supabase.from("stunden_fahrt").delete().eq("stunden_tag_id", tagId);
+        const { error: fDelErr } = await supabase
+          .from("stunden_fahrt")
+          .delete()
+          .eq("stunden_tag_id", tagId);
+        if (fDelErr) throw fDelErr;
       }
 
       return tagId;
