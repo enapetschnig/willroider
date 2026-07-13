@@ -75,6 +75,8 @@ export type Database = {
           erlernter_beruf: string | null;
           sonstige_pruefungen: string | null;
           bewerbung_als: string | null;
+          /** Balkenfarbe in der Poliereinsatz-Ansicht (Hex) — nur Bauleiter. */
+          planungsfarbe: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -130,6 +132,29 @@ export type Database = {
         };
         Insert: Partial<Database['public']['Tables']['partien']['Row']> & { name: string };
         Update: Partial<Database['public']['Tables']['partien']['Row']>;
+        Relationships: [];
+      };
+      poliereinsatz_zeitraeume: {
+        Row: {
+          id: string;
+          partie_id: string;
+          baustelle_id: string;
+          von_datum: string;
+          bis_datum: string;
+          /** false ⇒ Starttermin noch nicht fix → Balken gestrichelt. */
+          start_fix: boolean;
+          notiz: string | null;
+          erstellt_von: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['poliereinsatz_zeitraeume']['Row']> & {
+          partie_id: string;
+          baustelle_id: string;
+          von_datum: string;
+          bis_datum: string;
+        };
+        Update: Partial<Database['public']['Tables']['poliereinsatz_zeitraeume']['Row']>;
         Relationships: [];
       };
       fahrzeuge: {

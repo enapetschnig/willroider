@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
+import { PoliereinsatzView } from "@/components/arbeitsplanung/PoliereinsatzView";
 import { useToast } from "@/hooks/use-toast";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
 import {
@@ -98,13 +99,15 @@ const cellKey = (workerId: string, iso: string) => `${workerId}:${iso}`;
 const isoDate = (d: Date) => localIso(d);
 
 export default function Arbeitsplanung() {
-  const { canCreateBaustelle, isAdmin } = useAuth();
+  const { canCreateBaustelle, isAdmin, user } = useAuth();
   const { toast } = useToast();
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [fahrzeuge, setFahrzeuge] = useState<Fahrzeug[]>([]);
   const [filterPartie, setFilterPartie] = useState<string>("alle");
+  /** Ansicht: MA-Zeilen (klassisch) oder Poliereinsatz (MS-Project-Stil). */
+  const [ansicht, setAnsicht] = useState<"ma" | "polier">("ma");
   const [weeksVisible, setWeeksVisible] = useState(20);
   const [anchorWeek, setAnchorWeek] = useState<Date>(() => {
     const today = new Date();
@@ -1422,6 +1425,42 @@ export default function Arbeitsplanung() {
         }
       />
 
+      {/* Ansicht-Umschalter: Mitarbeiter-Zeilen ↔ Poliereinsatz (MS-Project-Stil) */}
+      <div className="inline-flex rounded-md border bg-card p-0.5">
+        {(
+          [
+            { key: "ma", label: "Mitarbeiter" },
+            { key: "polier", label: "Poliereinsatz" },
+          ] as const
+        ).map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setAnsicht(t.key)}
+            className={`px-4 py-1.5 rounded text-sm font-medium transition ${
+              ansicht === t.key
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {ansicht === "polier" && (
+        <PoliereinsatzView
+          baustellen={baustellen}
+          partien={partien}
+          profiles={profiles}
+          fahrzeuge={fahrzeuge}
+          canEdit={isAdmin}
+          userId={user?.id ?? null}
+        />
+      )}
+
+      {ansicht === "ma" && (
+      <>
+
       <Card>
         <CardContent className="p-3 flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => movePeriod(-4)}>
@@ -2128,6 +2167,9 @@ export default function Arbeitsplanung() {
           </div>
         )}
       </div>
+
+      </>
+      )}
 
       {/* Balken-Info: kleines Popup mit vollem Baustellennamen — schmale
           Balken zeigen nur 2 Buchstaben, am Tablet gibt es keinen Hover. */}
