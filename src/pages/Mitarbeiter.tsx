@@ -298,6 +298,7 @@ export default function Mitarbeiter() {
       kran_berechtigung: fd.get("kran_berechtigung") === "on",
       partie_id: (fd.get("partie_id") as string) || null,
       is_partieleiter: fd.get("is_partieleiter") === "on",
+      planungsfarbe: str("planungsfarbe"),
       geburtsdatum: str("geburtsdatum"),
       geburtsort: str("geburtsort"),
       staatsangehoerigkeit: str("staatsangehoerigkeit"),
@@ -1137,6 +1138,27 @@ export default function Mitarbeiter() {
                       defaultChecked={!!editing.is_partieleiter}
                     />
                     <Label htmlFor="is_partieleiter">Partieleiter / Polier</Label>
+                  </div>
+                  <div>
+                    <Label
+                      htmlFor="planungsfarbe"
+                      className="text-[10px] uppercase tracking-wide"
+                    >
+                      Balkenfarbe (Poliereinsatz)
+                    </Label>
+                    <div className="flex items-center gap-2 mt-1">
+                      <input
+                        id="planungsfarbe"
+                        name="planungsfarbe"
+                        type="color"
+                        defaultValue={editing.planungsfarbe ?? "#6b7280"}
+                        className="h-9 w-14 rounded-md border bg-background p-0.5 cursor-pointer"
+                      />
+                      <span className="text-[10px] text-muted-foreground">
+                        Nur für Bauleiter — Farbe der Balken in der
+                        Poliereinsatz-Ansicht.
+                      </span>
+                    </div>
                   </div>
                 </div>
               </section>

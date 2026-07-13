@@ -86,6 +86,7 @@ export function PoliereinsatzView({
   fahrzeuge,
   canEdit,
   userId,
+  onReload,
 }: {
   baustellen: Baustelle[];
   partien: Partie[];
@@ -94,6 +95,8 @@ export function PoliereinsatzView({
   /** arbeitsplanung.edit — darf Einsätze anlegen/ändern/verschieben */
   canEdit: boolean;
   userId: string | null;
+  /** Lädt die Stammdaten (u.a. profiles) im Parent neu — nach Umzügen. */
+  onReload?: () => void;
 }) {
   const { toast } = useToast();
   const [zeitraeume, setZeitraeume] = useState<Zeitraum[]>([]);
@@ -342,12 +345,17 @@ export function PoliereinsatzView({
         return;
       }
       if (d.previewVon === d.z.von_datum && d.previewBis === d.z.bis_datum) return;
-      const { error } = await supabase
+      const { data: upd, error } = await supabase
         .from("poliereinsatz_zeitraeume")
         .update({ von_datum: d.previewVon, bis_datum: d.previewBis })
-        .eq("id", d.z.id);
-      if (error) {
-        toast({ variant: "destructive", title: "Verschieben fehlgeschlagen", description: error.message });
+        .eq("id", d.z.id)
+        .select("id");
+      if (error || !upd || upd.length === 0) {
+        toast({
+          variant: "destructive",
+          title: "Verschieben fehlgeschlagen",
+          description: error?.message ?? "Keine Berechtigung.",
+        });
       }
       void load();
     };
@@ -371,14 +379,23 @@ export function PoliereinsatzView({
       bis_datum: d.bis,
       start_fix: d.startFix,
     };
-    const { error } = d.id
-      ? await supabase.from("poliereinsatz_zeitraeume").update(payload).eq("id", d.id)
+    const { data: saved, error } = d.id
+      ? await supabase
+          .from("poliereinsatz_zeitraeume")
+          .update(payload)
+          .eq("id", d.id)
+          .select("id")
       : await supabase
           .from("poliereinsatz_zeitraeume")
-          .insert({ ...payload, erstellt_von: userId });
+          .insert({ ...payload, erstellt_von: userId })
+          .select("id");
     setBusy(false);
-    if (error) {
-      toast({ variant: "destructive", title: "Speichern fehlgeschlagen", description: error.message });
+    if (error || !saved || saved.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Speichern fehlgeschlagen",
+        description: error?.message ?? "Keine Berechtigung.",
+      });
       return;
     }
     toast({ title: d.id ? "Einsatz aktualisiert" : "Einsatz angelegt" });
@@ -425,13 +442,26 @@ export function PoliereinsatzView({
         toast({ variant: "destructive", title: "Keine Werktage im Zeitraum" });
         return;
       }
+      // Gesperrte Monate (Lohnabschluss) ausschließen — sonst würde ein
+      // bereits abgerechneter Zeitraum nachträglich verändert.
+      const { data: sperren } = await supabase
+        .from("monatsabschluss")
+        .select("von_datum, bis_datum")
+        .eq("mitarbeiter_id", d.maId);
+      const istGesperrt = (iso: string) =>
+        ((sperren as any[]) ?? []).some(
+          (s) => iso >= s.von_datum && iso <= s.bis_datum,
+        );
+      const gesperrt = tage.filter(istGesperrt);
+      const offen = tage.filter((t) => !istGesperrt(t));
+
       const { data: existing } = await supabase
         .from("stunden_tage")
         .select("datum")
         .eq("mitarbeiter_id", d.maId)
-        .in("datum", tage);
+        .in("datum", offen.length > 0 ? offen : ["1900-01-01"]);
       const skip = new Set(((existing as any[]) ?? []).map((r) => r.datum));
-      const neu = tage.filter((t) => !skip.has(t));
+      const neu = offen.filter((t) => !skip.has(t));
       if (neu.length > 0) {
         const { error } = await supabase.from("stunden_tage").insert(
           neu.map((datum) => ({
@@ -450,7 +480,10 @@ export function PoliereinsatzView({
       toast({
         title: `${neu.length} Urlaubstag(e) eingetragen`,
         description:
-          (skip.size > 0 ? `${skip.size} Tag(e) übersprungen (bereits erfasst). ` : "") +
+          (skip.size > 0 ? `${skip.size} bereits erfasst. ` : "") +
+          (gesperrt.length > 0
+            ? `${gesperrt.length} übersprungen (Monat abgeschlossen). `
+            : "") +
           "Hinweis: kein Urlaubskonto-Abzug — dafür Urlaubsantrag verwenden.",
       });
       setUrlaubDialog(null);
@@ -461,15 +494,27 @@ export function PoliereinsatzView({
   };
 
   const moveMember = async (maId: string, partieId: string | null) => {
-    const { error } = await supabase
+    // .select() erzwingt Row-Count: ein RLS-Block liefert 0 Zeilen ohne
+    // error — ohne diese Prüfung würde ein stiller Fehlschlag als Erfolg
+    // gemeldet. Nach Erfolg lädt der Parent die Profile neu (onReload),
+    // damit der MA sofort in der Zielpartie erscheint.
+    const { data: updated, error } = await supabase
       .from("profiles")
       .update({ partie_id: partieId })
-      .eq("id", maId);
-    if (error) {
-      toast({ variant: "destructive", title: "Verschieben fehlgeschlagen", description: error.message });
-    } else {
-      toast({ title: "Mitarbeiter verschoben" });
+      .eq("id", maId)
+      .select("id");
+    if (error || !updated || updated.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Verschieben fehlgeschlagen",
+        description:
+          error?.message ??
+          "Keine Berechtigung — das dürfen nur Administratoren.",
+      });
+      return;
     }
+    toast({ title: "Mitarbeiter verschoben" });
+    onReload?.();
   };
 
   const shiftWeeks = (n: number) =>
@@ -477,6 +522,13 @@ export function PoliereinsatzView({
 
   // ─── Render ──────────────────────────────────────────────────────────
   const ROW_H = 28;
+  const MEMBER_H = 26; // feste Höhe je Mitglieder-Zeile im Panel
+  const PANEL_PAD = 12; // py-1.5 oben+unten
+  const PANEL_ACTION_H = 34; // Aktionszeile (Urlaub-Button + Fahrzeuge)
+  /** Exakte Höhe des aufgeklappten Mitglieder-Panels — EINE Quelle für
+   *  linke Spalte UND rechten Grid-Platzhalter, damit die Zeilen fluchten. */
+  const panelHeight = (memberCount: number) =>
+    Math.max(memberCount, 1) * MEMBER_H + PANEL_ACTION_H + PANEL_PAD;
 
   const renderBar = (
     z: Zeitraum,
@@ -648,16 +700,24 @@ export function PoliereinsatzView({
                       </span>
                     )}
                   </button>
-                  {/* Aufgeklappt: Mitglieder-Panel */}
+                  {/* Aufgeklappt: Mitglieder-Panel — feste Höhe (panelHeight),
+                      damit die rechte Grid-Seite exakt gleich hoch bleibt. */}
                   {expanded.has(g.partie.id) && (
-                    <div className="border-b bg-muted/20 px-2 py-1.5 space-y-1">
+                    <div
+                      className="border-b bg-muted/20 px-2 py-1.5 overflow-y-auto"
+                      style={{ height: panelHeight(g.member.length) }}
+                    >
                       {g.member.length === 0 && (
                         <div className="text-[10px] italic text-muted-foreground">
                           Keine Mitarbeiter zugeordnet.
                         </div>
                       )}
                       {g.member.map((m) => (
-                        <div key={m.id} className="flex items-center gap-1.5 text-[11px]">
+                        <div
+                          key={m.id}
+                          className="flex items-center gap-1.5 text-[11px]"
+                          style={{ height: MEMBER_H }}
+                        >
                           <span className="truncate flex-1">
                             {m.vorname} {m.nachname}
                             {m.is_partieleiter ? " ★" : ""}
@@ -815,10 +875,7 @@ export function PoliereinsatzView({
                     {expanded.has(g.partie.id) && (
                       <div
                         className="border-b bg-muted/20"
-                        style={{
-                          height:
-                            (g.member.length === 0 ? 1 : g.member.length) * 22 + 34,
-                        }}
+                        style={{ height: panelHeight(g.member.length) }}
                       />
                     )}
                     {/* Urlaub-Zeile: Segmente aller Partie-MA */}

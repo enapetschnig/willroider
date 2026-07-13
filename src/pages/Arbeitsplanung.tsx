@@ -99,7 +99,7 @@ const cellKey = (workerId: string, iso: string) => `${workerId}:${iso}`;
 const isoDate = (d: Date) => localIso(d);
 
 export default function Arbeitsplanung() {
-  const { canCreateBaustelle, isAdmin, user } = useAuth();
+  const { canCreateBaustelle, isAdmin, user, hasPermission } = useAuth();
   const { toast } = useToast();
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
@@ -1453,8 +1453,9 @@ export default function Arbeitsplanung() {
           partien={partien}
           profiles={profiles}
           fahrzeuge={fahrzeuge}
-          canEdit={isAdmin}
+          canEdit={hasPermission("arbeitsplanung.edit")}
           userId={user?.id ?? null}
+          onReload={load}
         />
       )}
 
