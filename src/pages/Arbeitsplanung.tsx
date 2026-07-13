@@ -508,6 +508,16 @@ export default function Arbeitsplanung() {
   };
   const [barDrag, setBarDrag] = useState<BarDrag | null>(null);
 
+  /** Info-Popup beim Antippen eines Balkens: voller Baustellenname, KST,
+   *  Zeitraum. Schmale 1-Tages-Balken zeigen sonst nur 2 Buchstaben —
+   *  am Tablet gibt es keinen Hover-Tooltip. */
+  const [barInfo, setBarInfo] = useState<{
+    bar: Bar;
+    dateRange: string;
+    anchor: { x: number; y: number };
+    cells: { workerId: string; iso: string }[];
+  } | null>(null);
+
   /** Werktag-ISOs zwischen zwei Daten (inklusive). */
   const werktageZwischen = (aIso: string, bIso: string): string[] => {
     const res: string[] = [];
@@ -668,16 +678,24 @@ export default function Arbeitsplanung() {
       setBarDrag(null);
       if (!bd) return;
       if (!bd.active || !bd.preview) {
-        // reiner Klick (keine Bewegung) → CellPopover für die Block-Zellen
+        // Reiner Klick (keine Bewegung) → Info-Popup mit vollem Namen.
+        // Von dort führt „Bearbeiten" ins CellPopover — schmale Balken
+        // sind sonst nicht lesbar (2 Buchstaben, kein Hover am Tablet).
         const cells = [...bd.bar.assignedIdx].map((i) => ({
           workerId: bd.bar.workerId,
           iso: dayIsoByIdx[i],
         }));
-        setSelection(new Set(cells.map((c) => cellKey(c.workerId, c.iso))));
-        setPopover({
-          workerId: bd.bar.workerId,
-          cells,
+        const idxs = [...bd.bar.assignedIdx].sort((a, b) => a - b);
+        const s = dayHeaders[idxs[0]].date;
+        const en = dayHeaders[idxs[idxs.length - 1]].date;
+        setBarInfo({
+          bar: bd.bar,
+          dateRange:
+            idxs.length === 1
+              ? s.toLocaleDateString("de-AT")
+              : `${s.toLocaleDateString("de-AT")} – ${en.toLocaleDateString("de-AT")}`,
           anchor: { x: e.clientX, y: e.clientY },
+          cells,
         });
         return;
       }
@@ -1962,9 +1980,28 @@ export default function Arbeitsplanung() {
                                       : wirdGezogen
                                       ? 0.35
                                       : 1,
-                                    pointerEvents: greifbar ? "auto" : "none",
+                                    // Auch nicht-greifbare Balken (Polier-Sicht,
+                                    // eingereichte) sind antippbar → Info-Popup.
+                                    pointerEvents: "auto",
+                                    cursor: greifbar ? undefined : "pointer",
                                   }}
                                   title={`${bar.label} · ${dateRange}${bar.isReadOnly ? " (eingereicht)" : ""}`}
+                                  onClick={
+                                    greifbar
+                                      ? undefined // Klick läuft über den Drag-Pfad (onUp)
+                                      : (e) => {
+                                          e.stopPropagation();
+                                          setBarInfo({
+                                            bar,
+                                            dateRange,
+                                            anchor: { x: e.clientX, y: e.clientY },
+                                            cells: sortedIdx.map((i) => ({
+                                              workerId: bar.workerId,
+                                              iso: dayIsoByIdx[i],
+                                            })),
+                                          });
+                                        }
+                                  }
                                 >
                                   {greifbar && (
                                     <>
@@ -2091,6 +2128,83 @@ export default function Arbeitsplanung() {
           </div>
         )}
       </div>
+
+      {/* Balken-Info: kleines Popup mit vollem Baustellennamen — schmale
+          Balken zeigen nur 2 Buchstaben, am Tablet gibt es keinen Hover. */}
+      {barInfo && (() => {
+        const b = barInfo.bar;
+        const bst = b.baustelleId
+          ? baustellen.find((x) => x.id === b.baustelleId)
+          : null;
+        const prof = profilesById[b.workerId];
+        const w = 280;
+        const px = Math.min(Math.max(8, barInfo.anchor.x - w / 2), window.innerWidth - w - 8);
+        const py = Math.min(barInfo.anchor.y + 10, window.innerHeight - 220);
+        return (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setBarInfo(null)} />
+            <div
+              className="fixed z-50 bg-card border rounded-lg shadow-xl p-3"
+              style={{ left: px, top: py, width: w }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start gap-2">
+                <span
+                  className="h-3 w-3 rounded-full shrink-0 mt-1"
+                  style={{ background: b.color }}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-bold leading-tight break-words">
+                    {b.label}
+                  </div>
+                  {bst && (bst.kostenstelle || bst.ort) && (
+                    <div className="text-[11px] text-muted-foreground mt-0.5">
+                      {[bst.kostenstelle, bst.ort].filter(Boolean).join(" · ")}
+                    </div>
+                  )}
+                </div>
+                {b.isReadOnly && (
+                  <Badge variant="outline" className="text-[9px] shrink-0">
+                    eingereicht
+                  </Badge>
+                )}
+              </div>
+              <div className="mt-2 pt-2 border-t text-[11px] text-muted-foreground space-y-0.5">
+                {prof && (
+                  <div>
+                    {prof.vorname} {prof.nachname}
+                  </div>
+                )}
+                <div>
+                  {barInfo.dateRange} ({barInfo.cells.length}{" "}
+                  {barInfo.cells.length === 1 ? "Tag" : "Tage"})
+                </div>
+              </div>
+              {isAdmin && !b.isReadOnly && (
+                <Button
+                  size="sm"
+                  className="w-full mt-2 h-9"
+                  onClick={() => {
+                    setSelection(
+                      new Set(
+                        barInfo.cells.map((c) => cellKey(c.workerId, c.iso)),
+                      ),
+                    );
+                    setPopover({
+                      workerId: b.workerId,
+                      cells: barInfo.cells,
+                      anchor: barInfo.anchor,
+                    });
+                    setBarInfo(null);
+                  }}
+                >
+                  <Pencil className="h-3.5 w-3.5 mr-1.5" /> Bearbeiten
+                </Button>
+              )}
+            </div>
+          </>
+        );
+      })()}
 
       {popover && (
         <CellPopover
