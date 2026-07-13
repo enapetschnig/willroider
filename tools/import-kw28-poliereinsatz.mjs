@@ -27,15 +27,20 @@ import { SUPABASE_URL } from "./test-config.mjs";
 const JSON_PATH = process.env.KW28_JSON ?? "/tmp/KW28.json";
 const NOTE_TAG = `Aus KW28.mpp importiert am ${new Date().toISOString().slice(0, 10)}`;
 
-// ─── Feld-Mapping (nach --dump verifizieren/anpassen!) ─────────────────
-// In MS Project sind KST/Baustelle-x/Bauleiter Custom-Text-Spalten.
-// Kandidaten laut KW26: text1..text10. --dump zeigt die echten Belegungen.
-const FELD_KST = ["text3", "text1", "text2"]; // erster nicht-leerer gewinnt
-const FELD_BAULEITER = ["text4", "text5", "text2"];
-const FELD_X = ["text6", "text7"];
+// ─── Feld-Mapping (via --dump verifiziert, Stand KW28) ─────────────────
+// Struktur der MPP: FLACHE Liste (alle outline_level 1).
+//   Task MIT name        = Polier-Gruppe (Sandner, Gruber CH, …)
+//   Task OHNE name       = Baustellen-Zeile; der BVH-Name ist die
+//                          zugewiesene RESSOURCE (assignments→resources).
+//   notes = Bauleiter    text3 = KST    text2 = "x" (Baustelle)
+//   Echte Balken = work_splits (start/finish sind nur die Task-Hülle).
+//   text1 ist ein Farb-Flag (−1 ≈ Maurer) — KEIN Start-fix-Signal;
+//   start_fix wird nach dem Import in der App gepflegt.
+const FELD_KST = ["text3"];
+const FELD_X = ["text2"];
+/** Nur Splits, die in/nach dieser Woche enden (KW28-Planung, keine Historie). */
+const SPLIT_AB = process.env.KW28_AB ?? "2026-07-06";
 
-// Bekannte Sonder-Gruppen, die KEINE Partie im App-Sinn sind (Halle etc.) —
-// werden importiert, wenn eine gleichnamige Partie existiert, sonst TODO.
 const iso = (s) => (s ? String(s).slice(0, 10) : null);
 
 function normalize(s) {
@@ -51,21 +56,24 @@ function normalize(s) {
     .trim();
 }
 
-function readTasks() {
+function readProject() {
   const d = JSON.parse(readFileSync(JSON_PATH, "utf8"));
-  return (d.tasks ?? [])
-    .filter((t) => t.outline_number)
-    .sort((a, b) => {
-      const an = String(a.outline_number).split(".").map(Number);
-      const bn = String(b.outline_number).split(".").map(Number);
-      for (let i = 0; i < Math.max(an.length, bn.length); i++) {
-        const da = an[i] || 0;
-        const db = bn[i] || 0;
-        if (da !== db) return da - db;
-      }
-      return 0;
-    });
+  const tasks = (d.tasks ?? [])
+    .filter((t) => t.wbs && t.wbs !== "0")
+    .sort((a, b) => Number(a.wbs) - Number(b.wbs));
+  const resources = Object.fromEntries(
+    (d.resources ?? []).map((r) => [r.unique_id, (r.name ?? "").trim()]),
+  );
+  // task_unique_id → BVH-Name (erste zugewiesene Ressource)
+  const bvhByTask = {};
+  for (const a of d.assignments ?? []) {
+    if (!(a.task_unique_id in bvhByTask)) {
+      bvhByTask[a.task_unique_id] = resources[a.resource_unique_id] ?? "";
+    }
+  }
+  return { tasks, bvhByTask };
 }
+const readTasks = () => readProject().tasks;
 
 function firstField(t, keys) {
   for (const k of keys) {
@@ -75,35 +83,40 @@ function firstField(t, keys) {
   return "";
 }
 
-/** Gruppen (Polier) + deren Baustellen-Tasks extrahieren.
- *  Level 1 = Polier-Summary, tiefere Level mit Name+Zeitraum = Einsatz. */
+/** Einsätze extrahieren: flache Liste, name-Tasks = Polier-Gruppen,
+ *  namenlose Tasks = Baustellen (BVH via Ressource), Balken = work_splits.
+ *  Je Split (ab SPLIT_AB) EIN Zeitraum. */
 export function extractEinsaetze() {
-  const tasks = readTasks();
+  const { tasks, bvhByTask } = readProject();
   const rows = [];
   let polier = null;
   for (const t of tasks) {
-    const level = String(t.outline_number).split(".").length;
     const name = (t.name ?? "").trim();
-    if (level === 1) {
-      polier = name || polier;
+    if (name) {
+      // Gruppen-Task (Polier) — die "Urlaube:"-Sektion beendet die Gruppen.
+      polier = name.replace(/:$/, "").trim();
       continue;
     }
-    if (!name || name.toLowerCase() === "urlaub") continue;
-    const von = iso(t.start);
-    const bis = iso(t.finish);
-    if (!von || !bis) continue;
-    rows.push({
-      polier,
-      bvh: name,
-      kst: firstField(t, FELD_KST),
-      bauleiter: firstField(t, FELD_BAULEITER),
-      x: firstField(t, FELD_X),
-      von,
-      bis,
-      // MS-Project: manuell geplante/geschätzte Tasks ≈ Start nicht fix.
-      startFix: !(t.estimated === true || t.manual === true),
-      taskId: t.id,
-    });
+    if (!polier || normalize(polier) === "urlaube") continue;
+    const bvh = (bvhByTask[t.unique_id] ?? "").trim();
+    if (!bvh || bvh.toLowerCase() === "urlaub") continue;
+    const splits = (t.work_splits ?? [])
+      .map((s) => ({ von: iso(s.start), bis: iso(s.end) }))
+      .filter((s) => s.von && s.bis && s.bis >= SPLIT_AB);
+    for (const s of splits) {
+      rows.push({
+        polier,
+        bvh,
+        kst: firstField(t, FELD_KST),
+        bauleiter: (t.notes ?? "").trim(),
+        x: firstField(t, FELD_X),
+        von: s.von,
+        bis: s.bis,
+        // Kein verlässliches Signal in der MPP — wird in der App gepflegt.
+        startFix: true,
+        taskId: t.id,
+      });
+    }
   }
   return rows;
 }
@@ -163,23 +176,63 @@ function matchPartie(polier, partien, profiles) {
   return partial.length === 1 ? partial[0] : null;
 }
 
-/** BVH (+KST) → Baustelle. KST ist der stärkste Schlüssel. */
+/** BVH (+KST) → Baustelle.
+ *  App-KSTs sind lang ("1404030-2602" = Präfix 140 + Kurz-KST + Lfd-Nr.),
+ *  die MPP führt nur die Kurz-KST ("4030"). Match: Kurz-KST steckt am
+ *  Anfang der App-KST (nach dem 140-Präfix). Sammel-KSTs (4020/4030/4040)
+ *  haben mehrere Kandidaten → Name entscheidet. */
+function kstMatches(appKst, kurzKst) {
+  const app = (appKst ?? "").trim().replace(/^140/, "");
+  return app.startsWith(kurzKst.trim());
+}
+function nameOverlap(a, b) {
+  // Token-basiert: alle Wörter des kürzeren Namens kommen im längeren vor.
+  // includes-Vergleich nur bei Tokens ≥4 Zeichen — sonst matcht "in" auf
+  // "Dietrichsteiner" und produziert Falsch-Treffer.
+  const ta = normalize(a).split(" ").filter((w) => w.length >= 3);
+  const tb = normalize(b).split(" ").filter((w) => w.length >= 3);
+  if (ta.length === 0 || tb.length === 0) return false;
+  const [short, long] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
+  return short.every((w) =>
+    long.some((lw) => {
+      if (lw === w) return true;
+      if (Math.min(lw.length, w.length) < 4) return false;
+      return lw.includes(w) || w.includes(lw);
+    }),
+  );
+}
+/** Sammel-KSTs (Stadtgebiete) decken viele verschiedene BVHs ab — dort
+ *  reicht die KST allein NICHT als Beweis, der Name muss mitpassen. */
+const SAMMEL_KST = new Set(["4020", "4030", "4040", "4060", "4070"]);
+
 function matchBaustelle(bvh, kst, baustellen) {
   if (kst) {
-    const byKst = baustellen.filter((b) => (b.kostenstelle ?? "").trim() === kst.trim());
-    if (byKst.length === 1) return byKst[0];
-    if (byKst.length > 1) {
-      const n = normalize(bvh);
-      const both = byKst.filter((b) => normalize(b.bvh_name) === n);
-      if (both.length === 1) return both[0];
+    const byKst = baustellen.filter((b) => kstMatches(b.kostenstelle, kst));
+    const brauchtName = SAMMEL_KST.has(kst.trim());
+    if (byKst.length === 1 && !brauchtName) return byKst[0];
+    if (byKst.length >= 1) {
+      const byName = byKst.filter((b) => nameOverlap(b.bvh_name, bvh));
+      if (byName.length === 1) return byName[0];
+    }
+    // Spezifische KST vorhanden, aber kein Kandidat passt → NICHT auf den
+    // Namens-Fallback ausweichen (Verwechslungsgefahr, lieber neu anlegen).
+    if (!SAMMEL_KST.has(kst.trim()) && byKst.length === 0) {
+      const n0 = normalize(bvh);
+      const exact0 = baustellen.filter((b) => normalize(b.bvh_name) === n0);
+      return exact0.length === 1 ? exact0[0] : null;
     }
   }
   const n = normalize(bvh);
-  const byName = baustellen.filter((b) => normalize(b.bvh_name) === n);
-  if (byName.length === 1) return byName[0];
-  const partial = baustellen.filter(
-    (b) => normalize(b.bvh_name).includes(n) || n.includes(normalize(b.bvh_name)),
-  );
+  const exact = baustellen.filter((b) => normalize(b.bvh_name) === n);
+  if (exact.length === 1) return exact[0];
+  // Reiner Namens-Fallback: streng — nur wenn ein Name den anderen als
+  // PRÄFIX enthält ("Pichele Hof" ↔ "Pichelehof"), kein Suffix-Raten
+  // ("Hochmüller" darf NICHT auf "EFH Familie Müller" fallen).
+  const partial = baustellen.filter((b) => {
+    const bn = normalize(b.bvh_name).replace(/ /g, "");
+    const qn = n.replace(/ /g, "");
+    return bn.startsWith(qn) || qn.startsWith(bn);
+  });
   return partial.length === 1 ? partial[0] : null;
 }
 
@@ -200,6 +253,12 @@ function matchBauleiter(raw, profiles) {
   if (cands.length > 1) {
     const mitFarbe = cands.filter((p) => p.planungsfarbe);
     if (mitFarbe.length === 1) return mitFarbe[0];
+    // Dokument-Konvention der Wochenplanung: "Egger" ohne Initial meint
+    // Eckart Egger (Sebastian wird stets als "Egger S" geführt).
+    if (nachname === "egger") {
+      const eckart = cands.find((p) => normalize(p.vorname).startsWith("eckar"));
+      if (eckart) return eckart;
+    }
   }
   return null;
 }
@@ -239,6 +298,79 @@ async function inspectOrImport(doImport) {
   }
 
   if (!doImport) return;
+
+  // ── Fehlendes anlegen (wie beim KW26-Import): Partien + Baustellen ──
+  console.log("\n── Anlegen fehlender Stammdaten ──");
+  const partieCache = new Map();
+  const bstCache = new Map();
+  for (const r of todo) {
+    // Partie (z.B. "Tripold") — ohne Leiter, graue Farbe
+    if (!r.partie && r.polier) {
+      const key = normalize(r.polier);
+      if (!partieCache.has(key)) {
+        const { data: np, error } = await supa
+          .from("partien")
+          .insert({ name: r.polier, farbcode: "#6b7280" })
+          .select("*")
+          .single();
+        if (error) {
+          console.error(`  ✗ Partie '${r.polier}': ${error.message}`);
+          partieCache.set(key, null);
+        } else {
+          console.log(`  + Partie '${r.polier}' angelegt (ohne Leiter)`);
+          partieCache.set(key, np);
+          partien.push(np);
+        }
+      }
+      r.partie = partieCache.get(key);
+    }
+    // Baustelle — KST im App-Format (Präfix 140), Bauleiter gleich mit
+    if (!r.baustelle && r.bvh) {
+      const key = normalize(r.bvh) + "|" + (r.kst ?? "");
+      if (!bstCache.has(key)) {
+        let { data: nb, error } = await supa
+          .from("baustellen")
+          .insert({
+            bvh_name: r.bvh,
+            kostenstelle: r.kst ? `140${r.kst}` : null,
+            status: "aktiv",
+            bauleiter_id: r.bauleiter?.id ?? null,
+            notizen: NOTE_TAG,
+          })
+          .select("*")
+          .single();
+        if (error && error.message.includes("baustellen_kostenstelle_key")) {
+          // Sammel-KST schon vergeben (UNIQUE) → ohne KST anlegen,
+          // Kurz-KST wandert in die Notiz; das Büro vergibt die Unternummer.
+          ({ data: nb, error } = await supa
+            .from("baustellen")
+            .insert({
+              bvh_name: r.bvh,
+              kostenstelle: null,
+              status: "aktiv",
+              bauleiter_id: r.bauleiter?.id ?? null,
+              notizen: `${NOTE_TAG} · KST laut Planung: ${r.kst}`,
+            })
+            .select("*")
+            .single());
+        }
+        if (error) {
+          console.error(`  ✗ Baustelle '${r.bvh}': ${error.message}`);
+          bstCache.set(key, null);
+        } else {
+          console.log(`  + Baustelle '${r.bvh}' (${nb.kostenstelle ?? "ohne KST"}) angelegt`);
+          bstCache.set(key, nb);
+          baustellen.push(nb);
+        }
+      }
+      r.baustelle = bstCache.get(key);
+    }
+    if (r.partie && r.baustelle) {
+      r.probleme = [];
+      ok.push(r);
+    }
+  }
+  const restTodo = todo.filter((r) => r.probleme.length > 0);
 
   console.log("\n── Import ──");
   let inserted = 0;
@@ -282,8 +414,11 @@ async function inspectOrImport(doImport) {
   }
   console.log(
     `\nFertig: ${inserted} Zeiträume angelegt, ${skipped} übersprungen (schon vorhanden), ` +
-      `${blSet} Bauleiter an Baustellen gesetzt, ${todo.length} TODO-Zeilen offen.`,
+      `${blSet} Bauleiter an Baustellen gesetzt, ${restTodo.length} TODO-Zeilen offen.`,
   );
+  for (const r of restTodo) {
+    console.log(`  offen: ${r.polier} | ${r.bvh} — ${r.probleme.join("; ")}`);
+  }
 }
 
 const mode = process.argv[2];
