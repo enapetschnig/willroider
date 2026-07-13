@@ -961,9 +961,98 @@ export function PoliereinsatzView({
         </CardContent>
       </Card>
 
-      <div className="md:hidden text-sm text-muted-foreground italic px-1">
-        Die Poliereinsatz-Ansicht ist für größere Bildschirme ausgelegt — bitte
-        Tablet quer oder PC verwenden.
+      {/* Mobile: schlanke Lese-Liste + Urlaub-Eintrag (kein Gantt) */}
+      <div className="md:hidden space-y-3">
+        <div className="text-[11px] text-muted-foreground px-1">
+          Übersicht der laufenden und kommenden Einsätze. Balken verschieben
+          am Tablet/PC.
+        </div>
+        {gruppen.map((g) => {
+          // Nur Einsätze anzeigen, die noch nicht vorbei sind
+          const heute = localIso(new Date());
+          const aktuelle = g.einsaetze
+            .filter((z) => z.bis_datum >= heute)
+            .sort((a, b) => a.von_datum.localeCompare(b.von_datum));
+          const darfUrlaub =
+            canEdit || (userId && g.partie.partieleiter_id === userId);
+          return (
+            <Card key={g.partie.id}>
+              <CardContent className="p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <span
+                    className="h-3 w-3 rounded-full shrink-0"
+                    style={{ background: g.partie.farbcode }}
+                  />
+                  <span className="font-bold text-sm truncate">
+                    {g.leiter ? g.leiter.nachname : g.partie.name}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground truncate">
+                    {g.partie.name}
+                  </span>
+                  {darfUrlaub && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px] px-2 ml-auto shrink-0"
+                      onClick={() =>
+                        setUrlaubDialog({
+                          partieId: g.partie.id,
+                          maId: g.member[0]?.id ?? "",
+                          von: localIso(new Date()),
+                          bis: localIso(new Date()),
+                        })
+                      }
+                    >
+                      <Sun className="h-3 w-3 mr-1" /> Urlaub
+                    </Button>
+                  )}
+                </div>
+                {aktuelle.length === 0 ? (
+                  <div className="text-[11px] text-muted-foreground italic">
+                    Keine laufenden Einsätze.
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {aktuelle.map((z) => {
+                      const b = baustellenById[z.baustelle_id];
+                      const bl = b?.bauleiter_id ? profilesById[b.bauleiter_id] : null;
+                      return (
+                        <div
+                          key={z.id}
+                          className="flex items-center gap-2 text-[12px] border-l-2 pl-2"
+                          style={{ borderColor: barColor(z) }}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium truncate">
+                              {b?.bvh_name ?? "?"}
+                              {!z.start_fix && (
+                                <span className="text-amber-600 text-[10px]"> · Start offen</span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground">
+                              {[b?.kostenstelle, bl?.nachname].filter(Boolean).join(" · ")}
+                            </div>
+                          </div>
+                          <div className="text-[10px] text-muted-foreground text-right shrink-0 tabular-nums">
+                            {new Date(z.von_datum).toLocaleDateString("de-AT", {
+                              day: "2-digit",
+                              month: "2-digit",
+                            })}
+                            –
+                            {new Date(z.bis_datum).toLocaleDateString("de-AT", {
+                              day: "2-digit",
+                              month: "2-digit",
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       {/* Info-Popup am Balken */}
