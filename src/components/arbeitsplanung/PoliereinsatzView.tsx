@@ -38,6 +38,7 @@ import {
   Pencil,
   Sun,
   Truck,
+  Undo2,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
@@ -146,12 +147,24 @@ export function PoliereinsatzView({
     moved: boolean;
     previewVon: string;
     previewBis: string;
+    previewPartie: string | null;
   } | null>(null);
   const [dragPreview, setDragPreview] = useState<{
     id: string;
     von: string;
     bis: string;
   } | null>(null);
+  /** Ziel-Partie beim vertikalen Balken-Drag (Highlight). */
+  const [dropPartieId, setDropPartieId] = useState<string | null>(null);
+
+  // ─── Undo-Stack (Schritte zurück bei falschem Verschieben) ───────────
+  type UndoAktion =
+    | { typ: "update"; id: string; vorher: { von_datum: string; bis_datum: string; partie_id: string } }
+    | { typ: "insert"; id: string } // rückgängig = löschen
+    | { typ: "delete"; zeile: Zeitraum }; // rückgängig = wieder anlegen
+  const [undoStack, setUndoStack] = useState<UndoAktion[]>([]);
+  const pushUndo = (a: UndoAktion) =>
+    setUndoStack((s) => [...s.slice(-19), a]); // max. 20 Schritte
 
   const totalDays = weeksVisible * 7;
   const rangeStartIso = isoDate(anchorWeek);
@@ -344,6 +357,7 @@ export function PoliereinsatzView({
       moved: false,
       previewVon: z.von_datum,
       previewBis: z.bis_datum,
+      previewPartie: null,
     };
 
     const onMove = (ev: PointerEvent) => {
@@ -366,6 +380,17 @@ export function PoliereinsatzView({
       d.previewVon = von;
       d.previewBis = bis;
       setDragPreview({ id: d.z.id, von, bis });
+
+      // Vertikal: über welcher Partie-Gruppe schwebt der Zeiger? (nur beim
+      // Move, nicht beim Resize) → Ziel-Highlight für Umzug zwischen Partien.
+      if (d.mode === "move") {
+        const el = document
+          .elementsFromPoint(ev.clientX, ev.clientY)
+          .find((n) => (n as HTMLElement).dataset?.partie) as HTMLElement | undefined;
+        const ziel = el?.dataset.partie ?? null;
+        d.previewPartie = ziel && ziel !== d.z.partie_id ? ziel : null;
+        setDropPartieId(d.previewPartie);
+      }
     };
     const onUp = async (ev: PointerEvent) => {
       document.removeEventListener("pointermove", onMove);
@@ -373,16 +398,29 @@ export function PoliereinsatzView({
       const d = dragRef.current;
       dragRef.current = null;
       setDragPreview(null);
+      const zielPartie = d?.previewPartie ?? null;
+      setDropPartieId(null);
       if (!d) return;
       if (!d.moved) {
         // Reiner Klick → Info-Popup
         setBarInfo({ z: d.z, anchor: { x: ev.clientX, y: ev.clientY } });
         return;
       }
-      if (d.previewVon === d.z.von_datum && d.previewBis === d.z.bis_datum) return;
+      const partieWechsel =
+        d.mode === "move" && zielPartie && zielPartie !== d.z.partie_id;
+      const datumWechsel =
+        d.previewVon !== d.z.von_datum || d.previewBis !== d.z.bis_datum;
+      if (!partieWechsel && !datumWechsel) return;
+
+      const patch: Record<string, unknown> = {
+        von_datum: d.previewVon,
+        bis_datum: d.previewBis,
+      };
+      if (partieWechsel) patch.partie_id = zielPartie;
+
       const { data: upd, error } = await supabase
         .from("poliereinsatz_zeitraeume")
-        .update({ von_datum: d.previewVon, bis_datum: d.previewBis })
+        .update(patch)
         .eq("id", d.z.id)
         .select("id");
       if (error || !upd || upd.length === 0) {
@@ -391,6 +429,21 @@ export function PoliereinsatzView({
           title: "Verschieben fehlgeschlagen",
           description: error?.message ?? "Keine Berechtigung.",
         });
+      } else {
+        // Undo-Eintrag: alter Zustand des Zeitraums
+        pushUndo({
+          typ: "update",
+          id: d.z.id,
+          vorher: {
+            von_datum: d.z.von_datum,
+            bis_datum: d.z.bis_datum,
+            partie_id: d.z.partie_id,
+          },
+        });
+        if (partieWechsel) {
+          const zp = partien.find((p) => p.id === zielPartie);
+          toast({ title: `Baustelle zu ${zp?.name ?? "Partie"} verschoben` });
+        }
       }
       void load();
     };
@@ -414,6 +467,8 @@ export function PoliereinsatzView({
       bis_datum: d.bis,
       start_fix: d.startFix,
     };
+    // vorher-Zustand für Undo (nur beim Update)
+    const vorher = d.id ? zeitraeume.find((z) => z.id === d.id) : null;
     const { data: saved, error } = d.id
       ? await supabase
           .from("poliereinsatz_zeitraeume")
@@ -433,6 +488,19 @@ export function PoliereinsatzView({
       });
       return;
     }
+    if (d.id && vorher) {
+      pushUndo({
+        typ: "update",
+        id: d.id,
+        vorher: {
+          von_datum: vorher.von_datum,
+          bis_datum: vorher.bis_datum,
+          partie_id: vorher.partie_id,
+        },
+      });
+    } else if (saved[0]?.id) {
+      pushUndo({ typ: "insert", id: saved[0].id });
+    }
     toast({ title: d.id ? "Einsatz aktualisiert" : "Einsatz angelegt" });
     setEditDialog(null);
     void load();
@@ -440,6 +508,7 @@ export function PoliereinsatzView({
 
   const deleteEinsatz = async (id: string) => {
     if (!confirm("Einsatz aus der Planung entfernen?")) return;
+    const zeile = zeitraeume.find((z) => z.id === id) ?? null;
     const { data: deleted, error } = await supabase
       .from("poliereinsatz_zeitraeume")
       .delete()
@@ -453,6 +522,7 @@ export function PoliereinsatzView({
       });
       return;
     }
+    if (zeile) pushUndo({ typ: "delete", zeile });
     setEditDialog(null);
     setBarInfo(null);
     void load();
@@ -550,6 +620,44 @@ export function PoliereinsatzView({
     }
     toast({ title: "Mitarbeiter verschoben" });
     onReload?.();
+  };
+
+  /** Letzten Schritt rückgängig machen. */
+  const undo = async () => {
+    const a = undoStack[undoStack.length - 1];
+    if (!a) return;
+    setUndoStack((s) => s.slice(0, -1));
+    let error: any = null;
+    if (a.typ === "update") {
+      ({ error } = await supabase
+        .from("poliereinsatz_zeitraeume")
+        .update(a.vorher)
+        .eq("id", a.id));
+    } else if (a.typ === "insert") {
+      ({ error } = await supabase
+        .from("poliereinsatz_zeitraeume")
+        .delete()
+        .eq("id", a.id));
+    } else {
+      // delete rückgängig → Zeile mit gleicher id wieder anlegen
+      const z = a.zeile;
+      ({ error } = await supabase.from("poliereinsatz_zeitraeume").insert({
+        id: z.id,
+        partie_id: z.partie_id,
+        baustelle_id: z.baustelle_id,
+        von_datum: z.von_datum,
+        bis_datum: z.bis_datum,
+        start_fix: z.start_fix,
+        notiz: z.notiz,
+        erstellt_von: z.erstellt_von,
+      }));
+    }
+    if (error) {
+      toast({ variant: "destructive", title: "Rückgängig fehlgeschlagen", description: error.message });
+    } else {
+      toast({ title: "Rückgängig gemacht" });
+    }
+    void load();
   };
 
   const shiftWeeks = (n: number) =>
@@ -652,6 +760,18 @@ export function PoliereinsatzView({
           <Button variant="outline" size="sm" onClick={() => shiftWeeks(4)}>
             <ChevronRight className="h-4 w-4" />
           </Button>
+          {canEdit && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={undo}
+              disabled={undoStack.length === 0}
+              title="Letzten Schritt rückgängig machen"
+            >
+              <Undo2 className="h-4 w-4 mr-1" /> Rückgängig
+              {undoStack.length > 0 ? ` (${undoStack.length})` : ""}
+            </Button>
+          )}
           <div className="flex items-center gap-2 flex-wrap ml-2 text-[11px]">
             {bauleiter.map((b) => (
               <span key={b.id} className="inline-flex items-center gap-1">
@@ -933,9 +1053,18 @@ export function PoliereinsatzView({
                   })}
                 </div>
 
-                {/* Zeilen (parallel zur linken Spalte) */}
+                {/* Zeilen (parallel zur linken Spalte).
+                    data-partie: Ziel-Erkennung beim Balken-Drag zwischen Partien. */}
                 {gruppen.map((g) => (
-                  <div key={g.partie.id}>
+                  <div
+                    key={g.partie.id}
+                    data-partie={g.partie.id}
+                    className={
+                      dropPartieId === g.partie.id
+                        ? "ring-2 ring-primary ring-inset"
+                        : ""
+                    }
+                  >
                     {/* Gruppenkopf-Zeile (leer, nur Grid) */}
                     <GridRow days={days} height={ROW_H} shade={`${g.partie.farbcode}10`} />
                     {expanded.has(g.partie.id) && (
