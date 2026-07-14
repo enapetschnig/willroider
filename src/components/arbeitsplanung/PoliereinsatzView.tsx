@@ -512,6 +512,33 @@ export function PoliereinsatzView({
     void load();
   };
 
+  /** Ein-Klick: Starttermin fix ↔ noch nicht fix (gestrichelter Balken).
+   *  Direkt aus dem Balken-Popup, ohne den ganzen Bearbeiten-Dialog. */
+  const toggleStartFix = async (z: Zeitraum) => {
+    if (!canEdit) return;
+    const neu = !z.start_fix;
+    const { data: saved, error } = await supabase
+      .from("poliereinsatz_zeitraeume")
+      .update({ start_fix: neu })
+      .eq("id", z.id)
+      .select("id");
+    if (error || !saved || saved.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Umschalten fehlgeschlagen",
+        description: error?.message ?? "Keine Berechtigung.",
+      });
+      return;
+    }
+    toast({
+      title: neu
+        ? "Starttermin fix"
+        : "Starttermin noch nicht fix – Balken wird gestrichelt",
+    });
+    setBarInfo(null);
+    void load();
+  };
+
   const deleteEinsatz = async (id: string) => {
     if (!confirm("Einsatz aus der Planung entfernen?")) return;
     const zeile = zeitraeume.find((z) => z.id === id) ?? null;
@@ -1352,6 +1379,30 @@ export function PoliereinsatzView({
                   {new Date(barInfo.z.bis_datum).toLocaleDateString("de-AT")}
                 </div>
               </div>
+              {canEdit && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full h-9 mt-2 justify-start gap-2"
+                  onClick={() => toggleStartFix(barInfo.z)}
+                  title="Starttermin fix ↔ noch nicht fix (gestrichelt)"
+                >
+                  <span
+                    className="h-2.5 w-6 rounded-sm shrink-0"
+                    style={{
+                      background: barInfo.z.start_fix
+                        ? barColor(barInfo.z)
+                        : "transparent",
+                      border: barInfo.z.start_fix
+                        ? "none"
+                        : `1.5px dashed ${barColor(barInfo.z)}`,
+                    }}
+                  />
+                  {barInfo.z.start_fix
+                    ? "Start noch nicht fix setzen"
+                    : "Start als fix setzen"}
+                </Button>
+              )}
               {canEdit && (
                 <div className="flex gap-2 mt-2">
                   <Button
