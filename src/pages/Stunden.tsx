@@ -222,6 +222,22 @@ export default function Stunden() {
   const istPolier = !!polierPartie;
   const primaryUserId = user?.id ?? "";
 
+  // Maschinen-(Halle-)Baustellen: werden auf /stunden NICHT bearbeitet,
+  // nur erhalten. Einmal laden, um sie beim Formular-Laden auszufiltern
+  // (sonst doppelt gezählt) und beim Speichern zu bewahren.
+  const [maschinenIds, setMaschinenIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    supabase
+      .from("baustellen")
+      .select("id")
+      .eq("kategorie", "maschine")
+      .then(({ data }) =>
+        setMaschinenIds(new Set((data ?? []).map((m: { id: string }) => m.id))),
+      );
+  }, []);
+  const istMaschinenEintrag = (art: string, baustelleId: string | null) =>
+    art === "baustelle" && !!baustelleId && maschinenIds.has(baustelleId);
+
   const { data: taetigkeitenStamm = [] } = useTaetigkeitenStamm({
     bereich: "baustelle",
   });
@@ -337,15 +353,20 @@ export default function Stunden() {
       ...emptyForm(),
       maEintraege: {
         ...Object.fromEntries(uids.map((u) => [u, [] as EintragRow[]])),
-        [primaryUserId]: t.taetigkeiten.map((tt) => ({
-          key: newKey(),
-          art: tt.art,
-          baustelle_id: tt.baustelle_id,
-          taetigkeit_id: tt.taetigkeit_id,
-          taetigkeit_freitext: tt.taetigkeit_freitext ?? "",
-          stunden: Number(tt.stunden),
-          notiz: tt.notiz ?? "",
-        })),
+        // Maschinen-(Halle-)Einträge NICHT ins Formular laden — sie werden
+        // beim Speichern separat erhalten (erhaltMaschinen). Sonst würden
+        // sie doppelt geschrieben (netto_stunden falsch).
+        [primaryUserId]: t.taetigkeiten
+          .filter((tt) => !istMaschinenEintrag(tt.art, tt.baustelle_id))
+          .map((tt) => ({
+            key: newKey(),
+            art: tt.art,
+            baustelle_id: tt.baustelle_id,
+            taetigkeit_id: tt.taetigkeit_id,
+            taetigkeit_freitext: tt.taetigkeit_freitext ?? "",
+            stunden: Number(tt.stunden),
+            notiz: tt.notiz ?? "",
+          })),
       },
       arbeitsbeginn: t.tag.arbeitsbeginn?.slice(0, 5) ?? null,
       anmerkung: t.tag.anmerkung ?? "",
@@ -373,7 +394,7 @@ export default function Stunden() {
         : null,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aktuellerEigenerTag?.tag.id, primaryUserId, date]);
+  }, [aktuellerEigenerTag?.tag.id, primaryUserId, date, maschinenIds]);
 
   // forUserIds-Wechsel: für jeden selektierten MA ein Eintrags-Array sichern,
   // Zulagen-stundenPerMa abgleichen.
@@ -651,17 +672,6 @@ export default function Stunden() {
           status: r.status,
           taetigkeiten: r.stunden_taetigkeiten ?? [],
         }),
-      );
-
-      // Maschinen-IDs für „Halle-Einträge erhalten"-Merge — direkt aus der DB,
-      // damit der Merge nicht versehentlich Halle-Daten löscht, falls die
-      // baustellen-Liste im Cache noch nicht (komplett) geladen ist.
-      const { data: maschinenRows } = await supabase
-        .from("baustellen")
-        .select("id")
-        .eq("kategorie", "maschine");
-      const maschinenIds = new Set(
-        (maschinenRows ?? []).map((m: { id: string }) => m.id),
       );
 
       for (const uid of forUserIds) {
