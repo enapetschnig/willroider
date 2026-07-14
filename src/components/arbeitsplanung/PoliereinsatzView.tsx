@@ -159,7 +159,7 @@ export function PoliereinsatzView({
 
   // ─── Undo-Stack (Schritte zurück bei falschem Verschieben) ───────────
   type UndoAktion =
-    | { typ: "update"; id: string; vorher: { von_datum: string; bis_datum: string; partie_id: string } }
+    | { typ: "update"; id: string; vorher: { von_datum: string; bis_datum: string; partie_id: string; start_fix: boolean } }
     | { typ: "insert"; id: string } // rückgängig = löschen
     | { typ: "delete"; zeile: Zeitraum }; // rückgängig = wieder anlegen
   const [undoStack, setUndoStack] = useState<UndoAktion[]>([]);
@@ -444,6 +444,7 @@ export function PoliereinsatzView({
             von_datum: d.z.von_datum,
             bis_datum: d.z.bis_datum,
             partie_id: d.z.partie_id,
+            start_fix: d.z.start_fix,
           },
         });
         if (partieWechsel) {
@@ -502,6 +503,7 @@ export function PoliereinsatzView({
           von_datum: vorher.von_datum,
           bis_datum: vorher.bis_datum,
           partie_id: vorher.partie_id,
+          start_fix: vorher.start_fix,
         },
       });
     } else if (saved[0]?.id) {
@@ -530,6 +532,17 @@ export function PoliereinsatzView({
       });
       return;
     }
+    // Rückgängig-fähig: alten Zustand (inkl. start_fix) in den Undo-Stack.
+    pushUndo({
+      typ: "update",
+      id: z.id,
+      vorher: {
+        von_datum: z.von_datum,
+        bis_datum: z.bis_datum,
+        partie_id: z.partie_id,
+        start_fix: z.start_fix,
+      },
+    });
     toast({
       title: neu
         ? "Starttermin fix"
