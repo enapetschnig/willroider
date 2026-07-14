@@ -709,9 +709,12 @@ export default function Tagesplanung() {
     try {
       const { data: zeitraeume } = await supabase
         .from("poliereinsatz_zeitraeume")
-        .select("partie_id, baustelle_id")
+        .select("partie_id, baustelle_id, von_datum")
         .lte("von_datum", datum)
-        .gte("bis_datum", datum);
+        .gte("bis_datum", datum)
+        // Früher begonnene (laufende) Einsätze zuerst → sie gelten als
+        // Hauptbaustelle der Partie, wenn mehrere gleichzeitig aktiv sind.
+        .order("von_datum", { ascending: true });
       if (!zeitraeume || zeitraeume.length === 0) {
         toast({
           variant: "destructive",
@@ -739,8 +742,14 @@ export default function Tagesplanung() {
           maByPartie.get(p.partie_id)!.push(p.id);
         });
 
+      // Jeder Mitarbeiter darf pro Tag nur EINER Baustelle zugeteilt werden.
+      // Hat eine Partie mehrere aktive Baustellen, landen die Mitarbeiter
+      // auf der ersten (laufenden Haupt-)Baustelle; weitere Baustellen
+      // werden ohne Mitarbeiter angelegt (Büro verteilt manuell).
+      const schonEingeteilt = new Set<string>();
       let saved = 0;
       let skipped = 0;
+      let ohneMa = 0;
       for (const z of zeitraeume) {
         if (!z.baustelle_id) {
           skipped++;
@@ -768,7 +777,10 @@ export default function Tagesplanung() {
           .single();
         if (!neu) continue;
 
-        const maIds = maByPartie.get(z.partie_id) ?? [];
+        // Nur noch nicht anderweitig eingeteilte Mitarbeiter zuweisen.
+        const maIds = (maByPartie.get(z.partie_id) ?? []).filter(
+          (mid) => !schonEingeteilt.has(mid),
+        );
         if (maIds.length > 0) {
           await supabase.from("einteilung_mitarbeiter").insert(
             maIds.map((mid) => ({
@@ -776,13 +788,21 @@ export default function Tagesplanung() {
               mitarbeiter_id: mid,
             })),
           );
+          maIds.forEach((mid) => schonEingeteilt.add(mid));
+        } else {
+          ohneMa++;
         }
         saved++;
       }
+      const hinweise = [
+        skipped > 0 ? `${skipped} übersprungen (bereits vorhanden)` : "",
+        ohneMa > 0
+          ? `${ohneMa} Baustelle(n) ohne Mitarbeiter (Partie mehrfach aktiv — bitte verteilen)`
+          : "",
+      ].filter(Boolean);
       toast({
         title: `${saved} Baustelle${saved === 1 ? "" : "n"} aus Polierplanung übernommen`,
-        description:
-          skipped > 0 ? `${skipped} übersprungen (bereits vorhanden)` : undefined,
+        description: hinweise.length ? hinweise.join(" · ") : undefined,
       });
       refresh();
     } finally {
