@@ -109,6 +109,13 @@ Deno.serve(async (req) => {
           id,
           err: "Bericht ist noch offen — der Mitarbeiter muss zuerst unterschreiben",
         });
+      else if (row.status === "versendet")
+        // Schon versendet (z.B. Teil-Erfolg eines früheren Laufs) → NICHT
+        // erneut mitschicken, sonst bekommt das Büro eine Doppel-Mail.
+        vorabFehler.push({
+          id,
+          err: "Bericht wurde bereits versendet",
+        });
     }
     if (vorabFehler.length > 0) {
       return jsonResponse({

@@ -1056,10 +1056,31 @@ export default function Arbeitsplanung() {
   const deletePartieFromPlan = async (partieId: string, partieName: string) => {
     if (!isAdmin) return;
     if (!confirm(`Partie „${partieName}" löschen? Mitarbeiter werden entkoppelt.`)) return;
+    // Ex-Polier merken, um sein is_partieleiter-Flag zurückzusetzen.
+    const { data: p } = await supabase
+      .from("partien")
+      .select("partieleiter_id")
+      .eq("id", partieId)
+      .maybeSingle();
+    const exLeiter = (p as any)?.partieleiter_id as string | undefined;
     const { error } = await supabase.from("partien").delete().eq("id", partieId);
     if (error) {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
       return;
+    }
+    // is_partieleiter zurücksetzen, wenn der Ex-Polier keine andere Partie leitet.
+    if (exLeiter) {
+      const { data: andere } = await supabase
+        .from("partien")
+        .select("id")
+        .eq("partieleiter_id", exLeiter)
+        .limit(1);
+      if (!andere || andere.length === 0) {
+        await supabase
+          .from("profiles")
+          .update({ is_partieleiter: false })
+          .eq("id", exLeiter);
+      }
     }
     toast({ title: "Partie gelöscht" });
     load();
