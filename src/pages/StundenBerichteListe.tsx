@@ -28,6 +28,7 @@ import {
   useStundenBerichtAktionen,
 } from "@/hooks/useStundenBericht";
 import { BsbVersendenDialog } from "@/components/BsbVersendenDialog";
+import { UnterschriftDialog } from "@/components/UnterschriftDialog";
 
 const STATUS_BADGE: Record<StundenBerichtStatus, { label: string; cls: string }> = {
   offen: {
@@ -92,6 +93,10 @@ export default function StundenBerichteListe() {
   const aktionen = useStundenBerichtAktionen();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [versendenOpen, setVersendenOpen] = useState(false);
+  // Büro-Unterschrift wird — wie im Einzel-Flow — VOR dem Versand gesammelt
+  // und ins PDF/an die RPC durchgereicht (Bestätigung = Unterschrift).
+  const [bueroSignOpen, setBueroSignOpen] = useState(false);
+  const [bueroSignature, setBueroSignature] = useState<string | null>(null);
 
   // Sortierung: nach Status (offen → unterschrieben → bestaetigt → versendet),
   // innerhalb nach Mitarbeiter-Nachname.
@@ -284,7 +289,7 @@ export default function StundenBerichteListe() {
               >
                 Auswahl löschen
               </Button>
-              <Button size="sm" onClick={() => setVersendenOpen(true)}>
+              <Button size="sm" onClick={() => setBueroSignOpen(true)}>
                 <Mail className="h-3.5 w-3.5 mr-1.5" />
                 Markierte ans Büro senden
               </Button>
@@ -386,12 +391,28 @@ export default function StundenBerichteListe() {
         </CardContent>
       </Card>
 
+      <UnterschriftDialog
+        open={bueroSignOpen}
+        onOpenChange={setBueroSignOpen}
+        onSave={(dataUrl) => {
+          setBueroSignature(dataUrl);
+          setBueroSignOpen(false);
+          setVersendenOpen(true);
+        }}
+        titel="Bestätigung unterschreiben"
+      />
+
       <BsbVersendenDialog
         open={versendenOpen}
-        onOpenChange={setVersendenOpen}
+        onOpenChange={(o) => {
+          setVersendenOpen(o);
+          if (!o) setBueroSignature(null);
+        }}
         berichtIds={Array.from(selected)}
+        bueroSignature={bueroSignature}
         onSent={() => {
           setSelected(new Set());
+          setBueroSignature(null);
         }}
       />
     </div>

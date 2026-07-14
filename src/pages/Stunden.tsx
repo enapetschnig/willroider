@@ -445,6 +445,11 @@ export default function Stunden() {
       const maEintraege = { ...f.maEintraege };
       for (const uid of forUserIds) {
         if ((maEintraege[uid] ?? []).length > 0) continue;
+        // MA, die ihren Tag SCHON selbst erfasst haben, NICHT mit Soll-/
+        // Tagesplanungs-Schätzwerten vorbefüllen — sonst würde ihr eigener
+        // Eintrag beim Speichern überschrieben. Block bleibt leer → Submit
+        // überspringt sie.
+        if (statusForDateMap.has(uid)) continue;
         const tp = tagesplanungPerMa.get(uid);
         const soll = sollPerMa.get(uid) ?? 0;
         if (aktive.size > 0) {
@@ -484,7 +489,7 @@ export default function Stunden() {
       return changed ? { ...f, maEintraege } : f;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tagesplanungPerMa, sollPerMa, forUserIds]);
+  }, [tagesplanungPerMa, sollPerMa, forUserIds, statusForDateMap]);
 
   /** Summe der Netto-Stunden eines MA aus seinen Einträgen. */
   const summenProMa = useMemo(() => {
