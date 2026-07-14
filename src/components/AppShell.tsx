@@ -324,7 +324,12 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Button size="sm" onClick={openFeedback} className="shrink-0 hidden sm:inline-flex">
                 <MessageSquarePlus className="h-4 w-4 mr-1.5" /> Änderungswunsch senden
               </Button>
-              <Button size="sm" onClick={openFeedback} className="shrink-0 sm:hidden px-2">
+              <Button
+                size="sm"
+                onClick={openFeedback}
+                className="shrink-0 sm:hidden px-2"
+                aria-label="Änderungswunsch senden"
+              >
                 <MessageSquarePlus className="h-4 w-4" />
               </Button>
               <button

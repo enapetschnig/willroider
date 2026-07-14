@@ -54,11 +54,15 @@ export function FeedbackDialog({
       toast({ variant: "destructive", title: "Bitte schreib kurz, worum es geht." });
       return;
     }
+    if (!user) {
+      toast({ variant: "destructive", title: "Bitte neu anmelden und erneut versuchen." });
+      return;
+    }
     setBusy(true);
     const appVersion =
       typeof __APP_BUILD__ !== "undefined" ? __APP_BUILD__ : null;
     const { error } = await supabase.from("feedback" as any).insert({
-      erstellt_von: user?.id ?? null,
+      erstellt_von: user.id,
       text: text.trim(),
       kategorie,
       seiten_kontext: location.pathname,

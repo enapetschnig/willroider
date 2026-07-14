@@ -65,19 +65,22 @@ export function AdminFeedback() {
     }
     const list = (data as unknown as FeedbackRow[]) ?? [];
     setRows(list);
-    // Namen der Ersteller nachladen
+    // Namen der Ersteller nachladen (Map immer frisch aufbauen)
     const ids = Array.from(new Set(list.map((r) => r.erstellt_von).filter(Boolean))) as string[];
+    const m = new Map<string, string>();
     if (ids.length > 0) {
-      const { data: profs } = await supabase
+      const { data: profs, error: pErr } = await supabase
         .from("profiles")
         .select("id, vorname, nachname")
         .in("id", ids);
-      const m = new Map<string, string>();
+      if (pErr) {
+        toast({ variant: "destructive", title: "Namen konnten nicht geladen werden", description: pErr.message });
+      }
       (profs ?? []).forEach((p: any) =>
         m.set(p.id, `${p.vorname ?? ""} ${p.nachname ?? ""}`.trim() || "—"),
       );
-      setNamen(m);
     }
+    setNamen(m);
     setLoading(false);
   };
 
