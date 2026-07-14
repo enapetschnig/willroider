@@ -14,18 +14,25 @@ import {
   Trash2,
   Eye,
   X,
+  Mic,
 } from "lucide-react";
+
+const fmtDauer = (s: number) =>
+  `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
 type FeedbackRow = {
   id: string;
   erstellt_von: string | null;
-  text: string;
+  text: string | null;
   kategorie: string;
   seiten_kontext: string | null;
   app_version: string | null;
   status: string;
   admin_notiz: string | null;
   created_at: string;
+  audio_pfad: string | null;
+  audio_typ: string | null;
+  audio_sekunden: number | null;
 };
 
 const KAT: Record<string, { label: string; icon: typeof Lightbulb; cls: string }> = {
@@ -48,6 +55,7 @@ export function AdminFeedback() {
   const { toast } = useToast();
   const [rows, setRows] = useState<FeedbackRow[]>([]);
   const [namen, setNamen] = useState<Map<string, string>>(new Map());
+  const [audioUrls, setAudioUrls] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("offen");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -81,6 +89,23 @@ export function AdminFeedback() {
       );
     }
     setNamen(m);
+
+    // Signierte URLs für Sprachnachrichten (privater Bucket, 1 h gültig)
+    const mitAudio = list.filter((r) => r.audio_pfad);
+    if (mitAudio.length > 0) {
+      const urls = new Map<string, string>();
+      await Promise.all(
+        mitAudio.map(async (r) => {
+          const { data: signed } = await supabase.storage
+            .from("feedback-audio")
+            .createSignedUrl(r.audio_pfad!, 3600);
+          if (signed?.signedUrl) urls.set(r.id, signed.signedUrl);
+        }),
+      );
+      setAudioUrls(urls);
+    } else {
+      setAudioUrls(new Map());
+    }
     setLoading(false);
   };
 
@@ -191,7 +216,24 @@ export function AdminFeedback() {
                           })}
                         </span>
                       </div>
-                      <div className="text-sm whitespace-pre-wrap break-words">{r.text}</div>
+                      {r.text && (
+                        <div className="text-sm whitespace-pre-wrap break-words">{r.text}</div>
+                      )}
+                      {r.audio_pfad && (
+                        <div className="mt-1.5 flex items-center gap-2 rounded-md bg-muted/50 px-2.5 py-1.5">
+                          <Mic className="h-3.5 w-3.5 text-primary shrink-0" />
+                          {audioUrls.get(r.id) ? (
+                            <audio src={audioUrls.get(r.id)} controls className="h-8 flex-1 min-w-0" />
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Sprachnachricht wird geladen …</span>
+                          )}
+                          {r.audio_sekunden != null && (
+                            <span className="text-[11px] text-muted-foreground tabular-nums shrink-0">
+                              {fmtDauer(r.audio_sekunden)}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       <div className="text-[11px] text-muted-foreground mt-1.5">
                         {r.seiten_kontext ? `Seite: ${r.seiten_kontext}` : null}
                         {r.app_version ? `  ·  Version: ${r.app_version}` : null}
