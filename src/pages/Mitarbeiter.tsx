@@ -285,6 +285,25 @@ export default function Mitarbeiter() {
     load();
   };
 
+  /** Partie eines Mitarbeiters direkt in der Tabelle ändern. */
+  const setPartie = async (userId: string, partieId: string | null) => {
+    const { data: updated, error } = await supabase
+      .from("profiles")
+      .update({ partie_id: partieId })
+      .eq("id", userId)
+      .select("id");
+    if (error || !updated || updated.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Fehler",
+        description: error?.message ?? "Keine Berechtigung.",
+      });
+      return;
+    }
+    toast({ title: "Partie geändert" });
+    load();
+  };
+
   const saveProfile = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!editing) return;
@@ -573,19 +592,23 @@ export default function Mitarbeiter() {
                         <TableCell>{p.pers_nr ?? "—"}</TableCell>
                         <TableCell className="text-xs">{p.email}</TableCell>
                         <TableCell>
-                          {partie ? (
-                            <Badge
-                              variant="outline"
-                              style={{
-                                borderColor: partie.farbcode,
-                                color: partie.farbcode,
-                              }}
-                            >
-                              {partie.name}
-                            </Badge>
-                          ) : (
-                            <span className="text-muted-foreground text-xs">—</span>
-                          )}
+                          <select
+                            value={p.partie_id ?? ""}
+                            onChange={(e) => setPartie(p.id, e.target.value || null)}
+                            className="h-8 text-xs rounded-md border bg-background px-2 max-w-[160px]"
+                            style={
+                              partie
+                                ? { borderColor: partie.farbcode, color: partie.farbcode }
+                                : undefined
+                            }
+                          >
+                            <option value="">— keine —</option>
+                            {partien.map((pp) => (
+                              <option key={pp.id} value={pp.id}>
+                                {pp.name}
+                              </option>
+                            ))}
+                          </select>
                         </TableCell>
                         <TableCell>
                           <select

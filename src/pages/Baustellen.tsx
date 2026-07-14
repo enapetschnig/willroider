@@ -35,7 +35,7 @@ const STATUS_LABEL: Record<BaustellenStatus, string> = {
 };
 
 export default function Baustellen() {
-  const { canCreateBaustelle } = useAuth();
+  const { canCreateBaustelle, user } = useAuth();
   const [data, setData] = useState<Baustelle[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
   const [search, setSearch] = useState("");
@@ -73,7 +73,7 @@ export default function Baustellen() {
   }, []);
 
   const filtered = useMemo(() => {
-    return data.filter((b) => {
+    const list = data.filter((b) => {
       if (statusFilter !== "alle" && b.status !== statusFilter) return false;
       if (search) {
         const q = search.toLowerCase();
@@ -86,7 +86,19 @@ export default function Baustellen() {
       }
       return true;
     });
-  }, [data, search, statusFilter]);
+    // Sortierung: Baustellen des angemeldeten Bauleiters zuerst, dann nach
+    // Kostenstelle aufsteigend (14040xx zuerst). Ohne KST ans Ende.
+    const kstKey = (b: (typeof data)[number]) => {
+      const k = (b.kostenstelle ?? "").trim();
+      return k ? k : "￿"; // leere KST hinten einsortieren
+    };
+    return [...list].sort((a, b) => {
+      const aMine = user && a.bauleiter_id === user.id ? 0 : 1;
+      const bMine = user && b.bauleiter_id === user.id ? 0 : 1;
+      if (aMine !== bMine) return aMine - bMine;
+      return kstKey(a).localeCompare(kstKey(b), "de", { numeric: true });
+    });
+  }, [data, search, statusFilter, user]);
 
   return (
     <div className="space-y-4">
