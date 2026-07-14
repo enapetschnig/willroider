@@ -116,6 +116,9 @@ export function aggregiereZulagen(
 export function taggeldFuerTag(
   t: StundenTagFull,
   _pausen?: PausenDauer,
+  /** IDs der Maschinen-/Halle-Baustellen — deren Stunden zählen NICHT
+   *  fürs Baustellen-Taggeld (Werkstatt-Arbeit gibt kein Taggeld). */
+  maschinenIds?: Set<string>,
 ): { kurz: number; lang: number } {
   if (t.fahrt?.taggeld_manuell) {
     return {
@@ -124,7 +127,11 @@ export function taggeldFuerTag(
     };
   }
   const baustelleStunden = t.taetigkeiten
-    .filter((tt) => tt.art === "baustelle")
+    .filter(
+      (tt) =>
+        tt.art === "baustelle" &&
+        !(maschinenIds && tt.baustelle_id && maschinenIds.has(tt.baustelle_id)),
+    )
     .reduce((s, tt) => s + Number(tt.stunden ?? 0), 0);
   return berechneTaggeld(baustelleStunden, "baustelle");
 }
@@ -135,11 +142,12 @@ export function aggregiereTaggeld(
   pausen: PausenDauer,
   satz_kurz_eur: number = TAGGELD_SATZ_KURZ_EUR,
   satz_lang_eur: number = TAGGELD_SATZ_LANG_EUR,
+  maschinenIds?: Set<string>,
 ): AggTaggeld {
   let kurz = 0;
   let lang = 0;
   for (const t of tage) {
-    const tg = taggeldFuerTag(t, pausen);
+    const tg = taggeldFuerTag(t, pausen, maschinenIds);
     kurz += tg.kurz;
     lang += tg.lang;
   }

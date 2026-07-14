@@ -60,7 +60,7 @@ const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, perm: "dashboard.view", end: true },
   { to: "/mein-tag", label: "Mein Tag", icon: ClipboardList, perm: "meintag.view", end: true },
   { to: "/arbeitsplanung", label: "Jahresplanung", icon: CalendarDays, perm: "arbeitsplanung.view", end: true },
-  { to: "/tagesplanung", label: "Tagesplanung", icon: ClipboardCheck, perm: "tagesplanung.view", end: true },
+  { to: "/tagesplanung", label: "Tagesplanung", icon: ClipboardCheck, perm: "tagesplanung.edit", end: true },
   { to: "/angebote", label: "Angebote", icon: Briefcase, perm: "angebote.view", end: false },
   { to: "/baustellen", label: "Baustellen", icon: Building2, perm: "baustellen.view", end: false },
   { to: "/stunden", label: "Zeiterfassung", icon: Clock, perm: "stunden.view_eigene", end: true },

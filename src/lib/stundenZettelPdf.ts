@@ -53,6 +53,8 @@ export interface StundenzettelData {
   zulagenTypen: ZulagenTypName[];
   pausen: PausenDauer;
   kilometergeldSatz: number;
+  /** Maschinen-/Halle-Baustellen — deren Stunden geben kein Taggeld. */
+  maschinenIds?: Set<string>;
 }
 
 function monatLabel(monat: string): string {
@@ -87,7 +89,7 @@ export function renderStundenzettel(
 
   const aggTaet = aggregiereTaetigkeiten(data.tage, data.taetigkeitenStamm);
   const aggZul = aggregiereZulagen(data.tage, data.zulagenTypen);
-  const aggTg = aggregiereTaggeld(data.tage, data.pausen);
+  const aggTg = aggregiereTaggeld(data.tage, data.pausen, data.maschinenIds);
   const aggKm = aggregiereKilometergeld(data.tage, data.kilometergeldSatz);
 
   // Header
@@ -108,7 +110,7 @@ export function renderStundenzettel(
     const netto = Number(t.tag.netto_stunden);
     const taet = fmtTaetigkeitenInline(t, data.taetigkeitenStamm);
     const zul = fmtZulagenInline(t, data.zulagenTypen);
-    const tg = taggeldFuerTag(t, data.pausen);
+    const tg = taggeldFuerTag(t, data.pausen, data.maschinenIds);
     const tgK = tg.kurz;
     const tgL = tg.lang;
     const tgStr = tgL > 0 ? `${tgL}× L` : tgK > 0 ? `${tgK}× K` : "—";

@@ -131,7 +131,7 @@ function isSetupFehler(error: { message?: string; code?: string } | null): boole
 // ─── Page ─────────────────────────────────────────────────────────────────
 
 export default function Tagesplanung() {
-  const { user, isAdmin, hasPermission } = useAuth();
+  const { user, hasPermission } = useAuth();
   /** Permission-gesteuert — Custom-Rollen wirken auch. */
   const darfFreigeben = hasPermission("tagesplanung.freigeben");
   const { toast } = useToast();
@@ -529,7 +529,9 @@ export default function Tagesplanung() {
         .in("einteilung_id", quellIds),
     ]);
 
-    // Pro Quell-Einteilung neue Einteilung anlegen
+    // Pro Quell-Einteilung neue Einteilung anlegen.
+    // Jeder MA nur 1x/Tag: mit bereits eingeteilten MA vorbefüllen.
+    const schonEingeteilt = new Set<string>(eingeteilteIds);
     let saved = 0;
     let skipped = 0;
     for (const quell of einteilungenVomQuell) {
@@ -562,10 +564,11 @@ export default function Tagesplanung() {
         .single();
       if (!neu) continue;
 
-      // MA übernehmen (abwesende skippen)
+      // MA übernehmen — abwesende UND bereits eingeteilte überspringen.
       const maForQuell = (ems ?? [])
         .filter((m: any) => m.einteilung_id === quell.id)
-        .filter((m: any) => !abwesendIds.has(m.mitarbeiter_id));
+        .filter((m: any) => !abwesendIds.has(m.mitarbeiter_id))
+        .filter((m: any) => !schonEingeteilt.has(m.mitarbeiter_id));
       if (maForQuell.length > 0) {
         await supabase.from("einteilung_mitarbeiter").insert(
           maForQuell.map((m: any) => ({
@@ -574,6 +577,7 @@ export default function Tagesplanung() {
             rolle: m.rolle,
           })),
         );
+        maForQuell.forEach((m: any) => schonEingeteilt.add(m.mitarbeiter_id));
       }
       // Fahrzeuge übernehmen
       const fzForQuell = (efs ?? []).filter((f: any) => f.einteilung_id === quell.id);
@@ -635,6 +639,8 @@ export default function Tagesplanung() {
           .in("einteilung_id", jpIds),
       ]);
 
+      // Jeder MA nur 1x/Tag: mit bereits eingeteilten MA vorbefüllen.
+      const schonEingeteilt = new Set<string>(eingeteilteIds);
       let saved = 0;
       let skipped = 0;
       for (const jp of jpEinteilungen) {
@@ -665,10 +671,11 @@ export default function Tagesplanung() {
           .single();
         if (!neu) continue;
 
-        // MA übernehmen (abwesende skippen)
+        // MA übernehmen — abwesende UND bereits eingeteilte überspringen.
         const maForJp = (jms ?? [])
           .filter((m: any) => m.einteilung_id === jp.id)
-          .filter((m: any) => !abwesendIds.has(m.mitarbeiter_id));
+          .filter((m: any) => !abwesendIds.has(m.mitarbeiter_id))
+          .filter((m: any) => !schonEingeteilt.has(m.mitarbeiter_id));
         if (maForJp.length > 0) {
           await supabase.from("einteilung_mitarbeiter").insert(
             maForJp.map((m: any) => ({
@@ -676,6 +683,7 @@ export default function Tagesplanung() {
               mitarbeiter_id: m.mitarbeiter_id,
             })),
           );
+          maForJp.forEach((m: any) => schonEingeteilt.add(m.mitarbeiter_id));
         }
         // Fahrzeuge übernehmen
         const fzForJp = (jfs ?? []).filter((f: any) => f.einteilung_id === jp.id);
@@ -1012,10 +1020,13 @@ export default function Tagesplanung() {
 
   // ─── Render ─────────────────────────────────────────────────────────────
 
-  if (!isAdmin) {
+  // Bearbeiten der Tagesplanung dürfen Bauleiter/Büro/GF (tagesplanung.edit).
+  // Reine Mitarbeiter sehen ihren Plan in „Mein Tag".
+  if (!hasPermission("tagesplanung.edit")) {
     return (
       <div className="text-center py-16 text-sm text-muted-foreground">
-        Nur für Verwaltung/Admin zugänglich.
+        Die Tagesplanung ist der Bauleitung/dem Büro vorbehalten. Deine
+        Einteilung findest du unter „Mein Tag".
       </div>
     );
   }

@@ -122,16 +122,18 @@ function currentMonth() {
 export type Periode = "voll" | "h1" | "h2";
 
 /** Liefert den Datums-Range fuer einen Monat + gewaehlte Periode.
- *   voll = ganzer Monat, h1 = 1.-15., h2 = 16.-Monatsende. */
+ *   voll = ganzer Monat, h1 = 1.-16., h2 = 17.-Monatsende.
+ *   Halbmonats-Grenze wie beim Baustellenstundenbericht/Lohnabschluss
+ *   (Teil 1 endet am 16., Teil 2 beginnt am 17.). */
 function monatRange(monat: string, periode: Periode = "voll") {
   const [y, m] = monat.split("-").map(Number);
   const mm = String(m).padStart(2, "0");
   const lastDay = new Date(y, m, 0).getDate();
   if (periode === "h1") {
-    return { from: `${y}-${mm}-01`, to: `${y}-${mm}-15` };
+    return { from: `${y}-${mm}-01`, to: `${y}-${mm}-16` };
   }
   if (periode === "h2") {
-    return { from: `${y}-${mm}-16`, to: `${y}-${mm}-${String(lastDay).padStart(2, "0")}` };
+    return { from: `${y}-${mm}-17`, to: `${y}-${mm}-${String(lastDay).padStart(2, "0")}` };
   }
   return { from: `${y}-${mm}-01`, to: `${y}-${mm}-${String(lastDay).padStart(2, "0")}` };
 }
@@ -152,6 +154,8 @@ export default function Stundenauswertung() {
   const [members, setMembers] = useState<Profile[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
   const [baustellenMap, setBaustellenMap] = useState<Map<string, string>>(new Map());
+  /** Maschinen-/Halle-Baustellen — deren Stunden geben kein Taggeld. */
+  const [maschinenIds, setMaschinenIds] = useState<Set<string>>(new Set());
   const [partieFilter, setPartieFilter] = useState<string>("");
   const [ansicht, setAnsicht] = useState<
     "uebersicht" | "raster" | "baustellen"
@@ -172,12 +176,19 @@ export default function Stundenauswertung() {
           .eq("is_active", true)
           .order("nachname"),
         supabase.from("partien").select("*").order("name"),
-        supabase.from("baustellen").select("id, bvh_name"),
+        supabase.from("baustellen").select("id, bvh_name, kategorie"),
       ]);
       setMembers((m as Profile[]) ?? []);
       setPartien((p as Partie[]) ?? []);
       setBaustellenMap(
         new Map(((b as any[]) ?? []).map((x) => [x.id as string, (x.bvh_name as string) ?? "Baustelle"])),
+      );
+      setMaschinenIds(
+        new Set(
+          ((b as any[]) ?? [])
+            .filter((x) => x.kategorie === "maschine")
+            .map((x) => x.id as string),
+        ),
       );
     })();
   }, []);
@@ -412,6 +423,7 @@ export default function Stundenauswertung() {
       zulagenTypen,
       pausen: pausenDauer,
       kilometergeldSatz: limits?.kilometergeld_satz_eur ?? 0.5,
+      maschinenIds,
     };
   }
 
@@ -470,7 +482,7 @@ export default function Stundenauswertung() {
             return z.stunden != null ? `${bez} ${Number(z.stunden)}h` : bez;
           })
           .join(", ");
-        const tg = taggeldFuerTag(t, pausenDauer);
+        const tg = taggeldFuerTag(t, pausenDauer, maschinenIds);
         const tgKurz = tg.kurz;
         const tgLang = tg.lang;
         const km = kmFuerTag(t);
@@ -1007,7 +1019,7 @@ function DetailMa({
   const taetById = new Map(taetigkeitenStamm.map((s) => [s.id, s.bezeichnung]));
   const aggTaet = aggregiereTaetigkeiten(tage, taetigkeitenStamm);
   const aggZul = aggregiereZulagen(tage, zulagenTypen);
-  const aggTg = aggregiereTaggeld(tage, pausenDauer);
+  const aggTg = aggregiereTaggeld(tage, pausenDauer, maschinenIds);
   const aggKm = aggregiereKilometergeld(tage, limits?.kilometergeld_satz_eur ?? 0.5);
 
   return (
@@ -1037,7 +1049,7 @@ function DetailMa({
                     "07:00",
                 })
               : null;
-            const tg = taggeldFuerTag(t, pausenDauer);
+            const tg = taggeldFuerTag(t, pausenDauer, maschinenIds);
             const tgKurz = tg.kurz;
             const tgLang = tg.lang;
             const arts =

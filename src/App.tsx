@@ -82,7 +82,7 @@ const App = () => (
             <Route element={<ProtectedRoute />}>
               <Route path="/" element={<RequirePermission perm="dashboard.view"><Dashboard /></RequirePermission>} />
               <Route path="/arbeitsplanung" element={<RequirePermission perm="arbeitsplanung.view"><Arbeitsplanung /></RequirePermission>} />
-              <Route path="/tagesplanung" element={<RequirePermission perm="tagesplanung.view"><Tagesplanung /></RequirePermission>} />
+              <Route path="/tagesplanung" element={<RequirePermission perm="tagesplanung.edit"><Tagesplanung /></RequirePermission>} />
               <Route path="/baustellen" element={<RequirePermission perm="baustellen.view"><Baustellen /></RequirePermission>} />
               <Route path="/baustellen/:id" element={<RequirePermission perm="baustellen.view"><BaustelleDetail /></RequirePermission>} />
               <Route path="/angebote" element={<RequirePermission perm="angebote.view"><Angebote /></RequirePermission>} />
