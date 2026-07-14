@@ -14,14 +14,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Lightbulb, Bug, Heart, MessageCircle, Loader2, Send } from "lucide-react";
+import { Lightbulb, Bug, MessageCircle, Loader2, Send } from "lucide-react";
 
-type Kategorie = "idee" | "problem" | "lob" | "sonstiges";
+type Kategorie = "idee" | "problem" | "sonstiges";
 
 const KATEGORIEN: { key: Kategorie; label: string; icon: typeof Lightbulb }[] = [
   { key: "idee", label: "Idee / Wunsch", icon: Lightbulb },
   { key: "problem", label: "Problem / Fehler", icon: Bug },
-  { key: "lob", label: "Lob", icon: Heart },
   { key: "sonstiges", label: "Sonstiges", icon: MessageCircle },
 ];
 
@@ -91,8 +90,8 @@ export function FeedbackDialog({
         <DialogHeader>
           <DialogTitle>Änderungswunsch senden</DialogTitle>
           <DialogDescription>
-            Dein Änderungswunsch, ein Fehler oder einfach ein Lob — alles hilft,
-            die App besser zu machen. Geht direkt ans Büro.
+            Dein Änderungswunsch oder ein Fehler — alles hilft, die App besser
+            zu machen. Geht direkt ans Büro.
           </DialogDescription>
         </DialogHeader>
 
