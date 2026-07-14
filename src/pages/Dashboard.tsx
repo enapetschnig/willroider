@@ -22,6 +22,7 @@ import {
   ShieldAlert,
   FileText,
   Wrench,
+  MessageSquarePlus,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 import { BerichteHintCard } from "@/components/dashboard/BerichteHintCard";
@@ -99,6 +100,7 @@ export default function Dashboard() {
   const [aktiveBaustellen, setAktiveBaustellen] = useState<Baustelle[]>([]);
   const [pendingProfiles, setPendingProfiles] = useState<PendingProfile[]>([]);
   const [pendingCount, setPendingCount] = useState<number>(0);
+  const [feedbackNeu, setFeedbackNeu] = useState<number>(0);
   const [angeboteFaellig, setAngeboteFaellig] = useState<number>(0);
   const [offeneUnterschriften, setOffeneUnterschriften] = useState<
     {
@@ -276,6 +278,25 @@ export default function Dashboard() {
         { event: "*", schema: "public", table: "profiles" },
         loadPending
       )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const loadFeedback = async () => {
+      const { count } = await supabase
+        .from("feedback" as any)
+        .select("id", { count: "exact", head: true })
+        .eq("status", "neu");
+      setFeedbackNeu(count ?? 0);
+    };
+    loadFeedback();
+    const ch = supabase
+      .channel("dashboard-feedback")
+      .on("postgres_changes", { event: "*", schema: "public", table: "feedback" }, loadFeedback)
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
@@ -492,6 +513,31 @@ export default function Dashboard() {
             </Link>
           </CardContent>
         </Card>
+      )}
+
+      {/* Feedback-Zähler (Admin) — dezent, nur wenn Neues da ist */}
+      {isAdmin && feedbackNeu > 0 && (
+        <Link to="/admin?tab=feedback" className="block">
+          <Card className="border-primary/30 bg-primary/5 hover:bg-primary/10 transition">
+            <CardContent className="p-3 flex items-center gap-3">
+              <div className="h-9 w-9 rounded-full bg-primary/15 text-primary flex items-center justify-center shrink-0">
+                <MessageSquarePlus className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium">
+                  {feedbackNeu === 1
+                    ? "1 neue Rückmeldung"
+                    : `${feedbackNeu} neue Rückmeldungen`}{" "}
+                  von Mitarbeitern
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Verbesserungswünsche & Meldungen ansehen
+                </div>
+              </div>
+              <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
+            </CardContent>
+          </Card>
+        </Link>
       )}
 
       {/* Angebote-Nachfrage-Banner (Admin) */}

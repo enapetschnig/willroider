@@ -22,8 +22,11 @@ import {
   FileText,
   Calculator,
   Mail,
+  MessageSquarePlus,
+  X,
 } from "lucide-react";
 import { InstallPromptDialog } from "./InstallPromptDialog";
+import { FeedbackDialog } from "./FeedbackDialog";
 import {
   getCachedInstallPrompt,
   subscribeInstallPrompt,
@@ -78,6 +81,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const [installOpen, setInstallOpen] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  /** Einmaliger Hinweis auf den neuen Feedback-Kanal (pro Gerät einmal). */
+  const [feedbackHint, setFeedbackHint] = useState(false);
   /** Nativer Installations-Prompt (Chrome/Edge Desktop + Android), sobald
    *  der Browser ihn anbietet. Null = nicht verfügbar (iOS, Firefox, …). */
   const [deferredPrompt, setDeferredPrompt] =
@@ -95,11 +101,32 @@ export function AppShell({ children }: { children: ReactNode }) {
     const unsub = subscribeInstallPrompt((e) => setDeferredPrompt(e));
     const onInstalled = () => setIsStandalone(true);
     window.addEventListener("appinstalled", onInstalled);
+
+    // Feedback-Hinweis: einmal pro Gerät zeigen.
+    try {
+      setFeedbackHint(!localStorage.getItem("willroider:feedback-hint-v1"));
+    } catch {
+      /* ignore */
+    }
     return () => {
       unsub();
       window.removeEventListener("appinstalled", onInstalled);
     };
   }, []);
+
+  const dismissFeedbackHint = () => {
+    setFeedbackHint(false);
+    try {
+      localStorage.setItem("willroider:feedback-hint-v1", "true");
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const openFeedback = () => {
+    dismissFeedbackHint();
+    setFeedbackOpen(true);
+  };
 
   /** Ein Klick auf „App installieren": wenn der Browser den nativen Prompt
    *  anbietet (PC-Chrome/Edge, Android), diesen direkt auslösen — sonst die
@@ -260,6 +287,16 @@ export function AppShell({ children }: { children: ReactNode }) {
                     </>
                   )}
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      openFeedback();
+                    }}
+                  >
+                    <MessageSquarePlus className="mr-2 h-4 w-4" />
+                    <span>Feedback geben</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <ChangePasswordDialog />
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleLogout}>
@@ -271,6 +308,35 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
+
+        {/* Einmaliger Hinweis auf den Feedback-Kanal — dezent, wegklickbar */}
+        {feedbackHint && (
+          <div className="bg-primary/5 border-b border-primary/20 px-3 sm:px-4 lg:px-6 py-2.5">
+            <div className="flex items-center gap-3">
+              <MessageSquarePlus className="h-5 w-5 text-primary shrink-0" />
+              <div className="text-sm min-w-0 flex-1">
+                <span className="font-medium">Neu: Sag uns deine Meinung!</span>{" "}
+                <span className="text-muted-foreground">
+                  Verbesserungswünsche, Fehler oder Lob – jederzeit über dein
+                  Konto-Menü oder hier.
+                </span>
+              </div>
+              <Button size="sm" onClick={openFeedback} className="shrink-0 hidden sm:inline-flex">
+                <MessageSquarePlus className="h-4 w-4 mr-1.5" /> Feedback geben
+              </Button>
+              <Button size="sm" onClick={openFeedback} className="shrink-0 sm:hidden px-2">
+                <MessageSquarePlus className="h-4 w-4" />
+              </Button>
+              <button
+                onClick={dismissFeedbackHint}
+                className="shrink-0 p-1.5 rounded hover:bg-muted text-muted-foreground"
+                aria-label="Hinweis ausblenden"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
 
         <main className="flex-1 px-3 sm:px-4 lg:px-6 py-3 sm:py-6 max-w-full pb-28 lg:pb-6">
           {children}
@@ -311,6 +377,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       <InstallPromptDialog open={installOpen} onClose={closeInstallDialog} />
+      <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
     </div>
   );
 }

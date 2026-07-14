@@ -14,6 +14,7 @@ import {
   FileText,
   KeyRound,
   Send,
+  MessageSquarePlus,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { AdminUebersicht } from "@/components/admin/AdminUebersicht";
@@ -24,6 +25,7 @@ import { AdminKrankmeldungen } from "@/components/admin/AdminKrankmeldungen";
 import { AdminLohnzettel } from "@/components/admin/AdminLohnzettel";
 import { AdminBerechtigungen } from "@/components/admin/AdminBerechtigungen";
 import { AdminZugangVerschicken } from "@/components/admin/AdminZugangVerschicken";
+import { AdminFeedback } from "@/components/admin/AdminFeedback";
 import Mitarbeiter from "@/pages/Mitarbeiter";
 import Fahrzeuge from "@/pages/Fahrzeuge";
 import Evaluierung from "@/pages/Evaluierung";
@@ -39,6 +41,7 @@ type TabKey =
   | "lohnzettel"
   | "fahrzeuge"
   | "evaluierung"
+  | "feedback"
   | "berechtigungen";
 
 const TABS: { key: TabKey; label: string; icon: typeof Users }[] = [
@@ -52,6 +55,7 @@ const TABS: { key: TabKey; label: string; icon: typeof Users }[] = [
   { key: "lohnzettel", label: "Lohnzettel", icon: FileText },
   { key: "fahrzeuge", label: "Fahrzeuge", icon: Truck },
   { key: "evaluierung", label: "Evaluierung", icon: ShieldCheck },
+  { key: "feedback", label: "Feedback", icon: MessageSquarePlus },
   { key: "berechtigungen", label: "Berechtigungen", icon: KeyRound },
 ];
 
@@ -129,6 +133,7 @@ export default function Admin() {
         {tab === "lohnzettel" && <AdminLohnzettel />}
         {tab === "fahrzeuge" && <Fahrzeuge />}
         {tab === "evaluierung" && <Evaluierung />}
+        {tab === "feedback" && <AdminFeedback />}
         {tab === "berechtigungen" && <AdminBerechtigungen />}
       </div>
     </div>
