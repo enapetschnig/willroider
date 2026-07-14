@@ -170,6 +170,10 @@ Deno.serve(async (req) => {
     geburtsdatum: body.geburtsdatum || null,
     is_partieleiter: body.is_partieleiter ?? false,
     is_active: true,
+    // Vom Admin angelegt = sofort freigeschaltet. Wichtig: bleibt auch nach
+    // späterer Deaktivierung true, damit die Person NICHT fälschlich als
+    // „neue Anmeldung" im Dashboard-Banner auftaucht.
+    je_freigeschaltet: true,
   };
   // partie_id nur setzen, wenn explizit übergeben — sonst bleibt die vom
   // handle_new_user-Trigger gesetzte Standard-Partie „Werkvorfertigung".
