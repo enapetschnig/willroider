@@ -87,6 +87,7 @@ export function PoliereinsatzView({
   canEdit,
   userId,
   onReload,
+  onNeueBaustelle,
 }: {
   baustellen: Baustelle[];
   partien: Partie[];
@@ -97,6 +98,8 @@ export function PoliereinsatzView({
   userId: string | null;
   /** Lädt die Stammdaten (u.a. profiles) im Parent neu — nach Umzügen. */
   onReload?: () => void;
+  /** Öffnet die "Neue Baustelle"-Oberfläche des Parents. */
+  onNeueBaustelle?: () => void;
 }) {
   const { toast } = useToast();
   const [zeitraeume, setZeitraeume] = useState<Zeitraum[]>([]);
@@ -670,6 +673,11 @@ export function PoliereinsatzView({
               Start nicht fix
             </span>
           </div>
+          {onNeueBaustelle && (
+            <Button size="sm" className="ml-auto" onClick={onNeueBaustelle}>
+              <Plus className="h-4 w-4 mr-1.5" /> Neue Baustelle
+            </Button>
+          )}
         </CardContent>
       </Card>
 
@@ -1158,24 +1166,35 @@ export function PoliereinsatzView({
                 </div>
               </div>
               {canEdit && (
-                <Button
-                  size="sm"
-                  className="w-full mt-2 h-9"
-                  onClick={() => {
-                    setEditDialog({
-                      id: barInfo.z.id,
-                      partieId: barInfo.z.partie_id,
-                      baustelleId: barInfo.z.baustelle_id,
-                      von: barInfo.z.von_datum,
-                      bis: barInfo.z.bis_datum,
-                      startFix: barInfo.z.start_fix,
-                      suche: "",
-                    });
-                    setBarInfo(null);
-                  }}
-                >
-                  <Pencil className="h-3.5 w-3.5 mr-1.5" /> Bearbeiten
-                </Button>
+                <div className="flex gap-2 mt-2">
+                  <Button
+                    size="sm"
+                    className="flex-1 h-9"
+                    onClick={() => {
+                      setEditDialog({
+                        id: barInfo.z.id,
+                        partieId: barInfo.z.partie_id,
+                        baustelleId: barInfo.z.baustelle_id,
+                        von: barInfo.z.von_datum,
+                        bis: barInfo.z.bis_datum,
+                        startFix: barInfo.z.start_fix,
+                        suche: "",
+                      });
+                      setBarInfo(null);
+                    }}
+                  >
+                    <Pencil className="h-3.5 w-3.5 mr-1.5" /> Bearbeiten
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-9 text-destructive border-destructive/40 hover:bg-destructive hover:text-destructive-foreground"
+                    onClick={() => deleteEinsatz(barInfo.z.id)}
+                    title="Einsatz aus der Planung entfernen"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               )}
             </div>
           </>

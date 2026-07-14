@@ -1456,6 +1456,14 @@ export default function Arbeitsplanung() {
           canEdit={hasPermission("arbeitsplanung.edit")}
           userId={user?.id ?? null}
           onReload={load}
+          onNeueBaustelle={
+            canCreateBaustelle
+              ? () => {
+                  setEditing({});
+                  setDialogOpen(true);
+                }
+              : undefined
+          }
         />
       )}
 
