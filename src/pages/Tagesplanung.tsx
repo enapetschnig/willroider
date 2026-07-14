@@ -699,6 +699,97 @@ export default function Tagesplanung() {
     }
   }
 
+  /** Vorgabe: Tagesplanung aus der Polierplanung ableiten
+   *  (Poliereinsatz → Mitarbeiter → Tagesplanung). Liest die am gewählten
+   *  Tag aktiven Poliereinsatz-Zeiträume und legt je Baustelle eine
+   *  Einteilung mit den aktiven Mitarbeitern der Partie an. */
+  async function uebernehmeAusPolierplanung() {
+    if (copyBusy) return;
+    setCopyBusy(true);
+    try {
+      const { data: zeitraeume } = await supabase
+        .from("poliereinsatz_zeitraeume")
+        .select("partie_id, baustelle_id")
+        .lte("von_datum", datum)
+        .gte("bis_datum", datum);
+      if (!zeitraeume || zeitraeume.length === 0) {
+        toast({
+          variant: "destructive",
+          title: "Keine Polierplanung für diesen Tag",
+        });
+        return;
+      }
+      if (
+        !window.confirm(
+          `${zeitraeume.length} Baustelle${zeitraeume.length === 1 ? "" : "n"} aus der Polierplanung für den ${new Date(datum).toLocaleDateString("de-AT")} übernehmen? Die Mitarbeiter der jeweiligen Partie werden eingeteilt.`,
+        )
+      )
+        return;
+
+      // Aktive Mitarbeiter je Partie (abwesende überspringen)
+      const { data: alleProfile } = await supabase
+        .from("profiles")
+        .select("id, partie_id, is_active");
+      const maByPartie = new Map<string, string[]>();
+      ((alleProfile as any[]) ?? [])
+        .filter((p) => p.is_active !== false && p.partie_id)
+        .filter((p) => !abwesendIds.has(p.id))
+        .forEach((p) => {
+          if (!maByPartie.has(p.partie_id)) maByPartie.set(p.partie_id, []);
+          maByPartie.get(p.partie_id)!.push(p.id);
+        });
+
+      let saved = 0;
+      let skipped = 0;
+      for (const z of zeitraeume) {
+        if (!z.baustelle_id) {
+          skipped++;
+          continue;
+        }
+        // Existiert für (Tag, Baustelle) schon eine Einteilung? Dann skippen.
+        const { data: existing } = await supabase
+          .from("einteilungen")
+          .select("id")
+          .eq("datum", datum)
+          .eq("baustelle_id", z.baustelle_id)
+          .maybeSingle();
+        if (existing) {
+          skipped++;
+          continue;
+        }
+        const { data: neu } = await supabase
+          .from("einteilungen")
+          .insert({
+            datum,
+            baustelle_id: z.baustelle_id,
+            created_by: user?.id ?? null,
+          })
+          .select("id")
+          .single();
+        if (!neu) continue;
+
+        const maIds = maByPartie.get(z.partie_id) ?? [];
+        if (maIds.length > 0) {
+          await supabase.from("einteilung_mitarbeiter").insert(
+            maIds.map((mid) => ({
+              einteilung_id: neu.id,
+              mitarbeiter_id: mid,
+            })),
+          );
+        }
+        saved++;
+      }
+      toast({
+        title: `${saved} Baustelle${saved === 1 ? "" : "n"} aus Polierplanung übernommen`,
+        description:
+          skipped > 0 ? `${skipped} übersprungen (bereits vorhanden)` : undefined,
+      });
+      refresh();
+    } finally {
+      setCopyBusy(false);
+    }
+  }
+
   function pdfFilename(): string {
     return `Arbeitseinteilung_${datum}.pdf`;
   }
@@ -976,6 +1067,15 @@ export default function Tagesplanung() {
             disabled={copyBusy}
           >
             <Copy className="h-4 w-4 mr-1.5" /> Plan vom Vortag
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={uebernehmeAusPolierplanung}
+            disabled={copyBusy}
+            title="Baustellen + Partie-Mitarbeiter aus der Polierplanung übernehmen"
+          >
+            <Users className="h-4 w-4 mr-1.5" /> Aus Polierplanung
           </Button>
           <Button
             variant="outline"
