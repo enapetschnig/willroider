@@ -256,10 +256,13 @@ export default function Dashboard() {
   useEffect(() => {
     if (!isAdmin) return;
     const loadPending = async () => {
+      // Nur echte, noch nie freigeschaltete Selbst-Registrierungen —
+      // ein deaktivierter Bestands-MA (je_freigeschaltet=true) zählt NICHT.
       const { data, count } = await supabase
         .from("profiles")
         .select("id, vorname, nachname, email, created_at", { count: "exact" })
         .eq("is_active", false)
+        .eq("je_freigeschaltet", false)
         .order("created_at", { ascending: false })
         .limit(5);
       setPendingProfiles((data as PendingProfile[]) ?? []);

@@ -207,9 +207,13 @@ export default function Mitarbeiter() {
   };
 
   const toggleActive = async (p: Profile) => {
+    // Beim Freischalten das je_freigeschaltet-Flag setzen — danach gilt
+    // die Person nie mehr als "neue Anmeldung" (auch nach Deaktivieren).
+    const patch: Record<string, unknown> = { is_active: !p.is_active };
+    if (!p.is_active) patch.je_freigeschaltet = true;
     const { error } = await supabase
       .from("profiles")
-      .update({ is_active: !p.is_active })
+      .update(patch)
       .eq("id", p.id);
     if (error) {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
@@ -298,6 +302,7 @@ export default function Mitarbeiter() {
       kran_berechtigung: fd.get("kran_berechtigung") === "on",
       partie_id: (fd.get("partie_id") as string) || null,
       is_partieleiter: fd.get("is_partieleiter") === "on",
+      ist_bauleiter: fd.get("ist_bauleiter") === "on",
       planungsfarbe: str("planungsfarbe"),
       geburtsdatum: str("geburtsdatum"),
       geburtsort: str("geburtsort"),
@@ -1138,6 +1143,14 @@ export default function Mitarbeiter() {
                       defaultChecked={!!editing.is_partieleiter}
                     />
                     <Label htmlFor="is_partieleiter">Partieleiter / Polier</Label>
+                  </div>
+                  <div className="flex items-center gap-2 pt-7">
+                    <Switch
+                      id="ist_bauleiter"
+                      name="ist_bauleiter"
+                      defaultChecked={!!editing.ist_bauleiter}
+                    />
+                    <Label htmlFor="ist_bauleiter">Bauleiter (im Baustellen-Formular wählbar)</Label>
                   </div>
                   <div>
                     <Label

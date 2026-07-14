@@ -16,6 +16,16 @@ import { localIso } from "@/lib/dateFmt";
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 
+/** Sammel-Kostenstellen mit automatischer Nummernvergabe (<Basis>-<JJ><NN>). */
+const SAMMEL_KST = [
+  "1404020",
+  "1404030",
+  "1404040",
+  "1404050",
+  "1404060",
+  "1404070",
+];
+
 interface Props {
   initial?: Partial<Baustelle> | null;
   onSaved?: (id: string) => void;
@@ -49,6 +59,34 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
   const [endDatum, setEndDatum] = useState(initial?.end_datum ?? "");
   const [bauleiterId, setBauleiterId] = useState<string>(initial?.bauleiter_id ?? "");
   const [kostenstelle, setKostenstelle] = useState(initial?.kostenstelle ?? "");
+
+  /** Nächste freie Nummer für eine Sammel-Kostenstelle vergeben.
+   *  Format: <Basis>-<JJ><NN>, z.B. 1404030-2603 (Jahr 26, laufende Nr. 03). */
+  const vergebeNaechsteKst = async (basis: string) => {
+    const jj = String(new Date().getFullYear()).slice(-2);
+    const prefix = `${basis}-${jj}`;
+    const { data } = await supabase
+      .from("baustellen")
+      .select("kostenstelle")
+      .like("kostenstelle", `${prefix}%`);
+    let maxNr = 0;
+    ((data as { kostenstelle: string | null }[]) ?? []).forEach((r) => {
+      const m = (r.kostenstelle ?? "").match(
+        new RegExp(`^${basis}-${jj}(\\d{2})$`),
+      );
+      if (m) maxNr = Math.max(maxNr, parseInt(m[1], 10));
+    });
+    if (maxNr >= 99) {
+      toast({
+        variant: "destructive",
+        title: "Nummernkreis voll",
+        description: `Für ${prefix} sind alle Nummern bis 99 vergeben.`,
+      });
+      return;
+    }
+    const nn = String(maxNr + 1).padStart(2, "0");
+    setKostenstelle(`${prefix}${nn}`);
+  };
   const [artBauarbeiten, setArtBauarbeiten] = useState(initial?.art_bauarbeiten ?? "");
   const [auftragssumme, setAuftragssumme] = useState<string>(
     initial?.auftragssumme != null ? String(initial.auftragssumme) : ""
@@ -62,12 +100,29 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
   );
 
   useEffect(() => {
+    // Nur Bauleiter — sie sind im "Verantwortlicher Bauleiter"-Dropdown wählbar.
+    // Der aktuell gesetzte Bauleiter wird zusätzlich geladen, falls er (aus
+    // Altbestand) nicht (mehr) als Bauleiter markiert ist.
     supabase
       .from("profiles")
       .select("*")
+      .eq("ist_bauleiter", true)
+      .eq("is_active", true)
       .order("nachname")
-      .then(({ data }) => setProfiles((data as Profile[]) ?? []));
-  }, []);
+      .then(async ({ data }) => {
+        let list = (data as Profile[]) ?? [];
+        const aktuell = initial?.bauleiter_id;
+        if (aktuell && !list.some((p) => p.id === aktuell)) {
+          const { data: extra } = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("id", aktuell)
+            .maybeSingle();
+          if (extra) list = [extra as Profile, ...list];
+        }
+        setProfiles(list);
+      });
+  }, [initial?.bauleiter_id]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -262,12 +317,27 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
             ))}
           </select>
         </Field>
-        <Field label="Erfasst unter">
+        <Field label="Erfasst unter (Kostenstelle)">
           <Input
             value={kostenstelle}
             onChange={(e) => setKostenstelle(e.target.value)}
-            placeholder="z.B. KS-2026-001"
+            placeholder="z.B. 1404030-2603"
           />
+          {/* Sammel-Kostenstellen: Knopf vergibt automatisch die nächste
+              freie Nummer im Format <Basis>-<JJ><NN> (z.B. 1404030-2603). */}
+          <div className="flex flex-wrap gap-1.5 mt-1.5">
+            {SAMMEL_KST.map((basis) => (
+              <button
+                key={basis}
+                type="button"
+                onClick={() => vergebeNaechsteKst(basis)}
+                className="text-[11px] px-2 py-1 rounded border bg-muted hover:bg-muted/70 font-mono"
+                title={`Nächste freie Nummer für ${basis} vergeben`}
+              >
+                {basis}
+              </button>
+            ))}
+          </div>
         </Field>
         <Field label="Art der Bauarbeiten">
           <Input

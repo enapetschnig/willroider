@@ -77,6 +77,10 @@ export type Database = {
           bewerbung_als: string | null;
           /** Balkenfarbe in der Poliereinsatz-Ansicht (Hex) — nur Bauleiter. */
           planungsfarbe: string | null;
+          /** True, sobald jemals freigeschaltet — steuert das "Neue Anmeldung"-Banner. */
+          je_freigeschaltet: boolean | null;
+          /** True = Bauleiter (wählbar im Baustellen-Formular). */
+          ist_bauleiter: boolean | null;
           created_at: string;
           updated_at: string;
         };
