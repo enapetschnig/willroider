@@ -253,41 +253,60 @@ export function InstallGuide({ onInstalled }: { onInstalled?: () => void }) {
             <CardContent className="p-2.5 text-xs flex items-center gap-2">
               <Monitor className="h-4 w-4 shrink-0" />
               <span>
-                <strong>Desktop</strong> · Chrome, Edge, Brave, Opera
+                <strong>Computer</strong> · Chrome, Edge, Brave, Opera
               </span>
             </CardContent>
           </Card>
           {deferredPrompt ? (
             <>
+              <div className="text-xs text-muted-foreground">
+                Ein Klick genügt:
+              </div>
               <Button onClick={triggerNativePrompt} className="w-full h-11">
                 <Download className="h-4 w-4 mr-2" />
                 Jetzt installieren
               </Button>
               <div className="text-[11px] text-muted-foreground text-center">
-                Oder manuell:
+                Falls das nicht klappt — so geht es von Hand:
               </div>
             </>
-          ) : null}
+          ) : (
+            <div className="text-xs text-muted-foreground">
+              Zum Installieren einen der folgenden Wege nutzen:
+            </div>
+          )}
           <ol className="space-y-3">
             <Step
               n={1}
               icon={Download}
               title="Install-Symbol in der Adresszeile"
-              desc="In der Adresszeile rechts neben der URL erscheint ein kleines Install-Symbol (Bildschirm mit Pfeil) — anklicken."
+              desc="Ganz rechts in der Adresszeile (neben dem Stern/Lesezeichen) erscheint ein kleines Symbol — ein Monitor mit Pfeil nach unten. Darauf klicken."
             />
             <Step
               n={2}
-              icon={Plus}
-              title={'„Installieren" klicken'}
-              desc={'Im Pop-up auf „Installieren" klicken. Die App öffnet sich in einem eigenen Fenster.'}
+              icon={MoreHorizontal}
+              title="Alternativ über das Browser-Menü"
+              desc={
+                'Chrome: ⋮ (oben rechts) → „Streamen, speichern und teilen" → „Seite als App installieren". · Edge: ⋯ → „Apps" → „Diese Website als App installieren".'
+              }
             />
             <Step
               n={3}
               icon={Monitor}
-              title="Vom Desktop starten"
-              desc="Die App ist jetzt in deinem Anwendungsmenü und auf dem Desktop verfügbar."
+              title={'„Installieren" bestätigen'}
+              desc={
+                'Im Pop-up auf „Installieren" klicken. Die App öffnet sich in einem eigenen Fenster und liegt danach im Startmenü / am Desktop.'
+              }
             />
           </ol>
+          <Card className="bg-muted/50 border-muted">
+            <CardContent className="p-2.5 text-[11px] text-muted-foreground">
+              <strong>Firefox &amp; Safari am Computer</strong> unterstützen die
+              Installation nicht. Bitte <strong>Chrome</strong> oder{" "}
+              <strong>Edge</strong> verwenden — beide sind auf Windows meist schon
+              vorhanden.
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

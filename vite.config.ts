@@ -20,6 +20,8 @@ export default defineConfig(({ mode }) => ({
       injectRegister: null,
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'],
       manifest: {
+        id: '/',
+        lang: 'de',
         name: 'Holzbau Willroider',
         short_name: 'Willroider',
         description: 'Baustellenmanagement, Arbeitsplanung und Zeiterfassung für Holzbau Willroider GmbH',

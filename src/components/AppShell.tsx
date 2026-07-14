@@ -24,6 +24,12 @@ import {
   Mail,
 } from "lucide-react";
 import { InstallPromptDialog } from "./InstallPromptDialog";
+import {
+  getCachedInstallPrompt,
+  subscribeInstallPrompt,
+  clearCachedInstallPrompt,
+  type BeforeInstallPromptEvent,
+} from "@/lib/pwaInstall";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import {
@@ -72,19 +78,50 @@ export function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const [installOpen, setInstallOpen] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
+  /** Nativer Installations-Prompt (Chrome/Edge Desktop + Android), sobald
+   *  der Browser ihn anbietet. Null = nicht verfügbar (iOS, Firefox, …). */
+  const [deferredPrompt, setDeferredPrompt] =
+    useState<BeforeInstallPromptEvent | null>(null);
 
-  // Auto-show install prompt one time per device (skipped if already installed)
   useEffect(() => {
     if (typeof window === "undefined") return;
     const standalone =
       window.matchMedia("(display-mode: standalone)").matches ||
       (navigator as any).standalone === true;
     setIsStandalone(standalone);
-    if (standalone) return;
-    if (localStorage.getItem("willroider:install-dismissed") === "true") return;
-    const t = window.setTimeout(() => setInstallOpen(true), 4000);
-    return () => window.clearTimeout(t);
+
+    // Nativen Prompt übernehmen (evtl. schon vor Mount gecacht) + abonnieren.
+    setDeferredPrompt(getCachedInstallPrompt());
+    const unsub = subscribeInstallPrompt((e) => setDeferredPrompt(e));
+    const onInstalled = () => setIsStandalone(true);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      unsub();
+      window.removeEventListener("appinstalled", onInstalled);
+    };
   }, []);
+
+  /** Ein Klick auf „App installieren": wenn der Browser den nativen Prompt
+   *  anbietet (PC-Chrome/Edge, Android), diesen direkt auslösen — sonst die
+   *  Schritt-für-Schritt-Anleitung öffnen (iPhone, Firefox …). */
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      try {
+        await deferredPrompt.prompt();
+        const choice = await deferredPrompt.userChoice;
+        clearCachedInstallPrompt();
+        setDeferredPrompt(null);
+        if (choice.outcome !== "accepted") {
+          // Nutzer hat abgelehnt → Anleitung als Alternative anbieten
+          setInstallOpen(true);
+        }
+      } catch {
+        setInstallOpen(true);
+      }
+      return;
+    }
+    setInstallOpen(true);
+  };
 
   const closeInstallDialog = () => {
     setInstallOpen(false);
@@ -185,7 +222,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setInstallOpen(true)}
+                  onClick={handleInstallClick}
                   title="App auf Startbildschirm installieren"
                   aria-label="App installieren"
                   className="px-2.5"
@@ -214,11 +251,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                       <DropdownMenuItem
                         onSelect={(e) => {
                           e.preventDefault();
-                          setInstallOpen(true);
+                          void handleInstallClick();
                         }}
                       >
                         <Smartphone className="mr-2 h-4 w-4" />
-                        <span>App zum Startbildschirm</span>
+                        <span>App installieren</span>
                       </DropdownMenuItem>
                     </>
                   )}
