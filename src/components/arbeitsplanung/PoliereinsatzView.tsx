@@ -228,8 +228,10 @@ export function PoliereinsatzView({
     const res: { iso: string; date: Date; isMonday: boolean; isToday: boolean; isWeekend: boolean; feiertag: boolean }[] = [];
     const today = localIso(new Date());
     for (let i = 0; i < totalDays; i++) {
-      const d = new Date(anchorWeek.getTime() + i * DAY_MS);
-      const iso = isoDate(d);
+      // ISO-Kette statt Millisekunden-Addition — sonst erzeugt die
+      // Sommerzeit-Umstellung (23-/25-h-Tage) einen Doppel-/Fehltag.
+      const iso = addDays(rangeStartIso, i);
+      const d = new Date(iso + "T00:00:00");
       res.push({
         iso,
         date: d,
@@ -240,7 +242,8 @@ export function PoliereinsatzView({
       });
     }
     return res;
-  }, [anchorWeek, totalDays]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rangeStartIso, totalDays]);
 
   const idxByIso = useMemo(() => {
     const m = new Map<string, number>();
@@ -390,6 +393,9 @@ export function PoliereinsatzView({
         const ziel = el?.dataset.partie ?? null;
         d.previewPartie = ziel && ziel !== d.z.partie_id ? ziel : null;
         setDropPartieId(d.previewPartie);
+        // Auch ein reiner Vertikal-Drag auf eine andere Partie zählt als
+        // "bewegt" — sonst würde nur das Info-Popup aufgehen.
+        if (d.previewPartie) d.moved = true;
       }
     };
     const onUp = async (ev: PointerEvent) => {
@@ -623,41 +629,66 @@ export function PoliereinsatzView({
   };
 
   /** Letzten Schritt rückgängig machen. */
+  const [undoBusy, setUndoBusy] = useState(false);
   const undo = async () => {
+    if (undoBusy) return;
     const a = undoStack[undoStack.length - 1];
     if (!a) return;
-    setUndoStack((s) => s.slice(0, -1));
-    let error: any = null;
-    if (a.typ === "update") {
-      ({ error } = await supabase
-        .from("poliereinsatz_zeitraeume")
-        .update(a.vorher)
-        .eq("id", a.id));
-    } else if (a.typ === "insert") {
-      ({ error } = await supabase
-        .from("poliereinsatz_zeitraeume")
-        .delete()
-        .eq("id", a.id));
-    } else {
-      // delete rückgängig → Zeile mit gleicher id wieder anlegen
-      const z = a.zeile;
-      ({ error } = await supabase.from("poliereinsatz_zeitraeume").insert({
-        id: z.id,
-        partie_id: z.partie_id,
-        baustelle_id: z.baustelle_id,
-        von_datum: z.von_datum,
-        bis_datum: z.bis_datum,
-        start_fix: z.start_fix,
-        notiz: z.notiz,
-        erstellt_von: z.erstellt_von,
-      }));
-    }
-    if (error) {
-      toast({ variant: "destructive", title: "Rückgängig fehlgeschlagen", description: error.message });
-    } else {
+    setUndoBusy(true);
+    try {
+      let error: any = null;
+      let betroffen = 1;
+      if (a.typ === "update") {
+        const { data, error: e } = await supabase
+          .from("poliereinsatz_zeitraeume")
+          .update(a.vorher)
+          .eq("id", a.id)
+          .select("id");
+        error = e;
+        betroffen = data?.length ?? 0;
+      } else if (a.typ === "insert") {
+        const { data, error: e } = await supabase
+          .from("poliereinsatz_zeitraeume")
+          .delete()
+          .eq("id", a.id)
+          .select("id");
+        error = e;
+        betroffen = data?.length ?? 0;
+      } else {
+        // delete rückgängig → Zeile mit gleicher id wieder anlegen
+        const z = a.zeile;
+        const { data, error: e } = await supabase
+          .from("poliereinsatz_zeitraeume")
+          .insert({
+            id: z.id,
+            partie_id: z.partie_id,
+            baustelle_id: z.baustelle_id,
+            von_datum: z.von_datum,
+            bis_datum: z.bis_datum,
+            start_fix: z.start_fix,
+            notiz: z.notiz,
+            erstellt_von: z.erstellt_von,
+          })
+          .select("id");
+        error = e;
+        betroffen = data?.length ?? 0;
+      }
+      if (error || betroffen === 0) {
+        toast({
+          variant: "destructive",
+          title: "Rückgängig fehlgeschlagen",
+          description:
+            error?.message ??
+            "Der Eintrag wurde inzwischen anderweitig geändert.",
+        });
+        return; // Schritt bleibt im Stack, damit nichts verloren geht
+      }
+      setUndoStack((s) => s.slice(0, -1));
       toast({ title: "Rückgängig gemacht" });
+      void load();
+    } finally {
+      setUndoBusy(false);
     }
-    void load();
   };
 
   const shiftWeeks = (n: number) =>
@@ -681,8 +712,35 @@ export function PoliereinsatzView({
     const bis = dragPreview?.id === z.id ? dragPreview.bis : z.bis_datum;
     // Balken nur an Arbeitstagen — Wochenenden/Feiertage sind echte Lücken.
     const segmente = arbeitstagSegmente(von, bis);
-    if (segmente.length === 0) return null;
     const color = barColor(z);
+    // Liegt der Einsatz KOMPLETT auf arbeitsfreien Tagen, bleibt sonst kein
+    // Balken übrig → nicht mehr anklick-/löschbar. Dann einen schmalen
+    // Klick-Stub über dem Rohbereich zeigen (nur zum Öffnen des Popups).
+    if (segmente.length === 0) {
+      const roh = barGeo(von, bis);
+      if (!roh) return null;
+      return (
+        <div
+          className="absolute rounded border border-dashed flex items-center justify-center text-[9px] cursor-pointer"
+          style={{
+            left: roh.left,
+            width: Math.max(roh.width, 14),
+            top: 3,
+            height: ROW_H - 6,
+            borderColor: color,
+            color,
+            background: `${color}22`,
+          }}
+          title={`${label} · nur an arbeitsfreien Tagen (${von} – ${bis})`}
+          onClick={(e) => {
+            e.stopPropagation();
+            setBarInfo({ z, anchor: { x: e.clientX, y: e.clientY } });
+          }}
+        >
+          !
+        </div>
+      );
+    }
     const breitestes = segmente.reduce((a, b) => (b.width > a.width ? b : a));
     return (
       <>
@@ -765,7 +823,7 @@ export function PoliereinsatzView({
               variant="outline"
               size="sm"
               onClick={undo}
-              disabled={undoStack.length === 0}
+              disabled={undoStack.length === 0 || undoBusy}
               title="Letzten Schritt rückgängig machen"
             >
               <Undo2 className="h-4 w-4 mr-1" /> Rückgängig

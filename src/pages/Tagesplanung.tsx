@@ -81,6 +81,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { localIso } from "@/lib/dateFmt";
+import { isWerktag, feiertagAt } from "@/lib/feiertage";
 import { BaustelleCombobox } from "@/components/stunden/BaustelleCombobox";
 import { useTagesplanung, type EinteilungMitDetails } from "@/hooks/useTagesplanung";
 import { useTaetigkeitenStamm } from "@/hooks/useStammdatenStunden";
@@ -705,6 +706,16 @@ export default function Tagesplanung() {
    *  Einteilung mit den aktiven Mitarbeitern der Partie an. */
   async function uebernehmeAusPolierplanung() {
     if (copyBusy) return;
+    // Wochenende/Feiertag: bewusste Rückfrage — normalerweise plant man
+    // keine Arbeitstage am Sa/So oder Feiertag.
+    if (!isWerktag(datum) || feiertagAt(datum)) {
+      if (
+        !window.confirm(
+          `${new Date(datum).toLocaleDateString("de-AT")} ist ein arbeitsfreier Tag (Wochenende/Feiertag). Trotzdem aus der Polierplanung übernehmen?`,
+        )
+      )
+        return;
+    }
     setCopyBusy(true);
     try {
       const { data: zeitraeume } = await supabase
@@ -743,26 +754,28 @@ export default function Tagesplanung() {
         });
 
       // Jeder Mitarbeiter darf pro Tag nur EINER Baustelle zugeteilt werden.
-      // Hat eine Partie mehrere aktive Baustellen, landen die Mitarbeiter
-      // auf der ersten (laufenden Haupt-)Baustelle; weitere Baustellen
-      // werden ohne Mitarbeiter angelegt (Büro verteilt manuell).
-      const schonEingeteilt = new Set<string>();
+      // WICHTIG: vorbefüllen mit den MA, die am Tag SCHON eingeteilt sind
+      // (manuell, Plan vom Vortag, Jahresplanung, übersprungene Baustellen)
+      // — sonst würde die Übernahme sie ein zweites Mal zuteilen.
+      const schonEingeteilt = new Set<string>(eingeteilteIds);
       let saved = 0;
       let skipped = 0;
       let ohneMa = 0;
+      let fehler = 0;
       for (const z of zeitraeume) {
         if (!z.baustelle_id) {
           skipped++;
           continue;
         }
         // Existiert für (Tag, Baustelle) schon eine Einteilung? Dann skippen.
+        // limit(1) statt maybeSingle(): verträgt auch Alt-Duplikate.
         const { data: existing } = await supabase
           .from("einteilungen")
           .select("id")
           .eq("datum", datum)
           .eq("baustelle_id", z.baustelle_id)
-          .maybeSingle();
-        if (existing) {
+          .limit(1);
+        if (existing && existing.length > 0) {
           skipped++;
           continue;
         }
@@ -775,20 +788,28 @@ export default function Tagesplanung() {
           })
           .select("id")
           .single();
-        if (!neu) continue;
+        if (!neu) {
+          fehler++;
+          continue;
+        }
 
         // Nur noch nicht anderweitig eingeteilte Mitarbeiter zuweisen.
         const maIds = (maByPartie.get(z.partie_id) ?? []).filter(
           (mid) => !schonEingeteilt.has(mid),
         );
         if (maIds.length > 0) {
-          await supabase.from("einteilung_mitarbeiter").insert(
+          const { error: emErr } = await supabase.from("einteilung_mitarbeiter").insert(
             maIds.map((mid) => ({
               einteilung_id: neu.id,
               mitarbeiter_id: mid,
             })),
           );
-          maIds.forEach((mid) => schonEingeteilt.add(mid));
+          if (emErr) {
+            // MA NICHT als verbraucht markieren — sie fehlen sonst überall.
+            fehler++;
+          } else {
+            maIds.forEach((mid) => schonEingeteilt.add(mid));
+          }
         } else {
           ohneMa++;
         }
@@ -797,10 +818,12 @@ export default function Tagesplanung() {
       const hinweise = [
         skipped > 0 ? `${skipped} übersprungen (bereits vorhanden)` : "",
         ohneMa > 0
-          ? `${ohneMa} Baustelle(n) ohne Mitarbeiter (Partie mehrfach aktiv — bitte verteilen)`
+          ? `${ohneMa} ohne Mitarbeiter (Partie mehrfach aktiv oder alle schon verplant — bitte verteilen)`
           : "",
+        fehler > 0 ? `${fehler} mit Fehler` : "",
       ].filter(Boolean);
       toast({
+        variant: fehler > 0 ? "destructive" : undefined,
         title: `${saved} Baustelle${saved === 1 ? "" : "n"} aus Polierplanung übernommen`,
         description: hinweise.length ? hinweise.join(" · ") : undefined,
       });
