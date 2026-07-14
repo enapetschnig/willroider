@@ -55,7 +55,7 @@ const TABS: { key: TabKey; label: string; icon: typeof Users }[] = [
   { key: "lohnzettel", label: "Lohnzettel", icon: FileText },
   { key: "fahrzeuge", label: "Fahrzeuge", icon: Truck },
   { key: "evaluierung", label: "Evaluierung", icon: ShieldCheck },
-  { key: "feedback", label: "Feedback", icon: MessageSquarePlus },
+  { key: "feedback", label: "Änderungswünsche", icon: MessageSquarePlus },
   { key: "berechtigungen", label: "Berechtigungen", icon: KeyRound },
 ];
 

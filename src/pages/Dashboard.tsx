@@ -526,12 +526,12 @@ export default function Dashboard() {
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium">
                   {feedbackNeu === 1
-                    ? "1 neue Rückmeldung"
-                    : `${feedbackNeu} neue Rückmeldungen`}{" "}
+                    ? "1 neuer Änderungswunsch"
+                    : `${feedbackNeu} neue Änderungswünsche`}{" "}
                   von Mitarbeitern
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  Verbesserungswünsche & Meldungen ansehen
+                  Änderungswünsche & Meldungen ansehen
                 </div>
               </div>
               <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />

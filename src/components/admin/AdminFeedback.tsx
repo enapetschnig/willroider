@@ -105,7 +105,7 @@ export function AdminFeedback() {
   };
 
   const remove = async (id: string) => {
-    if (!confirm("Dieses Feedback endgültig löschen?")) return;
+    if (!confirm("Diesen Änderungswunsch endgültig löschen?")) return;
     setBusyId(id);
     const { error } = await supabase.from("feedback" as any).delete().eq("id", id);
     setBusyId(null);
@@ -157,7 +157,7 @@ export function AdminFeedback() {
       ) : gefiltert.length === 0 ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            Kein Feedback in dieser Ansicht.
+            Keine Änderungswünsche in dieser Ansicht.
           </CardContent>
         </Card>
       ) : (

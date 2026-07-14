@@ -294,7 +294,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     }}
                   >
                     <MessageSquarePlus className="mr-2 h-4 w-4" />
-                    <span>Feedback geben</span>
+                    <span>Änderungswunsch senden</span>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <ChangePasswordDialog />
@@ -315,14 +315,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="flex items-center gap-3">
               <MessageSquarePlus className="h-5 w-5 text-primary shrink-0" />
               <div className="text-sm min-w-0 flex-1">
-                <span className="font-medium">Neu: Sag uns deine Meinung!</span>{" "}
+                <span className="font-medium">Neu: Änderungswünsche & Ideen</span>{" "}
                 <span className="text-muted-foreground">
                   Verbesserungswünsche, Fehler oder Lob – jederzeit über dein
                   Konto-Menü oder hier.
                 </span>
               </div>
               <Button size="sm" onClick={openFeedback} className="shrink-0 hidden sm:inline-flex">
-                <MessageSquarePlus className="h-4 w-4 mr-1.5" /> Feedback geben
+                <MessageSquarePlus className="h-4 w-4 mr-1.5" /> Änderungswunsch senden
               </Button>
               <Button size="sm" onClick={openFeedback} className="shrink-0 sm:hidden px-2">
                 <MessageSquarePlus className="h-4 w-4" />

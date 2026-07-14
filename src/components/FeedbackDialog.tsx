@@ -74,7 +74,7 @@ export function FeedbackDialog({
       return;
     }
     toast({
-      title: "Danke für dein Feedback! 🙌",
+      title: "Danke für deinen Änderungswunsch! 🙌",
       description: "Wir schauen es uns an.",
     });
     reset();
@@ -85,10 +85,10 @@ export function FeedbackDialog({
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Feedback geben</DialogTitle>
+          <DialogTitle>Änderungswunsch senden</DialogTitle>
           <DialogDescription>
-            Dein Vorschlag, ein Fehler oder einfach ein Lob — alles hilft, die
-            App besser zu machen. Geht direkt ans Büro.
+            Dein Änderungswunsch, ein Fehler oder einfach ein Lob — alles hilft,
+            die App besser zu machen. Geht direkt ans Büro.
           </DialogDescription>
         </DialogHeader>
 
