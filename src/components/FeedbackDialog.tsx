@@ -193,22 +193,32 @@ export function FeedbackDialog({
     }
 
     const appVersion = typeof __APP_BUILD__ !== "undefined" ? __APP_BUILD__ : null;
-    const { error } = await supabase.from("feedback" as any).insert({
-      erstellt_von: user.id,
-      text: hatText ? text.trim() : null,
-      kategorie,
-      seiten_kontext: location.pathname,
-      app_version: appVersion,
-      audio_pfad: audioPfad,
-      audio_typ: audioTyp,
-      audio_sekunden: audioBlob ? dauer : null,
-    });
+    const { data: inserted, error } = await supabase
+      .from("feedback" as any)
+      .insert({
+        erstellt_von: user.id,
+        text: hatText ? text.trim() : null,
+        kategorie,
+        seiten_kontext: location.pathname,
+        app_version: appVersion,
+        audio_pfad: audioPfad,
+        audio_typ: audioTyp,
+        audio_sekunden: audioBlob ? dauer : null,
+      })
+      .select("id")
+      .single();
     setBusy(false);
     if (error) {
       // Verwaiste Audiodatei aufräumen, wenn der Insert scheitert
       if (audioPfad) void supabase.storage.from("feedback-audio").remove([audioPfad]);
       toast({ variant: "destructive", title: "Konnte nicht gesendet werden", description: error.message });
       return;
+    }
+    // Benachrichtigung ans Büro auslösen — fire-and-forget, blockiert das
+    // Absenden nicht (Mail-Fehler soll den Nutzer nicht stören).
+    const neueId = (inserted as { id?: string } | null)?.id;
+    if (neueId) {
+      void supabase.functions.invoke("feedback-notify", { body: { feedbackId: neueId } });
     }
     toast({ title: "Danke für deinen Änderungswunsch! 🙌", description: "Wir schauen es uns an." });
     resetAll();
