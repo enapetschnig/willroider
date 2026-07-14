@@ -233,10 +233,14 @@ export function PoliereinsatzView({
   }, [days]);
 
   const weeks = useMemo(() => {
-    const res: { label: string; startIdx: number }[] = [];
+    const res: { label: string; startIdx: number; feiertage: number }[] = [];
     days.forEach((d, i) => {
       if (d.isMonday || i === 0) {
-        res.push({ label: `KW ${isoWeek(d.date)}`, startIdx: i });
+        res.push({ label: `KW ${isoWeek(d.date)}`, startIdx: i, feiertage: 0 });
+      }
+      // Feiertage an Werktagen der laufenden Woche zählen → "kurze Woche"
+      if (d.feiertag && !d.isWeekend && res.length > 0) {
+        res[res.length - 1].feiertage += 1;
       }
     });
     return res;
@@ -248,6 +252,28 @@ export function PoliereinsatzView({
     const vIdx = von <= rangeStartIso ? 0 : idxByIso.get(von) ?? 0;
     const bIdx = bis >= rangeEndIso ? totalDays - 1 : idxByIso.get(bis) ?? totalDays - 1;
     return { left: vIdx * DAY_W + 1, width: (bIdx - vIdx + 1) * DAY_W - 2 };
+  };
+
+  /** Arbeitstag-Segmente eines Zeitraums [von,bis]: nur Mo–Fr ohne Feiertag,
+   *  zusammenhängende Tage zu einem Balken-Stück. Wochenenden/Feiertage
+   *  erzeugen echte Lücken — der Balken sitzt nur auf Arbeitstagen. */
+  const arbeitstagSegmente = (
+    von: string,
+    bis: string,
+  ): { left: number; width: number }[] => {
+    const segs: { start: number; end: number }[] = [];
+    for (let i = 0; i < days.length; i++) {
+      const d = days[i];
+      if (d.iso < von || d.iso > bis) continue;
+      if (d.isWeekend || d.feiertag) continue;
+      const last = segs[segs.length - 1];
+      if (last && last.end === i - 1) last.end = i;
+      else segs.push({ start: i, end: i });
+    }
+    return segs.map((s) => ({
+      left: s.start * DAY_W + 1,
+      width: (s.end - s.start + 1) * DAY_W - 2,
+    }));
   };
 
   /** Urlaubs-Segmente eines MA (zusammenhängende Tage). */
@@ -279,7 +305,13 @@ export function PoliereinsatzView({
           a.von_datum.localeCompare(b.von_datum),
         ),
       }))
-      .sort((a, b) => a.partie.name.localeCompare(b.partie.name));
+      // Reihenfolge wie im MS-Project-Ausdruck: sort_order zuerst, dann Name.
+      .sort((a, b) => {
+        const sa = a.partie.sort_order ?? 9999;
+        const sb = b.partie.sort_order ?? 9999;
+        if (sa !== sb) return sa - sb;
+        return a.partie.name.localeCompare(b.partie.name);
+      });
   }, [partien, zeitraeume, profiles, profilesById]);
 
   const bauleiter = useMemo(
@@ -536,51 +568,62 @@ export function PoliereinsatzView({
   ): React.ReactNode => {
     const von = dragPreview?.id === z.id ? dragPreview.von : z.von_datum;
     const bis = dragPreview?.id === z.id ? dragPreview.bis : z.bis_datum;
-    const geo = barGeo(von, bis);
-    if (!geo) return null;
+    // Balken nur an Arbeitstagen — Wochenenden/Feiertage sind echte Lücken.
+    const segmente = arbeitstagSegmente(von, bis);
+    if (segmente.length === 0) return null;
     const color = barColor(z);
+    const breitestes = segmente.reduce((a, b) => (b.width > a.width ? b : a));
     return (
-      <div
-        className="absolute rounded flex items-center px-1.5 text-[10px] font-semibold text-white shadow-sm select-none"
-        style={{
-          left: geo.left,
-          width: geo.width,
-          top: 3,
-          height: ROW_H - 6,
-          background: z.start_fix
-            ? color
-            : // gestrichelt: Start noch nicht fix
-              `repeating-linear-gradient(45deg, ${color}, ${color} 6px, ${color}55 6px, ${color}55 12px)`,
-          border: z.start_fix ? "none" : `1.5px dashed ${color}`,
-          cursor: canEdit ? "grab" : "pointer",
-          touchAction: "none",
-        }}
-        title={`${label} · ${von} – ${bis}${z.start_fix ? "" : " (Start nicht fix)"}`}
-        onPointerDown={(e) => canEdit && onBarPointerDown(e, z, "move")}
-        onClick={(e) => {
-          if (canEdit) return; // Klick läuft über den Drag-Pfad
-          e.stopPropagation();
-          setBarInfo({ z, anchor: { x: e.clientX, y: e.clientY } });
-        }}
-      >
-        {canEdit && (
-          <>
+      <>
+        {segmente.map((geo, si) => {
+          const istErstes = si === 0;
+          const istLetztes = si === segmente.length - 1;
+          const zeigtLabel = geo === breitestes && geo.width >= 46;
+          return (
             <div
-              className="absolute left-0 top-0 bottom-0"
-              style={{ width: 7, cursor: "ew-resize" }}
-              onPointerDown={(e) => onBarPointerDown(e, z, "resize-l")}
-            />
-            <div
-              className="absolute right-0 top-0 bottom-0"
-              style={{ width: 7, cursor: "ew-resize" }}
-              onPointerDown={(e) => onBarPointerDown(e, z, "resize-r")}
-            />
-          </>
-        )}
-        <span className="truncate pointer-events-none">
-          {geo.width < 50 ? "" : label}
-        </span>
-      </div>
+              key={si}
+              className="absolute rounded flex items-center px-1.5 text-[10px] font-semibold text-white shadow-sm select-none"
+              style={{
+                left: geo.left,
+                width: geo.width,
+                top: 3,
+                height: ROW_H - 6,
+                background: z.start_fix
+                  ? color
+                  : `repeating-linear-gradient(45deg, ${color}, ${color} 6px, ${color}55 6px, ${color}55 12px)`,
+                border: z.start_fix ? "none" : `1.5px dashed ${color}`,
+                cursor: canEdit ? "grab" : "pointer",
+                touchAction: "none",
+              }}
+              title={`${label} · ${von} – ${bis}${z.start_fix ? "" : " (Start nicht fix)"}`}
+              onPointerDown={(e) => canEdit && onBarPointerDown(e, z, "move")}
+              onClick={(e) => {
+                if (canEdit) return;
+                e.stopPropagation();
+                setBarInfo({ z, anchor: { x: e.clientX, y: e.clientY } });
+              }}
+            >
+              {canEdit && istErstes && (
+                <div
+                  className="absolute left-0 top-0 bottom-0"
+                  style={{ width: 7, cursor: "ew-resize" }}
+                  onPointerDown={(e) => onBarPointerDown(e, z, "resize-l")}
+                />
+              )}
+              {canEdit && istLetztes && (
+                <div
+                  className="absolute right-0 top-0 bottom-0"
+                  style={{ width: 7, cursor: "ew-resize" }}
+                  onPointerDown={(e) => onBarPointerDown(e, z, "resize-r")}
+                />
+              )}
+              {zeigtLabel && (
+                <span className="truncate pointer-events-none">{label}</span>
+              )}
+            </div>
+          );
+        })}
+      </>
     );
   };
 
@@ -841,30 +884,45 @@ export function PoliereinsatzView({
                 <div className="flex border-b bg-muted/60" style={{ height: 21 }}>
                   {weeks.map((w, i) => {
                     const nextStart = weeks[i + 1]?.startIdx ?? totalDays;
+                    // Kurze Woche = mind. 1 Feiertag an einem Werktag.
+                    const kurz = w.feiertage > 0;
                     return (
                       <div
                         key={i}
-                        className="text-[10px] font-semibold flex items-center justify-center border-r"
+                        className={`text-[10px] font-semibold flex items-center justify-center gap-1 border-r ${
+                          kurz ? "bg-amber-100 text-amber-900" : ""
+                        }`}
                         style={{ width: (nextStart - w.startIdx) * DAY_W }}
+                        title={kurz ? `Kurze Woche — ${w.feiertage} Feiertag(e)` : undefined}
                       >
                         {w.label}
+                        {kurz && <span className="text-amber-600">●</span>}
                       </div>
                     );
                   })}
                 </div>
-                {/* Tages-Header */}
+                {/* Tages-Header: Wochentags-Buchstabe + Datum, Feiertag rot */}
                 <div className="flex border-b" style={{ height: 21 }}>
-                  {days.map((d, i) => (
-                    <div
-                      key={i}
-                      className={`text-[8px] flex items-center justify-center border-r ${
-                        d.isWeekend || d.feiertag ? "bg-muted/50 text-muted-foreground" : ""
-                      }`}
-                      style={{ width: DAY_W }}
-                    >
-                      {d.date.getDate()}
-                    </div>
-                  ))}
+                  {days.map((d, i) => {
+                    const wdBuchstabe = ["S", "M", "D", "M", "D", "F", "S"][d.date.getDay()];
+                    return (
+                      <div
+                        key={i}
+                        className={`text-[8px] flex flex-col items-center justify-center border-r leading-none ${
+                          d.feiertag
+                            ? "bg-red-100 text-red-700 font-semibold"
+                            : d.isWeekend
+                              ? "bg-muted/70 text-muted-foreground"
+                              : ""
+                        }`}
+                        style={{ width: DAY_W }}
+                        title={d.feiertag ? (feiertagAt(d.iso)?.name ?? "Feiertag") : undefined}
+                      >
+                        <span>{wdBuchstabe}</span>
+                        <span>{d.date.getDate()}</span>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 {/* Zeilen (parallel zur linken Spalte) */}
@@ -1299,7 +1357,13 @@ function GridBg({ days }: { days: { isWeekend: boolean; feiertag: boolean }[] })
       {days.map((d, i) => (
         <div
           key={i}
-          className={`border-r ${d.isWeekend || d.feiertag ? "bg-muted/40" : ""}`}
+          className={`border-r ${
+            d.feiertag
+              ? "bg-red-500/15"
+              : d.isWeekend
+                ? "bg-muted-foreground/15"
+                : ""
+          }`}
           style={{ width: DAY_W }}
         />
       ))}

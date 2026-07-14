@@ -127,6 +127,8 @@ export type Database = {
           farbcode: string;
           partieleiter_id: string | null;
           beschreibung: string | null;
+          /** Reihenfolge in der Poliereinsatz-Ansicht (klein = oben). */
+          sort_order: number | null;
           created_at: string;
           updated_at: string;
         };
