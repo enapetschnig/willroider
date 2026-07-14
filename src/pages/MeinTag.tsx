@@ -453,6 +453,9 @@ export default function MeinTag() {
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [partie, setPartie] = useState<Partie | null>(null);
   const [colleagues, setColleagues] = useState<{ id: string; vorname: string; nachname: string }[]>([]);
+  // Urlaubs-/ZA-Salden sind VORÜBERGEHEND für alle ausgeblendet, bis die
+  // Berechnung sicher stimmt. Zum Wiederanzeigen einfach auf true setzen.
+  const ZEITKONTEN_SICHTBAR = false;
   const [urlaubsSaldo, setUrlaubsSaldo] = useState<number | null>(null);
   const [zaSaldo, setZaSaldo] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -709,7 +712,8 @@ export default function MeinTag() {
           </div>
         )}
 
-        {/* Meine Konto-Salden */}
+        {/* Meine Konto-Salden — vorübergehend ausgeblendet (Berechnung wird geprüft) */}
+        {ZEITKONTEN_SICHTBAR && (
         <div className="grid grid-cols-2 gap-2 sm:gap-3">
           <Card className="border-amber-200 bg-amber-50">
             <CardContent className="p-3">
@@ -746,6 +750,7 @@ export default function MeinTag() {
             </CardContent>
           </Card>
         </div>
+        )}
       </div>
     </div>
   );
