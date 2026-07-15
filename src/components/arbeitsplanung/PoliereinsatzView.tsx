@@ -39,6 +39,8 @@ import {
   Sun,
   Truck,
   Undo2,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
@@ -79,6 +81,14 @@ const addDays = (iso: string, n: number): string => {
   d.setDate(d.getDate() + n);
   return isoDate(d);
 };
+/** Montag (lokal-ISO) einer ISO-Kalenderwoche. */
+function isoWeekMondayIso(jahr: number, kw: number): string {
+  const jan4 = new Date(jahr, 0, 4);
+  const jan4Dow = (jan4.getDay() + 6) % 7; // 0 = Montag
+  const mon = new Date(jan4);
+  mon.setDate(jan4.getDate() - jan4Dow + (kw - 1) * 7);
+  return isoDate(mon);
+}
 
 export function PoliereinsatzView({
   baustellen,
@@ -105,6 +115,10 @@ export function PoliereinsatzView({
   const { toast } = useToast();
   const [zeitraeume, setZeitraeume] = useState<Zeitraum[]>([]);
   const [urlaubByMa, setUrlaubByMa] = useState<Map<string, Set<string>>>(new Map());
+  /** Arbeitsfreie Werktage laut Arbeitszeitkalender (kurze Woche = Fr frei). */
+  const [kalenderFrei, setKalenderFrei] = useState<Set<string>>(new Set());
+  /** Betriebsurlaub-Tage (wochentyp='BU') — ganze Woche gesperrt. */
+  const [buTage, setBuTage] = useState<Set<string>>(new Set());
   const [weeksVisible] = useState(26);
   const [anchorWeek, setAnchorWeek] = useState<Date>(() => {
     const d = new Date();
@@ -112,6 +126,8 @@ export function PoliereinsatzView({
     return startOfISOWeek(d);
   });
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  /** Vollbild-Modus der Poliereinsatz-Ansicht. */
+  const [vollbild, setVollbild] = useState(false);
   const [busy, setBusy] = useState(false);
 
   // Neu/Bearbeiten-Dialog
@@ -156,6 +172,8 @@ export function PoliereinsatzView({
   } | null>(null);
   /** Ziel-Partie beim vertikalen Balken-Drag (Highlight). */
   const [dropPartieId, setDropPartieId] = useState<string | null>(null);
+  /** Mitlaufender Chip am Cursor beim Verschieben (zeigt Ziel-Partie). */
+  const [dragChip, setDragChip] = useState<{ x: number; y: number; text: string } | null>(null);
 
   // ─── Undo-Stack (Schritte zurück bei falschem Verschieben) ───────────
   type UndoAktion =
@@ -205,6 +223,33 @@ export function PoliereinsatzView({
       m.get(r.mitarbeiter_id)!.add(r.datum);
     });
     setUrlaubByMa(m);
+
+    // Arbeitszeitkalender der sichtbaren Jahre: kurze Wochen (Fr frei) +
+    // Betriebsurlaub (ganze Woche) als arbeitsfreie Tage aufbauen.
+    const jahre = Array.from(
+      new Set([Number(rangeStartIso.slice(0, 4)), Number(rangeEndIso.slice(0, 4))]),
+    );
+    const { data: kal } = await supabase
+      .from("arbeitszeitkalender")
+      .select("jahr, kw, wochentyp, soll_mo, soll_di, soll_mi, soll_do, soll_fr")
+      .in("jahr", jahre);
+    const frei = new Set<string>();
+    const bu = new Set<string>();
+    ((kal as any[]) ?? []).forEach((r) => {
+      const mon = isoWeekMondayIso(r.jahr, r.kw);
+      const perDay = [r.soll_mo, r.soll_di, r.soll_mi, r.soll_do, r.soll_fr];
+      for (let wd = 0; wd < 5; wd++) {
+        const tag = addDays(mon, wd);
+        if (r.wochentyp === "BU") {
+          frei.add(tag);
+          bu.add(tag);
+        } else if (perDay[wd] != null && Number(perDay[wd]) === 0) {
+          frei.add(tag);
+        }
+      }
+    });
+    setKalenderFrei(frei);
+    setBuTage(bu);
   };
 
   useEffect(() => {
@@ -223,9 +268,19 @@ export function PoliereinsatzView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rangeStartIso, rangeEndIso]);
 
+  // Vollbild per Escape verlassen.
+  useEffect(() => {
+    if (!vollbild) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setVollbild(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [vollbild]);
+
   // ─── Zeitachse ───────────────────────────────────────────────────────
   const days = useMemo(() => {
-    const res: { iso: string; date: Date; isMonday: boolean; isToday: boolean; isWeekend: boolean; feiertag: boolean }[] = [];
+    const res: { iso: string; date: Date; isMonday: boolean; isToday: boolean; isWeekend: boolean; feiertag: boolean; frei: boolean; bu: boolean }[] = [];
     const today = localIso(new Date());
     for (let i = 0; i < totalDays; i++) {
       // ISO-Kette statt Millisekunden-Addition — sonst erzeugt die
@@ -239,11 +294,14 @@ export function PoliereinsatzView({
         isToday: iso === today,
         isWeekend: d.getDay() === 0 || d.getDay() === 6,
         feiertag: !!feiertagAt(iso),
+        // Arbeitsfrei laut Kalender (kurze Woche Fr / Betriebsurlaub)
+        frei: kalenderFrei.has(iso),
+        bu: buTage.has(iso),
       });
     }
     return res;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rangeStartIso, totalDays]);
+  }, [rangeStartIso, totalDays, kalenderFrei, buTage]);
 
   const idxByIso = useMemo(() => {
     const m = new Map<string, number>();
@@ -252,15 +310,19 @@ export function PoliereinsatzView({
   }, [days]);
 
   const weeks = useMemo(() => {
-    const res: { label: string; startIdx: number; feiertage: number }[] = [];
+    const res: { label: string; startIdx: number; feiertage: number; freie: number; bu: boolean }[] = [];
     days.forEach((d, i) => {
       if (d.isMonday || i === 0) {
-        res.push({ label: `KW ${isoWeek(d.date)}`, startIdx: i, feiertage: 0 });
+        res.push({ label: `KW ${isoWeek(d.date)}`, startIdx: i, feiertage: 0, freie: 0, bu: false });
       }
-      // Feiertage an Werktagen der laufenden Woche zählen → "kurze Woche"
-      if (d.feiertag && !d.isWeekend && res.length > 0) {
-        res[res.length - 1].feiertage += 1;
+      const w = res[res.length - 1];
+      if (!w) return;
+      // Feiertage + kalender-freie Werktage der laufenden Woche → "kurze Woche"
+      if (!d.isWeekend) {
+        if (d.feiertag) w.feiertage += 1;
+        else if (d.frei) w.freie += 1;
       }
+      if (d.bu) w.bu = true;
     });
     return res;
   }, [days]);
@@ -284,7 +346,9 @@ export function PoliereinsatzView({
     for (let i = 0; i < days.length; i++) {
       const d = days[i];
       if (d.iso < von || d.iso > bis) continue;
-      if (d.isWeekend || d.feiertag) continue;
+      // Wochenende, Feiertag UND kalender-freie Tage (kurze-Woche-Freitag /
+      // Betriebsurlaub) sind keine Arbeitstage → echte Balken-Lücke.
+      if (d.isWeekend || d.feiertag || d.frei) continue;
       const last = segs[segs.length - 1];
       if (last && last.end === i - 1) last.end = i;
       else segs.push({ start: i, end: i });
@@ -396,6 +460,17 @@ export function PoliereinsatzView({
         // Auch ein reiner Vertikal-Drag auf eine andere Partie zählt als
         // "bewegt" — sonst würde nur das Info-Popup aufgehen.
         if (d.previewPartie) d.moved = true;
+        // Mitlaufendes Feedback am Cursor, damit klar ist, dass verschoben wird.
+        if (d.moved) {
+          const zielName = d.previewPartie
+            ? partien.find((p) => p.id === d.previewPartie)?.name ?? "Partie"
+            : null;
+          setDragChip({
+            x: ev.clientX,
+            y: ev.clientY,
+            text: zielName ? `→ ${zielName}` : "Verschieben …",
+          });
+        }
       }
     };
     const onUp = async (ev: PointerEvent) => {
@@ -406,6 +481,7 @@ export function PoliereinsatzView({
       setDragPreview(null);
       const zielPartie = d?.previewPartie ?? null;
       setDropPartieId(null);
+      setDragChip(null);
       if (!d) return;
       if (!d.moved) {
         // Reiner Klick → Info-Popup
@@ -782,12 +858,16 @@ export function PoliereinsatzView({
       );
     }
     const breitestes = segmente.reduce((a, b) => (b.width > a.width ? b : a));
+    // Passt der Name in den breitesten Balken? Sonst wird er RECHTS daneben
+    // geschrieben (statt abgeschnitten) — wie im MS-Project-Ausdruck.
+    const zeigtLabelInnen = breitestes.width >= 46;
+    const letztesSeg = segmente[segmente.length - 1];
     return (
       <>
         {segmente.map((geo, si) => {
           const istErstes = si === 0;
           const istLetztes = si === segmente.length - 1;
-          const zeigtLabel = geo === breitestes && geo.width >= 46;
+          const zeigtLabel = geo === breitestes && zeigtLabelInnen;
           return (
             <div
               key={si}
@@ -832,12 +912,33 @@ export function PoliereinsatzView({
             </div>
           );
         })}
+        {/* Name rechts neben dem Balken, wenn er innen nicht reinpasst */}
+        {!zeigtLabelInnen && (
+          <div
+            className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none px-1"
+            style={{
+              left: letztesSeg.left + letztesSeg.width + 3,
+              top: 3,
+              height: ROW_H - 6,
+              lineHeight: `${ROW_H - 6}px`,
+              color: barColor(z),
+            }}
+          >
+            {label}
+          </div>
+        )}
       </>
     );
   };
 
   return (
-    <div className="space-y-3">
+    <div
+      className={
+        vollbild
+          ? "fixed inset-0 z-50 bg-background overflow-auto p-3 space-y-3"
+          : "space-y-3"
+      }
+    >
       {/* Kopf: Navigation + Legende */}
       <Card>
         <CardContent className="p-2 flex items-center gap-2 flex-wrap">
@@ -891,8 +992,18 @@ export function PoliereinsatzView({
               Start nicht fix
             </span>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto"
+            onClick={() => setVollbild((v) => !v)}
+            title={vollbild ? "Vollbild verlassen (Esc)" : "Vollbild"}
+          >
+            {vollbild ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            <span className="hidden sm:inline ml-1.5">{vollbild ? "Vollbild aus" : "Vollbild"}</span>
+          </Button>
           {onNeueBaustelle && (
-            <Button size="sm" className="ml-auto" onClick={onNeueBaustelle}>
+            <Button size="sm" onClick={onNeueBaustelle}>
               <Plus className="h-4 w-4 mr-1.5" /> Neue Baustelle
             </Button>
           )}
@@ -901,12 +1012,18 @@ export function PoliereinsatzView({
 
       <Card className="overflow-hidden hidden md:block">
         <CardContent className="p-0">
-          <div className="flex">
-            {/* Linke Spaltengruppe */}
-            <div className="shrink-0 border-r bg-card z-10" style={{ width: LEFT_W }}>
-              {/* Kopfzeile */}
+          {/* Eigener Scroll-Bereich: linke Spalte + Kopfzeile bleiben beim
+              Scrollen fixiert (sticky). Höhe an den Viewport gekoppelt. */}
+          <div
+            className={`flex relative overflow-auto ${
+              vollbild ? "max-h-[calc(100vh-6rem)]" : "max-h-[calc(100vh-11rem)]"
+            }`}
+          >
+            {/* Linke Spaltengruppe — horizontal fixiert */}
+            <div className="shrink-0 border-r bg-card sticky left-0 z-20" style={{ width: LEFT_W }}>
+              {/* Kopfzeile — Ecke: horizontal + vertikal fixiert */}
               <div
-                className="border-b bg-muted/60 flex items-end px-2 text-[10px] font-semibold uppercase tracking-wide"
+                className="border-b bg-muted/60 flex items-end px-2 text-[10px] font-semibold uppercase tracking-wide sticky top-0 z-30"
                 style={{ height: 42 }}
               >
                 <div className="flex-1 pb-1">Polier / BVH</div>
@@ -1103,32 +1220,46 @@ export function PoliereinsatzView({
               ))}
             </div>
 
-            {/* Zeitachse + Balken */}
-            <div className="flex-1 overflow-x-auto">
+            {/* Zeitachse + Balken — scrollt mit dem Außen-Container */}
+            <div className="shrink-0">
               <div style={{ width: totalDays * DAY_W, position: "relative" }}>
-                {/* Wochen-Header */}
-                <div className="flex border-b bg-muted/60" style={{ height: 21 }}>
+                {/* Wochen-Header — vertikal fixiert */}
+                <div className="flex border-b bg-muted/60 sticky top-0 z-20" style={{ height: 21 }}>
                   {weeks.map((w, i) => {
                     const nextStart = weeks[i + 1]?.startIdx ?? totalDays;
-                    // Kurze Woche = mind. 1 Feiertag an einem Werktag.
-                    const kurz = w.feiertage > 0;
+                    // Kurze Woche = Feiertag ODER kalender-freier Werktag
+                    // (z.B. Freitag frei). Betriebsurlaub-Woche extra.
+                    const kurz = w.feiertage > 0 || w.freie > 0;
+                    const titel = w.bu
+                      ? "Betriebsurlaub"
+                      : kurz
+                        ? `Kurze Woche${w.freie > 0 ? " — Freitag frei" : ""}${w.feiertage > 0 ? ` — ${w.feiertage} Feiertag(e)` : ""}`
+                        : undefined;
                     return (
                       <div
                         key={i}
                         className={`text-[10px] font-semibold flex items-center justify-center gap-1 border-r ${
-                          kurz ? "bg-amber-100 text-amber-900" : ""
+                          w.bu
+                            ? "bg-violet-100 text-violet-900"
+                            : kurz
+                              ? "bg-amber-100 text-amber-900"
+                              : ""
                         }`}
                         style={{ width: (nextStart - w.startIdx) * DAY_W }}
-                        title={kurz ? `Kurze Woche — ${w.feiertage} Feiertag(e)` : undefined}
+                        title={titel}
                       >
                         {w.label}
-                        {kurz && <span className="text-amber-600">●</span>}
+                        {w.bu ? (
+                          <span className="text-violet-600">BU</span>
+                        ) : (
+                          kurz && <span className="text-amber-600">●</span>
+                        )}
                       </div>
                     );
                   })}
                 </div>
-                {/* Tages-Header: Wochentags-Buchstabe + Datum, Feiertag rot */}
-                <div className="flex border-b" style={{ height: 21 }}>
+                {/* Tages-Header: Wochentags-Buchstabe + Datum, Feiertag rot — vertikal fixiert unter dem Wochen-Header */}
+                <div className="flex border-b bg-card sticky top-[21px] z-20" style={{ height: 21 }}>
                   {days.map((d, i) => {
                     const wdBuchstabe = ["S", "M", "D", "M", "D", "F", "S"][d.date.getDay()];
                     return (
@@ -1137,12 +1268,24 @@ export function PoliereinsatzView({
                         className={`text-[8px] flex flex-col items-center justify-center border-r leading-none ${
                           d.feiertag
                             ? "bg-red-100 text-red-700 font-semibold"
-                            : d.isWeekend
-                              ? "bg-muted/70 text-muted-foreground"
-                              : ""
+                            : d.bu
+                              ? "bg-violet-100 text-violet-800"
+                              : d.frei
+                                ? "bg-amber-100 text-amber-800"
+                                : d.isWeekend
+                                  ? "bg-muted/70 text-muted-foreground"
+                                  : ""
                         }`}
                         style={{ width: DAY_W }}
-                        title={d.feiertag ? (feiertagAt(d.iso)?.name ?? "Feiertag") : undefined}
+                        title={
+                          d.feiertag
+                            ? (feiertagAt(d.iso)?.name ?? "Feiertag")
+                            : d.bu
+                              ? "Betriebsurlaub"
+                              : d.frei
+                                ? "Kurze Woche — frei"
+                                : undefined
+                        }
                       >
                         <span>{wdBuchstabe}</span>
                         <span>{d.date.getDate()}</span>
@@ -1347,6 +1490,16 @@ export function PoliereinsatzView({
           );
         })}
       </div>
+
+      {/* Mitlaufender Chip beim Verschieben zwischen Partien */}
+      {dragChip && (
+        <div
+          className="fixed z-[60] pointer-events-none rounded-md bg-primary text-primary-foreground text-xs font-medium px-2.5 py-1 shadow-lg"
+          style={{ left: dragChip.x + 14, top: dragChip.y + 14 }}
+        >
+          {dragChip.text}
+        </div>
+      )}
 
       {/* Info-Popup am Balken */}
       {barInfo && (() => {
@@ -1620,8 +1773,12 @@ export function PoliereinsatzView({
   );
 }
 
-/** Grid-Hintergrund einer Zeile (Wochenend-/Feiertags-Schattierung). */
-function GridBg({ days }: { days: { isWeekend: boolean; feiertag: boolean }[] }) {
+/** Grid-Hintergrund einer Zeile (Wochenend-/Feiertags-/Kalender-Schattierung). */
+function GridBg({
+  days,
+}: {
+  days: { isWeekend: boolean; feiertag: boolean; frei?: boolean; bu?: boolean }[];
+}) {
   return (
     <div className="absolute inset-0 flex pointer-events-none">
       {days.map((d, i) => (
@@ -1630,9 +1787,13 @@ function GridBg({ days }: { days: { isWeekend: boolean; feiertag: boolean }[] })
           className={`border-r ${
             d.feiertag
               ? "bg-red-500/15"
-              : d.isWeekend
-                ? "bg-muted-foreground/15"
-                : ""
+              : d.bu
+                ? "bg-violet-500/15"
+                : d.frei
+                  ? "bg-amber-500/15"
+                  : d.isWeekend
+                    ? "bg-muted-foreground/15"
+                    : ""
           }`}
           style={{ width: DAY_W }}
         />
