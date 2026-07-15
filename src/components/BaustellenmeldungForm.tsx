@@ -55,6 +55,12 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
     initial?.koordinaten_lng != null ? String(initial.koordinaten_lng) : ""
   );
   const [bauherrAdresse, setBauherrAdresse] = useState(initial?.bauherr_adresse ?? "");
+  const [bauherrPlz, setBauherrPlz] = useState<string>((initial as any)?.bauherr_plz ?? "");
+  const [bauherrOrt, setBauherrOrt] = useState<string>((initial as any)?.bauherr_ort ?? "");
+  // Koordinaten sind optional (Karten-Pins) — standardmäßig eingeklappt.
+  const [zeigeKoordinaten, setZeigeKoordinaten] = useState(
+    !!(initial?.koordinaten_lat || initial?.koordinaten_lng),
+  );
   const [startDatum, setStartDatum] = useState(initial?.start_datum ?? "");
   const [endDatum, setEndDatum] = useState(initial?.end_datum ?? "");
   const [bauleiterId, setBauleiterId] = useState<string>(initial?.bauleiter_id ?? "");
@@ -141,6 +147,8 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
       koordinaten_lat: koordLat ? Number(koordLat) : null,
       koordinaten_lng: koordLng ? Number(koordLng) : null,
       bauherr_adresse: bauherrAdresse || null,
+      bauherr_plz: bauherrPlz || null,
+      bauherr_ort: bauherrOrt || null,
       start_datum: startDatum || null,
       end_datum: endDatum || null,
       bauleiter_id: bauleiterId || null,
@@ -257,44 +265,83 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
         <Field label="Bauherr">
           <Input value={bauherr} onChange={(e) => setBauherr(e.target.value)} />
         </Field>
-        <Field label="Baustellenanschrift">
-          <Input
-            value={adresse}
-            onChange={(e) => setAdresse(e.target.value)}
-            placeholder="Straße, Hausnummer"
-          />
-        </Field>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Field label="PLZ">
-            <Input value={plz} onChange={(e) => setPlz(e.target.value)} />
+
+        {/* Wohnanschrift Bauherr — Straße / PLZ / Ort */}
+        <div className="rounded-md border bg-muted/20 p-3 space-y-3">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Wohnanschrift Bauherr
+          </div>
+          <Field label="Straße, Hausnummer">
+            <Input
+              value={bauherrAdresse}
+              onChange={(e) => setBauherrAdresse(e.target.value)}
+              placeholder="Straße, Hausnummer"
+            />
           </Field>
-          <div className="sm:col-span-2">
-            <Field label="Ort">
-              <Input value={ort} onChange={(e) => setOrt(e.target.value)} />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Field label="PLZ">
+              <Input value={bauherrPlz} onChange={(e) => setBauherrPlz(e.target.value)} />
             </Field>
+            <div className="sm:col-span-2">
+              <Field label="Ort">
+                <Input value={bauherrOrt} onChange={(e) => setBauherrOrt(e.target.value)} />
+              </Field>
+            </div>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Koordinaten Lat">
+
+        {/* Baustellenanschrift — Straße / PLZ / Ort */}
+        <div className="rounded-md border bg-muted/20 p-3 space-y-3">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Baustellenanschrift
+          </div>
+          <Field label="Straße, Hausnummer">
             <Input
-              inputMode="decimal"
-              value={koordLat}
-              onChange={(e) => setKoordLat(e.target.value)}
-              placeholder="46.6111"
+              value={adresse}
+              onChange={(e) => setAdresse(e.target.value)}
+              placeholder="Straße, Hausnummer"
             />
           </Field>
-          <Field label="Koordinaten Lng">
-            <Input
-              inputMode="decimal"
-              value={koordLng}
-              onChange={(e) => setKoordLng(e.target.value)}
-              placeholder="13.8558"
-            />
-          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Field label="PLZ">
+              <Input value={plz} onChange={(e) => setPlz(e.target.value)} />
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label="Ort">
+                <Input value={ort} onChange={(e) => setOrt(e.target.value)} />
+              </Field>
+            </div>
+          </div>
+
+          {/* Koordinaten optional — für Karten-Pins, standardmäßig eingeklappt */}
+          <button
+            type="button"
+            onClick={() => setZeigeKoordinaten((v) => !v)}
+            className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
+          >
+            {zeigeKoordinaten ? "Koordinaten ausblenden" : "Koordinaten (optional, für Karte)"}
+          </button>
+          {zeigeKoordinaten && (
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Koordinaten Lat">
+                <Input
+                  inputMode="decimal"
+                  value={koordLat}
+                  onChange={(e) => setKoordLat(e.target.value)}
+                  placeholder="46.6111"
+                />
+              </Field>
+              <Field label="Koordinaten Lng">
+                <Input
+                  inputMode="decimal"
+                  value={koordLng}
+                  onChange={(e) => setKoordLng(e.target.value)}
+                  placeholder="13.8558"
+                />
+              </Field>
+            </div>
+          )}
         </div>
-        <Field label="Wohnanschrift Bauherr">
-          <Input value={bauherrAdresse} onChange={(e) => setBauherrAdresse(e.target.value)} />
-        </Field>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Baubeginn">
             <Input type="date" value={startDatum} onChange={(e) => setStartDatum(e.target.value)} />

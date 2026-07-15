@@ -53,7 +53,9 @@ export async function generateBaustellenanlageDocx(
     adrZeile1, // 3. Baustellenanschrift Zeile 1
     adrZeile2, // 4. Baustellenanschrift Zeile 2 (PLZ Ort)
     koord, // 5. Koordinaten Baustelle
-    b.bauherr_adresse ?? "", // 6. Wohnanschrift Bauherr
+    [b.bauherr_adresse, [(b as any).bauherr_plz, (b as any).bauherr_ort].filter(Boolean).join(" ")]
+      .filter(Boolean)
+      .join(", "), // 6. Wohnanschrift Bauherr (Straße, PLZ Ort)
     fmtDate(b.start_datum), // 7. Baubeginn
     fmtDate(b.end_datum), // 8. Vorr. Ende
     bauleiterName, // 9. Verantwortlicher Bauleiter / § 9 VStG
