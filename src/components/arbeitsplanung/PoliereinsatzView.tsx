@@ -933,21 +933,31 @@ export function PoliereinsatzView({
             </div>
           );
         })}
-        {/* Name rechts neben dem Balken, wenn er innen nicht reinpasst */}
-        {!zeigtLabelInnen && (
-          <div
-            className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none px-1"
-            style={{
-              left: letztesSeg.left + letztesSeg.width + 3,
-              top: 3,
-              height: ROW_H - 6,
-              lineHeight: `${ROW_H - 6}px`,
-              color: barColor(z),
-            }}
-          >
-            {label}
-          </div>
-        )}
+        {/* Name rechts neben dem Balken, wenn er innen nicht reinpasst —
+            als deckender Chip, damit er beim Scrollen nicht mit Raster/
+            anderen Zeilen verschwimmt. */}
+        {!zeigtLabelInnen && (() => {
+          const labelLeft = letztesSeg.left + letztesSeg.width + 3;
+          // Am Rasterende kappen — sonst vergrößert das Label die Scrollbreite.
+          const maxW = Math.max(0, Math.min(220, totalDays * DAY_W - labelLeft - 2));
+          if (maxW < 24) return null;
+          return (
+            <div
+              className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none px-1 rounded bg-card/95 border truncate"
+              style={{
+                left: labelLeft,
+                maxWidth: maxW,
+                top: 4,
+                height: ROW_H - 8,
+                lineHeight: `${ROW_H - 10}px`,
+                color: barColor(z),
+                borderColor: `${barColor(z)}66`,
+              }}
+            >
+              {label}
+            </div>
+          );
+        })()}
       </>
     );
   };
@@ -1203,7 +1213,12 @@ export function PoliereinsatzView({
                         <div className="flex-1 truncate pl-5" title={b?.bvh_name ?? "?"}>
                           {b?.bvh_name ?? "?"}
                         </div>
-                        <div className="w-12 text-[10px] text-muted-foreground tabular-nums">
+                        {/* Einzeilig + abgeschnitten — lange Unter-KSTs
+                            (1404030-2602) brachen sonst in die Nachbarzeile um */}
+                        <div
+                          className="w-12 text-[9px] text-muted-foreground tabular-nums whitespace-nowrap overflow-hidden"
+                          title={b?.kostenstelle ?? ""}
+                        >
                           {b?.kostenstelle ?? ""}
                         </div>
                         <div className="w-6 text-center text-[10px]">
