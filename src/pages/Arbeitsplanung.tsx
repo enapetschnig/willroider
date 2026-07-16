@@ -1315,19 +1315,34 @@ export default function Arbeitsplanung() {
         const existingSet = new Set((existing ?? []).map((r: any) => r.datum));
         const toInsert = dates.filter((d) => !existingSet.has(d));
         if (toInsert.length > 0) {
-          const { error: insErr } = await supabase.from("stunden_tage").insert(
-            toInsert.map((datum) => ({
-              mitarbeiter_id: mitarbeiterId,
-              datum,
-              tag_status: tagStatus,
-              netto_stunden: 0,
-              status: "erfasst" as const,
-            })),
-          );
+          const { data: neueTage, error: insErr } = await supabase
+            .from("stunden_tage")
+            .insert(
+              toInsert.map((datum) => ({
+                mitarbeiter_id: mitarbeiterId,
+                datum,
+                tag_status: tagStatus,
+                netto_stunden: 0,
+                status: "erfasst" as const,
+              })),
+            )
+            .select("id");
           if (insErr) {
             toast({ variant: "destructive", title: "Fehlzeit setzen fehlgeschlagen", description: insErr.message });
             loadAssignments();
             return false;
+          }
+          // 0h-Tätigkeitszeile je Tag — sonst zeigt der Baustellenstunden-
+          // bericht (Raster/PDF) den Tag als "Kein Eintrag" statt U/K/SW.
+          if (neueTage && neueTage.length > 0) {
+            await supabase.from("stunden_taetigkeiten").insert(
+              neueTage.map((t: any) => ({
+                stunden_tag_id: t.id,
+                position: 1,
+                stunden: 0,
+                art: tagStatus,
+              })),
+            );
           }
         }
         // Bestehende (noch nicht freigegebene) Tage auf Fehlzeit umstellen.
@@ -1356,6 +1371,16 @@ export default function Arbeitsplanung() {
             loadAssignments();
             return false;
           }
+          // 0h-Tätigkeitszeile nachlegen (alte Tätigkeiten wurden gelöscht) —
+          // sonst zeigt der BSB "Kein Eintrag" statt U/K/SW.
+          await supabase.from("stunden_taetigkeiten").insert(
+            tagIds.map((id: string) => ({
+              stunden_tag_id: id,
+              position: 1,
+              stunden: 0,
+              art: tagStatus,
+            })),
+          );
         }
       }
       toast({

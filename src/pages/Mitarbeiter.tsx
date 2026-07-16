@@ -123,7 +123,7 @@ type RolleRow = {
 
 export default function Mitarbeiter() {
   const { toast } = useToast();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user: currentUser } = useAuth();
   const canDeleteMa = hasPermission("mitarbeiter.delete");
   const [params, setParams] = useSearchParams();
   const initialTab =
@@ -278,6 +278,27 @@ export default function Mitarbeiter() {
   const setRole = async (userId: string, rolleId: string) => {
     const rolle = rollenListe.find((r) => r.id === rolleId);
     if (!rolle) return;
+    // Selbst-Aussperrungs-Schutz: die EIGENE Rolle darf nur auf eine Rolle
+    // mit Admin-Zugang geändert werden — sonst fliegt der Admin sofort aus
+    // der Verwaltung und niemand kann es rückgängig machen.
+    if (currentUser && userId === currentUser.id) {
+      const { data: adminRecht } = await supabase
+        .from("rollen_berechtigungen" as any)
+        .select("berechtigung:berechtigungen!inner(schluessel)")
+        .eq("rolle_id", rolleId)
+        .in("berechtigung.schluessel", ["admin.view", "system.admin_panel"])
+        .limit(1);
+      if (!adminRecht || adminRecht.length === 0) {
+        toast({
+          variant: "destructive",
+          title: "Nicht möglich",
+          description:
+            "Du kannst deine eigene Rolle nicht auf eine Rolle ohne Verwaltungs-Zugang ändern — du würdest dich selbst aussperren. Bitte einen anderen Admin darum.",
+        });
+        load(); // Dropdown zurücksetzen
+        return;
+      }
+    }
     // Atomares UPDATE statt delete+insert: schlug der Insert fehl (z.B.
     // RLS beim Ändern der EIGENEN Rolle), hatte der User GAR KEINE Rolle
     // mehr — beim Admin selbst ein kompletter Lockout.

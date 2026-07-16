@@ -485,6 +485,46 @@ export default function Tagesplanung() {
   /** Kopiert alle Einteilungen vom letzten Werktag (oder Vortag) auf den aktuellen Tag.
    *  Skippt MA, die heute krank/Urlaub/SW haben — die werden in der Sonderfälle-Sektion gezeigt. */
   const [copyBusy, setCopyBusy] = useState(false);
+
+  /** Tages-Belegung FRISCH aus der DB (nicht aus dem React-Query-Cache):
+   *  bereits eingeteilte Mitarbeiter + zugeteilte Fahrzeuge + Abwesende.
+   *  Schützt die Übernahme-Funktionen vor Doppelzuteilung durch stale
+   *  Cache (Datumswechsel, paralleler Bearbeiter, confirm()-Blockade). */
+  async function ladeTagesBelegung(): Promise<{
+    maIds: Set<string>;
+    fzIds: Set<string>;
+    abwesend: Set<string>;
+  }> {
+    const [{ data: em }, { data: ef }, { data: abw }, { data: antr }] = await Promise.all([
+      supabase
+        .from("einteilung_mitarbeiter")
+        .select("mitarbeiter_id, einteilung:einteilungen!inner(datum)")
+        .eq("einteilung.datum", datum),
+      supabase
+        .from("einteilung_fahrzeuge")
+        .select("fahrzeug_id, einteilung:einteilungen!inner(datum)")
+        .eq("einteilung.datum", datum),
+      supabase
+        .from("stunden_tage")
+        .select("mitarbeiter_id")
+        .eq("datum", datum)
+        .in("tag_status", ["urlaub", "krank", "schlechtwetter"]),
+      supabase
+        .from("urlaubsantraege")
+        .select("mitarbeiter_id")
+        .eq("status", "genehmigt")
+        .lte("von", datum)
+        .gte("bis", datum),
+    ]);
+    return {
+      maIds: new Set(((em as any[]) ?? []).map((r) => r.mitarbeiter_id)),
+      fzIds: new Set(((ef as any[]) ?? []).map((r) => r.fahrzeug_id)),
+      abwesend: new Set([
+        ...(((abw as any[]) ?? []).map((r) => r.mitarbeiter_id)),
+        ...(((antr as any[]) ?? []).map((r) => r.mitarbeiter_id)),
+      ]),
+    };
+  }
   async function uebernehmePlanVomVortag() {
     if (copyBusy) return;
     setCopyBusy(true);
@@ -530,8 +570,8 @@ export default function Tagesplanung() {
     ]);
 
     // Pro Quell-Einteilung neue Einteilung anlegen.
-    // Jeder MA nur 1x/Tag: mit bereits eingeteilten MA vorbefüllen.
-    const schonEingeteilt = new Set<string>(eingeteilteIds);
+    // Jeder MA nur 1x/Tag: Belegung FRISCH aus der DB (stale-Cache-Schutz).
+    const schonEingeteilt = (await ladeTagesBelegung()).maIds;
     let saved = 0;
     let skipped = 0;
     for (const quell of einteilungenVomQuell) {
@@ -639,8 +679,8 @@ export default function Tagesplanung() {
           .in("einteilung_id", jpIds),
       ]);
 
-      // Jeder MA nur 1x/Tag: mit bereits eingeteilten MA vorbefüllen.
-      const schonEingeteilt = new Set<string>(eingeteilteIds);
+      // Jeder MA nur 1x/Tag: Belegung FRISCH aus der DB (stale-Cache-Schutz).
+      const schonEingeteilt = (await ladeTagesBelegung()).maIds;
       let saved = 0;
       let skipped = 0;
       for (const jp of jpEinteilungen) {
@@ -748,6 +788,10 @@ export default function Tagesplanung() {
       )
         return;
 
+      // Tages-Belegung FRISCH aus der DB — nicht aus dem evtl. veralteten
+      // React-Query-Cache (Datumswechsel, paralleler Bearbeiter).
+      const belegung = await ladeTagesBelegung();
+
       // Aktive Mitarbeiter je Partie (abwesende überspringen)
       const { data: alleProfile } = await supabase
         .from("profiles")
@@ -755,7 +799,7 @@ export default function Tagesplanung() {
       const maByPartie = new Map<string, string[]>();
       ((alleProfile as any[]) ?? [])
         .filter((p) => p.is_active !== false && p.partie_id)
-        .filter((p) => !abwesendIds.has(p.id))
+        .filter((p) => !belegung.abwesend.has(p.id))
         .forEach((p) => {
           if (!maByPartie.has(p.partie_id)) maByPartie.set(p.partie_id, []);
           maByPartie.get(p.partie_id)!.push(p.id);
@@ -772,16 +816,14 @@ export default function Tagesplanung() {
           if (!fzByPartie.has(f.partie_id)) fzByPartie.set(f.partie_id, []);
           fzByPartie.get(f.partie_id)!.push(f.id);
         });
-      // Ein Fahrzeug nur 1x/Tag: mit bereits zugeteilten vorbefüllen.
-      const schonFahrzeug = new Set<string>(
-        (plan?.einteilungen ?? []).flatMap((e) => e.fahrzeuge.map((f) => f.id)),
-      );
+      // Ein Fahrzeug nur 1x/Tag: mit bereits zugeteilten vorbefüllen (frisch).
+      const schonFahrzeug = belegung.fzIds;
 
       // Jeder Mitarbeiter darf pro Tag nur EINER Baustelle zugeteilt werden.
       // WICHTIG: vorbefüllen mit den MA, die am Tag SCHON eingeteilt sind
       // (manuell, Plan vom Vortag, Jahresplanung, übersprungene Baustellen)
       // — sonst würde die Übernahme sie ein zweites Mal zuteilen.
-      const schonEingeteilt = new Set<string>(eingeteilteIds);
+      const schonEingeteilt = belegung.maIds;
       let saved = 0;
       let skipped = 0;
       let ohneMa = 0;
@@ -849,7 +891,8 @@ export default function Tagesplanung() {
               fahrzeug_id: fid,
             })),
           );
-          if (!efErr) fzIds.forEach((fid) => schonFahrzeug.add(fid));
+          if (efErr) fehler++;
+          else fzIds.forEach((fid) => schonFahrzeug.add(fid));
         }
         saved++;
       }
@@ -1148,7 +1191,7 @@ export default function Tagesplanung() {
             variant="outline"
             size="sm"
             onClick={uebernehmePlanVomVortag}
-            disabled={copyBusy}
+            disabled={copyBusy || isLoading || !plan}
           >
             <Copy className="h-4 w-4 mr-1.5" /> Plan vom Vortag
           </Button>
@@ -1156,7 +1199,7 @@ export default function Tagesplanung() {
             variant="outline"
             size="sm"
             onClick={uebernehmeAusPolierplanung}
-            disabled={copyBusy}
+            disabled={copyBusy || isLoading || !plan}
             title="Baustellen + Partie-Mitarbeiter aus der Polierplanung übernehmen"
           >
             <Users className="h-4 w-4 mr-1.5" /> Aus Polierplanung
@@ -1165,7 +1208,7 @@ export default function Tagesplanung() {
             variant="outline"
             size="sm"
             onClick={uebernehmeAusJahresplanung}
-            disabled={copyBusy}
+            disabled={copyBusy || isLoading || !plan}
           >
             <CalendarRange className="h-4 w-4 mr-1.5" /> Aus Jahresplanung
           </Button>

@@ -606,18 +606,42 @@ function EditRolleDialog({
   };
 
   const remove = async () => {
+    // Selbstschutz: die eigene Rolle nicht löschen — man würde auf
+    // 'Mitarbeiter' fallen und sich selbst aus der Verwaltung aussperren.
+    const { data: auth } = await supabase.auth.getUser();
+    if (auth?.user) {
+      const { data: eigene } = await supabase
+        .from("user_roles")
+        .select("rolle_id")
+        .eq("user_id", auth.user.id)
+        .maybeSingle();
+      if ((eigene as any)?.rolle_id === rolle.id) {
+        toast({
+          variant: "destructive",
+          title: "Nicht möglich",
+          description: "Du kannst deine eigene Rolle nicht löschen — bitte einen anderen Admin darum.",
+        });
+        return;
+      }
+    }
     if (!window.confirm(`Rolle "${rolle.bezeichnung}" wirklich löschen? Zugewiesene User landen auf "Mitarbeiter".`)) return;
     // Vorher: alle user_roles auf 'mitarbeiter' setzen
-    const { data: mitarbeiterRolle } = await supabase
+    const { data: mitarbeiterRolle, error: mErr } = await supabase
       .from("rollen")
       .select("id")
       .eq("schluessel", "mitarbeiter")
       .single();
-    if (mitarbeiterRolle) {
-      await supabase
-        .from("user_roles")
-        .update({ rolle_id: mitarbeiterRolle.id })
-        .eq("rolle_id", rolle.id);
+    if (mErr || !mitarbeiterRolle) {
+      toast({ variant: "destructive", title: "Löschen abgebrochen", description: "Mitarbeiter-Rolle nicht gefunden — User könnten sonst ohne Rolle enden." });
+      return;
+    }
+    const { error: umErr } = await supabase
+      .from("user_roles")
+      .update({ rolle_id: mitarbeiterRolle.id })
+      .eq("rolle_id", rolle.id);
+    if (umErr) {
+      toast({ variant: "destructive", title: "Löschen abgebrochen", description: `User-Umhängung fehlgeschlagen: ${umErr.message}` });
+      return;
     }
     const { error } = await supabase.from("rollen").delete().eq("id", rolle.id);
     if (error) {

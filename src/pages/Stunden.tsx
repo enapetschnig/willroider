@@ -299,19 +299,23 @@ export default function Stunden() {
       ),
     [user, allMembers],
   );
-  const { data: statusForDateMap = new Map<string, { hours: number }>() } = useQuery({
+  const { data: statusForDateMap = new Map<string, { hours: number; tagStatus?: string }>() } = useQuery({
     queryKey: ["stunden_status_for_date", date, memberIds],
     queryFn: async () => {
-      if (memberIds.length === 0) return new Map<string, { hours: number }>();
+      if (memberIds.length === 0) return new Map<string, { hours: number; tagStatus?: string }>();
       const { data } = await supabase
         .from("stunden_tage")
-        .select("mitarbeiter_id, netto_stunden")
+        .select("mitarbeiter_id, netto_stunden, tag_status")
         .eq("datum", date)
         .in("mitarbeiter_id", memberIds);
-      const map = new Map<string, { hours: number }>();
+      const map = new Map<string, { hours: number; tagStatus?: string }>();
       (data ?? []).forEach((r: any) => {
         const cur = map.get(r.mitarbeiter_id) ?? { hours: 0 };
         cur.hours += Number(r.netto_stunden ?? 0);
+        // Fehlzeit-Status merken (Urlaub/Krank/SW) — für 0h-Tage sonst unsichtbar
+        if (r.tag_status && r.tag_status !== "baustelle" && r.tag_status !== "firma") {
+          cur.tagStatus = r.tag_status;
+        }
         map.set(r.mitarbeiter_id, cur);
       });
       return map;
@@ -521,11 +525,16 @@ export default function Stunden() {
       .filter(Boolean) as Profile[];
   }, [forUserIds, allMembers, profile, user]);
 
-  // MA mit bereits gebuchten Stunden an diesem Tag (Konflikt-Banner)
+  // MA mit bereits gebuchtem Tag (Stunden ODER Fehlzeit wie Urlaub/Krank) —
+  // 0h-Urlaubstage waren vorher unsichtbar und blockierten die Vorbefüllung
+  // ohne jeden Hinweis.
   const konflikte = useMemo(() => {
     return selectedMaList
-      .map((m) => ({ ma: m, h: statusForDateMap.get(m.id)?.hours ?? 0 }))
-      .filter((x) => x.h > 0);
+      .map((m) => {
+        const s = statusForDateMap.get(m.id);
+        return { ma: m, h: s?.hours ?? 0, tagStatus: s?.tagStatus };
+      })
+      .filter((x) => x.h > 0 || !!x.tagStatus);
   }, [selectedMaList, statusForDateMap]);
 
   const arbeitsbeginnEffective =
@@ -944,17 +953,20 @@ export default function Stunden() {
             <AlertTriangle className="h-4 w-4 text-amber-700 shrink-0" />
             <span className="text-sm font-semibold text-amber-900">
               {konflikte.length === 1
-                ? "1 Mitarbeiter hat an diesem Tag bereits Stunden"
-                : `${konflikte.length} Mitarbeiter haben an diesem Tag bereits Stunden`}
+                ? "1 Mitarbeiter hat an diesem Tag bereits einen Eintrag"
+                : `${konflikte.length} Mitarbeiter haben an diesem Tag bereits einen Eintrag`}
             </span>
           </div>
           <ul className="text-xs text-amber-900 pl-6 space-y-0.5">
-            {konflikte.map(({ ma, h }) => (
+            {konflikte.map(({ ma, h, tagStatus }) => (
               <li key={ma.id} className="tabular-nums">
                 <span className="font-medium">
                   {ma.vorname} {ma.nachname}:
                 </span>{" "}
-                {fmtH(h)}
+                {tagStatus
+                  ? ({ urlaub: "Urlaub", krank: "Krank", schlechtwetter: "Schlechtwetter", feiertag: "Feiertag" }[tagStatus] ?? tagStatus) +
+                    (h > 0 ? ` + ${fmtH(h)}` : "")
+                  : fmtH(h)}
               </li>
             ))}
           </ul>

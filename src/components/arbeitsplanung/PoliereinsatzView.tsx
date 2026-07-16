@@ -210,7 +210,10 @@ export function PoliereinsatzView({
         .select("mitarbeiter_id, datum")
         .eq("tag_status", "urlaub")
         .gte("datum", rangeStartIso)
-        .lte("datum", rangeEndIso),
+        .lte("datum", rangeEndIso)
+        // PostgREST kappt standardmäßig bei 1000 Zeilen — bei vielen
+        // Urlauben (26-Wochen-Fenster × 47 MA) würden Balken fehlen.
+        .range(0, 9999),
     ]);
     if (zErr) {
       toast({ variant: "destructive", title: "Laden fehlgeschlagen", description: zErr.message });
@@ -268,10 +271,12 @@ export function PoliereinsatzView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rangeStartIso, rangeEndIso]);
 
-  // Vollbild per Escape verlassen.
+  // Vollbild per Escape verlassen — aber NICHT, wenn ein Dialog das Esc
+  // schon konsumiert hat (Radix ruft preventDefault beim Dialog-Schließen).
   useEffect(() => {
     if (!vollbild) return;
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if (e.key === "Escape") setVollbild(false);
     };
     window.addEventListener("keydown", onKey);
@@ -398,7 +403,10 @@ export function PoliereinsatzView({
   }, [partien, zeitraeume, profiles, profilesById]);
 
   const bauleiter = useMemo(
-    () => profiles.filter((p) => p.planungsfarbe).sort((a, b) => a.nachname.localeCompare(b.nachname)),
+    () =>
+      profiles
+        .filter((p) => p.planungsfarbe && p.is_active !== false)
+        .sort((a, b) => a.nachname.localeCompare(b.nachname)),
     [profiles],
   );
 
@@ -1248,8 +1256,9 @@ export function PoliereinsatzView({
             {/* Zeitachse + Balken — scrollt mit dem Außen-Container */}
             <div className="shrink-0">
               <div style={{ width: totalDays * DAY_W, position: "relative" }}>
-                {/* Wochen-Header — vertikal fixiert */}
-                <div className="flex border-b bg-muted/60 sticky top-0 z-20" style={{ height: 21 }}>
+                {/* Wochen-Header — vertikal fixiert. z-10 (unter der linken
+                    z-20-Spalte, sonst übermalt er beim Horizontal-Scroll die Ecke) */}
+                <div className="flex border-b bg-muted sticky top-0 z-10" style={{ height: 21 }}>
                   {weeks.map((w, i) => {
                     const nextStart = weeks[i + 1]?.startIdx ?? totalDays;
                     // Kurze Woche = Feiertag ODER kalender-freier Werktag
@@ -1284,7 +1293,7 @@ export function PoliereinsatzView({
                   })}
                 </div>
                 {/* Tages-Header: Wochentags-Buchstabe + Datum, Feiertag rot — vertikal fixiert unter dem Wochen-Header */}
-                <div className="flex border-b bg-card sticky top-[21px] z-20" style={{ height: 21 }}>
+                <div className="flex border-b bg-card sticky top-[21px] z-10" style={{ height: 21 }}>
                   {days.map((d, i) => {
                     const wdBuchstabe = ["S", "M", "D", "M", "D", "F", "S"][d.date.getDay()];
                     return (
