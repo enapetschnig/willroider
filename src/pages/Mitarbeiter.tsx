@@ -111,12 +111,15 @@ function MaZulagenSection({ mitarbeiterId }: { mitarbeiterId: string }) {
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
 
-const ROLES: { value: AppRole; label: string }[] = [
-  { value: "geschaeftsfuehrung", label: "Geschäftsführung" },
-  { value: "bauleiter", label: "Vorarbeiter" },
-  { value: "buero", label: "Büro" },
-  { value: "mitarbeiter", label: "Mitarbeiter" },
-];
+/** Rollen kommen dynamisch aus der rollen-Tabelle — damit erscheinen auch
+ *  selbst angelegte Rollen und Umbenennungen sofort im Dropdown. */
+type RolleRow = {
+  id: string;
+  schluessel: string;
+  bezeichnung: string;
+  legacy_enum: AppRole | null;
+  sort_order: number | null;
+};
 
 export default function Mitarbeiter() {
   const { toast } = useToast();
@@ -140,7 +143,9 @@ export default function Mitarbeiter() {
   };
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
-  const [roles, setRoles] = useState<Record<string, AppRole>>({});
+  const [rollenListe, setRollenListe] = useState<RolleRow[]>([]);
+  /** user_id → rollen.id (Quelle der Wahrheit für Berechtigungen). */
+  const [roles, setRoles] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<Profile | null>(null);
   const [editingSensitive, setEditingSensitive] = useState<
     Database["public"]["Tables"]["profiles_sensitive"]["Row"] | null
@@ -154,19 +159,32 @@ export default function Mitarbeiter() {
   const [credentials, setCredentials] = useState<CredentialsResult | null>(null);
 
   const load = async () => {
-    const [profRes, partRes, roleRes] = await Promise.all([
+    const [profRes, partRes, roleRes, rollenRes] = await Promise.all([
       supabase.from("profiles").select("*").order("nachname"),
       supabase.from("partien").select("*").order("name"),
-      supabase.from("user_roles").select("user_id, role"),
+      supabase.from("user_roles").select("user_id, role, rolle_id"),
+      supabase
+        .from("rollen" as any)
+        .select("id, schluessel, bezeichnung, legacy_enum, sort_order")
+        .order("sort_order"),
     ]);
     setProfiles((profRes.data as Profile[]) ?? []);
     setPartien((partRes.data as Partie[]) ?? []);
-    const map: Record<string, AppRole> = {};
+    const rollen = (rollenRes.data as unknown as RolleRow[]) ?? [];
+    setRollenListe(rollen);
+    // user → rolle_id; Alt-Zeilen ohne rolle_id über das legacy-Enum auflösen.
+    const byEnum = new Map(rollen.filter((r) => r.legacy_enum).map((r) => [r.legacy_enum, r.id]));
+    const map: Record<string, string> = {};
     (roleRes.data ?? []).forEach((r: any) => {
-      map[r.user_id] = r.role;
+      const rid = r.rolle_id ?? byEnum.get(r.role);
+      if (rid) map[r.user_id] = rid;
     });
     setRoles(map);
   };
+
+  /** Fallback fürs Dropdown, wenn ein User (noch) keine Rolle hat. */
+  const mitarbeiterRolleId =
+    rollenListe.find((r) => r.schluessel === "mitarbeiter")?.id ?? "";
 
   useEffect(() => {
     load();
@@ -257,14 +275,17 @@ export default function Mitarbeiter() {
     load();
   };
 
-  const setRole = async (userId: string, role: AppRole) => {
+  const setRole = async (userId: string, rolleId: string) => {
+    const rolle = rollenListe.find((r) => r.id === rolleId);
+    if (!rolle) return;
     // Atomares UPDATE statt delete+insert: schlug der Insert fehl (z.B.
     // RLS beim Ändern der EIGENEN Rolle), hatte der User GAR KEINE Rolle
     // mehr — beim Admin selbst ein kompletter Lockout.
-    // Der Sync-Trigger zieht rolle_id aus dem role-ENUM nach.
+    // Der Sync-Trigger (fn_sync_user_role_enum) leitet aus rolle_id das
+    // legacy role-ENUM ab — Custom-Rollen bekommen 'mitarbeiter' als Basis.
     const { data: updated, error } = await supabase
       .from("user_roles")
-      .update({ role })
+      .update({ rolle_id: rolleId })
       .eq("user_id", userId)
       .select("user_id");
     if (error) {
@@ -275,13 +296,13 @@ export default function Mitarbeiter() {
       // Kein user_roles-Eintrag vorhanden (Alt-Datenbestand) → anlegen.
       const { error: insErr } = await supabase
         .from("user_roles")
-        .insert({ user_id: userId, role });
+        .insert({ user_id: userId, role: rolle.legacy_enum ?? "mitarbeiter", rolle_id: rolleId });
       if (insErr) {
         toast({ variant: "destructive", title: "Fehler", description: insErr.message });
         return;
       }
     }
-    toast({ title: "Rolle aktualisiert" });
+    toast({ title: `Rolle: ${rolle.bezeichnung}` });
     load();
   };
 
@@ -505,13 +526,13 @@ export default function Mitarbeiter() {
                         </Badge>
                       )}
                       <select
-                        value={roles[p.id] ?? "mitarbeiter"}
-                        onChange={(e) => setRole(p.id, e.target.value as AppRole)}
+                        value={roles[p.id] ?? mitarbeiterRolleId}
+                        onChange={(e) => setRole(p.id, e.target.value)}
                         className="h-9 text-xs rounded-md border bg-background px-2 flex-1 min-w-0"
                       >
-                        {ROLES.map((r) => (
-                          <option key={r.value} value={r.value}>
-                            {r.label}
+                        {rollenListe.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.bezeichnung}
                           </option>
                         ))}
                       </select>
@@ -612,13 +633,13 @@ export default function Mitarbeiter() {
                         </TableCell>
                         <TableCell>
                           <select
-                            value={roles[p.id] ?? "mitarbeiter"}
-                            onChange={(e) => setRole(p.id, e.target.value as AppRole)}
+                            value={roles[p.id] ?? mitarbeiterRolleId}
+                            onChange={(e) => setRole(p.id, e.target.value)}
                             className="h-8 text-xs rounded-md border bg-background px-2"
                           >
-                            {ROLES.map((r) => (
-                              <option key={r.value} value={r.value}>
-                                {r.label}
+                            {rollenListe.map((r) => (
+                              <option key={r.id} value={r.id}>
+                                {r.bezeichnung}
                               </option>
                             ))}
                           </select>

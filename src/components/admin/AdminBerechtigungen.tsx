@@ -320,15 +320,18 @@ export function AdminBerechtigungen() {
                       <Save className="h-3.5 w-3.5 mr-1.5" />
                       {saving ? "Speichere …" : "Speichern"}
                     </Button>
-                    {!selRolle.is_system && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setEditRolleOpen(true)}
-                      >
-                        Bearbeiten
-                      </Button>
-                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setEditRolleOpen(true)}
+                      title={
+                        selRolle.is_system
+                          ? "Umbenennen möglich — System-Rollen können nicht gelöscht werden"
+                          : "Umbenennen oder löschen"
+                      }
+                    >
+                      Bearbeiten
+                    </Button>
                   </div>
                 </div>
 
@@ -421,7 +424,7 @@ export function AdminBerechtigungen() {
         templates={rollen}
       />
 
-      {selRolle && !selRolle.is_system && (
+      {selRolle && (
         <EditRolleDialog
           rolle={selRolle}
           open={editRolleOpen}
@@ -643,12 +646,18 @@ function EditRolleDialog({
           </div>
           <div className="text-xs text-muted-foreground">
             Schlüssel <code>{rolle.schluessel}</code> kann nicht geändert werden.
+            {rolle.is_system &&
+              " System-Rollen können umbenannt, aber nicht gelöscht werden."}
           </div>
         </div>
         <DialogFooter className="justify-between">
-          <Button variant="outline" className="text-destructive" onClick={remove}>
-            <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Löschen
-          </Button>
+          {rolle.is_system ? (
+            <span />
+          ) : (
+            <Button variant="outline" className="text-destructive" onClick={remove}>
+              <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Löschen
+            </Button>
+          )}
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Abbrechen
