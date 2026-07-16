@@ -761,6 +761,22 @@ export default function Tagesplanung() {
           maByPartie.get(p.partie_id)!.push(p.id);
         });
 
+      // Stamm-Fahrzeuge je Partie — kommen automatisch mit auf die Baustelle.
+      const { data: alleFahrzeuge } = await supabase
+        .from("fahrzeuge")
+        .select("id, partie_id, aktiv" as "*");
+      const fzByPartie = new Map<string, string[]>();
+      ((alleFahrzeuge as any[]) ?? [])
+        .filter((f) => f.aktiv !== false && f.partie_id)
+        .forEach((f) => {
+          if (!fzByPartie.has(f.partie_id)) fzByPartie.set(f.partie_id, []);
+          fzByPartie.get(f.partie_id)!.push(f.id);
+        });
+      // Ein Fahrzeug nur 1x/Tag: mit bereits zugeteilten vorbefüllen.
+      const schonFahrzeug = new Set<string>(
+        (plan?.einteilungen ?? []).flatMap((e) => e.fahrzeuge.map((f) => f.id)),
+      );
+
       // Jeder Mitarbeiter darf pro Tag nur EINER Baustelle zugeteilt werden.
       // WICHTIG: vorbefüllen mit den MA, die am Tag SCHON eingeteilt sind
       // (manuell, Plan vom Vortag, Jahresplanung, übersprungene Baustellen)
@@ -820,6 +836,20 @@ export default function Tagesplanung() {
           }
         } else {
           ohneMa++;
+        }
+
+        // Stamm-Fahrzeuge der Partie mitgeben (jedes Fahrzeug nur 1x/Tag).
+        const fzIds = (fzByPartie.get(z.partie_id) ?? []).filter(
+          (fid) => !schonFahrzeug.has(fid),
+        );
+        if (fzIds.length > 0) {
+          const { error: efErr } = await supabase.from("einteilung_fahrzeuge").insert(
+            fzIds.map((fid) => ({
+              einteilung_id: neu.id,
+              fahrzeug_id: fid,
+            })),
+          );
+          if (!efErr) fzIds.forEach((fid) => schonFahrzeug.add(fid));
         }
         saved++;
       }
@@ -1741,6 +1771,7 @@ function EinteilungsZeile({
                 einteilungId={e.einteilung.id}
                 name={`${m.profil.nachname} ${m.profil.vorname}`}
                 gelesen={!!m.ma.gelesen_am}
+                leiter={!!(m.profil as any).is_partieleiter}
                 onRemove={() => onRemoveMa(m.ma.id, e.einteilung.id)}
               />
             ) : null,
@@ -2087,12 +2118,15 @@ function DraggableMa({
   einteilungId,
   name,
   gelesen,
+  leiter,
   onRemove,
 }: {
   emId: string;
   einteilungId: string;
   name: string;
   gelesen: boolean;
+  /** Polier/Partieleiter — fett und ganz oben. */
+  leiter?: boolean;
   onRemove: () => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -2113,7 +2147,7 @@ function DraggableMa({
       {...attributes}
       {...listeners}
     >
-      <span style={{ fontWeight: 500 }}>
+      <span style={{ fontWeight: leiter ? 700 : 500 }} title={leiter ? "Polier/Partieleiter" : undefined}>
         {name}
         {gelesen && (
           <span

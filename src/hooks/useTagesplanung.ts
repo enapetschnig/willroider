@@ -160,6 +160,10 @@ export function useTagesplanung(datum: string) {
           baustelle: baustellen.get(e.baustelle_id) ?? null,
           fahrzeuge: efByEinteilung.get(e.id) ?? [],
           mitarbeiter: (emByEinteilung.get(e.id) ?? []).sort((a, b) => {
+            // Polier/Partieleiter immer ganz oben, danach alphabetisch.
+            const al = a.profil?.is_partieleiter ? 0 : 1;
+            const bl = b.profil?.is_partieleiter ? 0 : 1;
+            if (al !== bl) return al - bl;
             const an = a.profil?.nachname ?? "";
             const bn = b.profil?.nachname ?? "";
             return an.localeCompare(bn);

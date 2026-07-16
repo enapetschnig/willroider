@@ -44,17 +44,20 @@ export default function Fahrzeuge() {
   const canDelete = hasPermission("fahrzeuge.delete");
   const [data, setData] = useState<Fahrzeug[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [partien, setPartien] = useState<{ id: string; name: string; farbcode: string | null }[]>([]);
   const [editing, setEditing] = useState<Partial<Fahrzeug> | null>(null);
   const [tab, setTab] = useState<FahrzeugKategorie>("baustelle");
   const [assignTarget, setAssignTarget] = useState<Fahrzeug | null>(null);
 
   const load = async () => {
-    const [{ data: rows }, { data: ps }] = await Promise.all([
+    const [{ data: rows }, { data: ps }, { data: pt }] = await Promise.all([
       supabase.from("fahrzeuge").select("*").order("inventar_nr"),
       supabase.from("profiles").select("*").eq("is_active", true).order("nachname"),
+      supabase.from("partien").select("id, name, farbcode, sort_order" as "*").order("sort_order"),
     ]);
     setData((rows as Fahrzeug[]) ?? []);
     setProfiles((ps as Profile[]) ?? []);
+    setPartien((pt as any[]) ?? []);
   };
   useEffect(() => {
     load();
@@ -124,6 +127,21 @@ export default function Fahrzeuge() {
       return;
     }
     toast({ title: "Fahrzeug gelöscht" });
+    load();
+  };
+
+  /** Stamm-Partie des Fahrzeugs — wird bei „Aus Polierplanung übernehmen"
+   *  automatisch der Baustelle der Partie zugeteilt. */
+  const setFahrzeugPartie = async (fahrzeugId: string, partieId: string | null) => {
+    const { error } = await supabase
+      .from("fahrzeuge")
+      .update({ partie_id: partieId } as any)
+      .eq("id", fahrzeugId);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    toast({ title: partieId ? "Partie zugeordnet" : "Partie-Zuordnung entfernt" });
     load();
   };
 
@@ -255,6 +273,33 @@ export default function Fahrzeuge() {
                           {f.standard_fahrer_notiz ? "→ zuordnen" : "+ Fahrer zuordnen"}
                         </button>
                       </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Stamm-Partie: kommt bei „Aus Polierplanung übernehmen"
+                    automatisch mit auf die Baustelle der Partie. */}
+                {f.kategorie !== "anlage" && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-muted-foreground shrink-0">Partie:</span>
+                    {canEdit ? (
+                      <select
+                        value={(f as any).partie_id ?? ""}
+                        onChange={(e) => setFahrzeugPartie(f.id, e.target.value || null)}
+                        className="h-7 text-xs rounded-md border bg-background px-1.5 flex-1 min-w-0"
+                        title="Stamm-Partie — Fahrzeug fährt bei der Tagesplanungs-Übernahme automatisch mit"
+                      >
+                        <option value="">— keine —</option>
+                        {partien.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span>
+                        {partien.find((p) => p.id === (f as any).partie_id)?.name ?? "—"}
+                      </span>
                     )}
                   </div>
                 )}
