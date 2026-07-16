@@ -402,6 +402,19 @@ export function PoliereinsatzView({
     [profiles],
   );
 
+  /** Urlauber, die sonst nirgends sichtbar wären: weder Mitglied einer
+   *  angezeigten Polier-Gruppe noch Bauleiter (z.B. Werkvorfertigung/Büro)
+   *  — wie die „Urlaube:"-Liste unten im MS-Project-Ausdruck. */
+  const sonstigeUrlauber = useMemo(() => {
+    const abgedeckt = new Set<string>();
+    gruppen.forEach((g) => g.member.forEach((m) => abgedeckt.add(m.id)));
+    bauleiter.forEach((b) => abgedeckt.add(b.id));
+    return profiles
+      .filter((p) => p.is_active !== false && !abgedeckt.has(p.id))
+      .filter((p) => (urlaubByMa.get(p.id)?.size ?? 0) > 0)
+      .sort((a, b) => a.nachname.localeCompare(b.nachname));
+  }, [profiles, gruppen, bauleiter, urlaubByMa]);
+
   const barColor = (z: Zeitraum): string => {
     const b = baustellenById[z.baustelle_id];
     const bl = b?.bauleiter_id ? profilesById[b.bauleiter_id] : null;
@@ -1196,12 +1209,12 @@ export function PoliereinsatzView({
                   })}
                 </div>
               ))}
-              {/* Bauleiter-Urlaubs-Block */}
+              {/* Urlaubs-Block: Bauleiter/Büro + alle sonst nicht sichtbaren Urlauber */}
               <div
                 className="border-b bg-muted/60 flex items-center px-2 text-[12px] font-bold"
                 style={{ height: ROW_H }}
               >
-                Urlaube (Bauleiter / Büro)
+                Urlaube
               </div>
               {bauleiter.map((b) => (
                 <div
@@ -1215,6 +1228,18 @@ export function PoliereinsatzView({
                   />
                   <span className="truncate">
                     {b.vorname} {b.nachname}
+                  </span>
+                </div>
+              ))}
+              {sonstigeUrlauber.map((p) => (
+                <div
+                  key={p.id}
+                  className="border-b flex items-center gap-1.5 px-2 text-[11px]"
+                  style={{ height: ROW_H }}
+                >
+                  <span className="h-2 w-2 rounded-full shrink-0 bg-muted-foreground/50" />
+                  <span className="truncate">
+                    {p.vorname} {p.nachname}
                   </span>
                 </div>
               ))}
@@ -1352,7 +1377,7 @@ export function PoliereinsatzView({
                     })}
                   </div>
                 ))}
-                {/* Bauleiter-Urlaube */}
+                {/* Urlaube: Bauleiter/Büro + sonst nicht sichtbare Urlauber */}
                 <GridRow days={days} height={ROW_H} shade="hsl(var(--muted))" />
                 {bauleiter.map((b) => (
                   <div key={b.id} className="relative border-b" style={{ height: ROW_H }}>
@@ -1372,6 +1397,31 @@ export function PoliereinsatzView({
                             background: b.planungsfarbe ?? "#0891b2",
                           }}
                           title={`Urlaub ${seg.von} – ${seg.bis}`}
+                        >
+                          {geo.width >= 44 ? "Urlaub" : ""}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+                {sonstigeUrlauber.map((p) => (
+                  <div key={p.id} className="relative border-b" style={{ height: ROW_H }}>
+                    <GridBg days={days} />
+                    {urlaubSegmente(p.id).map((seg, si) => {
+                      const geo = barGeo(seg.von, seg.bis);
+                      if (!geo) return null;
+                      return (
+                        <div
+                          key={si}
+                          className="absolute rounded flex items-center px-1 text-[9px] font-medium text-white truncate"
+                          style={{
+                            left: geo.left,
+                            width: geo.width,
+                            top: 4,
+                            height: ROW_H - 8,
+                            background: "#0891b2",
+                          }}
+                          title={`${p.vorname} ${p.nachname} · Urlaub ${seg.von} – ${seg.bis}`}
                         >
                           {geo.width >= 44 ? "Urlaub" : ""}
                         </div>
