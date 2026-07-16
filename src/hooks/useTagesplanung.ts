@@ -55,6 +55,7 @@ export function useTagesplanung(datum: string) {
         { data: antragRaw },
         { data: freiRaw },
         { data: letzteFreiRaw },
+        { data: polierRaw },
       ] = await Promise.all([
         supabase.from("einteilungen").select("*").eq("datum", datum),
         supabase
@@ -108,6 +109,17 @@ export function useTagesplanung(datum: string) {
             (r) => r,
             () => ({ data: null, error: null } as any),
           ),
+        // Poliereinsatz des Tages → Reihenfolge der Baustellen wie im
+        // MS-Project-Ausdruck (Partie-sort_order).
+        supabase
+          .from("poliereinsatz_zeitraeume" as any)
+          .select("partie_id, baustelle_id")
+          .lte("von_datum", datum)
+          .gte("bis_datum", datum)
+          .then(
+            (r) => r,
+            () => ({ data: null, error: null } as any),
+          ),
       ]);
 
       const baustellen = new Map((bsRaw ?? []).map((b: any) => [b.id, b as Baustelle]));
@@ -129,16 +141,36 @@ export function useTagesplanung(datum: string) {
         emByEinteilung.set(e.einteilung_id, arr);
       });
 
-      const einteilungen: EinteilungMitDetails[] = (einteilungenRaw ?? []).map((e: any) => ({
-        einteilung: e as Einteilung,
-        baustelle: baustellen.get(e.baustelle_id) ?? null,
-        fahrzeuge: efByEinteilung.get(e.id) ?? [],
-        mitarbeiter: (emByEinteilung.get(e.id) ?? []).sort((a, b) => {
-          const an = a.profil?.nachname ?? "";
-          const bn = b.profil?.nachname ?? "";
-          return an.localeCompare(bn);
-        }),
-      }));
+      // Reihenfolge wie die Polier-Vorlage: Baustelle → sort_order der
+      // Partie, die laut Poliereinsatz heute dort ist. Baustellen ohne
+      // Polier-Zuordnung kommen dahinter (alphabetisch).
+      const partieSort = new Map(
+        ((pRaw as Partie[]) ?? []).map((p: any) => [p.id, p.sort_order ?? 9999]),
+      );
+      const bstSort = new Map<string, number>();
+      ((polierRaw as any[]) ?? []).forEach((z: any) => {
+        const so = partieSort.get(z.partie_id) ?? 9999;
+        const cur = bstSort.get(z.baustelle_id);
+        if (cur === undefined || so < cur) bstSort.set(z.baustelle_id, so);
+      });
+
+      const einteilungen: EinteilungMitDetails[] = (einteilungenRaw ?? [])
+        .map((e: any) => ({
+          einteilung: e as Einteilung,
+          baustelle: baustellen.get(e.baustelle_id) ?? null,
+          fahrzeuge: efByEinteilung.get(e.id) ?? [],
+          mitarbeiter: (emByEinteilung.get(e.id) ?? []).sort((a, b) => {
+            const an = a.profil?.nachname ?? "";
+            const bn = b.profil?.nachname ?? "";
+            return an.localeCompare(bn);
+          }),
+        }))
+        .sort((a, b) => {
+          const sa = bstSort.get(a.einteilung.baustelle_id ?? "") ?? 99999;
+          const sb = bstSort.get(b.einteilung.baustelle_id ?? "") ?? 99999;
+          if (sa !== sb) return sa - sb;
+          return (a.baustelle?.bvh_name ?? "").localeCompare(b.baustelle?.bvh_name ?? "");
+        });
 
       // Abwesende: stunden_tage + genehmigte urlaubsantraege (deduped)
       const abwesendIds = new Set<string>();
