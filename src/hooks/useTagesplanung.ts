@@ -176,20 +176,24 @@ export function useTagesplanung(datum: string) {
           return (a.baustelle?.bvh_name ?? "").localeCompare(b.baustelle?.bvh_name ?? "");
         });
 
-      // Abwesende: stunden_tage + genehmigte urlaubsantraege (deduped)
+      // Abwesende: stunden_tage + genehmigte urlaubsantraege (deduped).
+      // Personen außerhalb der Tagesplanung (Büro/Bauleitung, in_tagesplanung
+      // = false) werden hier nicht gelistet — sie sind nie eingeteilt.
+      const inPlanung = (id: string) =>
+        (mitarbeiter.get(id) as any)?.in_tagesplanung !== false;
       const abwesendIds = new Set<string>();
       const abwesende: AbwesenheitDetail[] = [];
       (tageRaw ?? []).forEach((t: any) => {
         if (abwesendIds.has(t.mitarbeiter_id)) return;
         const ma = mitarbeiter.get(t.mitarbeiter_id);
-        if (!ma) return;
+        if (!ma || !inPlanung(t.mitarbeiter_id)) return;
         abwesendIds.add(t.mitarbeiter_id);
         abwesende.push({ ma, status: t.tag_status as TagStatus });
       });
       (antragRaw ?? []).forEach((a: any) => {
         if (abwesendIds.has(a.mitarbeiter_id)) return;
         const ma = mitarbeiter.get(a.mitarbeiter_id);
-        if (!ma) return;
+        if (!ma || !inPlanung(a.mitarbeiter_id)) return;
         abwesendIds.add(a.mitarbeiter_id);
         abwesende.push({ ma, status: "urlaub", seit: a.von, bis: a.bis });
       });
@@ -201,7 +205,10 @@ export function useTagesplanung(datum: string) {
         freigabe: freiRaw ?? null,
         letzteFreigegeben: letzteFreiRaw ?? null,
         partien: (pRaw as Partie[]) ?? [],
-        alleMa: (maRaw as Profile[]) ?? [],
+        // Auswahl-Liste: nur in der Tagesplanung einteilbare Mitarbeiter
+        alleMa: (((maRaw as Profile[]) ?? []) as any[]).filter(
+          (m) => m.in_tagesplanung !== false,
+        ) as Profile[],
       };
     },
     enabled: !!datum,

@@ -361,6 +361,7 @@ export default function Mitarbeiter() {
       qualifikation: str("qualifikation"),
       fuehrerschein: str("fuehrerschein"),
       kran_berechtigung: fd.get("kran_berechtigung") === "on",
+      in_tagesplanung: fd.get("in_tagesplanung") === "on",
       partie_id: (fd.get("partie_id") as string) || null,
       is_partieleiter: fd.get("is_partieleiter") === "on",
       ist_bauleiter: fd.get("ist_bauleiter") === "on",
@@ -1097,6 +1098,19 @@ export default function Mitarbeiter() {
                       defaultChecked={!!editing.kran_berechtigung}
                     />
                     <Label htmlFor="kran_berechtigung">Kran-Berechtigung</Label>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <Switch
+                      id="in_tagesplanung"
+                      name="in_tagesplanung"
+                      defaultChecked={(editing as any).in_tagesplanung !== false}
+                    />
+                    <Label htmlFor="in_tagesplanung">
+                      In Tagesplanung einteilbar
+                      <span className="block text-[11px] font-normal text-muted-foreground">
+                        Aus = erscheint nicht in der Auswahl/Übernahme (Büro, Bauleitung …)
+                      </span>
+                    </Label>
                   </div>
                 </div>
               </section>

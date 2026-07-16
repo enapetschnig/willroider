@@ -792,13 +792,13 @@ export default function Tagesplanung() {
       // React-Query-Cache (Datumswechsel, paralleler Bearbeiter).
       const belegung = await ladeTagesBelegung();
 
-      // Aktive Mitarbeiter je Partie (abwesende überspringen)
+      // Aktive Mitarbeiter je Partie (abwesende + nicht-einteilbare überspringen)
       const { data: alleProfile } = await supabase
         .from("profiles")
-        .select("id, partie_id, is_active");
+        .select("id, partie_id, is_active, in_tagesplanung" as "*");
       const maByPartie = new Map<string, string[]>();
       ((alleProfile as any[]) ?? [])
-        .filter((p) => p.is_active !== false && p.partie_id)
+        .filter((p) => p.is_active !== false && p.partie_id && p.in_tagesplanung !== false)
         .filter((p) => !belegung.abwesend.has(p.id))
         .forEach((p) => {
           if (!maByPartie.has(p.partie_id)) maByPartie.set(p.partie_id, []);
