@@ -1284,10 +1284,18 @@ export function PoliereinsatzView({
                       : kurz
                         ? `Kurze Woche${w.freie > 0 ? " — Freitag frei" : ""}${w.feiertage > 0 ? ` — ${w.feiertage} Feiertag(e)` : ""}`
                         : undefined;
+                    // Monat/Datum wie im MS-Project-Ausdruck: "KW 28 · 6. Jul"
+                    // (+ Jahr beim Jahreswechsel)
+                    const MONAT = ["Jän", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+                    const wd = days[w.startIdx]?.date;
+                    const heuteJahr = new Date().getFullYear();
+                    const datumLabel = wd
+                      ? `${wd.getDate()}. ${MONAT[wd.getMonth()]}${wd.getFullYear() !== heuteJahr ? ` '${String(wd.getFullYear()).slice(-2)}` : ""}`
+                      : "";
                     return (
                       <div
                         key={i}
-                        className={`text-[10px] font-semibold flex items-center justify-center gap-1 border-r ${
+                        className={`text-[10px] font-semibold flex items-center justify-center gap-1 border-r whitespace-nowrap overflow-hidden ${
                           w.bu
                             ? "bg-violet-100 text-violet-900"
                             : kurz
@@ -1298,6 +1306,9 @@ export function PoliereinsatzView({
                         title={titel}
                       >
                         {w.label}
+                        {datumLabel && (
+                          <span className="font-normal text-muted-foreground">· {datumLabel}</span>
+                        )}
                         {w.bu ? (
                           <span className="text-violet-600">BU</span>
                         ) : (
