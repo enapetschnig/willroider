@@ -121,7 +121,7 @@ function layout(ctx: CanvasRenderingContext2D, plan: TagesPlanData, draw: boolea
     e.mitarbeiter.forEach((m, i) => {
       if (!m.profil) return;
       const name = `${m.profil.nachname} ${m.profil.vorname}`;
-      const istLeiter = i === 0 && !!(m.profil as any).is_partieleiter;
+      const istLeiter = i === 0 && m.istLeiter;
       text(
         (istLeiter ? "▪ " : "• ") + name,
         `${istLeiter ? "bold " : ""}30px Georgia, serif`,

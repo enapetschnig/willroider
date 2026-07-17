@@ -84,7 +84,7 @@ export function makeTagesplanungPdf(plan: TagesPlanData): jsPDF {
   // Polier/Partieleiter steht (durch die Hook-Sortierung) an erster Stelle —
   // im PDF wird er wie in der App FETT gedruckt (Eigen-Rendering der Zelle).
   const leiterErste = plan.einteilungen.map(
-    (e) => !!(e.mitarbeiter[0]?.profil as any)?.is_partieleiter,
+    (e) => !!e.mitarbeiter[0]?.istLeiter,
   );
 
   autoTable(doc, {

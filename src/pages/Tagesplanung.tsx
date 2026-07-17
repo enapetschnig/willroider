@@ -1816,7 +1816,7 @@ function EinteilungsZeile({
                 einteilungId={e.einteilung.id}
                 name={`${m.profil.nachname} ${m.profil.vorname}`}
                 gelesen={!!m.ma.gelesen_am}
-                leiter={!!(m.profil as any).is_partieleiter}
+                leiter={m.istLeiter}
                 onRemove={() => onRemoveMa(m.ma.id, e.einteilung.id)}
               />
             ) : null,
@@ -1882,8 +1882,17 @@ function MitarbeiterSicht({
     .filter((m) => !eingeteiltIds.has(m.id) && !abwesendIds.has(m.id))
     .map((m) => ({ ma: m, einteilungId: null, baustelle: null }));
 
-  // Eingeteilte nach Baustelle gruppieren
+  // Eingeteilte nach Baustelle gruppieren. WICHTIG: zuerst ALLE heutigen
+  // Einteilungen als Gruppen anlegen — auch LEERE Baustellen (z.B. aus der
+  // Polierplanungs-Übernahme, wenn alle Partie-MA schon verplant waren).
+  // Sonst sind sie in dieser Ansicht unsichtbar und niemand kann Leute
+  // draufziehen.
   const groupedByBaustelle = new Map<string, { baustelle: Baustelle | null; rows: MaZeile[] }>();
+  for (const e of plan.einteilungen) {
+    const key = e.baustelle?.id ?? "ohne-baustelle";
+    if (!groupedByBaustelle.has(key))
+      groupedByBaustelle.set(key, { baustelle: e.baustelle, rows: [] });
+  }
   for (const z of eingeteilt) {
     const key = z.baustelle?.id ?? "ohne-baustelle";
     if (!groupedByBaustelle.has(key))
@@ -1991,6 +2000,11 @@ function MitarbeiterSicht({
                       {g.rows.length} MA
                     </span>
                   </div>
+                  {g.rows.length === 0 && (
+                    <div className="text-xs italic text-muted-foreground py-1.5">
+                      Noch niemand eingeteilt — unten bei „Nicht eingeteilt" zuweisen.
+                    </div>
+                  )}
                   <div className="divide-y divide-border/60">
                     {g.rows.map((z) => (
                       <div key={z.ma.id} className="flex items-center gap-2 py-1.5">

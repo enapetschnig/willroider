@@ -15,7 +15,7 @@ export interface EinteilungMitDetails {
   einteilung: Einteilung;
   baustelle: Baustelle | null;
   fahrzeuge: Fahrzeug[];
-  mitarbeiter: { ma: EinteilungMa; profil: Profile | null }[];
+  mitarbeiter: { ma: EinteilungMa; profil: Profile | null; istLeiter: boolean }[];
 }
 
 export interface AbwesenheitDetail {
@@ -154,20 +154,31 @@ export function useTagesplanung(datum: string) {
         if (cur === undefined || so < cur) bstSort.set(z.baustelle_id, so);
       });
 
+      // Wer ist WIRKLICH Vorarbeiter/Polier? Live aus der Partie-Verwaltung
+      // (partien.partieleiter_id) — nicht aus dem is_partieleiter-Flag, das
+      // bei Leiter-Wechseln veralten kann.
+      const leiterIds = new Set(
+        ((pRaw as Partie[]) ?? [])
+          .map((p: any) => p.partieleiter_id)
+          .filter(Boolean),
+      );
+
       const einteilungen: EinteilungMitDetails[] = (einteilungenRaw ?? [])
         .map((e: any) => ({
           einteilung: e as Einteilung,
           baustelle: baustellen.get(e.baustelle_id) ?? null,
           fahrzeuge: efByEinteilung.get(e.id) ?? [],
-          mitarbeiter: (emByEinteilung.get(e.id) ?? []).sort((a, b) => {
-            // Polier/Partieleiter immer ganz oben, danach alphabetisch.
-            const al = a.profil?.is_partieleiter ? 0 : 1;
-            const bl = b.profil?.is_partieleiter ? 0 : 1;
-            if (al !== bl) return al - bl;
-            const an = a.profil?.nachname ?? "";
-            const bn = b.profil?.nachname ?? "";
-            return an.localeCompare(bn);
-          }),
+          mitarbeiter: (emByEinteilung.get(e.id) ?? [])
+            .map((m) => ({ ...m, istLeiter: !!m.profil && leiterIds.has(m.profil.id) }))
+            .sort((a, b) => {
+              // Polier/Partieleiter immer ganz oben, danach alphabetisch.
+              const al = a.istLeiter ? 0 : 1;
+              const bl = b.istLeiter ? 0 : 1;
+              if (al !== bl) return al - bl;
+              const an = a.profil?.nachname ?? "";
+              const bn = b.profil?.nachname ?? "";
+              return an.localeCompare(bn);
+            }),
         }))
         .sort((a, b) => {
           const sa = bstSort.get(a.einteilung.baustelle_id ?? "") ?? 99999;
