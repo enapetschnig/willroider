@@ -71,6 +71,7 @@ import {
   CalendarRange,
 } from "lucide-react";
 import { makeTagesplanungPdf } from "@/lib/tagesplanungPdf";
+import { makeTagesplanungBild } from "@/lib/tagesplanungBild";
 import {
   teilePdfDirektDownload,
   teilePdfViaLink,
@@ -933,7 +934,8 @@ export default function Tagesplanung() {
     toast({ title: "PDF heruntergeladen" });
   }
 
-  /** Teilt die PDF via WhatsApp:
+  /** Teilt die Tagesplanung via WhatsApp — als BILD (PNG): zeigt im Chat
+   *  eine echte Vorschau statt eines PDF-Datei-Symbols.
    *  - Mobile/Devices mit Native Share API: System-Share-Sheet → 1-Klick
    *  - Desktop ohne Native Share: Auswahl-Dialog mit zwei Pfaden
    *    (Direkt-Download für Drag&Drop vs. Cloud-Link). */
@@ -942,16 +944,16 @@ export default function Tagesplanung() {
       toast({ variant: "destructive", title: "Plan noch nicht geladen" });
       return;
     }
-    const doc = makeTagesplanungPdf(plan);
-    const blob = doc.output("blob");
+    const blob = await makeTagesplanungBild(plan);
     const payload: TeilenInput = {
       blob,
-      filename: pdfFilename(),
+      filename: `Arbeitseinteilung_${datum}.png`,
       text: pdfTeilenText(),
+      mime: "image/png",
     };
 
     // 1) Native Share zuerst probieren (Mobile, manche Desktops)
-    const file = new File([blob], payload.filename, { type: "application/pdf" });
+    const file = new File([blob], payload.filename, { type: "image/png" });
     if ((navigator as any).canShare?.({ files: [file] })) {
       try {
         await (navigator as any).share({
@@ -977,9 +979,9 @@ export default function Tagesplanung() {
     teilePdfDirektDownload(sharePayload);
     setSharePayload(null);
     toast({
-      title: "PDF heruntergeladen",
+      title: "Bild heruntergeladen",
       description:
-        "WhatsApp Web ist offen — ziehe die PDF aus dem Downloads-Ordner in den Chat.",
+        "WhatsApp Web ist offen — ziehe das Bild aus dem Downloads-Ordner in den Chat.",
       duration: 8000,
     });
   }
@@ -994,7 +996,7 @@ export default function Tagesplanung() {
       toast({
         title: "WhatsApp Web geöffnet",
         description:
-          "Chat wählen und Senden — der Empfänger bekommt einen Link zur PDF.",
+          "Chat wählen und Senden — der Empfänger bekommt einen Link zum Bild.",
       });
     } else if (r.mode === "missing-bucket") {
       setSetupDialogOpen(true);
@@ -1582,7 +1584,7 @@ function WhatsAppShareDialog({
     <Dialog open={!!payload} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Wie willst du die PDF teilen?</DialogTitle>
+          <DialogTitle>Wie willst du den Tagesplan teilen?</DialogTitle>
         </DialogHeader>
         <div className="space-y-3 pt-2">
           <button
@@ -1611,7 +1613,7 @@ function WhatsAppShareDialog({
             </div>
             <div className="text-sm text-sky-800 mt-1.5">
               PDF wird hochgeladen, der Empfänger bekommt einen klickbaren Link
-              im WhatsApp-Text (öffnet die PDF im Browser). Funktioniert ohne
+              im WhatsApp-Text (öffnet das Bild im Browser). Funktioniert ohne
               Drag &amp; Drop, ideal wenn der Empfänger nicht am PC ist.
             </div>
           </button>

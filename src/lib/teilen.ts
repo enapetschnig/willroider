@@ -16,6 +16,8 @@ export interface TeilenInput {
   filename: string;
   /** Begleit-Text (z.B. „Arbeitseinteilung Mittwoch 20.05.2026"). */
   text: string;
+  /** MIME-Typ der Datei (Default: application/pdf). */
+  mime?: string;
 }
 
 export type TeilenMode = "share" | "url" | "download" | "missing-bucket";
@@ -47,7 +49,7 @@ export async function teilePdfViaWhatsApp(
   input: TeilenInput,
 ): Promise<TeilenResult> {
   const file = new File([input.blob], input.filename, {
-    type: "application/pdf",
+    type: input.mime ?? "application/pdf",
   });
 
   // 1) Native Share — auf Mobile fast immer, auf Desktop nur mit installierter
@@ -75,7 +77,7 @@ export async function teilePdfViaWhatsApp(
     const { error: upErr } = await supabase.storage
       .from("share-temp")
       .upload(path, input.blob, {
-        contentType: "application/pdf",
+        contentType: input.mime ?? "application/pdf",
         upsert: false,
       });
     if (upErr) {
@@ -173,7 +175,7 @@ export async function teilePdfViaLink(
     const { error: upErr } = await supabase.storage
       .from("share-temp")
       .upload(path, input.blob, {
-        contentType: "application/pdf",
+        contentType: input.mime ?? "application/pdf",
         upsert: false,
       });
     if (upErr) {

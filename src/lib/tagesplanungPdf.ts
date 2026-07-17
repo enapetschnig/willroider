@@ -81,6 +81,11 @@ export function makeTagesplanungPdf(plan: TagesPlanData): jsPDF {
         .join("\n") || "—";
     return [bvhText, fahrzText, taetText, maText];
   });
+  // Polier/Partieleiter steht (durch die Hook-Sortierung) an erster Stelle —
+  // im PDF wird er wie in der App FETT gedruckt (Eigen-Rendering der Zelle).
+  const leiterErste = plan.einteilungen.map(
+    (e) => !!(e.mitarbeiter[0]?.profil as any)?.is_partieleiter,
+  );
 
   autoTable(doc, {
     startY: y,
@@ -122,6 +127,29 @@ export function makeTagesplanungPdf(plan: TagesPlanData): jsPDF {
           // den Standard-Style fett, Kostenstelle erscheint dann mit fett.
           // Eleganter wäre eine eigene didDrawCell, aber für V1 reicht's so.
         }
+      }
+    },
+    // Mitarbeiter-Spalte selbst zeichnen, wenn der erste MA ein Polier ist:
+    // Standard-Druck unterdrücken (Höhe wurde schon aus dem Text berechnet)…
+    willDrawCell: (data) => {
+      if (data.section === "body" && data.column.index === 3 && leiterErste[data.row.index]) {
+        data.cell.text = [];
+      }
+    },
+    // …und Zeile für Zeile drucken — erste Zeile (Polier) FETT.
+    didDrawCell: (data) => {
+      if (data.section === "body" && data.column.index === 3 && leiterErste[data.row.index]) {
+        const lines = String(body[data.row.index][3]).split("\n");
+        const x = data.cell.x + 3;
+        const lh = (10 / doc.internal.scaleFactor) * 1.15;
+        let ty = data.cell.y + 2;
+        doc.setFontSize(10);
+        lines.forEach((line, i) => {
+          doc.setFont("times", i === 0 ? "bold" : "normal");
+          doc.text(line, x, ty, { baseline: "top" });
+          ty += lh;
+        });
+        doc.setFont("times", "normal");
       }
     },
   });
