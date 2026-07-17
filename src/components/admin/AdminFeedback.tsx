@@ -15,6 +15,7 @@ import {
   Eye,
   X,
   Mic,
+  Paperclip,
 } from "lucide-react";
 
 const fmtDauer = (s: number) =>
@@ -33,6 +34,9 @@ type FeedbackRow = {
   audio_pfad: string | null;
   audio_typ: string | null;
   audio_sekunden: number | null;
+  anhang_pfad: string | null;
+  anhang_name: string | null;
+  anhang_typ: string | null;
 };
 
 const KAT: Record<string, { label: string; icon: typeof Lightbulb; cls: string }> = {
@@ -56,6 +60,7 @@ export function AdminFeedback() {
   const [rows, setRows] = useState<FeedbackRow[]>([]);
   const [namen, setNamen] = useState<Map<string, string>>(new Map());
   const [audioUrls, setAudioUrls] = useState<Map<string, string>>(new Map());
+  const [anhangUrls, setAnhangUrls] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("offen");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -90,22 +95,29 @@ export function AdminFeedback() {
     }
     setNamen(m);
 
-    // Signierte URLs für Sprachnachrichten (privater Bucket, 1 h gültig)
-    const mitAudio = list.filter((r) => r.audio_pfad);
-    if (mitAudio.length > 0) {
-      const urls = new Map<string, string>();
-      await Promise.all(
-        mitAudio.map(async (r) => {
+    // Signierte URLs für Sprachnachrichten + Datei-Anhänge (private Buckets, 1 h)
+    const urls = new Map<string, string>();
+    const dateiUrls = new Map<string, string>();
+    await Promise.all([
+      ...list
+        .filter((r) => r.audio_pfad)
+        .map(async (r) => {
           const { data: signed } = await supabase.storage
             .from("feedback-audio")
             .createSignedUrl(r.audio_pfad!, 3600);
           if (signed?.signedUrl) urls.set(r.id, signed.signedUrl);
         }),
-      );
-      setAudioUrls(urls);
-    } else {
-      setAudioUrls(new Map());
-    }
+      ...list
+        .filter((r) => r.anhang_pfad)
+        .map(async (r) => {
+          const { data: signed } = await supabase.storage
+            .from("feedback-dateien")
+            .createSignedUrl(r.anhang_pfad!, 3600);
+          if (signed?.signedUrl) dateiUrls.set(r.id, signed.signedUrl);
+        }),
+    ]);
+    setAudioUrls(urls);
+    setAnhangUrls(dateiUrls);
     setLoading(false);
   };
 
@@ -218,6 +230,29 @@ export function AdminFeedback() {
                       </div>
                       {r.text && (
                         <div className="text-sm whitespace-pre-wrap break-words">{r.text}</div>
+                      )}
+                      {r.anhang_pfad && (
+                        <div className="mt-1.5">
+                          {r.anhang_typ?.startsWith("image/") && anhangUrls.get(r.id) ? (
+                            <a href={anhangUrls.get(r.id)} target="_blank" rel="noreferrer">
+                              <img
+                                src={anhangUrls.get(r.id)}
+                                alt={r.anhang_name ?? "Anhang"}
+                                className="max-h-48 rounded-md border object-contain"
+                              />
+                            </a>
+                          ) : (
+                            <a
+                              href={anhangUrls.get(r.id) ?? "#"}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 rounded-md border bg-muted/50 px-2.5 py-1.5 text-xs hover:bg-muted"
+                            >
+                              <Paperclip className="h-3.5 w-3.5 text-primary" />
+                              {r.anhang_name ?? "Anhang öffnen"}
+                            </a>
+                          )}
+                        </div>
                       )}
                       {r.audio_pfad && (
                         <div className="mt-1.5 flex items-center gap-2 rounded-md bg-muted/50 px-2.5 py-1.5">

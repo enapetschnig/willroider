@@ -24,6 +24,7 @@ import {
   Mail,
   MessageSquarePlus,
   X,
+  NotebookPen,
 } from "lucide-react";
 import { InstallPromptDialog } from "./InstallPromptDialog";
 import { FeedbackDialog } from "./FeedbackDialog";
@@ -71,6 +72,7 @@ const NAV: NavItem[] = [
   { to: "/stunden/auswertung", label: "Auswertung", icon: BarChart3, perm: "stunden.view_alle", end: true },
   { to: "/stundenberichte", label: "Stundenberichte", icon: FileSpreadsheet, perm: "stunden.bsb.bestaetigen", end: false },
   { to: "/berichte", label: "Berichte", icon: FileText, perm: "berichte.view", end: false },
+  { to: "/notizen", label: "Notizen", icon: NotebookPen, perm: "admin.view", end: true },
   { to: "/kalkulator", label: "Kalkulator", icon: Calculator, perm: "kalkulator.view", end: true },
   { to: "/kalkulator/anfragen", label: "Anfragen", icon: Mail, perm: "kalkulator.anfragen_verwalten", end: true },
   { to: "/admin", label: "Verwaltung", icon: Settings, perm: "admin.view", end: false },

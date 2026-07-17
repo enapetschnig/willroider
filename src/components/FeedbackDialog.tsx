@@ -23,6 +23,8 @@ import {
   Mic,
   Square,
   Trash2,
+  Paperclip,
+  X,
 } from "lucide-react";
 
 type Kategorie = "idee" | "problem" | "sonstiges";
@@ -66,6 +68,9 @@ export function FeedbackDialog({
   const [kategorie, setKategorie] = useState<Kategorie>("idee");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  /** Optionaler Datei-/Screenshot-Anhang (max. 10 MB). */
+  const [anhang, setAnhang] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // ── Audio-Aufnahme ────────────────────────────────────────────────
   const [aufnahme, setAufnahme] = useState<"idle" | "recording">("idle");
@@ -153,6 +158,16 @@ export function FeedbackDialog({
     setAufnahme("idle");
     setText("");
     setKategorie("idee");
+    setAnhang(null);
+  };
+
+  const waehleAnhang = (f: File | null) => {
+    if (!f) return;
+    if (f.size > 10 * 1024 * 1024) {
+      toast({ variant: "destructive", title: "Datei zu groß", description: "Maximal 10 MB." });
+      return;
+    }
+    setAnhang(f);
   };
 
   const closeDialog = (v: boolean) => {
@@ -192,6 +207,23 @@ export function FeedbackDialog({
       audioTyp = audioBlob.type;
     }
 
+    // Datei-Anhang hochladen (eigener Ordner {uid}/… — RLS)
+    let anhangPfad: string | null = null;
+    if (anhang) {
+      const ext = anhang.name.split(".").pop() || "bin";
+      const pfad = `${user.id}/${crypto.randomUUID()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from("feedback-dateien")
+        .upload(pfad, anhang, { contentType: anhang.type || undefined, upsert: false });
+      if (upErr) {
+        setBusy(false);
+        if (audioPfad) void supabase.storage.from("feedback-audio").remove([audioPfad]);
+        toast({ variant: "destructive", title: "Anhang konnte nicht hochgeladen werden", description: upErr.message });
+        return;
+      }
+      anhangPfad = pfad;
+    }
+
     const appVersion = typeof __APP_BUILD__ !== "undefined" ? __APP_BUILD__ : null;
     const { data: inserted, error } = await supabase
       .from("feedback" as any)
@@ -204,13 +236,17 @@ export function FeedbackDialog({
         audio_pfad: audioPfad,
         audio_typ: audioTyp,
         audio_sekunden: audioBlob ? dauer : null,
+        anhang_pfad: anhangPfad,
+        anhang_name: anhang?.name ?? null,
+        anhang_typ: anhang?.type ?? null,
       })
       .select("id")
       .single();
     setBusy(false);
     if (error) {
-      // Verwaiste Audiodatei aufräumen, wenn der Insert scheitert
+      // Verwaiste Dateien aufräumen, wenn der Insert scheitert
       if (audioPfad) void supabase.storage.from("feedback-audio").remove([audioPfad]);
+      if (anhangPfad) void supabase.storage.from("feedback-dateien").remove([anhangPfad]);
       toast({ variant: "destructive", title: "Konnte nicht gesendet werden", description: error.message });
       return;
     }
@@ -305,6 +341,49 @@ export function FeedbackDialog({
                 onClick={startAufnahme}
               >
                 <Mic className="h-4 w-4" /> Sprachnachricht aufnehmen
+              </Button>
+            )}
+          </div>
+
+          {/* Datei-/Screenshot-Anhang */}
+          <div className="space-y-1.5">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+              Datei / Screenshot (optional)
+            </Label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+              className="hidden"
+              onChange={(e) => waehleAnhang(e.target.files?.[0] ?? null)}
+            />
+            {anhang ? (
+              <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                <Paperclip className="h-4 w-4 text-primary shrink-0" />
+                <span className="truncate flex-1 min-w-0">{anhang.name}</span>
+                <span className="text-xs text-muted-foreground shrink-0">
+                  {(anhang.size / 1024 / 1024).toFixed(1)} MB
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAnhang(null);
+                    if (fileInputRef.current) fileInputRef.current.value = "";
+                  }}
+                  className="shrink-0 p-1 rounded hover:bg-muted text-muted-foreground"
+                  aria-label="Anhang entfernen"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full gap-2"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Paperclip className="h-4 w-4" /> Datei oder Screenshot anheften
               </Button>
             )}
           </div>
