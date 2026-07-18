@@ -271,8 +271,22 @@ export default function Tagesplanung() {
     refresh();
   }
 
+  /** Löscht eine Einteilung, wenn kein Mitarbeiter mehr dranhängt —
+   *  im Tagesplan stehen nur belegte Baustellen. */
+  async function loescheWennLeer(einteilungId: string) {
+    const { data: rest } = await supabase
+      .from("einteilung_mitarbeiter")
+      .select("id")
+      .eq("einteilung_id", einteilungId)
+      .limit(1);
+    if (!rest || rest.length === 0) {
+      await supabase.from("einteilungen").delete().eq("id", einteilungId);
+    }
+  }
+
   async function removeMitarbeiter(emId: string, einteilungId: string) {
     await supabase.from("einteilung_mitarbeiter").delete().eq("id", emId);
+    await loescheWennLeer(einteilungId);
     await markManuell("einteilungen", einteilungId);
     refresh();
   }
@@ -283,6 +297,14 @@ export default function Tagesplanung() {
     mitarbeiterIds: string[];
     fahrzeugIds: string[];
   }) {
+    if (input.mitarbeiterIds.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Mindestens 1 Mitarbeiter wählen",
+        description: "Im Tagesplan stehen nur Baustellen mit eingeteilten Mitarbeitern.",
+      });
+      return;
+    }
     const { data: e, error } = await supabase
       .from("einteilungen")
       .insert({
@@ -367,6 +389,8 @@ export default function Tagesplanung() {
       }
       await markManuell("einteilung_mitarbeiter", emId);
     }
+    // Quell-Einteilung leer geworden? → entfernen (nur belegte Baustellen)
+    await loescheWennLeer(source.einteilung_id);
     await markManuell("einteilungen", neueEinteilungId);
     refresh();
   }
@@ -380,6 +404,10 @@ export default function Tagesplanung() {
       .delete()
       .eq("mitarbeiter_id", maId)
       .in("einteilung_id", einteilungIds);
+    // Leer gewordene Einteilungen entfernen (nur belegte Baustellen)
+    for (const id of einteilungIds) {
+      await loescheWennLeer(id);
+    }
     refresh();
   }
 
@@ -451,6 +479,10 @@ export default function Tagesplanung() {
       return;
     }
     await markManuell("einteilung_mitarbeiter", (inserted as any).id);
+    // Alte Einteilungen des MA leer geworden? → entfernen (nur belegte Baustellen)
+    for (const id of altEinteilungIds) {
+      if (id !== einteilungId) await loescheWennLeer(id);
+    }
     refresh();
   }
 
@@ -591,6 +623,18 @@ export default function Tagesplanung() {
         skipped++;
         continue;
       }
+      // MA übernehmen — abwesende UND bereits eingeteilte überspringen.
+      // Bleibt NIEMAND übrig → Baustelle gar nicht anlegen (nur belegte
+      // Baustellen im Tagesplan).
+      const maForQuell = (ems ?? [])
+        .filter((m: any) => m.einteilung_id === quell.id)
+        .filter((m: any) => !abwesendIds.has(m.mitarbeiter_id))
+        .filter((m: any) => !schonEingeteilt.has(m.mitarbeiter_id));
+      if (maForQuell.length === 0) {
+        skipped++;
+        continue;
+      }
+
       const { data: neu } = await supabase
         .from("einteilungen")
         .insert({
@@ -605,21 +649,14 @@ export default function Tagesplanung() {
         .single();
       if (!neu) continue;
 
-      // MA übernehmen — abwesende UND bereits eingeteilte überspringen.
-      const maForQuell = (ems ?? [])
-        .filter((m: any) => m.einteilung_id === quell.id)
-        .filter((m: any) => !abwesendIds.has(m.mitarbeiter_id))
-        .filter((m: any) => !schonEingeteilt.has(m.mitarbeiter_id));
-      if (maForQuell.length > 0) {
-        await supabase.from("einteilung_mitarbeiter").insert(
-          maForQuell.map((m: any) => ({
-            einteilung_id: neu.id,
-            mitarbeiter_id: m.mitarbeiter_id,
-            rolle: m.rolle,
-          })),
-        );
-        maForQuell.forEach((m: any) => schonEingeteilt.add(m.mitarbeiter_id));
-      }
+      await supabase.from("einteilung_mitarbeiter").insert(
+        maForQuell.map((m: any) => ({
+          einteilung_id: neu.id,
+          mitarbeiter_id: m.mitarbeiter_id,
+          rolle: m.rolle,
+        })),
+      );
+      maForQuell.forEach((m: any) => schonEingeteilt.add(m.mitarbeiter_id));
       // Fahrzeuge übernehmen
       const fzForQuell = (efs ?? []).filter((f: any) => f.einteilung_id === quell.id);
       if (fzForQuell.length > 0) {
@@ -634,7 +671,7 @@ export default function Tagesplanung() {
     }
     toast({
       title: `${saved} Einteilungen übernommen`,
-      description: skipped > 0 ? `${skipped} übersprungen (existieren bereits)` : undefined,
+      description: skipped > 0 ? `${skipped} übersprungen (bereits vorhanden oder ohne Mitarbeiter)` : undefined,
     });
     refresh();
     } finally {
@@ -700,6 +737,18 @@ export default function Tagesplanung() {
           skipped++;
           continue;
         }
+        // MA übernehmen — abwesende UND bereits eingeteilte überspringen.
+        // Bleibt NIEMAND übrig → Baustelle gar nicht anlegen (nur belegte
+        // Baustellen im Tagesplan).
+        const maForJp = (jms ?? [])
+          .filter((m: any) => m.einteilung_id === jp.id)
+          .filter((m: any) => !abwesendIds.has(m.mitarbeiter_id))
+          .filter((m: any) => !schonEingeteilt.has(m.mitarbeiter_id));
+        if (maForJp.length === 0) {
+          skipped++;
+          continue;
+        }
+
         const { data: neu } = await supabase
           .from("einteilungen")
           .insert({
@@ -712,20 +761,13 @@ export default function Tagesplanung() {
           .single();
         if (!neu) continue;
 
-        // MA übernehmen — abwesende UND bereits eingeteilte überspringen.
-        const maForJp = (jms ?? [])
-          .filter((m: any) => m.einteilung_id === jp.id)
-          .filter((m: any) => !abwesendIds.has(m.mitarbeiter_id))
-          .filter((m: any) => !schonEingeteilt.has(m.mitarbeiter_id));
-        if (maForJp.length > 0) {
-          await supabase.from("einteilung_mitarbeiter").insert(
-            maForJp.map((m: any) => ({
-              einteilung_id: neu.id,
-              mitarbeiter_id: m.mitarbeiter_id,
-            })),
-          );
-          maForJp.forEach((m: any) => schonEingeteilt.add(m.mitarbeiter_id));
-        }
+        await supabase.from("einteilung_mitarbeiter").insert(
+          maForJp.map((m: any) => ({
+            einteilung_id: neu.id,
+            mitarbeiter_id: m.mitarbeiter_id,
+          })),
+        );
+        maForJp.forEach((m: any) => schonEingeteilt.add(m.mitarbeiter_id));
         // Fahrzeuge übernehmen
         const fzForJp = (jfs ?? []).filter((f: any) => f.einteilung_id === jp.id);
         if (fzForJp.length > 0) {
@@ -741,7 +783,7 @@ export default function Tagesplanung() {
       toast({
         title: `${saved} Einteilung${saved === 1 ? "" : "en"} aus Jahresplanung übernommen`,
         description:
-          skipped > 0 ? `${skipped} übersprungen (bereits vorhanden)` : undefined,
+          skipped > 0 ? `${skipped} übersprungen (bereits vorhanden oder ohne Mitarbeiter)` : undefined,
       });
       refresh();
     } finally {
@@ -846,6 +888,17 @@ export default function Tagesplanung() {
           skipped++;
           continue;
         }
+        // Nur noch nicht anderweitig eingeteilte Mitarbeiter zuweisen.
+        // KEINE Mitarbeiter verfügbar → Baustelle GAR NICHT anlegen:
+        // im Tagesplan sollen nur belegte Baustellen stehen.
+        const maIds = (maByPartie.get(z.partie_id) ?? []).filter(
+          (mid) => !schonEingeteilt.has(mid),
+        );
+        if (maIds.length === 0) {
+          ohneMa++;
+          continue;
+        }
+
         const { data: neu } = await supabase
           .from("einteilungen")
           .insert({
@@ -860,26 +913,19 @@ export default function Tagesplanung() {
           continue;
         }
 
-        // Nur noch nicht anderweitig eingeteilte Mitarbeiter zuweisen.
-        const maIds = (maByPartie.get(z.partie_id) ?? []).filter(
-          (mid) => !schonEingeteilt.has(mid),
+        const { error: emErr } = await supabase.from("einteilung_mitarbeiter").insert(
+          maIds.map((mid) => ({
+            einteilung_id: neu.id,
+            mitarbeiter_id: mid,
+          })),
         );
-        if (maIds.length > 0) {
-          const { error: emErr } = await supabase.from("einteilung_mitarbeiter").insert(
-            maIds.map((mid) => ({
-              einteilung_id: neu.id,
-              mitarbeiter_id: mid,
-            })),
-          );
-          if (emErr) {
-            // MA NICHT als verbraucht markieren — sie fehlen sonst überall.
-            fehler++;
-          } else {
-            maIds.forEach((mid) => schonEingeteilt.add(mid));
-          }
-        } else {
-          ohneMa++;
+        if (emErr) {
+          // Leere Hülle nicht stehen lassen — wieder entfernen.
+          await supabase.from("einteilungen").delete().eq("id", neu.id);
+          fehler++;
+          continue;
         }
+        maIds.forEach((mid) => schonEingeteilt.add(mid));
 
         // Stamm-Fahrzeuge der Partie mitgeben (jedes Fahrzeug nur 1x/Tag).
         const fzIds = (fzByPartie.get(z.partie_id) ?? []).filter(
@@ -900,7 +946,7 @@ export default function Tagesplanung() {
       const hinweise = [
         skipped > 0 ? `${skipped} übersprungen (bereits vorhanden)` : "",
         ohneMa > 0
-          ? `${ohneMa} ohne Mitarbeiter (Partie mehrfach aktiv oder alle schon verplant — bitte verteilen)`
+          ? `${ohneMa} nicht angelegt (keine freien Mitarbeiter — Partie mehrfach aktiv oder alle verplant)`
           : "",
         fehler > 0 ? `${fehler} mit Fehler` : "",
       ].filter(Boolean);
@@ -1882,17 +1928,9 @@ function MitarbeiterSicht({
     .filter((m) => !eingeteiltIds.has(m.id) && !abwesendIds.has(m.id))
     .map((m) => ({ ma: m, einteilungId: null, baustelle: null }));
 
-  // Eingeteilte nach Baustelle gruppieren. WICHTIG: zuerst ALLE heutigen
-  // Einteilungen als Gruppen anlegen — auch LEERE Baustellen (z.B. aus der
-  // Polierplanungs-Übernahme, wenn alle Partie-MA schon verplant waren).
-  // Sonst sind sie in dieser Ansicht unsichtbar und niemand kann Leute
-  // draufziehen.
+  // Eingeteilte nach Baustelle gruppieren — NUR belegte Baustellen
+  // (Wunsch: Baustellen ohne Mitarbeiter erscheinen im Tagesplan nicht).
   const groupedByBaustelle = new Map<string, { baustelle: Baustelle | null; rows: MaZeile[] }>();
-  for (const e of plan.einteilungen) {
-    const key = e.baustelle?.id ?? "ohne-baustelle";
-    if (!groupedByBaustelle.has(key))
-      groupedByBaustelle.set(key, { baustelle: e.baustelle, rows: [] });
-  }
   for (const z of eingeteilt) {
     const key = z.baustelle?.id ?? "ohne-baustelle";
     if (!groupedByBaustelle.has(key))
@@ -2000,11 +2038,6 @@ function MitarbeiterSicht({
                       {g.rows.length} MA
                     </span>
                   </div>
-                  {g.rows.length === 0 && (
-                    <div className="text-xs italic text-muted-foreground py-1.5">
-                      Noch niemand eingeteilt — unten bei „Nicht eingeteilt" zuweisen.
-                    </div>
-                  )}
                   <div className="divide-y divide-border/60">
                     {g.rows.map((z) => (
                       <div key={z.ma.id} className="flex items-center gap-2 py-1.5">
