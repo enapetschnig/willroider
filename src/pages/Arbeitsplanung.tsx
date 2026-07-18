@@ -17,6 +17,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
 import { PoliereinsatzView } from "@/components/arbeitsplanung/PoliereinsatzView";
+import { genehmigeUrlaubsantrag, lehneUrlaubsantragAb } from "@/lib/urlaubsantrag";
 import { useToast } from "@/hooks/use-toast";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
 import {
@@ -204,6 +205,40 @@ export default function Arbeitsplanung() {
     setFahrzeuge((fz.data as Fahrzeug[]) ?? []);
   };
 
+  /** Urlaubsantrag direkt am „U? beantragt"-Balken entscheiden —
+   *  gleiche Logik wie Verwaltung → Urlaubs-Konten (lib/urlaubsantrag). */
+  const [antragBusy, setAntragBusy] = useState(false);
+  const entscheideAntrag = async (antragId: string, genehmigt: boolean) => {
+    if (antragBusy) return;
+    setAntragBusy(true);
+    try {
+      if (genehmigt) {
+        const { data: antrag } = await supabase
+          .from("urlaubsantraege")
+          .select("*")
+          .eq("id", antragId)
+          .maybeSingle();
+        if (!antrag) {
+          toast({ variant: "destructive", title: "Antrag nicht gefunden" });
+          return;
+        }
+        const r = await genehmigeUrlaubsantrag(antrag as any);
+        if (r.alreadyDecided) toast({ title: "Bereits entschieden" });
+        else if (!r.ok) toast({ variant: "destructive", title: "Fehler", description: r.message });
+        else toast({ title: "Urlaub genehmigt", description: r.message });
+      } else {
+        const r = await lehneUrlaubsantragAb(antragId);
+        if (r.alreadyDecided) toast({ title: "Bereits entschieden" });
+        else if (!r.ok) toast({ variant: "destructive", title: "Fehler", description: r.message });
+        else toast({ title: "Antrag abgelehnt" });
+      }
+      setBarInfo(null);
+      loadAssignments();
+    } finally {
+      setAntragBusy(false);
+    }
+  };
+
   const loadAssignments = async () => {
     const startIso = isoDate(rangeStart);
     const endIso = isoDate(new Date(rangeStart.getTime() + (totalDays - 1) * DAY_MS));
@@ -284,6 +319,7 @@ export default function Arbeitsplanung() {
           map.set(cellKey(a.mitarbeiter_id, iso), {
             source: "fehlzeit",
             refId: a.id,
+            einteilungId: a.id, // Antrag-ID — für Genehmigen am Balken
             fehlzeitTyp: "U?",
             isReadOnly: true, // entschieden wird über Genehmigen/Ablehnen
           });
@@ -461,7 +497,9 @@ export default function Arbeitsplanung() {
           }
           const key =
             a.source === "fehlzeit"
-              ? `f:${a.fehlzeitTyp ?? ""}`
+              ? a.fehlzeitTyp === "U?"
+                ? `f:U?:${a.einteilungId ?? ""}`
+                : `f:${a.fehlzeitTyp ?? ""}`
               : `e:${a.baustelleId ?? "x"}`;
           if (cur && (cur as any)._key === key) {
             // Fortsetzung — Wochenend-Lücke in den visuellen Span aufnehmen
@@ -2337,6 +2375,31 @@ export default function Arbeitsplanung() {
                   {barInfo.cells.length === 1 ? "Tag" : "Tage"})
                 </div>
               </div>
+              {/* Urlaubsantrag direkt hier entscheiden — synchron mit
+                  Verwaltung + Dashboard (gleiche Logik-Bibliothek). */}
+              {b.fehlzeitTyp === "U?" &&
+                hasPermission("urlaub.genehmigen") &&
+                b.einteilungIds.size > 0 && (
+                  <div className="flex gap-2 mt-2">
+                    <Button
+                      size="sm"
+                      className="flex-1 h-9 bg-emerald-600 hover:bg-emerald-700"
+                      disabled={antragBusy}
+                      onClick={() => entscheideAntrag(Array.from(b.einteilungIds)[0], true)}
+                    >
+                      Genehmigen
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 h-9 text-destructive border-destructive/40"
+                      disabled={antragBusy}
+                      onClick={() => entscheideAntrag(Array.from(b.einteilungIds)[0], false)}
+                    >
+                      Ablehnen
+                    </Button>
+                  </div>
+                )}
               {isAdmin && !b.isReadOnly && (
                 <Button
                   size="sm"

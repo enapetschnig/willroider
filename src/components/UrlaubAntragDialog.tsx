@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { genehmigeUrlaubsantrag, lehneUrlaubsantragAb } from "@/lib/urlaubsantrag";
 import { Plus, Sun, X } from "lucide-react";
 import { werktagePlus, isWerktag } from "@/lib/feiertage";
 import { localIso } from "@/lib/dateFmt";
@@ -284,15 +285,17 @@ export function AdminUrlaubsantraegeCard() {
   const [antraege, setAntraege] = useState<
     (Antrag & { mitarbeiter?: { vorname: string; nachname: string } | null })[]
   >([]);
+  const [ladeFehler, setLadeFehler] = useState<string | null>(null);
   /** Antrag-ID die gerade verarbeitet wird — Doppelklick-Schutz. */
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("urlaubsantraege")
       .select("*, mitarbeiter:profiles(vorname,nachname)")
       .eq("status", "offen")
       .order("eingereicht_am", { ascending: true });
+    setLadeFehler(error ? error.message : null);
     setAntraege((data as any) ?? []);
   };
 
@@ -311,103 +314,15 @@ export function AdminUrlaubsantraegeCard() {
     if (busyId) return;
     setBusyId(a.id);
     try {
-      const { data: u } = await supabase.auth.getUser();
-      // 1) Antrag-Status setzen — MIT Status-Guard + Row-Count-Check.
-      //    Ohne Guard buchte ein Doppelklick (oder zwei Admins parallel)
-      //    die Urlaubstage DOPPELT vom Konto ab.
-      const { data: claimed, error: err1 } = await supabase
-        .from("urlaubsantraege")
-        .update({
-          status: "genehmigt",
-          entschieden_von: u.user?.id ?? null,
-          entschieden_am: new Date().toISOString(),
-        })
-        .eq("id", a.id)
-        .eq("status", "offen")
-        .select("id");
-      if (err1) {
-        toast({ variant: "destructive", title: "Fehler", description: err1.message });
-        return;
+      const r = await genehmigeUrlaubsantrag(a);
+      if (r.alreadyDecided) {
+        toast({ title: "Bereits entschieden", description: "Dieser Antrag wurde inzwischen schon bearbeitet." });
+      } else if (!r.ok) {
+        toast({ variant: "destructive", title: "Fehler", description: r.message });
+      } else {
+        toast({ title: "Antrag genehmigt", description: r.message });
       }
-      if (!claimed || claimed.length === 0) {
-        toast({
-          title: "Bereits entschieden",
-          description: "Dieser Antrag wurde inzwischen schon bearbeitet.",
-        });
-        void load();
-        return;
-      }
-      // 2) Konto-Buchung
-      if (a.arbeitstage && a.arbeitstage > 0) {
-        const { error: buchErr } = await supabase.from("urlaubs_buchungen").insert({
-          mitarbeiter_id: a.mitarbeiter_id,
-          art: "urlaub_genommen",
-          tage: -Math.abs(Number(a.arbeitstage)),
-          wirksam_am: a.von,
-          notiz: `Antrag: ${a.von} – ${a.bis}`,
-          erstellt_von: u.user?.id ?? null,
-        });
-        if (buchErr) {
-          toast({
-            variant: "destructive",
-            title: "Konto-Buchung fehlgeschlagen",
-            description: `${buchErr.message} — Antrag ist genehmigt, bitte Buchung manuell im Urlaubs-Konto nachtragen.`,
-          });
-        }
-      }
-      // 3) Pro Werktag im Range UPSERT stunden_tage.tag_status='urlaub'
-      const werktageInRange: string[] = [];
-      let d = new Date(a.von + "T00:00:00");
-      const ende = new Date(a.bis + "T00:00:00");
-      while (d <= ende) {
-        if (isWerktag(d)) werktageInRange.push(localIso(d));
-        d.setDate(d.getDate() + 1);
-      }
-      if (werktageInRange.length > 0) {
-        // existierende Einträge laden, dann nur INSERT für fehlende (vermeidet duplicate-Key)
-        const { data: existing } = await supabase
-          .from("stunden_tage")
-          .select("id, datum, status")
-          .eq("mitarbeiter_id", a.mitarbeiter_id)
-          .in("datum", werktageInRange);
-        const existingSet = new Set((existing ?? []).map((r: any) => r.datum));
-        const toInsert = werktageInRange.filter((d) => !existingSet.has(d));
-        if (toInsert.length > 0) {
-          const { error: insErr } = await supabase.from("stunden_tage").insert(
-            toInsert.map((datum) => ({
-              mitarbeiter_id: a.mitarbeiter_id,
-              datum,
-              tag_status: "urlaub" as const,
-              netto_stunden: 0,
-              status: "ma_bestaetigt" as const,
-            })),
-          );
-          if (insErr) console.error("Urlaubs-Tage-Insert:", insErr);
-        }
-        // Bestehende (noch nicht freigegebene) Einträge auf Urlaub umstellen.
-        // WICHTIG: auch die stunden_taetigkeiten der Tage löschen — sonst
-        // rechnet der Recompute-Trigger beim nächsten Edit die alten
-        // Arbeitsstunden zurück und der Urlaub verschwindet. Das Löschen
-        // entfernt auch alte TAG:-Auto-Urlaubsbuchungen (verhindert
-        // Doppelabzug zusätzlich zur Antrags-Buchung).
-        const ueberschreibbar = (existing ?? []).filter(
-          (r: any) => r.status === "erfasst" || r.status === "ma_bestaetigt",
-        );
-        if (ueberschreibbar.length > 0) {
-          const tagIds = ueberschreibbar.map((r: any) => r.id);
-          const { error: ttDelErr } = await supabase
-            .from("stunden_taetigkeiten")
-            .delete()
-            .in("stunden_tag_id", tagIds);
-          if (ttDelErr) console.error("Taetigkeiten-Cleanup:", ttDelErr);
-          const { error: updErr } = await supabase
-            .from("stunden_tage")
-            .update({ tag_status: "urlaub", netto_stunden: 0 })
-            .in("id", tagIds);
-          if (updErr) console.error("Urlaubs-Tage-Update:", updErr);
-        }
-      }
-      toast({ title: "Antrag genehmigt" });
+      void load();
     } finally {
       setBusyId(null);
     }
@@ -417,45 +332,42 @@ export function AdminUrlaubsantraegeCard() {
     if (busyId) return;
     setBusyId(a.id);
     try {
-      const { data: u } = await supabase.auth.getUser();
-      const { data: claimed, error } = await supabase
-        .from("urlaubsantraege")
-        .update({
-          status: "abgelehnt",
-          entschieden_von: u.user?.id ?? null,
-          entschieden_am: new Date().toISOString(),
-        })
-        .eq("id", a.id)
-        .eq("status", "offen")
-        .select("id");
-      if (error) {
-        toast({ variant: "destructive", title: "Fehler", description: error.message });
-        return;
+      const r = await lehneUrlaubsantragAb(a.id);
+      if (r.alreadyDecided) {
+        toast({ title: "Bereits entschieden", description: "Dieser Antrag wurde inzwischen schon bearbeitet." });
+      } else if (!r.ok) {
+        toast({ variant: "destructive", title: "Fehler", description: r.message });
+      } else {
+        toast({ title: "Antrag abgelehnt" });
       }
-      if (!claimed || claimed.length === 0) {
-        toast({
-          title: "Bereits entschieden",
-          description: "Dieser Antrag wurde inzwischen schon bearbeitet.",
-        });
-        void load();
-        return;
-      }
-      toast({ title: "Antrag abgelehnt" });
+      void load();
     } finally {
       setBusyId(null);
     }
   };
 
-  if (antraege.length === 0) return null;
-
+  // Immer sichtbar — auch ohne offene Anträge (sonst sucht man die
+  // Genehmigen-Stelle vergeblich) und erst recht bei Ladefehlern.
   return (
     <Card className="border-amber-300 bg-amber-50">
       <CardContent className="p-4 space-y-2">
         <div className="flex items-center gap-1.5 text-sm font-semibold text-amber-900">
           <Sun className="h-4 w-4" />
-          {antraege.length} offene{" "}
-          {antraege.length === 1 ? "Urlaubsantrag" : "Urlaubsanträge"}
+          {antraege.length > 0
+            ? `${antraege.length} offene ${antraege.length === 1 ? "Urlaubsantrag" : "Urlaubsanträge"} — hier genehmigen`
+            : "Urlaubsanträge genehmigen"}
         </div>
+        {ladeFehler && (
+          <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+            Anträge konnten nicht geladen werden: {ladeFehler}
+          </div>
+        )}
+        {!ladeFehler && antraege.length === 0 && (
+          <div className="text-xs text-amber-800/80 italic">
+            Derzeit keine offenen Anträge. Neue Anträge erscheinen hier und
+            ganz oben am Dashboard.
+          </div>
+        )}
         <div className="space-y-2">
           {antraege.map((a) => (
             <div
