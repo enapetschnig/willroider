@@ -716,6 +716,7 @@ export default function Stundenauswertung() {
                               zulagenTypen={zulagenTypen}
                               baustellenMap={baustellenMap}
                               pausenDauer={pausenDauer}
+                              maschinenIds={maschinenIds}
                               limits={limits}
                               onEditTag={(t) =>
                                 setEditTag({
@@ -1001,6 +1002,7 @@ function DetailMa({
   zulagenTypen,
   baustellenMap,
   pausenDauer,
+  maschinenIds,
   limits,
   onEditTag,
 }: {
@@ -1012,6 +1014,7 @@ function DetailMa({
   zulagenTypen: Database["public"]["Tables"]["zulagen_typen"]["Row"][];
   baustellenMap: Map<string, string>;
   pausenDauer: PausenDauer;
+  maschinenIds: Set<string>;
   limits: any;
   onEditTag?: (t: StundenTagFull) => void;
 }) {

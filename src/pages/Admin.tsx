@@ -68,6 +68,10 @@ const ALT_TAB: Record<string, TabKey> = {
   kalender: "arbeitszeit",
   stunden_stamm: "arbeitszeit",
   einstellungen: "arbeitszeit",
+  // Unter-Reiter der Mitarbeiter-Seite (Alt-Links / Kollisions-Schutz):
+  // landen im Mitarbeiter-Tab, die Seite öffnet den Unter-Reiter selbst.
+  partien: "mitarbeiter",
+  ordner: "mitarbeiter",
 };
 
 export default function Admin() {

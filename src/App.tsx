@@ -26,6 +26,7 @@ import StundenBerichteListe from "@/pages/StundenBerichteListe";
 import HalleErfassung from "@/pages/HalleErfassung";
 import Berichte from "@/pages/Berichte";
 import Notizen from "@/pages/Notizen";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import BerichtDetail from "@/pages/BerichtDetail";
 import Kalender from "@/pages/Kalender";
 import Evaluierung from "@/pages/Evaluierung";
@@ -70,6 +71,7 @@ function RequireRole({
 }
 
 const App = () => (
+  <ErrorBoundary>
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
@@ -116,6 +118,7 @@ const App = () => (
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
+  </ErrorBoundary>
 );
 
 export default App;

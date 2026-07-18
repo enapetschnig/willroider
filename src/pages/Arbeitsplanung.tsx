@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -101,13 +102,19 @@ const isoDate = (d: Date) => localIso(d);
 export default function Arbeitsplanung() {
   const { canCreateBaustelle, isAdmin, user, hasPermission } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [fahrzeuge, setFahrzeuge] = useState<Fahrzeug[]>([]);
   const [filterPartie, setFilterPartie] = useState<string>("alle");
   /** Ansicht: MA-Zeilen (klassisch) oder Poliereinsatz (MS-Project-Stil). */
-  const [ansicht, setAnsicht] = useState<"ma" | "polier">("ma");
+  // Deep-Link: /arbeitsplanung?ansicht=polier öffnet direkt den Poliereinsatz
+  const [ansicht, setAnsicht] = useState<"ma" | "polier">(() =>
+    new URLSearchParams(window.location.search).get("ansicht") === "polier"
+      ? "polier"
+      : "ma",
+  );
   const [weeksVisible, setWeeksVisible] = useState(20);
   const [anchorWeek, setAnchorWeek] = useState<Date>(() => {
     const today = new Date();
@@ -122,19 +129,11 @@ export default function Arbeitsplanung() {
   const [newPartieFarbe, setNewPartieFarbe] = useState("#3b82f6");
   const [newPartieleiterId, setNewPartieleiterId] = useState("");
 
-  const openPartieEditor = (partie?: Partie | null) => {
-    if (partie) {
-      setEditingPartieId(partie.id);
-      setNewPartieName(partie.name);
-      setNewPartieFarbe(partie.farbcode || "#3b82f6");
-      setNewPartieleiterId(partie.partieleiter_id ?? "");
-    } else {
-      setEditingPartieId(null);
-      setNewPartieName("");
-      setNewPartieFarbe("#3b82f6");
-      setNewPartieleiterId("");
-    }
-    setPartieDialog(true);
+  // EINE Pflege-Stelle für Partien: Anlegen/Umbenennen/Leiter/Löschen
+  // passiert ausschließlich in der Verwaltung — von hier wird nur verlinkt.
+  // (Der lokale Dialog bleibt als toter Code erhalten, wird nicht geöffnet.)
+  const openPartieEditor = (_partie?: Partie | null) => {
+    navigate("/admin?tab=mitarbeiter&sub=partien");
   };
   const closePartieEditor = () => {
     setPartieDialog(false);
@@ -258,6 +257,8 @@ export default function Arbeitsplanung() {
     const ch = supabase
       .channel("planung-bs")
       .on("postgres_changes", { event: "*", schema: "public", table: "baustellen" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "partien" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "jahresplan_einteilungen" }, () => loadAssignments())
       .on("postgres_changes", { event: "*", schema: "public", table: "jahresplan_mitarbeiter" }, () => loadAssignments())
       .on("postgres_changes", { event: "*", schema: "public", table: "stunden_tage" }, () => loadAssignments())
@@ -1453,7 +1454,7 @@ export default function Arbeitsplanung() {
                 onClick={() => openPartieEditor()}
               >
                 <UserPlus className="h-4 w-4 mr-2" />
-                Neue Partie
+                Partien verwalten
               </Button>
             )}
             {canCreateBaustelle && (
@@ -1742,7 +1743,7 @@ export default function Arbeitsplanung() {
                 onClick={() => openPartieEditor()}
                 className="w-full flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground hover:bg-muted border-b transition"
               >
-                <Plus className="h-3.5 w-3.5" /> Neue Partie
+                <Plus className="h-3.5 w-3.5" /> Partien verwalten
               </button>
             )}
           </div>
@@ -2386,18 +2387,9 @@ export default function Arbeitsplanung() {
                     variant="ghost"
                     className="h-7 w-7 p-0"
                     onClick={() => openPartieEditor(p)}
-                    title="Bearbeiten"
+                    title="In der Verwaltung bearbeiten"
                   >
                     <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 w-7 p-0 text-destructive"
-                    onClick={() => deletePartieFromPlan(p.id, p.name)}
-                    title="Löschen"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               ))}

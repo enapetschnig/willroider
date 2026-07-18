@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,7 +27,7 @@ import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { CheckCircle2, XCircle, Plus, Edit, Trash2, AlertTriangle, UserPlus } from "lucide-react";
+import { CheckCircle2, XCircle, Plus, Edit, Trash2, AlertTriangle, UserPlus, CalendarDays } from "lucide-react";
 import type { Database, AppRole } from "@/integrations/supabase/types";
 import {
   BAUSTELLEN_ORDNER,
@@ -126,19 +126,20 @@ export default function Mitarbeiter() {
   const { hasPermission, user: currentUser } = useAuth();
   const canDeleteMa = hasPermission("mitarbeiter.delete");
   const [params, setParams] = useSearchParams();
+  // WICHTIG: eigener Parameter "sub" — NICHT "tab", der gehört der äußeren
+  // Verwaltung (/admin?tab=…). Die Kollision machte beim Klick auf "Partien"
+  // die URL zu /admin?tab=partien → unbekannter Verwaltungs-Reiter → leere
+  // Seite ("weißer Bildschirm").
+  const subParam = params.get("sub") ?? params.get("tab"); // tab: Alt-Links
   const initialTab =
-    params.get("tab") === "partien"
-      ? "partien"
-      : params.get("tab") === "ordner"
-      ? "ordner"
-      : "mitarbeiter";
+    subParam === "partien" ? "partien" : subParam === "ordner" ? "ordner" : "mitarbeiter";
   const [tab, setTab] = useState(initialTab);
 
   const onTabChange = (v: string) => {
     setTab(v);
     const next = new URLSearchParams(params);
-    if (v === "mitarbeiter") next.delete("tab");
-    else next.set("tab", v);
+    if (v === "mitarbeiter") next.delete("sub");
+    else next.set("sub", v);
     setParams(next, { replace: true });
   };
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -735,7 +736,12 @@ export default function Mitarbeiter() {
         </TabsContent>
 
         <TabsContent value="partien">
-          <div className="flex justify-end mb-3">
+          <div className="flex justify-end gap-2 mb-3">
+            <Button variant="outline" asChild>
+              <Link to="/arbeitsplanung?ansicht=polier">
+                <CalendarDays className="h-4 w-4 mr-2" /> Zum Poliereinsatz
+              </Link>
+            </Button>
             <Button onClick={() => setEditingPartie({ farbcode: "#3b82f6" })}>
               <Plus className="h-4 w-4 mr-2" /> Neue Partie
             </Button>

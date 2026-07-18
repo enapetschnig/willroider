@@ -41,9 +41,11 @@ import {
   Undo2,
   Maximize2,
   Minimize2,
+  Users2,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
+import { useNavigate } from "react-router-dom";
 import { feiertagAt } from "@/lib/feiertage";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -113,6 +115,7 @@ export function PoliereinsatzView({
   onNeueBaustelle?: () => void;
 }) {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [zeitraeume, setZeitraeume] = useState<Zeitraum[]>([]);
   const [urlaubByMa, setUrlaubByMa] = useState<Map<string, Set<string>>>(new Map());
   /** Arbeitsfreie Werktage laut Arbeitszeitkalender (kurze Woche = Fr frei). */
@@ -1023,10 +1026,22 @@ export function PoliereinsatzView({
               Start nicht fix
             </span>
           </div>
+          {canEdit && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto"
+              onClick={() => navigate("/admin?tab=mitarbeiter&sub=partien")}
+              title="Partien anlegen, umbenennen, Leiter und Mitglieder ändern — zentral in der Verwaltung"
+            >
+              <Users2 className="h-4 w-4" />
+              <span className="hidden sm:inline ml-1.5">Partien verwalten</span>
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
-            className="ml-auto"
+            className={canEdit ? "" : "ml-auto"}
             onClick={() => setVollbild((v) => !v)}
             title={vollbild ? "Vollbild verlassen (Esc)" : "Vollbild"}
           >
