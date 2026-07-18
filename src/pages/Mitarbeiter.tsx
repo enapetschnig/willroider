@@ -329,6 +329,19 @@ export default function Mitarbeiter() {
 
   /** Partie eines Mitarbeiters direkt in der Tabelle ändern. */
   const setPartie = async (userId: string, partieId: string | null) => {
+    // Rückfrage gegen versehentliche Klicks im Schnell-Dropdown — ein
+    // falscher Partie-Wechsel nimmt den MA unbemerkt aus der Polier-Übernahme.
+    const p = profiles.find((x) => x.id === userId);
+    const von = partien.find((x) => x.id === p?.partie_id)?.name ?? "keine Partie";
+    const nach = partien.find((x) => x.id === partieId)?.name ?? "keine Partie";
+    if (
+      !window.confirm(
+        `${p?.vorname ?? ""} ${p?.nachname ?? ""} von „${von}" nach „${nach}" verschieben?`,
+      )
+    ) {
+      load(); // Dropdown auf echten Wert zurücksetzen
+      return;
+    }
     const { data: updated, error } = await supabase
       .from("profiles")
       .update({ partie_id: partieId })
@@ -342,7 +355,7 @@ export default function Mitarbeiter() {
       });
       return;
     }
-    toast({ title: "Partie geändert" });
+    toast({ title: `${p?.nachname ?? "Mitarbeiter"}: Partie → ${nach}` });
     load();
   };
 

@@ -15,6 +15,7 @@ import {
   KeyRound,
   Send,
   MessageSquarePlus,
+  History as HistoryIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { AdminUebersicht } from "@/components/admin/AdminUebersicht";
@@ -26,6 +27,7 @@ import { AdminLohnzettel } from "@/components/admin/AdminLohnzettel";
 import { AdminBerechtigungen } from "@/components/admin/AdminBerechtigungen";
 import { AdminZugangVerschicken } from "@/components/admin/AdminZugangVerschicken";
 import { AdminFeedback } from "@/components/admin/AdminFeedback";
+import { AdminProtokoll } from "@/components/admin/AdminProtokoll";
 import Mitarbeiter from "@/pages/Mitarbeiter";
 import Fahrzeuge from "@/pages/Fahrzeuge";
 import Evaluierung from "@/pages/Evaluierung";
@@ -42,6 +44,7 @@ type TabKey =
   | "fahrzeuge"
   | "evaluierung"
   | "feedback"
+  | "protokoll"
   | "berechtigungen";
 
 const TABS: { key: TabKey; label: string; icon: typeof Users }[] = [
@@ -56,6 +59,7 @@ const TABS: { key: TabKey; label: string; icon: typeof Users }[] = [
   { key: "fahrzeuge", label: "Fahrzeuge", icon: Truck },
   { key: "evaluierung", label: "Evaluierung", icon: ShieldCheck },
   { key: "feedback", label: "Änderungswünsche", icon: MessageSquarePlus },
+  { key: "protokoll", label: "Protokoll", icon: HistoryIcon },
   { key: "berechtigungen", label: "Berechtigungen", icon: KeyRound },
 ];
 
@@ -134,6 +138,7 @@ export default function Admin() {
         {tab === "fahrzeuge" && <Fahrzeuge />}
         {tab === "evaluierung" && <Evaluierung />}
         {tab === "feedback" && <AdminFeedback />}
+        {tab === "protokoll" && <AdminProtokoll />}
         {tab === "berechtigungen" && <AdminBerechtigungen />}
       </div>
     </div>
