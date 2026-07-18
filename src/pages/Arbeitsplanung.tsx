@@ -71,12 +71,14 @@ const FEHLZEIT_LABEL: Record<string, string> = {
   K: "Krank",
   F: "Feiertag",
   SW: "Schlechtwetter",
+  "U?": "Urlaub beantragt",
 };
 const FEHLZEIT_COLOR: Record<string, string> = {
   U: "#3b82f6",
   K: "#ef4444",
   F: "#8b5cf6",
   SW: "#f59e0b",
+  "U?": "#f59e0b",
 };
 // Mapping Planungs-Code → stunden_tage.tag_status (Enum der Zeiterfassung).
 // Fehlzeiten werden in stunden_tage geschrieben — die einzige Tabelle, die
@@ -205,14 +207,15 @@ export default function Arbeitsplanung() {
   const loadAssignments = async () => {
     const startIso = isoDate(rangeStart);
     const endIso = isoDate(new Date(rangeStart.getTime() + (totalDays - 1) * DAY_MS));
-    const [{ data: emRows }, { data: fzRows }] = await Promise.all([
+    // Der Mitarbeiter-Reiter zeigt: EINSÄTZE aus dem Poliereinsatz (nur
+    // Anzeige, geplant wird im Poliereinsatz-Reiter) + ABWESENHEITEN
+    // (hier eintragbar) + offene URLAUBSANTRÄGE (schraffiert).
+    const [{ data: zRows }, { data: fzRows }, { data: antragRows }] = await Promise.all([
       supabase
-        .from("jahresplan_mitarbeiter")
-        .select(
-          "id, mitarbeiter_id, einteilung_id, einteilungen:jahresplan_einteilungen!inner(id, datum, baustelle_id, baustellen(bvh_name))"
-        )
-        .gte("einteilungen.datum", startIso)
-        .lte("einteilungen.datum", endIso),
+        .from("poliereinsatz_zeitraeume" as any)
+        .select("id, partie_id, baustelle_id, von_datum, bis_datum")
+        .lte("von_datum", endIso)
+        .gte("bis_datum", startIso),
       // Fehlzeiten aus stunden_tage — dieselbe Quelle, die auch
       // Zeiterfassung/BSB/Lohn lesen (stundenbuchungen ist Legacy)
       supabase
@@ -221,24 +224,76 @@ export default function Arbeitsplanung() {
         .gte("datum", startIso)
         .lte("datum", endIso)
         .in("tag_status", FEHLZEIT_TAG_STATI),
+      supabase
+        .from("urlaubsantraege")
+        .select("id, mitarbeiter_id, von, bis, status")
+        .eq("status", "offen")
+        .lte("von", endIso)
+        .gte("bis", startIso)
+        .then(
+          (r) => r,
+          () => ({ data: null } as any),
+        ),
     ]);
+
     const map = new Map<string, AssignmentCell>();
-    (emRows ?? []).forEach((r: any) => {
-      const e = r.einteilungen;
-      if (!e?.datum) return;
-      const b = baustellen.find((x) => x.id === e.baustelle_id);
-      const partie = b?.partie_id ? partienById[b.partie_id] : null;
-      map.set(cellKey(r.mitarbeiter_id, e.datum), {
-        source: "einteilung",
-        refId: r.id,
-        einteilungId: r.einteilung_id,
-        baustelleId: e.baustelle_id,
-        baustelleName: e.baustellen?.bvh_name ?? b?.bvh_name ?? "Bauhof",
-        baustelleColor: partie?.farbcode ?? "#6b7280",
-      });
+
+    // 1) Einsätze aus dem Poliereinsatz: Partie-Zeitraum → alle aktiven
+    //    Partie-Mitglieder an jedem Werktag des Zeitraums. Farbe wie im
+    //    Poliereinsatz (Bauleiter-Planungsfarbe).
+    const addDaysIso = (iso: string, n: number) => {
+      const d = new Date(iso + "T00:00:00");
+      d.setDate(d.getDate() + n);
+      return isoDate(d);
+    };
+    (zRows as any[] | null)?.forEach((z) => {
+      const b = baustellen.find((x) => x.id === z.baustelle_id);
+      const bl = b?.bauleiter_id ? profilesById[b.bauleiter_id] : null;
+      const farbe = (bl as any)?.planungsfarbe ?? "#6b7280";
+      const member = profiles.filter(
+        (p) => p.partie_id === z.partie_id && p.is_active !== false,
+      );
+      if (member.length === 0) return;
+      let iso = z.von_datum < startIso ? startIso : z.von_datum;
+      const ende = z.bis_datum > endIso ? endIso : z.bis_datum;
+      while (iso <= ende) {
+        if (isWerktag(iso)) {
+          for (const m of member) {
+            map.set(cellKey(m.id, iso), {
+              source: "einteilung",
+              refId: z.id,
+              einteilungId: z.id,
+              baustelleId: z.baustelle_id,
+              baustelleName: b?.bvh_name ?? "?",
+              baustelleColor: farbe,
+              isReadOnly: true, // geplant wird im Poliereinsatz
+            });
+          }
+        }
+        iso = addDaysIso(iso, 1);
+      }
     });
+
+    // 2) Offene Urlaubsanträge — überdecken Einsätze (Person wäre weg),
+    //    aber NICHT echte Fehlzeiten (die kommen in Schritt 3 drüber).
+    (antragRows as any[] | null)?.forEach((a) => {
+      let iso = a.von < startIso ? startIso : a.von;
+      const ende = a.bis > endIso ? endIso : a.bis;
+      while (iso <= ende) {
+        if (isWerktag(iso)) {
+          map.set(cellKey(a.mitarbeiter_id, iso), {
+            source: "fehlzeit",
+            refId: a.id,
+            fehlzeitTyp: "U?",
+            isReadOnly: true, // entschieden wird über Genehmigen/Ablehnen
+          });
+        }
+        iso = addDaysIso(iso, 1);
+      }
+    });
+
+    // 3) Echte Fehlzeiten überschreiben alles (Mitarbeiter ist nicht da)
     (fzRows ?? []).forEach((r: any) => {
-      // Fehlzeit überschreibt Einteilung (Mitarbeiter nicht da)
       map.set(cellKey(r.mitarbeiter_id, r.datum), {
         source: "fehlzeit",
         refId: r.id,
@@ -259,8 +314,8 @@ export default function Arbeitsplanung() {
       .on("postgres_changes", { event: "*", schema: "public", table: "baustellen" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "partien" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "jahresplan_einteilungen" }, () => loadAssignments())
-      .on("postgres_changes", { event: "*", schema: "public", table: "jahresplan_mitarbeiter" }, () => loadAssignments())
+      .on("postgres_changes", { event: "*", schema: "public", table: "poliereinsatz_zeitraeume" }, () => loadAssignments())
+      .on("postgres_changes", { event: "*", schema: "public", table: "urlaubsantraege" }, () => loadAssignments())
       .on("postgres_changes", { event: "*", schema: "public", table: "stunden_tage" }, () => loadAssignments())
       .subscribe();
     return () => {
@@ -270,7 +325,7 @@ export default function Arbeitsplanung() {
 
   useEffect(() => {
     loadAssignments();
-  }, [anchorWeek, weeksVisible, baustellen, partien]);
+  }, [anchorWeek, weeksVisible, baustellen, partien, profiles]);
 
   const totalDays = weeksVisible * 7;
   const rangeStart = anchorWeek;
@@ -2080,7 +2135,7 @@ export default function Arbeitsplanung() {
                                     pointerEvents: "auto",
                                     cursor: greifbar ? undefined : "pointer",
                                   }}
-                                  title={`${bar.label} · ${dateRange}${bar.isReadOnly ? " (eingereicht)" : ""}`}
+                                  title={`${bar.label} · ${dateRange}${bar.isReadOnly ? (bar.source === "einteilung" ? " (aus Poliereinsatz)" : bar.fehlzeitTyp === "U?" ? " (beantragt)" : " (eingereicht)") : ""}`}
                                   onClick={
                                     greifbar
                                       ? undefined // Klick läuft über den Drag-Pfad (onUp)
@@ -2263,7 +2318,11 @@ export default function Arbeitsplanung() {
                 </div>
                 {b.isReadOnly && (
                   <Badge variant="outline" className="text-[9px] shrink-0">
-                    eingereicht
+                    {b.source === "einteilung"
+                      ? "aus Poliereinsatz"
+                      : b.fehlzeitTyp === "U?"
+                        ? "beantragt"
+                        : "eingereicht"}
                   </Badge>
                 )}
               </div>
@@ -3031,46 +3090,15 @@ function CellPopover({
           )}
         </div>
 
+        {/* Einsätze werden im Poliereinsatz geplant — hier gibt es NUR
+            Abwesenheiten (Wunsch: eine Pflege-Stelle, nichts verwechseln). */}
         <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
-          {hasExisting ? "Auf andere Baustelle verschieben" : "Auf Baustelle einteilen"}
-        </div>
-        <div className="space-y-1 max-h-44 overflow-y-auto mb-2">
-          {baustellen.length === 0 ? (
-            <div className="text-xs text-muted-foreground italic px-1">
-              Keine aktiven Baustellen.
-            </div>
-          ) : (
-            baustellen.map((b) => {
-              const partie = b.partie_id ? partien.find((p) => p.id === b.partie_id) : null;
-              return (
-                <button
-                  key={b.id}
-                  onClick={() => onAssignBaustelle(b.id)}
-                  className="w-full text-left text-xs px-2 py-2 rounded hover:bg-muted flex items-start gap-2"
-                >
-                  <span
-                    className="h-2.5 w-2.5 rounded-full shrink-0 mt-1"
-                    style={{ background: partie?.farbcode ?? "#6b7280" }}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium leading-tight break-words">{b.bvh_name}</div>
-                    {(b.kostenstelle || b.ort) && (
-                      <div className="text-[10px] text-muted-foreground mt-0.5">
-                        {[b.kostenstelle, b.ort].filter(Boolean).join(" · ")}
-                      </div>
-                    )}
-                  </div>
-                </button>
-              );
-            })
-          )}
-        </div>
-
-        <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 border-t pt-2">
-          Fehlzeit
+          Abwesenheit eintragen
         </div>
         <div className="grid grid-cols-2 gap-1 mb-2">
-          {Object.entries(FEHLZEIT_LABEL).map(([k, l]) => (
+          {Object.entries(FEHLZEIT_LABEL)
+            .filter(([k]) => !!FEHLZEIT_TAG_STATUS[k])
+            .map(([k, l]) => (
             <button
               key={k}
               onClick={() => onSetFehlzeit(k)}
@@ -3083,68 +3111,6 @@ function CellPopover({
           ))}
         </div>
 
-        {/* Tätigkeit + Fahrzeuge — nur wenn alle markierten Cells zur gleichen
-            Einteilung gehören (gleiche Baustelle + gleicher Tag) */}
-        {singleEinteilungId && (
-          <div className="border-t pt-2 mb-2 space-y-2">
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              Tätigkeit & Fahrzeuge
-            </div>
-            <input
-              type="text"
-              value={taetigkeit}
-              onChange={(e) => setTaetigkeit(e.target.value)}
-              placeholder="z.B. Montage, Abbund, Streichen"
-              className="w-full h-9 rounded-md border bg-background px-2 text-xs"
-            />
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground mt-1.5">
-              Fahrzeuge ({selectedFahrzeuge.size})
-            </div>
-            {fahrzeuge.length === 0 ? (
-              <div className="text-[11px] text-muted-foreground italic">
-                Keine aktiven Fahrzeuge — anlegen unter „Fahrzeuge".
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-1 max-h-32 overflow-y-auto">
-                {fahrzeuge.map((f) => {
-                  const sel = selectedFahrzeuge.has(f.id);
-                  return (
-                    <button
-                      key={f.id}
-                      onClick={() => {
-                        const next = new Set(selectedFahrzeuge);
-                        if (sel) next.delete(f.id);
-                        else next.add(f.id);
-                        setSelectedFahrzeuge(next);
-                      }}
-                      className={`text-[11px] px-2 py-1.5 rounded border text-left transition truncate ${
-                        sel
-                          ? "border-primary bg-primary/10 text-primary font-semibold"
-                          : "border-border hover:bg-muted"
-                      }`}
-                      title={`${f.kennzeichen}${f.bezeichnung ? ` · ${f.bezeichnung}` : ""}`}
-                    >
-                      {f.kennzeichen}
-                      {f.bezeichnung && (
-                        <span className="block text-[9px] opacity-70 truncate">
-                          {f.bezeichnung}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            <button
-              onClick={saveDetails}
-              disabled={savingDetails}
-              className="w-full text-xs px-2 py-2 rounded bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50"
-            >
-              {savingDetails ? "Speichert…" : "Tätigkeit & Fahrzeuge speichern"}
-            </button>
-          </div>
-        )}
-
         {hasExisting && (
           <button
             onClick={onClear}
@@ -3156,8 +3122,8 @@ function CellPopover({
               if (uniqueWorkerIds.length === 1 && uniqueDates.length === 1) {
                 const p = profilesById[uniqueWorkerIds[0]];
                 return p
-                  ? `${p.vorname} aus dieser Einteilung nehmen`
-                  : "Aus Einteilung nehmen";
+                  ? `Abwesenheit von ${p.vorname} entfernen`
+                  : "Abwesenheit entfernen";
               }
               if (uniqueWorkerIds.length === 1 && uniqueDates.length > 1) {
                 return `${uniqueDates.length} Tage entfernen`;

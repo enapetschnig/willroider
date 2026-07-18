@@ -15,6 +15,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Plus, Sun, X } from "lucide-react";
 import { werktagePlus, isWerktag } from "@/lib/feiertage";
 import { localIso } from "@/lib/dateFmt";
@@ -276,6 +277,10 @@ export function UrlaubAntragDialog({
 /** Admin-Card: offene Anträge mit Genehmigen/Ablehnen-Buttons. */
 export function AdminUrlaubsantraegeCard() {
   const { toast } = useToast();
+  // Genehmigen/Ablehnen hängt an der Rollen-Berechtigung urlaub.genehmigen
+  // (Verwaltung → Berechtigungen) — RLS erzwingt das zusätzlich serverseitig.
+  const { hasPermission } = useAuth();
+  const darfEntscheiden = hasPermission("urlaub.genehmigen");
   const [antraege, setAntraege] = useState<
     (Antrag & { mitarbeiter?: { vorname: string; nachname: string } | null })[]
   >([]);
@@ -480,7 +485,7 @@ export function AdminUrlaubsantraegeCard() {
                   variant="outline"
                   className="h-7 text-xs"
                   onClick={() => ablehnen(a)}
-                  disabled={busyId !== null}
+                  disabled={busyId !== null || !darfEntscheiden}
                 >
                   Ablehnen
                 </Button>
@@ -488,7 +493,7 @@ export function AdminUrlaubsantraegeCard() {
                   size="sm"
                   className="h-7 text-xs"
                   onClick={() => genehmigen(a)}
-                  disabled={busyId !== null}
+                  disabled={busyId !== null || !darfEntscheiden}
                 >
                   {busyId === a.id ? "Verarbeite…" : "Genehmigen"}
                 </Button>

@@ -96,11 +96,14 @@ type HeuteEintrag = {
 };
 
 export default function Dashboard() {
-  const { user, profile, isAdmin } = useAuth();
+  const { user, profile, isAdmin, hasPermission } = useAuth();
   const [aktiveBaustellen, setAktiveBaustellen] = useState<Baustelle[]>([]);
   const [pendingProfiles, setPendingProfiles] = useState<PendingProfile[]>([]);
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [feedbackNeu, setFeedbackNeu] = useState<number>(0);
+  const [offeneAntraege, setOffeneAntraege] = useState<
+    { id: string; von: string; bis: string; name: string }[]
+  >([]);
   const [angeboteFaellig, setAngeboteFaellig] = useState<number>(0);
   const [offeneUnterschriften, setOffeneUnterschriften] = useState<
     {
@@ -283,6 +286,41 @@ export default function Dashboard() {
       supabase.removeChannel(ch);
     };
   }, [isAdmin]);
+
+  useEffect(() => {
+    if (!hasPermission("urlaub.genehmigen")) return;
+    const loadAntraege = async () => {
+      const { data } = await supabase
+        .from("urlaubsantraege")
+        .select("id, von, bis, mitarbeiter_id")
+        .eq("status", "offen")
+        .order("eingereicht_am");
+      const rows = (data as any[]) ?? [];
+      const ids = Array.from(new Set(rows.map((r) => r.mitarbeiter_id)));
+      const namen = new Map<string, string>();
+      if (ids.length > 0) {
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("id, vorname, nachname")
+          .in("id", ids);
+        (profs ?? []).forEach((p: any) =>
+          namen.set(p.id, `${p.vorname ?? ""} ${p.nachname ?? ""}`.trim()),
+        );
+      }
+      setOffeneAntraege(
+        rows.map((r) => ({ id: r.id, von: r.von, bis: r.bis, name: namen.get(r.mitarbeiter_id) ?? "?" })),
+      );
+    };
+    loadAntraege();
+    const ch = supabase
+      .channel("dashboard-urlaub")
+      .on("postgres_changes", { event: "*", schema: "public", table: "urlaubsantraege" }, loadAntraege)
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasPermission("urlaub.genehmigen")]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -508,6 +546,62 @@ export default function Dashboard() {
             <Link to="/mitarbeiter" className="sm:hidden block mt-3">
               <Button className="w-full h-11 bg-amber-600 hover:bg-amber-700 text-white shadow-md">
                 Jetzt freischalten
+                <ArrowRight className="h-4 w-4 ml-1.5" />
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Offene Urlaubsanträge — für alle mit urlaub.genehmigen (Rollen-Einstellung) */}
+      {hasPermission("urlaub.genehmigen") && offeneAntraege.length > 0 && (
+        <Card className="border-2 border-sky-500 bg-gradient-to-r from-sky-50 to-sky-100 shadow-md">
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex items-start gap-3 sm:gap-4">
+              <div className="relative shrink-0">
+                <div className="h-11 w-11 sm:h-12 sm:w-12 rounded-full bg-sky-600 flex items-center justify-center text-white shadow-md">
+                  <CalendarDays className="h-5 w-5 sm:h-6 sm:w-6" />
+                </div>
+                <span className="absolute -top-0.5 -right-0.5 h-5 min-w-[20px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-sky-50 animate-pulse">
+                  {offeneAntraege.length}
+                </span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-base sm:text-lg text-sky-950 leading-tight">
+                  {offeneAntraege.length === 1
+                    ? "1 Urlaubsantrag wartet auf Entscheidung"
+                    : `${offeneAntraege.length} Urlaubsanträge warten auf Entscheidung`}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {offeneAntraege.slice(0, 5).map((a) => (
+                    <span
+                      key={a.id}
+                      className="inline-flex items-center gap-1.5 bg-white rounded-full px-2.5 py-1 text-xs shadow-sm border border-sky-200"
+                    >
+                      <strong>{a.name}</strong>
+                      <span className="text-muted-foreground">
+                        {new Date(a.von).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit" })}
+                        –{new Date(a.bis).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit" })}
+                      </span>
+                    </span>
+                  ))}
+                  {offeneAntraege.length > 5 && (
+                    <span className="text-xs text-sky-800 italic self-center">
+                      +{offeneAntraege.length - 5} weitere
+                    </span>
+                  )}
+                </div>
+              </div>
+              <Link to="/admin?tab=urlaub" className="shrink-0 hidden sm:block">
+                <Button className="bg-sky-600 hover:bg-sky-700 text-white shadow-md">
+                  Jetzt entscheiden
+                  <ArrowRight className="h-4 w-4 ml-1.5" />
+                </Button>
+              </Link>
+            </div>
+            <Link to="/admin?tab=urlaub" className="sm:hidden block mt-3">
+              <Button className="w-full h-11 bg-sky-600 hover:bg-sky-700 text-white shadow-md">
+                Jetzt entscheiden
                 <ArrowRight className="h-4 w-4 ml-1.5" />
               </Button>
             </Link>

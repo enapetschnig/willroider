@@ -144,13 +144,6 @@ export function PoliereinsatzView({
     suche: string;
   } | null>(null);
 
-  // Urlaub-Schnelleintrag
-  const [urlaubDialog, setUrlaubDialog] = useState<{
-    partieId: string;
-    maId: string;
-    von: string;
-    bis: string;
-  } | null>(null);
 
   // Info-Popup am Balken
   const [barInfo, setBarInfo] = useState<{
@@ -676,73 +669,6 @@ export function PoliereinsatzView({
 
   /** Urlaub-Schnelleintrag: schreibt echte stunden_tage (nur Werktage,
    *  keine bestehenden Tage überschreiben, kein Konto-Abzug). */
-  const saveUrlaub = async () => {
-    const d = urlaubDialog;
-    if (!d || !d.maId || !d.von || !d.bis || d.bis < d.von) return;
-    setBusy(true);
-    try {
-      const tage: string[] = [];
-      let cur = d.von;
-      while (cur <= d.bis) {
-        const dt = new Date(cur + "T00:00:00");
-        const wd = dt.getDay();
-        if (wd !== 0 && wd !== 6 && !feiertagAt(cur)) tage.push(cur);
-        cur = addDays(cur, 1);
-      }
-      if (tage.length === 0) {
-        toast({ variant: "destructive", title: "Keine Werktage im Zeitraum" });
-        return;
-      }
-      // Gesperrte Monate (Lohnabschluss) ausschließen — sonst würde ein
-      // bereits abgerechneter Zeitraum nachträglich verändert.
-      const { data: sperren } = await supabase
-        .from("monatsabschluss")
-        .select("von_datum, bis_datum")
-        .eq("mitarbeiter_id", d.maId);
-      const istGesperrt = (iso: string) =>
-        ((sperren as any[]) ?? []).some(
-          (s) => iso >= s.von_datum && iso <= s.bis_datum,
-        );
-      const gesperrt = tage.filter(istGesperrt);
-      const offen = tage.filter((t) => !istGesperrt(t));
-
-      const { data: existing } = await supabase
-        .from("stunden_tage")
-        .select("datum")
-        .eq("mitarbeiter_id", d.maId)
-        .in("datum", offen.length > 0 ? offen : ["1900-01-01"]);
-      const skip = new Set(((existing as any[]) ?? []).map((r) => r.datum));
-      const neu = offen.filter((t) => !skip.has(t));
-      if (neu.length > 0) {
-        const { error } = await supabase.from("stunden_tage").insert(
-          neu.map((datum) => ({
-            mitarbeiter_id: d.maId,
-            datum,
-            tag_status: "urlaub" as const,
-            netto_stunden: 0,
-            status: "erfasst" as const,
-          })),
-        );
-        if (error) {
-          toast({ variant: "destructive", title: "Eintragen fehlgeschlagen", description: error.message });
-          return;
-        }
-      }
-      toast({
-        title: `${neu.length} Urlaubstag(e) eingetragen`,
-        description:
-          (skip.size > 0 ? `${skip.size} bereits erfasst. ` : "") +
-          (gesperrt.length > 0
-            ? `${gesperrt.length} übersprungen (Monat abgeschlossen). `
-            : "") +
-          "Hinweis: kein Urlaubskonto-Abzug — dafür Urlaubsantrag verwenden.",
-      });
-      setUrlaubDialog(null);
-      void load();
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const moveMember = async (maId: string, partieId: string | null) => {
     // .select() erzwingt Row-Count: ein RLS-Block liefert 0 Zeilen ohne
@@ -1171,24 +1097,9 @@ export function PoliereinsatzView({
                         </div>
                       ))}
                       <div className="flex items-center gap-2 pt-1">
-                        {(canEdit ||
-                          (userId && g.partie.partieleiter_id === userId)) && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-6 text-[10px] px-2"
-                            onClick={() =>
-                              setUrlaubDialog({
-                                partieId: g.partie.id,
-                                maId: g.member[0]?.id ?? "",
-                                von: localIso(new Date()),
-                                bis: localIso(new Date()),
-                              })
-                            }
-                          >
-                            <Sun className="h-3 w-3 mr-1" /> Urlaub eintragen
-                          </Button>
-                        )}
+                        {/* Urlaub wird NICHT mehr hier eingetragen — nur noch
+                            in der Jahresplanung → Reiter „Mitarbeiter"
+                            (eine Pflege-Stelle für Abwesenheiten). */}
                         {fahrzeuge
                           .filter(
                             (f) =>
@@ -1509,8 +1420,6 @@ export function PoliereinsatzView({
           const aktuelle = g.einsaetze
             .filter((z) => z.bis_datum >= heute)
             .sort((a, b) => a.von_datum.localeCompare(b.von_datum));
-          const darfUrlaub =
-            canEdit || (userId && g.partie.partieleiter_id === userId);
           return (
             <Card key={g.partie.id}>
               <CardContent className="p-3">
@@ -1525,23 +1434,6 @@ export function PoliereinsatzView({
                   <span className="text-[11px] text-muted-foreground truncate">
                     {g.partie.name}
                   </span>
-                  {darfUrlaub && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-[11px] px-2 ml-auto shrink-0"
-                      onClick={() =>
-                        setUrlaubDialog({
-                          partieId: g.partie.id,
-                          maId: g.member[0]?.id ?? "",
-                          von: localIso(new Date()),
-                          bis: localIso(new Date()),
-                        })
-                      }
-                    >
-                      <Sun className="h-3 w-3 mr-1" /> Urlaub
-                    </Button>
-                  )}
                 </div>
                 {aktuelle.length === 0 ? (
                   <div className="text-[11px] text-muted-foreground italic">
@@ -1806,69 +1698,6 @@ export function PoliereinsatzView({
       </Dialog>
 
       {/* Urlaub-Schnelleintrag */}
-      <Dialog open={!!urlaubDialog} onOpenChange={(o) => !o && setUrlaubDialog(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Urlaub eintragen</DialogTitle>
-          </DialogHeader>
-          {urlaubDialog && (
-            <div className="space-y-3">
-              <div>
-                <Label className="text-xs">Mitarbeiter</Label>
-                <select
-                  className="w-full h-10 border rounded bg-background px-2 text-sm"
-                  value={urlaubDialog.maId}
-                  onChange={(e) =>
-                    setUrlaubDialog({ ...urlaubDialog, maId: e.target.value })
-                  }
-                >
-                  {profiles
-                    .filter((p) => p.partie_id === urlaubDialog.partieId && p.is_active !== false)
-                    .map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.vorname} {p.nachname}
-                      </option>
-                    ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <Label className="text-xs">Von</Label>
-                  <Input
-                    type="date"
-                    value={urlaubDialog.von}
-                    onChange={(e) =>
-                      setUrlaubDialog({ ...urlaubDialog, von: e.target.value })
-                    }
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs">Bis</Label>
-                  <Input
-                    type="date"
-                    value={urlaubDialog.bis}
-                    onChange={(e) =>
-                      setUrlaubDialog({ ...urlaubDialog, bis: e.target.value })
-                    }
-                  />
-                </div>
-              </div>
-              <div className="text-[11px] text-muted-foreground">
-                Schreibt Urlaubs-Tage direkt in die Zeiterfassung (nur Werktage).
-                Kein Urlaubskonto-Abzug — dafür den Urlaubsantrag verwenden.
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setUrlaubDialog(null)}>
-              Abbrechen
-            </Button>
-            <Button onClick={saveUrlaub} disabled={busy || !urlaubDialog?.maId}>
-              Eintragen
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
