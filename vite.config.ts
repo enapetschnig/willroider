@@ -26,6 +26,12 @@ export default defineConfig(({ mode }) => ({
       manifest: {
         id: '/',
         lang: 'de',
+        // Erlaubt getInstalledRelatedApps(): der Install-Dialog kann damit
+        // erkennen, ob die App auf diesem PC schon installiert ist.
+        related_applications: [
+          { platform: 'webapp', url: 'https://www.willroider.app/manifest.webmanifest' },
+        ],
+        prefer_related_applications: false,
         name: 'Holzbau Willroider',
         short_name: 'Willroider',
         description: 'Baustellenmanagement, Arbeitsplanung und Zeiterfassung für Holzbau Willroider GmbH',

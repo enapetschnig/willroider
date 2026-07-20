@@ -56,10 +56,30 @@ export function InstallGuide({ onInstalled }: { onInstalled?: () => void }) {
     useState<BeforeInstallPromptEvent | null>(null);
   const [standalone, setStandalone] = useState(false);
   const [platform, setPlatform] = useState<Platform>("desktop");
+  /** App ist auf diesem Gerät schon installiert (getInstalledRelatedApps) —
+   *  DER häufigste Grund, warum Chrome kein Install-Symbol mehr zeigt. */
+  const [bereitsInstalliert, setBereitsInstalliert] = useState(false);
+  /** Firefox/Safari am Desktop können PWAs nicht installieren. */
+  const [unsupportedBrowser, setUnsupportedBrowser] = useState<string | null>(null);
 
   useEffect(() => {
     setStandalone(isStandalone());
     setPlatform(detectPlatform());
+
+    const ua = navigator.userAgent;
+    if (/Firefox\//.test(ua)) setUnsupportedBrowser("Firefox");
+    else if (/Safari\//.test(ua) && !/Chrome|Chromium|Edg|OPR|CriOS|Android/.test(ua) && !/iPad|iPhone|iPod/.test(ua)) {
+      setUnsupportedBrowser("Safari");
+    }
+    // Bereits installiert? Braucht related_applications im Manifest.
+    (navigator as any)
+      .getInstalledRelatedApps?.()
+      .then((apps: unknown[]) => {
+        if (Array.isArray(apps) && apps.length > 0) setBereitsInstalliert(true);
+      })
+      .catch(() => {
+        /* nicht unterstützt → unbekannt */
+      });
 
     // Aktueller Cache-Stand sofort übernehmen (Event wurde u. U. schon
     // vor Mount in main.tsx abgefangen).
@@ -257,6 +277,49 @@ export function InstallGuide({ onInstalled }: { onInstalled?: () => void }) {
               </span>
             </CardContent>
           </Card>
+
+          {/* Status-Erkennung: sagt dem Nutzer die WAHRHEIT, statt ihn eine
+              Anleitung durchprobieren zu lassen, die nicht greifen kann. */}
+          {bereitsInstalliert && (
+            <Card className="border-emerald-300 bg-emerald-50">
+              <CardContent className="p-3 text-xs text-emerald-900 space-y-1">
+                <div className="font-semibold flex items-center gap-1.5">
+                  <CheckCircle2 className="h-4 w-4" /> Die App ist auf diesem PC bereits installiert!
+                </div>
+                <div>
+                  Deshalb zeigt der Browser kein Install-Symbol mehr an. Du
+                  findest die App im <strong>Startmenü</strong> (nach
+                  „Willroider" suchen) — von dort auch an Taskleiste oder
+                  Desktop anheften.
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          {unsupportedBrowser && (
+            <Card className="border-red-300 bg-red-50">
+              <CardContent className="p-3 text-xs text-red-900 space-y-1">
+                <div className="font-semibold">
+                  Du nutzt gerade {unsupportedBrowser} — hier ist Installieren nicht möglich.
+                </div>
+                <div>
+                  Bitte <strong>Chrome</strong> oder <strong>Edge</strong> öffnen
+                  (auf Windows vorinstalliert), dort{" "}
+                  <strong>willroider.app</strong> aufrufen und anmelden — dann
+                  klappt die Installation.
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          {!bereitsInstalliert && !unsupportedBrowser && !deferredPrompt && (
+            <Card className="bg-amber-50 border-amber-300">
+              <CardContent className="p-2.5 text-[11px] text-amber-900">
+                Der Browser bietet gerade keinen Ein-Klick-Install an (passiert
+                z.B. nach mehrmaligem Wegklicken). <strong>Der Menü-Weg in
+                Schritt 2 funktioniert trotzdem immer.</strong>
+              </CardContent>
+            </Card>
+          )}
+
           {deferredPrompt ? (
             <>
               <div className="text-xs text-muted-foreground">
