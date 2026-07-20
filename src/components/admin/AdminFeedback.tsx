@@ -16,6 +16,8 @@ import {
   X,
   Mic,
   Paperclip,
+  Zap,
+  UsersRound,
 } from "lucide-react";
 
 const fmtDauer = (s: number) =>
@@ -49,11 +51,13 @@ const KAT: Record<string, { label: string; icon: typeof Lightbulb; cls: string }
 const STATUS: Record<string, { label: string; cls: string }> = {
   neu: { label: "Neu", cls: "bg-blue-100 text-blue-800" },
   gesehen: { label: "Gesehen", cls: "bg-slate-100 text-slate-700" },
+  sofort: { label: "Sofort umsetzen", cls: "bg-orange-100 text-orange-800" },
+  besprechung: { label: "Zur Besprechung", cls: "bg-violet-100 text-violet-800" },
   umgesetzt: { label: "Umgesetzt", cls: "bg-green-100 text-green-800" },
   abgelehnt: { label: "Abgelehnt", cls: "bg-zinc-100 text-zinc-500" },
 };
 
-type Filter = "offen" | "alle" | "umgesetzt";
+type Filter = "offen" | "sofort" | "besprechung" | "umgesetzt" | "alle";
 
 export function AdminFeedback() {
   const { toast } = useToast();
@@ -159,8 +163,10 @@ export function AdminFeedback() {
   const gefiltert = useMemo(() => {
     if (filter === "alle") return rows;
     if (filter === "umgesetzt") return rows.filter((r) => r.status === "umgesetzt");
-    // offen = neu + gesehen
-    return rows.filter((r) => r.status === "neu" || r.status === "gesehen");
+    if (filter === "sofort") return rows.filter((r) => r.status === "sofort");
+    if (filter === "besprechung") return rows.filter((r) => r.status === "besprechung");
+    // offen = alles noch nicht Erledigte
+    return rows.filter((r) => r.status !== "umgesetzt" && r.status !== "abgelehnt");
   }, [rows, filter]);
 
   const neuCount = rows.filter((r) => r.status === "neu").length;
@@ -171,6 +177,8 @@ export function AdminFeedback() {
         {(
           [
             { k: "offen", label: "Offen" },
+            { k: "sofort", label: "Sofort" },
+            { k: "besprechung", label: "Besprechung" },
             { k: "umgesetzt", label: "Umgesetzt" },
             { k: "alle", label: "Alle" },
           ] as { k: Filter; label: string }[]
@@ -285,6 +293,28 @@ export function AdminFeedback() {
                         onClick={() => setStatus(r.id, "gesehen")}
                       >
                         <Eye className="h-3.5 w-3.5 mr-1.5" /> Gesehen
+                      </Button>
+                    )}
+                    {r.status !== "sofort" && r.status !== "umgesetzt" && r.status !== "abgelehnt" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-orange-700 border-orange-300 hover:bg-orange-50"
+                        disabled={busyId === r.id}
+                        onClick={() => setStatus(r.id, "sofort")}
+                      >
+                        <Zap className="h-3.5 w-3.5 mr-1.5" /> Sofort umsetzen
+                      </Button>
+                    )}
+                    {r.status !== "besprechung" && r.status !== "umgesetzt" && r.status !== "abgelehnt" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-violet-700 border-violet-300 hover:bg-violet-50"
+                        disabled={busyId === r.id}
+                        onClick={() => setStatus(r.id, "besprechung")}
+                      >
+                        <UsersRound className="h-3.5 w-3.5 mr-1.5" /> Zur Besprechung
                       </Button>
                     )}
                     {r.status !== "umgesetzt" && (

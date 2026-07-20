@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
     // Eintrag laden (Service-Role) + prüfen, dass er dem Aufrufer gehört.
     const { data: fb, error: fbErr } = await admin
       .from("feedback")
-      .select("id, erstellt_von, text, kategorie, seiten_kontext, app_version, audio_pfad, audio_sekunden, created_at")
+      .select("id, erstellt_von, text, kategorie, seiten_kontext, app_version, audio_pfad, audio_sekunden, anhang_pfad, anhang_name, anhang_typ, created_at")
       .eq("id", feedbackId)
       .maybeSingle();
     if (fbErr || !fb) return json({ ok: false, error: "Eintrag nicht gefunden" }, 404);
@@ -89,6 +89,22 @@ Deno.serve(async (req) => {
     const inhalt = fb.text ? esc(fb.text) : audioHinweis || "(kein Text)";
     const link = `${APP_URL}/admin?tab=feedback`;
 
+    // Anhang (Foto/Screenshot/Datei): signierte URL (7 Tage) — Bilder werden
+    // direkt in der Mail angezeigt, andere Dateien als Download-Link.
+    let anhangUrl: string | null = null;
+    if (fb.anhang_pfad) {
+      const { data: signed } = await admin.storage
+        .from("feedback-dateien")
+        .createSignedUrl(fb.anhang_pfad, 7 * 24 * 3600);
+      anhangUrl = signed?.signedUrl ?? null;
+    }
+    const istBild = !!fb.anhang_typ?.startsWith("image/");
+    const anhangHtml = anhangUrl
+      ? istBild
+        ? `<div style="margin:0 0 16px"><img src="${anhangUrl}" alt="${esc(fb.anhang_name ?? "Anhang")}" style="max-width:100%;border-radius:8px;border:1px solid #ddd" /><div style="font-size:12px;color:#666;margin-top:4px"><a href="${anhangUrl}">${esc(fb.anhang_name ?? "Bild in voller Größe öffnen")}</a></div></div>`
+        : `<p style="margin:0 0 16px">📎 <a href="${anhangUrl}">${esc(fb.anhang_name ?? "Anhang öffnen")}</a></p>`
+      : "";
+
     const html = `
       <div style="font-family:system-ui,Arial,sans-serif;max-width:560px;margin:0 auto">
         <h2 style="margin:0 0 4px">Neuer Änderungswunsch</h2>
@@ -97,13 +113,14 @@ Deno.serve(async (req) => {
           <div style="white-space:pre-wrap;line-height:1.5">${inhalt}</div>
           ${hatAudio && fb.text ? `<div style="margin-top:10px;color:#555">${audioHinweis}</div>` : ""}
         </div>
+        ${anhangHtml}
         <p style="color:#666;font-size:13px;margin:0 0 4px">Von: <strong>${esc(name)}</strong></p>
         ${fb.seiten_kontext ? `<p style="color:#666;font-size:13px;margin:0 0 4px">Seite: ${esc(fb.seiten_kontext)}</p>` : ""}
         ${fb.app_version ? `<p style="color:#666;font-size:13px;margin:0 0 16px">Version: ${esc(fb.app_version)}</p>` : ""}
         <a href="${link}" style="display:inline-block;background:#B0353C;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px">In der App öffnen</a>
       </div>`;
 
-    const textBody = `Neuer Änderungswunsch (${kat})\n\n${fb.text ?? (audioHinweis || "(kein Text)")}\n\nVon: ${name}\n${fb.seiten_kontext ? `Seite: ${fb.seiten_kontext}\n` : ""}\nÖffnen: ${link}`;
+    const textBody = `Neuer Änderungswunsch (${kat})\n\n${fb.text ?? (audioHinweis || "(kein Text)")}\n${anhangUrl ? `\n📎 Anhang: ${fb.anhang_name ?? "Datei"} — ${anhangUrl}\n` : ""}\nVon: ${name}\n${fb.seiten_kontext ? `Seite: ${fb.seiten_kontext}\n` : ""}\nÖffnen: ${link}`;
 
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -111,7 +128,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         from: FROM,
         to: [empfaenger],
-        subject: `Neuer Änderungswunsch – ${kat}${hatAudio ? " 🎤" : ""}`,
+        subject: `Neuer Änderungswunsch – ${kat}${hatAudio ? " 🎤" : ""}${anhangUrl ? " 📎" : ""}`,
         text: textBody,
         html,
       }),
