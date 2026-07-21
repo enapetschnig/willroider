@@ -117,7 +117,9 @@ export function PoliereinsatzView({
   const { toast } = useToast();
   const navigate = useNavigate();
   const [zeitraeume, setZeitraeume] = useState<Zeitraum[]>([]);
-  const [urlaubByMa, setUrlaubByMa] = useState<Map<string, Set<string>>>(new Map());
+  const [urlaubByMa, setUrlaubByMa] = useState<Map<string, Map<string, string>>>(
+    new Map(),
+  );
   /** Arbeitsfreie Werktage laut Arbeitszeitkalender (kurze Woche = Fr frei). */
   const [kalenderFrei, setKalenderFrei] = useState<Set<string>>(new Set());
   /** Betriebsurlaub-Tage (wochentyp='BU') — ganze Woche gesperrt. */
@@ -203,8 +205,10 @@ export function PoliereinsatzView({
         .order("von_datum"),
       supabase
         .from("stunden_tage")
-        .select("mitarbeiter_id, datum")
-        .eq("tag_status", "urlaub")
+        .select("mitarbeiter_id, datum, tag_status")
+        // Nicht nur Urlaub: ein Krankenstand blieb hier sonst unsichtbar und
+        // der Polier plante jemanden ein, der gar nicht da ist.
+        .in("tag_status", ["urlaub", "krank", "schlechtwetter"])
         .gte("datum", rangeStartIso)
         .lte("datum", rangeEndIso)
         // PostgREST kappt standardmäßig bei 1000 Zeilen — bei vielen
@@ -216,10 +220,10 @@ export function PoliereinsatzView({
       return;
     }
     setZeitraeume((zs as Zeitraum[]) ?? []);
-    const m = new Map<string, Set<string>>();
+    const m = new Map<string, Map<string, string>>();
     ((urlaub as any[]) ?? []).forEach((r) => {
-      if (!m.has(r.mitarbeiter_id)) m.set(r.mitarbeiter_id, new Set());
-      m.get(r.mitarbeiter_id)!.add(r.datum);
+      if (!m.has(r.mitarbeiter_id)) m.set(r.mitarbeiter_id, new Map());
+      m.get(r.mitarbeiter_id)!.set(r.datum, r.tag_status);
     });
     setUrlaubByMa(m);
 
@@ -360,16 +364,32 @@ export function PoliereinsatzView({
     }));
   };
 
-  /** Urlaubs-Segmente eines MA (zusammenhängende Tage). */
-  const urlaubSegmente = (maId: string): { von: string; bis: string }[] => {
-    const tage = [...(urlaubByMa.get(maId) ?? [])].sort();
-    const segs: { von: string; bis: string }[] = [];
-    for (const iso of tage) {
+  /** Abwesenheits-Segmente eines MA: zusammenhängende Tage GLEICHER Art.
+   *  Ein Wechsel Krank→Urlaub bricht das Segment, damit die Farbe stimmt. */
+  const urlaubSegmente = (
+    maId: string,
+  ): { von: string; bis: string; typ: string }[] => {
+    const tage = [...(urlaubByMa.get(maId)?.entries() ?? [])].sort((a, b) =>
+      a[0].localeCompare(b[0]),
+    );
+    const segs: { von: string; bis: string; typ: string }[] = [];
+    for (const [iso, typ] of tage) {
       const last = segs[segs.length - 1];
-      if (last && addDays(last.bis, 1) === iso) last.bis = iso;
-      else segs.push({ von: iso, bis: iso });
+      if (last && last.typ === typ && addDays(last.bis, 1) === iso) last.bis = iso;
+      else segs.push({ von: iso, bis: iso, typ });
     }
     return segs;
+  };
+
+  const ABW_FARBE: Record<string, string> = {
+    urlaub: "#0891b2",
+    krank: "#ef4444",
+    schlechtwetter: "#f59e0b",
+  };
+  const ABW_LABEL: Record<string, string> = {
+    urlaub: "Urlaub",
+    krank: "Krank",
+    schlechtwetter: "Schlechtwetter",
   };
 
   // ─── Gruppen: Partien mit Leiter oder Einsätzen ──────────────────────
@@ -1123,7 +1143,7 @@ export function PoliereinsatzView({
                     className="border-b flex items-center px-2 text-[10px] italic text-muted-foreground"
                     style={{ height: ROW_H }}
                   >
-                    <span className="pl-5">Urlaub</span>
+                    <span className="pl-5">Abwesend</span>
                   </div>
                   {/* Einsatz-Zeilen */}
                   {g.einsaetze.map((z) => {
@@ -1163,7 +1183,7 @@ export function PoliereinsatzView({
                 className="border-b bg-muted/60 flex items-center px-2 text-[12px] font-bold"
                 style={{ height: ROW_H }}
               >
-                Urlaube
+                Urlaube / Abwesenheiten
               </div>
               {bauleiter.map((b) => (
                 <div
@@ -1316,9 +1336,9 @@ export function PoliereinsatzView({
                                 width: geo.width,
                                 top: 4,
                                 height: ROW_H - 8,
-                                background: "#0891b2",
+                                background: ABW_FARBE[seg.typ] ?? "#0891b2",
                               }}
-                              title={`${m.vorname} ${m.nachname} · Urlaub ${seg.von} – ${seg.bis}`}
+                              title={`${m.vorname} ${m.nachname} · ${ABW_LABEL[seg.typ] ?? seg.typ} ${seg.von} – ${seg.bis}`}
                             >
                               {geo.width >= 44 ? m.nachname : ""}
                             </div>
@@ -1355,11 +1375,16 @@ export function PoliereinsatzView({
                             width: geo.width,
                             top: 4,
                             height: ROW_H - 8,
-                            background: b.planungsfarbe ?? "#0891b2",
+                            // Krank/SW behalten ihre Signalfarbe, sonst die
+                            // persönliche Planungsfarbe des Bauleiters.
+                            background:
+                              seg.typ === "urlaub"
+                                ? (b.planungsfarbe ?? ABW_FARBE.urlaub)
+                                : (ABW_FARBE[seg.typ] ?? ABW_FARBE.urlaub),
                           }}
-                          title={`Urlaub ${seg.von} – ${seg.bis}`}
+                          title={`${ABW_LABEL[seg.typ] ?? seg.typ} ${seg.von} – ${seg.bis}`}
                         >
-                          {geo.width >= 44 ? "Urlaub" : ""}
+                          {geo.width >= 44 ? (ABW_LABEL[seg.typ] ?? seg.typ) : ""}
                         </div>
                       );
                     })}
@@ -1380,9 +1405,9 @@ export function PoliereinsatzView({
                             width: geo.width,
                             top: 4,
                             height: ROW_H - 8,
-                            background: "#0891b2",
+                            background: ABW_FARBE[seg.typ] ?? "#0891b2",
                           }}
-                          title={`${p.vorname} ${p.nachname} · Urlaub ${seg.von} – ${seg.bis}`}
+                          title={`${p.vorname} ${p.nachname} · ${ABW_LABEL[seg.typ] ?? seg.typ} ${seg.von} – ${seg.bis}`}
                         >
                           {geo.width >= 44 ? "Urlaub" : ""}
                         </div>
