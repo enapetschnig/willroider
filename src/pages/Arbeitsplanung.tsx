@@ -1231,25 +1231,43 @@ export default function Arbeitsplanung() {
     let ftIds = (ftRows ?? [])
       .filter((r: any) => cells.some((c) => c.workerId === r.mitarbeiter_id && c.iso === r.datum))
       .map((r: any) => r.id as string);
+    const gesperrt: string[] = [];
     if (ftIds.length > 0) {
-      // Tage mit erfassten Tätigkeiten NICHT löschen — dort hängen echte Stunden dran
+      // Tage mit ECHTEN Arbeitsstunden nicht löschen. Entscheidend ist die
+      // Tätigkeits-Art, nicht ihr bloßes Vorhandensein: Urlaubs-/Krank-Tage
+      // tragen eine 0-Stunden-Markierungszeile (art='urlaub'/'krank'), die
+      // den Tag erst korrekt im Stundenbericht anzeigt. Vorher sperrte die
+      // Prüfung auf `existiert eine Tätigkeit` genau diese Marker mit —
+      // dadurch ließ sich KEINE einzige Abwesenheit mehr entfernen.
       const { data: ttRows, error: ttSelErr } = await supabase
         .from("stunden_taetigkeiten")
         .select("stunden_tag_id")
-        .in("stunden_tag_id", ftIds);
+        .in("stunden_tag_id", ftIds)
+        .in("art", ["baustelle", "firma"]);
       if (ttSelErr) {
         toast({ variant: "destructive", title: "Fehler beim Entfernen", description: ttSelErr.message });
         return false;
       }
-      const mitTaetigkeiten = new Set((ttRows ?? []).map((r: any) => r.stunden_tag_id));
-      ftIds = ftIds.filter((id) => !mitTaetigkeiten.has(id));
+      const mitArbeitszeit = new Set((ttRows ?? []).map((r: any) => r.stunden_tag_id));
+      gesperrt.push(...ftIds.filter((id) => mitArbeitszeit.has(id)));
+      ftIds = ftIds.filter((id) => !mitArbeitszeit.has(id));
     }
     if (ftIds.length > 0) {
+      // Die Markierungszeilen gehen per FK-Cascade automatisch mit.
       const { error: ftDelErr } = await supabase.from("stunden_tage").delete().in("id", ftIds);
       if (ftDelErr) {
         toast({ variant: "destructive", title: "Fehler beim Entfernen", description: ftDelErr.message });
         return false;
       }
+    }
+    // Übersprungene Tage benennen — vorher passierte scheinbar einfach nichts.
+    if (gesperrt.length > 0) {
+      toast({
+        variant: "destructive",
+        title: `${gesperrt.length} ${gesperrt.length === 1 ? "Tag" : "Tage"} nicht entfernt`,
+        description:
+          "Dort sind bereits Arbeitsstunden erfasst. Diese Tage bitte in der Zeiterfassung korrigieren.",
+      });
     }
     return true;
   };
@@ -2375,6 +2393,63 @@ export default function Arbeitsplanung() {
                   {barInfo.cells.length === 1 ? "Tag" : "Tage"})
                 </div>
               </div>
+
+              {/* „Wieder da ab" — der häufige Fall: jemand kommt früher aus
+                  Krankenstand/Urlaub zurück. Der Zieh-Griff am Balkenrand ist
+                  nur 8px breit (Spalte = 22px) und am Tablet nicht treffbar;
+                  hier wird der Tag stattdessen aus einer Liste gewählt. */}
+              {isAdmin &&
+                !b.isReadOnly &&
+                b.source === "fehlzeit" &&
+                b.fehlzeitTyp !== "U?" &&
+                barInfo.cells.length > 1 && (
+                  <div className="mt-2 pt-2 border-t">
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+                      Wieder da ab — {FEHLZEIT_LABEL[b.fehlzeitTyp ?? ""] ?? "Abwesenheit"} endet vorher
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {/* Erster Tag entfällt: „ab dem ersten Tag wieder da"
+                          hieße die ganze Abwesenheit löschen — dafür gibt es
+                          unten den eigenen Knopf. */}
+                      {[...barInfo.cells]
+                        .sort((x, y) => x.iso.localeCompare(y.iso))
+                        .slice(1)
+                        .map((c) => (
+                          <button
+                            key={c.iso}
+                            disabled={cellActionBusy}
+                            onClick={async () => {
+                              const abIso = c.iso;
+                              const weg = barInfo.cells.filter((x) => x.iso >= abIso);
+                              const wieder = new Date(abIso + "T00:00:00").toLocaleDateString(
+                                "de-AT",
+                                { day: "2-digit", month: "2-digit" },
+                              );
+                              if (
+                                !window.confirm(
+                                  `${prof?.vorname ?? ""} ${prof?.nachname ?? ""} ist ab ${wieder} wieder da?\n\n${weg.length} ${weg.length === 1 ? "Tag wird" : "Tage werden"} aus der Abwesenheit entfernt.`,
+                                )
+                              )
+                                return;
+                              setBarInfo(null);
+                              await clearCells(weg);
+                            }}
+                            className="text-[11px] px-2 py-1.5 rounded border hover:bg-muted disabled:opacity-50 tabular-nums"
+                          >
+                            {new Date(c.iso + "T00:00:00").toLocaleDateString("de-AT", {
+                              weekday: "short",
+                              day: "2-digit",
+                              month: "2-digit",
+                            })}
+                          </button>
+                        ))}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground mt-1.5">
+                      Danach zählt wieder der Einsatz aus dem Poliereinsatz.
+                    </div>
+                  </div>
+                )}
+
               {/* Urlaubsantrag direkt hier entscheiden — synchron mit
                   Verwaltung + Dashboard (gleiche Logik-Bibliothek). */}
               {b.fehlzeitTyp === "U?" &&

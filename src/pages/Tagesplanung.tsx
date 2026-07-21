@@ -214,6 +214,18 @@ export default function Tagesplanung() {
     () => new Set((plan?.abwesende ?? []).map((a) => a.ma.id)),
     [plan?.abwesende],
   );
+  /** Abwesenheits-Grund im Klartext — der Picker zeigt ihn am Namen an. */
+  const abwesendGrund = useMemo(() => {
+    const L: Record<string, string> = {
+      urlaub: "Urlaub",
+      krank: "Krank",
+      schlechtwetter: "Schlechtwetter",
+      feiertag: "Feiertag",
+    };
+    return new Map(
+      (plan?.abwesende ?? []).map((a) => [a.ma.id, L[a.status] ?? a.status]),
+    );
+  }, [plan?.abwesende]);
   // Bereits eingeteilte IDs für den MA-Picker filtern
   const eingeteilteIds = useMemo(() => {
     const s = new Set<string>();
@@ -249,6 +261,54 @@ export default function Tagesplanung() {
     refresh();
   }
 
+  /**
+   * Hebt die Abwesenheit für den geplanten Tag auf — für den Fall
+   * „kommt früher aus Krankenstand/Urlaub zurück". Ohne das stünde der
+   * Mitarbeiter gleichzeitig auf der Baustelle und in der Abwesend-Liste.
+   * Tage mit bereits erfassten Arbeitsstunden bleiben unangetastet.
+   */
+  async function hebeAbwesenheitAuf(
+    maIds: string[],
+  ): Promise<{ entfernt: number; ausAntrag: string[] }> {
+    if (maIds.length === 0 || !datum) return { entfernt: 0, ausAntrag: [] };
+
+    // Zweite Abwesenheits-Quelle: ein genehmigter Urlaubsantrag deckt den Tag
+    // ab. Den darf die Tagesplanung nicht still umschreiben (Konto-Buchung
+    // hängt daran) — sonst stünde die Person nach dem Neuladen wieder als
+    // abwesend da. Solche Fälle werden benannt statt heimlich übergangen.
+    const { data: antraege } = await supabase
+      .from("urlaubsantraege")
+      .select("mitarbeiter_id")
+      .in("mitarbeiter_id", maIds)
+      .eq("status", "genehmigt")
+      .lte("von", datum)
+      .gte("bis", datum);
+    const ausAntrag = Array.from(
+      new Set((antraege ?? []).map((a: any) => a.mitarbeiter_id as string)),
+    );
+
+    const { data: tage } = await supabase
+      .from("stunden_tage")
+      .select("id")
+      .in("mitarbeiter_id", maIds)
+      .eq("datum", datum)
+      .in("tag_status", ["urlaub", "krank", "schlechtwetter", "feiertag"])
+      .in("status", ["erfasst", "ma_bestaetigt"]);
+    const ids = (tage ?? []).map((t: any) => t.id as string);
+    if (ids.length === 0) return { entfernt: 0, ausAntrag };
+    const { data: arbeit } = await supabase
+      .from("stunden_taetigkeiten")
+      .select("stunden_tag_id")
+      .in("stunden_tag_id", ids)
+      .in("art", ["baustelle", "firma"]);
+    const gesperrt = new Set((arbeit ?? []).map((r: any) => r.stunden_tag_id));
+    const loeschbar = ids.filter((id) => !gesperrt.has(id));
+    if (loeschbar.length === 0) return { entfernt: 0, ausAntrag };
+    // Markierungszeilen gehen per FK-Cascade mit.
+    await supabase.from("stunden_tage").delete().in("id", loeschbar);
+    return { entfernt: loeschbar.length, ausAntrag };
+  }
+
   async function addMitarbeiter(einteilungId: string, maIds: string[]) {
     if (maIds.length === 0) return;
     const { data: inserted, error } = await supabase
@@ -267,6 +327,28 @@ export default function Tagesplanung() {
     await markManuell("einteilungen", einteilungId);
     for (const r of inserted ?? []) {
       await markManuell("einteilung_mitarbeiter", (r as any).id);
+    }
+    // Wer eingeteilt wird, ist an dem Tag da — Abwesenheit entfernen.
+    const abwesendeDavon = maIds.filter((id) => abwesendIds.has(id));
+    const { entfernt, ausAntrag } = await hebeAbwesenheitAuf(abwesendeDavon);
+    if (entfernt > 0) {
+      toast({
+        title: "Abwesenheit aufgehoben",
+        description: `${entfernt === 1 ? "Ein Mitarbeiter ist" : `${entfernt} Mitarbeiter sind`} für diesen Tag wieder als anwesend eingetragen.`,
+      });
+    }
+    if (ausAntrag.length > 0) {
+      const namen = ausAntrag
+        .map((id) => {
+          const p = (plan?.alleMa ?? []).find((m) => m.id === id);
+          return p ? `${p.nachname} ${p.vorname}` : "Mitarbeiter";
+        })
+        .join(", ");
+      toast({
+        variant: "destructive",
+        title: "Genehmigter Urlaub bleibt bestehen",
+        description: `${namen}: Der Urlaub ist bereits genehmigt und aufs Konto gebucht. Bitte den Antrag in der Verwaltung unter „Urlaubs-Konten" anpassen, sonst erscheint die Abwesenheit wieder.`,
+      });
     }
     refresh();
   }
@@ -1409,6 +1491,7 @@ export default function Tagesplanung() {
                 alleMa={plan?.alleMa ?? []}
                 taetigkeitenStamm={taetigkeitenStamm}
                 abwesendIds={abwesendIds}
+                abwesendGrund={abwesendGrund}
                 eingeteilteIds={eingeteilteIds}
                 onTaetigkeit={updateTaetigkeit}
                 onFahrzeuge={updateFahrzeuge}
@@ -1701,6 +1784,7 @@ function EinteilungsZeile({
   alleMa,
   taetigkeitenStamm,
   abwesendIds,
+  abwesendGrund,
   eingeteilteIds,
   onTaetigkeit,
   onFahrzeuge,
@@ -1713,6 +1797,7 @@ function EinteilungsZeile({
   alleMa: Profile[];
   taetigkeitenStamm: Database["public"]["Tables"]["taetigkeiten_stamm"]["Row"][];
   abwesendIds: Set<string>;
+  abwesendGrund?: Map<string, string>;
   eingeteilteIds: Set<string>;
   onTaetigkeit: (id: string, val: string) => Promise<void>;
   onFahrzeuge: (id: string, ids: string[]) => Promise<void>;
@@ -1871,6 +1956,7 @@ function EinteilungsZeile({
             <MaPicker
               alleMa={alleMa}
               abwesendIds={abwesendIds}
+              abwesendGrund={abwesendGrund}
               eingeteilteIds={eingeteilteIds}
               onAdd={(ids) => onAddMa(e.einteilung.id, ids)}
               trigger={
@@ -2341,12 +2427,14 @@ function FahrzeugPicker({
 function MaPicker({
   alleMa,
   abwesendIds,
+  abwesendGrund,
   eingeteilteIds,
   onAdd,
   trigger,
 }: {
   alleMa: Profile[];
   abwesendIds: Set<string>;
+  abwesendGrund?: Map<string, string>;
   eingeteilteIds: Set<string>;
   onAdd: (ids: string[]) => void;
   trigger: React.ReactNode;
@@ -2355,16 +2443,26 @@ function MaPicker({
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
 
+  const passtZurSuche = (m: Profile, s: string) =>
+    !s ||
+    `${m.vorname} ${m.nachname}`.toLowerCase().includes(s) ||
+    `${m.nachname} ${m.vorname}`.toLowerCase().includes(s);
+
   const visible = useMemo(() => {
     const s = search.trim().toLowerCase();
     return alleMa
       .filter((m) => !abwesendIds.has(m.id) && !eingeteilteIds.has(m.id))
-      .filter(
-        (m) =>
-          !s ||
-          `${m.vorname} ${m.nachname}`.toLowerCase().includes(s) ||
-          `${m.nachname} ${m.vorname}`.toLowerCase().includes(s),
-      );
+      .filter((m) => passtZurSuche(m, s));
+  }, [alleMa, abwesendIds, eingeteilteIds, search]);
+
+  /** Abwesend gemeldete MA — früher komplett ausgeblendet, dadurch war
+   *  „kommt einen Tag früher zurück" gar nicht abbildbar. Jetzt separat
+   *  wählbar; beim Hinzufügen wird die Abwesenheit für den Tag entfernt. */
+  const abwesendeSichtbar = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    return alleMa
+      .filter((m) => abwesendIds.has(m.id) && !eingeteilteIds.has(m.id))
+      .filter((m) => passtZurSuche(m, s));
   }, [alleMa, abwesendIds, eingeteilteIds, search]);
 
   const apply = () => {
@@ -2412,10 +2510,47 @@ function MaPicker({
               </span>
             </label>
           ))}
-          {visible.length === 0 && (
+          {visible.length === 0 && abwesendeSichtbar.length === 0 && (
             <div className="text-center py-4 text-sm text-muted-foreground">
               Keine freien Mitarbeiter
             </div>
+          )}
+
+          {abwesendeSichtbar.length > 0 && (
+            <>
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground px-2 pt-3 pb-1 border-t mt-2">
+                Abwesend gemeldet — nur wählen, wenn doch da
+              </div>
+              {abwesendeSichtbar.map((m) => {
+                const grund = abwesendGrund?.get(m.id);
+                return (
+                  <label
+                    key={m.id}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted/50 cursor-pointer text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={sel.has(m.id)}
+                      onChange={() => {
+                        const next = new Set(sel);
+                        if (next.has(m.id)) next.delete(m.id);
+                        else next.add(m.id);
+                        setSel(next);
+                      }}
+                    />
+                    <span className="font-medium text-muted-foreground">
+                      {m.nachname} {m.vorname}
+                    </span>
+                    <span className="text-[9px] ml-auto shrink-0 rounded-full border px-1.5 py-0.5 text-muted-foreground">
+                      {grund ?? "abwesend"}
+                    </span>
+                  </label>
+                );
+              })}
+              <div className="text-[10px] text-muted-foreground px-2 pb-1">
+                Beim Hinzufügen wird die Abwesenheit für diesen Tag entfernt.
+              </div>
+            </>
           )}
         </div>
         <DialogFooter>
