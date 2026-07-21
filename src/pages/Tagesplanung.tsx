@@ -424,6 +424,24 @@ export default function Tagesplanung() {
         })),
       );
     }
+    // Wie bei addMitarbeiter: wer eingeteilt wird, ist da. Ohne das stünde
+    // die Person auf demselben Ausdruck gleichzeitig auf der Baustelle und
+    // unter „Sonderfälle → Krank".
+    const abwesendeDavon = input.mitarbeiterIds.filter((id) => abwesendIds.has(id));
+    const { entfernt, ausAntrag } = await hebeAbwesenheitAuf(abwesendeDavon);
+    if (entfernt > 0) {
+      toast({
+        title: "Abwesenheit aufgehoben",
+        description: `${entfernt === 1 ? "Ein Mitarbeiter ist" : `${entfernt} Mitarbeiter sind`} für diesen Tag wieder als anwesend eingetragen.`,
+      });
+    }
+    if (ausAntrag.length > 0) {
+      toast({
+        variant: "destructive",
+        title: "Genehmigter Urlaub bleibt bestehen",
+        description: `Bitte den Antrag in der Verwaltung unter „Urlaubs-Konten" anpassen, sonst erscheint die Abwesenheit wieder.`,
+      });
+    }
     refresh();
   }
 
@@ -1520,6 +1538,7 @@ export default function Tagesplanung() {
             fahrzeuge={allFahrzeuge}
             alleMa={plan?.alleMa ?? []}
             abwesendIds={abwesendIds}
+            abwesendGrund={abwesendGrund}
             eingeteilteIds={eingeteilteIds}
             onAdd={addEinteilung}
           />
@@ -2573,6 +2592,7 @@ function AddEinteilungDialog({
   fahrzeuge,
   alleMa,
   abwesendIds,
+  abwesendGrund,
   eingeteilteIds,
   onAdd,
 }: {
@@ -2580,6 +2600,7 @@ function AddEinteilungDialog({
   fahrzeuge: Fahrzeug[];
   alleMa: Profile[];
   abwesendIds: Set<string>;
+  abwesendGrund?: Map<string, string>;
   eingeteilteIds: Set<string>;
   onAdd: (input: {
     baustelle_id: string;
@@ -2680,28 +2701,42 @@ function AddEinteilungDialog({
           <div>
             <Label className="text-sm">Mitarbeiter</Label>
             <div className="max-h-44 overflow-y-auto border rounded p-2 text-sm space-y-0.5">
-              {alleMa
-                .filter((m) => !abwesendIds.has(m.id) && !eingeteilteIds.has(m.id))
-                .map((m) => (
-                  <label
-                    key={m.id}
-                    className="flex items-center gap-2 hover:bg-muted/50 rounded px-1 py-0.5 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={maIds.has(m.id)}
-                      onChange={() => {
-                        const next = new Set(maIds);
-                        if (next.has(m.id)) next.delete(m.id);
-                        else next.add(m.id);
-                        setMaIds(next);
-                      }}
-                    />
-                    <span>
-                      {m.nachname} {m.vorname}
-                    </span>
-                  </label>
-                ))}
+              {/* Abwesende stehen unten mit Grund — sonst wäre „kommt früher
+                  zurück" auch über eine neue Einteilung nicht abbildbar. */}
+              {[...alleMa]
+                .filter((m) => !eingeteilteIds.has(m.id))
+                .sort(
+                  (a, b) =>
+                    Number(abwesendIds.has(a.id)) - Number(abwesendIds.has(b.id)),
+                )
+                .map((m) => {
+                  const abwesend = abwesendIds.has(m.id);
+                  return (
+                    <label
+                      key={m.id}
+                      className="flex items-center gap-2 hover:bg-muted/50 rounded px-1 py-0.5 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={maIds.has(m.id)}
+                        onChange={() => {
+                          const next = new Set(maIds);
+                          if (next.has(m.id)) next.delete(m.id);
+                          else next.add(m.id);
+                          setMaIds(next);
+                        }}
+                      />
+                      <span className={abwesend ? "text-muted-foreground" : undefined}>
+                        {m.nachname} {m.vorname}
+                      </span>
+                      {abwesend && (
+                        <span className="text-[9px] ml-auto shrink-0 rounded-full border px-1.5 py-0.5 text-muted-foreground">
+                          {abwesendGrund?.get(m.id) ?? "abwesend"}
+                        </span>
+                      )}
+                    </label>
+                  );
+                })}
             </div>
           </div>
         </div>
