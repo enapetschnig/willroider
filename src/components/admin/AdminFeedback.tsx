@@ -39,6 +39,7 @@ type FeedbackRow = {
   anhang_pfad: string | null;
   anhang_name: string | null;
   anhang_typ: string | null;
+  dringlichkeit: string | null;
 };
 
 const KAT: Record<string, { label: string; icon: typeof Lightbulb; cls: string }> = {
@@ -55,6 +56,14 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   besprechung: { label: "Zur Besprechung", cls: "bg-violet-100 text-violet-800" },
   umgesetzt: { label: "Umgesetzt", cls: "bg-green-100 text-green-800" },
   abgelehnt: { label: "Abgelehnt", cls: "bg-zinc-100 text-zinc-500" },
+};
+
+/** Vom Melder gewählte Dringlichkeit (feedback.dringlichkeit). */
+const DRINGLICHKEIT: Record<string, { label: string; cls: string; rang: number }> = {
+  sofort: { label: "🔴 Dringend", cls: "border-red-300 text-red-800 bg-red-50", rang: 0 },
+  normal: { label: "🟡 Normal", cls: "border-amber-300 text-amber-800 bg-amber-50", rang: 1 },
+  besprechen: { label: "💬 Zuerst besprechen", cls: "border-violet-300 text-violet-800 bg-violet-50", rang: 2 },
+  irgendwann: { label: "💡 Nur eine Idee", cls: "border-slate-300 text-slate-600 bg-slate-50", rang: 3 },
 };
 
 type Filter = "offen" | "sofort" | "besprechung" | "umgesetzt" | "alle";
@@ -161,12 +170,27 @@ export function AdminFeedback() {
   };
 
   const gefiltert = useMemo(() => {
-    if (filter === "alle") return rows;
-    if (filter === "umgesetzt") return rows.filter((r) => r.status === "umgesetzt");
-    if (filter === "sofort") return rows.filter((r) => r.status === "sofort");
-    if (filter === "besprechung") return rows.filter((r) => r.status === "besprechung");
-    // offen = alles noch nicht Erledigte
-    return rows.filter((r) => r.status !== "umgesetzt" && r.status !== "abgelehnt");
+    const basis =
+      filter === "alle"
+        ? rows
+        : filter === "umgesetzt"
+          ? rows.filter((r) => r.status === "umgesetzt")
+          : filter === "sofort"
+            ? rows.filter((r) => r.status === "sofort")
+            : filter === "besprechung"
+              ? rows.filter((r) => r.status === "besprechung")
+              // offen = alles noch nicht Erledigte
+              : rows.filter((r) => r.status !== "umgesetzt" && r.status !== "abgelehnt");
+
+    // In der Offen-Liste zuerst das Dringende — sonst geht ein „blockiert
+    // mich" zwischen späteren Ideen unter. Erledigt-Listen bleiben
+    // chronologisch (dort zählt, was zuletzt passiert ist).
+    if (filter === "umgesetzt" || filter === "alle") return basis;
+    const rang = (r: FeedbackRow) =>
+      DRINGLICHKEIT[r.dringlichkeit ?? "normal"]?.rang ?? 1;
+    return [...basis].sort(
+      (a, b) => rang(a) - rang(b) || b.created_at.localeCompare(a.created_at),
+    );
   }, [rows, filter]);
 
   const neuCount = rows.filter((r) => r.status === "neu").length;
@@ -225,6 +249,17 @@ export function AdminFeedback() {
                           <Icon className="h-3 w-3" /> {kat.label}
                         </Badge>
                         <Badge className={st.cls}>{st.label}</Badge>
+                        {/* Einschätzung des Melders — bewusst getrennt vom
+                            Status, den die Verwaltung vergibt. */}
+                        {(() => {
+                          const dr = DRINGLICHKEIT[r.dringlichkeit ?? "normal"];
+                          if (!dr) return null;
+                          return (
+                            <Badge variant="outline" className={dr.cls} title="Einschätzung des Melders">
+                              {dr.label}
+                            </Badge>
+                          );
+                        })()}
                         <span className="text-xs text-muted-foreground">
                           {name} ·{" "}
                           {new Date(r.created_at).toLocaleDateString("de-AT", {

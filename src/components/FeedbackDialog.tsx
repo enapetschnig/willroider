@@ -35,6 +35,42 @@ const KATEGORIEN: { key: Kategorie; label: string; icon: typeof Lightbulb }[] = 
   { key: "sonstiges", label: "Sonstiges", icon: MessageCircle },
 ];
 
+type Dringlichkeit = "sofort" | "normal" | "besprechen" | "irgendwann";
+
+/** Einschätzung des Melders — bewusst in Baustellen-Sprache, ohne
+ *  Fachbegriffe. „normal" ist vorausgewählt, damit niemand überlegen muss. */
+const DRINGLICHKEITEN: {
+  key: Dringlichkeit;
+  label: string;
+  hint: string;
+  emoji: string;
+}[] = [
+  {
+    key: "sofort",
+    label: "Dringend — blockiert mich",
+    hint: "Ich komme damit gerade nicht weiter",
+    emoji: "🔴",
+  },
+  {
+    key: "normal",
+    label: "Normal",
+    hint: "Sollte bald kommen, eilt aber nicht",
+    emoji: "🟡",
+  },
+  {
+    key: "besprechen",
+    label: "Zuerst besprechen",
+    hint: "Da sollten wir vorher gemeinsam drüber reden",
+    emoji: "💬",
+  },
+  {
+    key: "irgendwann",
+    label: "Nur eine Idee",
+    hint: "Kann warten, wäre irgendwann schön",
+    emoji: "💡",
+  },
+];
+
 /** Best passende, breit abspielbare Aufnahme-MIME wählen. */
 function pickMime(): string | undefined {
   if (typeof MediaRecorder === "undefined") return undefined;
@@ -66,6 +102,7 @@ export function FeedbackDialog({
   const { toast } = useToast();
   const location = useLocation();
   const [kategorie, setKategorie] = useState<Kategorie>("idee");
+  const [dringlichkeit, setDringlichkeit] = useState<Dringlichkeit>("normal");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   /** Optionaler Datei-/Screenshot-Anhang (max. 10 MB). */
@@ -158,6 +195,7 @@ export function FeedbackDialog({
     setAufnahme("idle");
     setText("");
     setKategorie("idee");
+    setDringlichkeit("normal");
     setAnhang(null);
   };
 
@@ -231,6 +269,7 @@ export function FeedbackDialog({
         erstellt_von: user.id,
         text: hatText ? text.trim() : null,
         kategorie,
+        dringlichkeit,
         seiten_kontext: location.pathname,
         app_version: appVersion,
         audio_pfad: audioPfad,
@@ -296,6 +335,43 @@ export function FeedbackDialog({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {k.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Dringlichkeit — Einschätzung des Melders. Die Verwaltung
+              entscheidet danach separat über die Umsetzung. */}
+          <div className="space-y-1.5">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+              Wie dringend ist es?
+            </Label>
+            <div className="space-y-1.5">
+              {DRINGLICHKEITEN.map((d) => {
+                const active = dringlichkeit === d.key;
+                return (
+                  <button
+                    key={d.key}
+                    type="button"
+                    onClick={() => setDringlichkeit(d.key)}
+                    className={`w-full flex items-start gap-2.5 rounded-md border px-3 py-2 text-left transition ${
+                      active
+                        ? "border-primary bg-primary/10"
+                        : "border-input hover:bg-muted"
+                    }`}
+                  >
+                    <span className="text-base leading-none mt-0.5 shrink-0">{d.emoji}</span>
+                    <span className="min-w-0">
+                      <span
+                        className={`block text-sm ${active ? "font-semibold text-primary" : "font-medium"}`}
+                      >
+                        {d.label}
+                      </span>
+                      <span className="block text-[11px] text-muted-foreground leading-tight">
+                        {d.hint}
+                      </span>
+                    </span>
                   </button>
                 );
               })}

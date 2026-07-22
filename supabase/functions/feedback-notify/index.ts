@@ -14,6 +14,13 @@ const FROM = Deno.env.get("RESEND_FROM") ?? "berichte@willroider.app";
 const APP_URL = Deno.env.get("APP_URL") ?? "https://willroider.app";
 const FALLBACK_MAIL = "napetschnig.chris@gmail.com";
 
+const DRINGLICHKEIT: Record<string, { label: string; farbe: string }> = {
+  sofort: { label: "🔴 Dringend — blockiert mich", farbe: "#dc2626" },
+  normal: { label: "🟡 Normal", farbe: "#b45309" },
+  besprechen: { label: "💬 Zuerst besprechen", farbe: "#7c3aed" },
+  irgendwann: { label: "💡 Nur eine Idee", farbe: "#64748b" },
+};
+
 const KAT_LABEL: Record<string, string> = {
   idee: "Idee / Wunsch",
   problem: "Problem / Fehler",
@@ -53,7 +60,7 @@ Deno.serve(async (req) => {
     // Eintrag laden (Service-Role) + prüfen, dass er dem Aufrufer gehört.
     const { data: fb, error: fbErr } = await admin
       .from("feedback")
-      .select("id, erstellt_von, text, kategorie, seiten_kontext, app_version, audio_pfad, audio_sekunden, anhang_pfad, anhang_name, anhang_typ, created_at")
+      .select("id, erstellt_von, text, kategorie, seiten_kontext, app_version, audio_pfad, audio_sekunden, anhang_pfad, anhang_name, anhang_typ, dringlichkeit, created_at")
       .eq("id", feedbackId)
       .maybeSingle();
     if (fbErr || !fb) return json({ ok: false, error: "Eintrag nicht gefunden" }, 404);
@@ -105,9 +112,15 @@ Deno.serve(async (req) => {
         : `<p style="margin:0 0 16px">📎 <a href="${anhangUrl}">${esc(fb.anhang_name ?? "Anhang öffnen")}</a></p>`
       : "";
 
+    // Dringlichkeit — Einschätzung des Melders, prominent im Kopf der Mail.
+    const dr = DRINGLICHKEIT[fb.dringlichkeit ?? "normal"] ?? DRINGLICHKEIT.normal;
+
     const html = `
       <div style="font-family:system-ui,Arial,sans-serif;max-width:560px;margin:0 auto">
         <h2 style="margin:0 0 4px">Neuer Änderungswunsch</h2>
+        <p style="margin:0 0 12px">
+          <span style="display:inline-block;border:1px solid ${dr.farbe};color:${dr.farbe};border-radius:999px;padding:3px 10px;font-size:13px;font-weight:600">${dr.label}</span>
+        </p>
         <p style="color:#666;margin:0 0 16px">Kategorie: <strong>${esc(kat)}</strong></p>
         <div style="background:#f6f6f7;border-radius:8px;padding:14px 16px;margin-bottom:16px">
           <div style="white-space:pre-wrap;line-height:1.5">${inhalt}</div>
@@ -120,7 +133,7 @@ Deno.serve(async (req) => {
         <a href="${link}" style="display:inline-block;background:#B0353C;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px">In der App öffnen</a>
       </div>`;
 
-    const textBody = `Neuer Änderungswunsch (${kat})\n\n${fb.text ?? (audioHinweis || "(kein Text)")}\n${anhangUrl ? `\n📎 Anhang: ${fb.anhang_name ?? "Datei"} — ${anhangUrl}\n` : ""}\nVon: ${name}\n${fb.seiten_kontext ? `Seite: ${fb.seiten_kontext}\n` : ""}\nÖffnen: ${link}`;
+    const textBody = `Neuer Änderungswunsch (${kat}) — ${dr.label}\n\n${fb.text ?? (audioHinweis || "(kein Text)")}\n${anhangUrl ? `\n📎 Anhang: ${fb.anhang_name ?? "Datei"} — ${anhangUrl}\n` : ""}\nVon: ${name}\n${fb.seiten_kontext ? `Seite: ${fb.seiten_kontext}\n` : ""}\nÖffnen: ${link}`;
 
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -128,7 +141,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         from: FROM,
         to: [empfaenger],
-        subject: `Neuer Änderungswunsch – ${kat}${hatAudio ? " 🎤" : ""}${anhangUrl ? " 📎" : ""}`,
+        subject: `${fb.dringlichkeit === "sofort" ? "DRINGEND: " : ""}Änderungswunsch – ${kat}${hatAudio ? " 🎤" : ""}${anhangUrl ? " 📎" : ""}`,
         text: textBody,
         html,
       }),
