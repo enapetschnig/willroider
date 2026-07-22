@@ -545,10 +545,18 @@ export function PoliereinsatzView({
       });
   }, [partien, zeitraeume, profiles, profilesById]);
 
+  /**
+   * Bauleiter = wer in der Verwaltung als Bauleiter markiert ist.
+   *
+   * Vorher wurde auf `planungsfarbe` gefiltert. Dadurch standen Leute in
+   * der Legende, die gar keine Bauleiter (mehr) sind — sie hatten nur eine
+   * Farbe aus früheren Zeiten. Ausschalten in der Verwaltung zeigte keine
+   * Wirkung, die Ansicht war also nicht synchron. Jetzt zählt der Schalter.
+   */
   const bauleiter = useMemo(
     () =>
       profiles
-        .filter((p) => p.planungsfarbe && p.is_active !== false)
+        .filter((p) => (p as any).ist_bauleiter === true && p.is_active !== false)
         .sort((a, b) => a.nachname.localeCompare(b.nachname)),
     [profiles],
   );
@@ -1095,7 +1103,9 @@ export function PoliereinsatzView({
               <span key={b.id} className="inline-flex items-center gap-1">
                 <span
                   className="h-2.5 w-2.5 rounded-full inline-block"
-                  style={{ background: b.planungsfarbe! }}
+                  // Fallback: ein Bauleiter ohne gesetzte Farbe soll nicht als
+                  // unsichtbarer Punkt erscheinen.
+                  style={{ background: b.planungsfarbe ?? "#6b7280" }}
                 />
                 {b.nachname}
               </span>
@@ -1370,7 +1380,7 @@ export function PoliereinsatzView({
                 >
                   <span
                     className="h-2 w-2 rounded-full shrink-0"
-                    style={{ background: b.planungsfarbe! }}
+                    style={{ background: b.planungsfarbe ?? "#6b7280" }}
                   />
                   <span className="truncate">
                     {b.vorname} {b.nachname}
