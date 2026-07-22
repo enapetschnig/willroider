@@ -357,7 +357,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         {/* pb-safe-nav (index.css): Freiraum für die fixierte Leiste inkl.
             Home-Indikator-Zone, am Desktop wieder klein. */}
-        <main className="flex-1 px-3 sm:px-4 lg:px-6 py-3 sm:py-6 max-w-full pb-safe-nav">
+        {/* pt statt py: `sm:py-6` setzt AUCH padding-bottom und steht im
+            gebauten CSS HINTER .pb-safe-nav — ab 640px (iPad hochkant,
+            iPhone quer) gewann es und ließ nur 24px Freiraum unter einer
+            ~74px hohen Leiste. Die untersten ~50px jeder Seite waren
+            dadurch nicht antippbar; Tipper landeten in der Navigation. */}
+        <main className="flex-1 px-3 sm:px-4 lg:px-6 pt-3 sm:pt-6 max-w-full pb-safe-nav">
           {children}
         </main>
 

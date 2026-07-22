@@ -84,6 +84,10 @@ type Dokument = Database["public"]["Tables"]["dokumente"]["Row"];
 
 /** Letzter Mailversand eines Dokuments — Quelle: Tabelle dokument_versand. */
 type VersandInfo = { am: string; an: string; anzahl: number };
+
+/** Stichtag: ab wann wird der Versand protokolliert. Ältere Dokumente
+ *  können nicht als „nicht versendet" gelten — dafür fehlen die Daten. */
+const VERSAND_AB = "2026-07-22";
 type OrdnerMarker = Database["public"]["Tables"]["dokument_ordner"]["Row"];
 
 // Wrapper für Icon-Auswahl analog zu vorher (alle FileText außer Fotos)
@@ -1664,10 +1668,17 @@ function FileCard({
                   {versandInfo.anzahl > 1 ? ` (${versandInfo.anzahl}×)` : ""}
                 </span>
               </div>
-            ) : (
+            ) : d.created_at >= VERSAND_AB ? (
               <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[9px] font-medium text-amber-800">
                 <MailWarning className="h-2.5 w-2.5 shrink-0" />
                 Noch nicht versendet
+              </div>
+            ) : (
+              // Vor Einführung des Nachweises hochgeladen — hier ist schlicht
+              // nicht bekannt, ob die Mail raus ist. „Noch nicht versendet"
+              // wäre an dieser Stelle eine Falschaussage.
+              <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-muted border px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
+                Versand unbekannt
               </div>
             )}
           </div>
@@ -1896,12 +1907,12 @@ function FileListView({
                               <MailCheck className="h-2.5 w-2.5" />
                               Versendet
                             </span>
-                          ) : (
+                          ) : d.created_at >= VERSAND_AB ? (
                             <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[9px] font-medium text-amber-800">
                               <MailWarning className="h-2.5 w-2.5" />
                               Offen
                             </span>
-                          )}
+                          ) : null}
                         </span>
                       )}
                     </td>

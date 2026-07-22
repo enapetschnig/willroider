@@ -1409,7 +1409,7 @@ export function PoliereinsatzView({
                           }}
                           title={`${p.vorname} ${p.nachname} · ${ABW_LABEL[seg.typ] ?? seg.typ} ${seg.von} – ${seg.bis}`}
                         >
-                          {geo.width >= 44 ? "Urlaub" : ""}
+                          {geo.width >= 44 ? (ABW_LABEL[seg.typ] ?? seg.typ) : ""}
                         </div>
                       );
                     })}

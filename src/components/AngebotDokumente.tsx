@@ -253,7 +253,9 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
     e?.stopPropagation();
     setSendItems([
       {
-        id: d.id,
+        // BEWUSST ohne id: Angebots-Dateien liegen in angebot_dokumente,
+        // der Versand-Nachweis hängt aber per Fremdschlüssel an dokumente.
+        // Eine ID von hier würde beim Protokollieren abgewiesen.
         bucket: "angebote",
         storage_path: d.storage_path,
         dateiname: d.dateiname,

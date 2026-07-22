@@ -286,11 +286,17 @@ export default function Tagesplanung() {
     const ausAntrag = Array.from(
       new Set((antraege ?? []).map((a: any) => a.mitarbeiter_id as string)),
     );
+    // Diese Mitarbeiter werden NICHT angefasst. Vorher wurde ausAntrag zwar
+    // berechnet, aber nie ausgeschlossen — der Urlaubstag verschwand aus
+    // stunden_tage (Stundenbericht zeigte dann „Kein Eintrag" statt U),
+    // während Antrag und Konto-Buchung unverändert stehen blieben.
+    const anfassbar = maIds.filter((id) => !ausAntrag.includes(id));
+    if (anfassbar.length === 0) return { entfernt: 0, ausAntrag };
 
     const { data: tage } = await supabase
       .from("stunden_tage")
       .select("id")
-      .in("mitarbeiter_id", maIds)
+      .in("mitarbeiter_id", anfassbar)
       .eq("datum", datum)
       .in("tag_status", ["urlaub", "krank", "schlechtwetter", "feiertag"])
       .in("status", ["erfasst", "ma_bestaetigt"]);
@@ -1352,14 +1358,12 @@ export default function Tagesplanung() {
           >
             <Users className="h-4 w-4 mr-1.5" /> Aus Polierplanung
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={uebernehmeAusJahresplanung}
-            disabled={copyBusy || isLoading || !plan}
-          >
-            <CalendarRange className="h-4 w-4 mr-1.5" /> Aus Jahresplanung
-          </Button>
+          {/* „Aus Jahresplanung" entfernt: Einsätze werden seit der
+              Umstellung ausschließlich im Poliereinsatz geplant, in
+              jahresplan_einteilungen schreibt nichts mehr. Der Knopf hätte
+              für jeden künftigen Tag „nichts gefunden" gemeldet und den
+              Eindruck erweckt, es sei nichts geplant. „Aus Polierplanung"
+              daneben macht genau das, was er versprach. */}
           <Button variant="outline" size="sm" onClick={downloadPdf}>
             <Download className="h-4 w-4 mr-1.5" /> PDF
           </Button>

@@ -1228,9 +1228,28 @@ export default function Arbeitsplanung() {
       toast({ variant: "destructive", title: "Fehler beim Entfernen", description: ftSelErr.message });
       return false;
     }
-    let ftIds = (ftRows ?? [])
-      .filter((r: any) => cells.some((c) => c.workerId === r.mitarbeiter_id && c.iso === r.datum))
-      .map((r: any) => r.id as string);
+    // Genehmigte Urlaubsanträge sind tabu: an ihnen hängt die Konto-Buchung.
+    // Würde der Tag hier gelöscht, bliebe die Abbuchung stehen und der
+    // Stundenbericht zeigte „Kein Eintrag" statt U. Die Tagesplanung hält
+    // sich an dieselbe Regel (hebeAbwesenheitAuf).
+    const { data: genehmigt } = await supabase
+      .from("urlaubsantraege")
+      .select("mitarbeiter_id, von, bis")
+      .in("mitarbeiter_id", workerIds)
+      .eq("status", "genehmigt")
+      .lte("von", dates[dates.length - 1])
+      .gte("bis", dates[0]);
+    const ausAntrag = (r: { mitarbeiter_id: string; datum: string }) =>
+      (genehmigt ?? []).some(
+        (a: any) =>
+          a.mitarbeiter_id === r.mitarbeiter_id && a.von <= r.datum && a.bis >= r.datum,
+      );
+
+    const passend = (ftRows ?? []).filter((r: any) =>
+      cells.some((c) => c.workerId === r.mitarbeiter_id && c.iso === r.datum),
+    );
+    const antragsTage = passend.filter(ausAntrag);
+    let ftIds = passend.filter((r: any) => !ausAntrag(r)).map((r: any) => r.id as string);
     const gesperrt: string[] = [];
     if (ftIds.length > 0) {
       // Tage mit ECHTEN Arbeitsstunden nicht löschen. Entscheidend ist die
@@ -1267,6 +1286,13 @@ export default function Arbeitsplanung() {
         title: `${gesperrt.length} ${gesperrt.length === 1 ? "Tag" : "Tage"} nicht entfernt`,
         description:
           "Dort sind bereits Arbeitsstunden erfasst. Diese Tage bitte in der Zeiterfassung korrigieren.",
+      });
+    }
+    if (antragsTage.length > 0) {
+      toast({
+        variant: "destructive",
+        title: `${antragsTage.length} ${antragsTage.length === 1 ? "Tag" : "Tage"} aus genehmigtem Urlaub`,
+        description: `Diese Tage gehören zu einem genehmigten Urlaubsantrag — der Urlaub ist bereits vom Konto abgebucht. Bitte den Antrag in der Verwaltung unter „Urlaubs-Konten" anpassen.`,
       });
     }
     return true;
@@ -1689,7 +1715,13 @@ export default function Arbeitsplanung() {
       {/* Mobile: kompakter Worker-Plan pro Tag */}
       <div className="md:hidden space-y-3">
         {/* Sticky Mobile-Legende */}
-        <div className="md:hidden sticky top-14 z-20 bg-background/95 backdrop-blur border rounded-md px-2 py-1.5 -mx-1">
+        {/* top muss die Safe-Area der Kopfzeile einschließen — seit
+            viewport-fit=cover ist die Kopfzeile um den Statusleisten-Abstand
+            höher, und die Legende verschwand dahinter. */}
+        <div
+          className="md:hidden sticky z-20 bg-background/95 backdrop-blur border rounded-md px-2 py-1.5 -mx-1"
+          style={{ top: "calc(env(safe-area-inset-top, 0px) + 3.5rem)" }}
+        >
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]">
             <span className="font-semibold uppercase tracking-wide text-muted-foreground">
               Codes:
