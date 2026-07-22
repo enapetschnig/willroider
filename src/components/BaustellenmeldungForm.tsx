@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,16 +9,31 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { generateBaustellenanlageDocx, DOCX_MIME } from "@/lib/baustellenanlageDocx";
-import { Save, Mail } from "lucide-react";
-import { DocSendDialog, type DocSendItem } from "@/components/dokumente/DocSendDialog";
+import { Save, Mail, X } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 
-/** Feste Empfänger der Baustellenmeldung — im Dialog ergänzbar. */
-const FESTE_EMPFAENGER = "schneider@willroider.at, maurer@willroider.at";
+/** Feste Empfänger der Baustellenmeldung — im Formular abwählbar/ergänzbar. */
+const FESTE_EMPFAENGER = ["schneider@willroider.at", "maurer@willroider.at"];
+
+const MAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Blob → base64, blockweise gegen Stack-Overflow bei großen Dateien. */
+async function blobToBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode.apply(
+      null,
+      bytes.subarray(i, i + chunk) as unknown as number[],
+    );
+  }
+  return btoa(bin);
+}
 
 /** Sammel-Kostenstellen mit automatischer Nummernvergabe (<Basis>-<JJ><NN>). */
 const SAMMEL_KST = [
@@ -46,12 +61,38 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
   const { toast } = useToast();
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [saving, setSaving] = useState(false);
-  /** Nach dem Anlegen gleich die Mail-Maske öffnen (Standard: ja). */
-  const [versendenNachAnlegen, setVersendenNachAnlegen] = useState(true);
-  const [sendItem, setSendItem] = useState<DocSendItem | null>(null);
-  const [sendBvh, setSendBvh] = useState("");
-  /** Zuletzt gespeicherte Baustellen-ID — für onSaved nach dem Versand. */
-  const gespeicherteIdRef = useRef<string | null>(null);
+  const [versendend, setVersendend] = useState(false);
+  /**
+   * Empfänger der Baustellenmeldung. Die beiden festen sind vorausgewählt,
+   * lassen sich aber abwählen; weitere kommen über das Feld darunter dazu.
+   * Steht bewusst ÜBER dem Anlegen-Knopf: man sieht vor dem Absenden, wer
+   * die Meldung bekommt, statt es hinterher in einem zweiten Dialog zu tun.
+   */
+  const [empfaengerListe, setEmpfaengerListe] = useState<
+    { mail: string; aktiv: boolean }[]
+  >(FESTE_EMPFAENGER.map((mail) => ({ mail, aktiv: true })));
+  const [neueMail, setNeueMail] = useState("");
+  const aktiveEmpfaenger = empfaengerListe.filter((e) => e.aktiv).map((e) => e.mail);
+
+  const addEmpfaenger = () => {
+    const m = neueMail.trim();
+    if (!m) return;
+    if (!MAIL_RE.test(m)) {
+      toast({
+        variant: "destructive",
+        title: "Adresse ungültig",
+        description: `„${m}" ist keine gültige E-Mail-Adresse.`,
+      });
+      return;
+    }
+    if (empfaengerListe.some((e) => e.mail.toLowerCase() === m.toLowerCase())) {
+      toast({ title: "Adresse steht schon in der Liste" });
+      setNeueMail("");
+      return;
+    }
+    setEmpfaengerListe((l) => [...l, { mail: m, aktiv: true }]);
+    setNeueMail("");
+  };
 
   const [bvhName, setBvhName] = useState(initial?.bvh_name ?? "");
   const [bauherr, setBauherr] = useState(initial?.bauherr ?? "");
@@ -209,7 +250,8 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
           return p ? `${p.vorname} ${p.nachname}` : "";
         })()
       : "";
-    let frischesDokument: DocSendItem | null = null;
+    /** Frisch erzeugte DOCX für den Mailversand (base64, kein zweiter Download). */
+    let docxFuerMail: { dateiname: string; base64: string; dokumentId?: string } | null = null;
     try {
       const docxBlob = await generateBaustellenanlageDocx(
         { ...savedRow, ...payload },
@@ -235,16 +277,15 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
           } as any)
           .select("id")
           .single();
-        // Für den direkt anschließenden Mailversand merken (inkl. ID, damit
-        // der Versand-Nachweis am Dokument hängt).
-        frischesDokument = {
-          id: (dok as any)?.id,
-          bucket: "baustellen",
-          storage_path: path,
-          dateiname,
-          groesse: docxBlob.size,
-          mimetype: DOCX_MIME,
-        };
+        // Für den direkt anschließenden Mailversand merken. Die DOCX liegt
+        // ohnehin schon im Speicher — kein erneuter Download nötig.
+        if (aktiveEmpfaenger.length > 0) {
+          docxFuerMail = {
+            dateiname,
+            base64: await blobToBase64(docxBlob),
+            dokumentId: (dok as any)?.id,
+          };
+        }
       }
     } catch (err: any) {
       toast({
@@ -258,17 +299,46 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
       title: initial?.id ? "Baustelle aktualisiert" : "Baustelle angelegt",
       description: "Baustellenmeldung als DOCX im Ordner Baustellenanlage abgelegt.",
     });
-    setSaving(false);
 
-    // Direkt versenden: Der Versand-Dialog öffnet sich vorausgefüllt mit den
-    // festen Empfängern und der frisch erzeugten DOCX. Das Formular bleibt
-    // stehen, bis der Dialog zu ist — sonst verschwände der Anhang mit ihm.
-    if (versendenNachAnlegen && frischesDokument) {
-      gespeicherteIdRef.current = id!;
-      setSendItem(frischesDokument);
-      setSendBvh(bvhName);
-      return; // onSaved erst nach dem Dialog (siehe onOpenChange unten)
+    // Versand direkt im Anschluss — die Empfänger stehen schon im Formular,
+    // es braucht keinen zweiten Dialog. Ein Fehler beim Versand darf das
+    // erfolgreiche Anlegen NICHT rückgängig machen; er wird nur gemeldet.
+    if (aktiveEmpfaenger.length > 0 && docxFuerMail) {
+      setVersendend(true);
+      try {
+        const { data, error } = await supabase.functions.invoke("dokument-versenden", {
+          body: {
+            empfaenger: aktiveEmpfaenger.join(", "),
+            betreff: `Baustellenmeldung ${bvhName}`,
+            text:
+              `Hallo,\n\nim Anhang die Baustellenmeldung für „${bvhName}".\n\n` +
+              `Mit freundlichen Grüßen`,
+            attachments: [
+              { filename: docxFuerMail.dateiname, contentBase64: docxFuerMail.base64 },
+            ],
+            dokumentIds: docxFuerMail.dokumentId ? [docxFuerMail.dokumentId] : [],
+          },
+        });
+        if (error) throw error;
+        if (data && (data as any).ok === false) {
+          throw new Error((data as any).error ?? "Unbekannter Fehler");
+        }
+        toast({
+          title: "Baustellenmeldung versendet",
+          description: `An ${aktiveEmpfaenger.join(", ")}.`,
+        });
+      } catch (e) {
+        toast({
+          variant: "destructive",
+          title: "Mail nicht versendet",
+          description: `${(e as Error).message} — Die Baustelle ist angelegt, die DOCX liegt im Ordner „Baustellenanlage" und kann dort von Hand verschickt werden.`,
+        });
+      } finally {
+        setVersendend(false);
+      }
     }
+
+    setSaving(false);
     onSaved?.(id!);
   };
 
@@ -466,24 +536,82 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
           />
         </Field>
 
-        {/* Direktversand — der übliche Weg: anlegen und sofort ans Büro. */}
-        <div className="flex items-center gap-3 rounded-md border p-3 bg-muted/20">
-          <Switch
-            id="mailversand"
-            checked={versendenNachAnlegen}
-            onCheckedChange={setVersendenNachAnlegen}
-          />
-          <Label htmlFor="mailversand" className="cursor-pointer flex-1">
-            <span className="flex items-center gap-1.5 font-medium">
-              <Mail className="h-4 w-4 text-primary" />
-              Danach gleich per Mail versenden
-            </span>
-            <span className="block text-[11px] text-muted-foreground font-normal mt-0.5">
-              Öffnet die Mail-Maske mit {FESTE_EMPFAENGER.split(",").length} festen
-              Empfängern und der Baustellenmeldung im Anhang — weitere Adressen
-              lassen sich dort ergänzen.
-            </span>
-          </Label>
+        {/* Empfänger — bewusst hier, direkt über den Knöpfen: man sieht vor
+            dem Klick, wer die Meldung bekommt. Abwählen = geht nicht raus. */}
+        <div className="rounded-md border p-3 bg-muted/20 space-y-2">
+          <div className="flex items-center gap-1.5 text-sm font-medium">
+            <Mail className="h-4 w-4 text-primary" />
+            Baustellenmeldung per Mail senden an
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {empfaengerListe.map((e, i) => {
+              const fest = FESTE_EMPFAENGER.includes(e.mail);
+              return (
+                <span
+                  key={e.mail}
+                  className={`inline-flex items-center gap-1.5 rounded-full border pl-2 pr-1 py-1 text-xs transition ${
+                    e.aktiv
+                      ? "bg-primary/10 border-primary text-primary font-medium"
+                      : "bg-background text-muted-foreground line-through"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEmpfaengerListe((l) =>
+                        l.map((x, xi) => (xi === i ? { ...x, aktiv: !x.aktiv } : x)),
+                      )
+                    }
+                    title={e.aktiv ? "Nicht senden an diese Adresse" : "Wieder aktivieren"}
+                  >
+                    {e.mail}
+                  </button>
+                  {!fest && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEmpfaengerListe((l) => l.filter((_, xi) => xi !== i))
+                      }
+                      className="text-muted-foreground hover:text-destructive"
+                      aria-label={`${e.mail} entfernen`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+          <div className="flex gap-1.5">
+            <Input
+              value={neueMail}
+              onChange={(ev) => setNeueMail(ev.target.value)}
+              onKeyDown={(ev) => {
+                if (ev.key === "Enter") {
+                  ev.preventDefault(); // sonst würde das Formular abschicken
+                  addEmpfaenger();
+                }
+              }}
+              placeholder="weitere E-Mail-Adresse…"
+              className="h-9 text-sm"
+              inputMode="email"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addEmpfaenger}
+              disabled={!neueMail.trim()}
+            >
+              Hinzufügen
+            </Button>
+          </div>
+          {aktiveEmpfaenger.length === 0 && (
+            <div className="text-[11px] text-amber-700">
+              Keine Adresse ausgewählt — die Baustelle wird nur angelegt, es
+              geht keine Mail raus.
+            </div>
+          )}
         </div>
       </div>
 
@@ -498,31 +626,19 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
         )}
         <Button type="submit" disabled={saving} className="flex-1 h-11">
           <Save className="h-4 w-4 mr-2" />
-          {saving ? "Speichert…" : initial?.id ? "Speichern + DOCX aktualisieren" : "Baustelle anlegen + DOCX erstellen"}
+          {versendend
+            ? "Versendet…"
+            : saving
+              ? "Speichert…"
+              : (initial?.id
+                  ? "Speichern + DOCX aktualisieren"
+                  : "Baustelle anlegen + DOCX erstellen") +
+                (aktiveEmpfaenger.length > 0
+                  ? " + an " + aktiveEmpfaenger.length + " senden"
+                  : "")}
         </Button>
       </div>
 
-      {/* Versand-Maske nach dem Anlegen. Erst wenn sie zu ist, meldet das
-          Formular „fertig" — sonst würde der Dialog mit dem Formular
-          verschwinden, bevor die Mail raus ist. */}
-      <DocSendDialog
-        open={!!sendItem}
-        onOpenChange={(o) => {
-          if (!o) {
-            setSendItem(null);
-            const id = gespeicherteIdRef.current;
-            gespeicherteIdRef.current = null;
-            if (id) onSaved?.(id);
-          }
-        }}
-        items={sendItem ? [sendItem] : []}
-        defaultEmpfaenger={FESTE_EMPFAENGER}
-        defaultBetreff={`Baustellenmeldung ${sendBvh}`}
-        defaultBody={
-          `Hallo,\n\nim Anhang die Baustellenmeldung für „${sendBvh}".\n\n` +
-          `Mit freundlichen Grüßen`
-        }
-      />
     </form>
   );
 }
