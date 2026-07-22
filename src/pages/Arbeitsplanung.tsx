@@ -242,15 +242,11 @@ export default function Arbeitsplanung() {
   const loadAssignments = async () => {
     const startIso = isoDate(rangeStart);
     const endIso = isoDate(new Date(rangeStart.getTime() + (totalDays - 1) * DAY_MS));
-    // Der Mitarbeiter-Reiter zeigt: EINSÄTZE aus dem Poliereinsatz (nur
-    // Anzeige, geplant wird im Poliereinsatz-Reiter) + ABWESENHEITEN
-    // (hier eintragbar) + offene URLAUBSANTRÄGE (schraffiert).
-    const [{ data: zRows }, { data: fzRows }, { data: antragRows }] = await Promise.all([
-      supabase
-        .from("poliereinsatz_zeitraeume" as any)
-        .select("id, partie_id, baustelle_id, von_datum, bis_datum")
-        .lte("von_datum", endIso)
-        .gte("bis_datum", startIso),
+    // Dieser Reiter ist die ABWESENHEITS-Übersicht: Urlaub, Krank,
+    // Schlechtwetter und offene Urlaubsanträge — sonst nichts. Die
+    // Baustellen-Balken standen früher hier und machten die Abwesenheiten
+    // unauffindbar; geplant wird ohnehin ausschließlich im Poliereinsatz.
+    const [{ data: fzRows }, { data: antragRows }] = await Promise.all([
       // Fehlzeiten aus stunden_tage — dieselbe Quelle, die auch
       // Zeiterfassung/BSB/Lohn lesen (stundenbuchungen ist Legacy)
       supabase
@@ -273,44 +269,13 @@ export default function Arbeitsplanung() {
 
     const map = new Map<string, AssignmentCell>();
 
-    // 1) Einsätze aus dem Poliereinsatz: Partie-Zeitraum → alle aktiven
-    //    Partie-Mitglieder an jedem Werktag des Zeitraums. Farbe wie im
-    //    Poliereinsatz (Bauleiter-Planungsfarbe).
     const addDaysIso = (iso: string, n: number) => {
       const d = new Date(iso + "T00:00:00");
       d.setDate(d.getDate() + n);
       return isoDate(d);
     };
-    (zRows as any[] | null)?.forEach((z) => {
-      const b = baustellen.find((x) => x.id === z.baustelle_id);
-      const bl = b?.bauleiter_id ? profilesById[b.bauleiter_id] : null;
-      const farbe = (bl as any)?.planungsfarbe ?? "#6b7280";
-      const member = profiles.filter(
-        (p) => p.partie_id === z.partie_id && p.is_active !== false,
-      );
-      if (member.length === 0) return;
-      let iso = z.von_datum < startIso ? startIso : z.von_datum;
-      const ende = z.bis_datum > endIso ? endIso : z.bis_datum;
-      while (iso <= ende) {
-        if (isWerktag(iso)) {
-          for (const m of member) {
-            map.set(cellKey(m.id, iso), {
-              source: "einteilung",
-              refId: z.id,
-              einteilungId: z.id,
-              baustelleId: z.baustelle_id,
-              baustelleName: b?.bvh_name ?? "?",
-              baustelleColor: farbe,
-              isReadOnly: true, // geplant wird im Poliereinsatz
-            });
-          }
-        }
-        iso = addDaysIso(iso, 1);
-      }
-    });
 
-    // 2) Offene Urlaubsanträge — überdecken Einsätze (Person wäre weg),
-    //    aber NICHT echte Fehlzeiten (die kommen in Schritt 3 drüber).
+    // 1) Offene Urlaubsanträge (noch nicht entschieden)
     (antragRows as any[] | null)?.forEach((a) => {
       let iso = a.von < startIso ? startIso : a.von;
       const ende = a.bis > endIso ? endIso : a.bis;
@@ -328,7 +293,7 @@ export default function Arbeitsplanung() {
       }
     });
 
-    // 3) Echte Fehlzeiten überschreiben alles (Mitarbeiter ist nicht da)
+    // 2) Genehmigte/eingetragene Fehlzeiten überschreiben offene Anträge
     (fzRows ?? []).forEach((r: any) => {
       map.set(cellKey(r.mitarbeiter_id, r.datum), {
         source: "fehlzeit",
@@ -1763,11 +1728,20 @@ export default function Arbeitsplanung() {
 
       {/* Desktop: Mitarbeiter-Gantt */}
       <Card className="overflow-hidden hidden md:block">
-        <div className="flex">
-          {/* Left fixed: Polier + Mitarbeiter */}
-          <div className="shrink-0 border-r bg-card" style={{ width: 240 }}>
+        {/* Eigener Scroll-Bereich mit begrenzter Höhe — nur dadurch kann die
+            Datumszeile beim Herunterscrollen oben stehen bleiben. Vorher
+            wuchs der Behälter mit dem Inhalt, scrollte nie selbst, und das
+            sticky lief ins Leere: die Kopfzeile rutschte mit weg. Gleicher
+            Aufbau wie im Poliereinsatz. */}
+        <div className="flex relative overflow-auto max-h-[calc(100vh-13rem)]">
+          {/* Left fixed: Polier + Mitarbeiter — auch waagrecht fixiert, damit
+              die Namen beim Scrollen nach rechts sichtbar bleiben. */}
+          <div
+            className="shrink-0 border-r bg-card sticky left-0 z-20"
+            style={{ width: 240 }}
+          >
             <div
-              className="bg-muted/60 border-b sticky top-0 z-10 px-3 text-[10px] font-semibold uppercase tracking-wide flex items-end"
+              className="bg-muted/60 border-b sticky top-0 z-30 px-3 text-[10px] font-semibold uppercase tracking-wide flex items-end"
               style={{ height: 56 }}
             >
               <span className="pb-1">Polier · Mitarbeiter</span>
@@ -1792,7 +1766,7 @@ export default function Arbeitsplanung() {
                   <PolierHeader
                     partie={g.partie}
                     polier={polier}
-                    bvhCount={g.members.length}
+                    maCount={g.members.length}
                     members={[]}
                     allPartien={partien}
                     unassignedMembers={unassignedMembers}
@@ -1891,8 +1865,10 @@ export default function Arbeitsplanung() {
             )}
           </div>
 
-          {/* Timeline */}
-          <div className="flex-1 overflow-x-auto">
+          {/* Timeline — kein eigener Scroll-Behälter mehr: das Scrollen macht
+              der äußere Bereich, sonst gäbe es zwei Scrollleisten und die
+              Kopfzeile könnte nicht kleben. */}
+          <div className="flex-1">
             <div style={{ width: totalDays * dayWidth, position: "relative" }}>
               {/* Headers */}
               <div className="bg-muted/60 sticky top-0 z-10">
@@ -2719,7 +2695,7 @@ export default function Arbeitsplanung() {
 function PolierHeader({
   partie,
   polier,
-  bvhCount,
+  maCount,
   members,
   allPartien,
   unassignedMembers,
@@ -2733,7 +2709,7 @@ function PolierHeader({
 }: {
   partie: Partie | null;
   polier: string | null;
-  bvhCount: number;
+  maCount: number;
   members: Profile[];
   allPartien: Partie[];
   unassignedMembers: Profile[];
@@ -2800,7 +2776,12 @@ function PolierHeader({
             <span className="truncate block">{partie?.name ?? "—"}</span>
           )}
         </div>
-        <span className="text-[10px] opacity-70 shrink-0">{bvhCount} BVH</span>
+        {/* Zählt Partie-Mitglieder, stand aber fälschlich als „BVH"
+            (Bauvorhaben) da — in der reinen Abwesenheits-Ansicht erst recht
+            irreführend. */}
+        <span className="text-[10px] opacity-70 shrink-0">
+          {maCount} MA
+        </span>
         {isAdmin && partie && onEditPartie && (
           <button
             onClick={() => onEditPartie(partie)}
