@@ -1,7 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { MeineWuensche } from "@/components/feedback/MeineWuensche";
 import { useToast } from "@/components/ui/use-toast";
 import {
   Dialog,
@@ -103,6 +104,9 @@ export function FeedbackDialog({
   const location = useLocation();
   const [kategorie, setKategorie] = useState<Kategorie>("idee");
   const [dringlichkeit, setDringlichkeit] = useState<Dringlichkeit>("normal");
+  const [ansicht, setAnsicht] = useState<"neu" | "meine">("neu");
+  /** Wie viele eigene Wünsche warten auf meine Antwort? */
+  const [offeneFragen, setOffeneFragen] = useState(0);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   /** Optionaler Datei-/Screenshot-Anhang (max. 10 MB). */
@@ -199,6 +203,20 @@ export function FeedbackDialog({
     setAnhang(null);
   };
 
+  // Wie viele eigene Wünsche warten auf eine Antwort? Zeigt den Punkt am
+  // Reiter „Meine Wünsche" — sonst bliebe eine Rückfrage unbemerkt.
+  useEffect(() => {
+    if (!open || !user) return;
+    (async () => {
+      const { count } = await supabase
+        .from("feedback" as any)
+        .select("id", { count: "exact", head: true })
+        .eq("erstellt_von", user.id)
+        .eq("offene_frage", true);
+      setOffeneFragen(count ?? 0);
+    })();
+  }, [open, user, ansicht]);
+
   const waehleAnhang = (f: File | null) => {
     if (!f) return;
     if (f.size > 10 * 1024 * 1024) {
@@ -212,6 +230,7 @@ export function FeedbackDialog({
     if (!v) {
       if (aufnahme === "recording") stopAufnahme();
       resetAll();
+      setAnsicht("neu");
     }
     onOpenChange(v);
   };
@@ -306,13 +325,52 @@ export function FeedbackDialog({
     <Dialog open={open} onOpenChange={closeDialog}>
       <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Änderungswunsch senden</DialogTitle>
+          <DialogTitle>Änderungswunsch</DialogTitle>
           <DialogDescription>
             Schreib es oder nimm eine Sprachnachricht auf — beides hilft, die
             App besser zu machen. Geht direkt ans Büro.
           </DialogDescription>
         </DialogHeader>
 
+        {/* Zwei Ansichten: neu schreiben ODER eigene Wünsche verfolgen.
+            Letzteres gab es bisher gar nicht — abgeschickte Wünsche waren
+            für den Melder unsichtbar, eine Rückfrage erreichte ihn nie. */}
+        <div className="flex gap-1 border-b -mt-1">
+          {([
+            { k: "neu" as const, label: "Neuer Wunsch" },
+            { k: "meine" as const, label: "Meine Wünsche" },
+          ]).map((t) => (
+            <button
+              key={t.k}
+              type="button"
+              onClick={() => setAnsicht(t.k)}
+              className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition ${
+                ansicht === t.k
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t.label}
+              {t.k === "meine" && offeneFragen > 0 && (
+                <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
+                  {offeneFragen}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {ansicht === "meine" ? (
+          <div className="py-1 max-h-[60vh] overflow-y-auto">
+            {user ? (
+              <MeineWuensche userId={user.id} />
+            ) : (
+              <div className="text-sm text-muted-foreground py-6 text-center">
+                Bitte neu anmelden.
+              </div>
+            )}
+          </div>
+        ) : (
         <div className="space-y-4 py-1">
           <div className="space-y-1.5">
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -478,20 +536,23 @@ export function FeedbackDialog({
             />
           </div>
         </div>
+        )}
 
-        <DialogFooter className="gap-2 sm:gap-2">
-          <Button variant="outline" onClick={() => closeDialog(false)} disabled={busy}>
-            Abbrechen
-          </Button>
-          <Button onClick={submit} disabled={busy || !kannSenden}>
-            {busy ? (
-              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4 mr-1.5" />
-            )}
-            Absenden
-          </Button>
-        </DialogFooter>
+        {ansicht === "neu" && (
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="outline" onClick={() => closeDialog(false)} disabled={busy}>
+              Abbrechen
+            </Button>
+            <Button onClick={submit} disabled={busy || !kannSenden}>
+              {busy ? (
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4 mr-1.5" />
+              )}
+              Absenden
+            </Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   );

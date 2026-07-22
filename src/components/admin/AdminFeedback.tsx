@@ -18,7 +18,11 @@ import {
   Paperclip,
   Zap,
   UsersRound,
+  HelpCircle,
+  MessagesSquare,
 } from "lucide-react";
+import { BesprechungsModus } from "@/components/admin/BesprechungsModus";
+import { FeedbackFaden } from "@/components/feedback/FeedbackFaden";
 
 const fmtDauer = (s: number) =>
   `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -40,6 +44,8 @@ type FeedbackRow = {
   anhang_name: string | null;
   anhang_typ: string | null;
   dringlichkeit: string | null;
+  offene_frage: boolean | null;
+  letzter_kommentar_von: string | null;
 };
 
 const KAT: Record<string, { label: string; icon: typeof Lightbulb; cls: string }> = {
@@ -77,6 +83,9 @@ export function AdminFeedback() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("offen");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [besprechungOffen, setBesprechungOffen] = useState(false);
+  /** Welcher Wunsch hat den Faden aufgeklappt? */
+  const [fadenOffen, setFadenOffen] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -194,6 +203,14 @@ export function AdminFeedback() {
   }, [rows, filter]);
 
   const neuCount = rows.filter((r) => r.status === "neu").length;
+  /** Der Melder hat zuletzt geschrieben — also liegt der Ball bei uns. */
+  const antwortCount = rows.filter(
+    (r) =>
+      r.letzter_kommentar_von &&
+      r.letzter_kommentar_von === r.erstellt_von &&
+      r.status !== "umgesetzt" &&
+      r.status !== "abgelehnt",
+  ).length;
 
   return (
     <div className="space-y-4">
@@ -220,6 +237,32 @@ export function AdminFeedback() {
         {neuCount > 0 && (
           <Badge className="bg-blue-100 text-blue-800 ml-auto">{neuCount} neu</Badge>
         )}
+      </div>
+
+      {/* Besprechung: geht die aktuell gefilterte Liste einzeln durch. */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <Button
+          onClick={() => setBesprechungOffen(true)}
+          disabled={gefiltert.length === 0}
+          className="gap-1.5"
+        >
+          <UsersRound className="h-4 w-4" />
+          Besprechung starten
+          {gefiltert.length > 0 && (
+            <span className="tabular-nums opacity-80">({gefiltert.length})</span>
+          )}
+        </Button>
+        {antwortCount > 0 && (
+          <Badge className="bg-emerald-100 text-emerald-800 gap-1">
+            <MessagesSquare className="h-3 w-3" />
+            {antwortCount} {antwortCount === 1 ? "neue Antwort" : "neue Antworten"}
+          </Badge>
+        )}
+        <span className="text-xs text-muted-foreground">
+          Zeigt die Wünsche des Reiters „{
+            { offen: "Offen", sofort: "Sofort", besprechung: "Besprechung", umgesetzt: "Umgesetzt", alle: "Alle" }[filter]
+          }" einzeln — mit Freigeben, Notiz und Rückfrage.
+        </span>
       </div>
 
       {loading ? (
@@ -376,6 +419,14 @@ export function AdminFeedback() {
                     )}
                     <Button
                       size="sm"
+                      variant={r.letzter_kommentar_von === r.erstellt_von && r.letzter_kommentar_von ? "default" : "outline"}
+                      onClick={() => setFadenOffen(fadenOffen === r.id ? null : r.id)}
+                    >
+                      <MessagesSquare className="h-3.5 w-3.5 mr-1.5" />
+                      {fadenOffen === r.id ? "Verlauf zu" : "Rückfrage / Notiz"}
+                    </Button>
+                    <Button
+                      size="sm"
                       variant="ghost"
                       className="text-destructive ml-auto"
                       disabled={busyId === r.id}
@@ -384,12 +435,32 @@ export function AdminFeedback() {
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
+
+                  {fadenOffen === r.id && (
+                    <div className="mt-3 border-t pt-3">
+                      <FeedbackFaden
+                        feedbackId={r.id}
+                        melderId={r.erstellt_von}
+                        istAdmin
+                        namen={namen}
+                        onGeaendert={load}
+                      />
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             );
           })}
         </div>
       )}
+
+      <BesprechungsModus
+        open={besprechungOffen}
+        onOpenChange={setBesprechungOffen}
+        wuensche={gefiltert as any}
+        namen={namen}
+        onGeaendert={load}
+      />
     </div>
   );
 }
