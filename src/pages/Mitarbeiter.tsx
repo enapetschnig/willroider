@@ -148,6 +148,8 @@ export default function Mitarbeiter() {
   /** user_id → rollen.id (Quelle der Wahrheit für Berechtigungen). */
   const [roles, setRoles] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<Profile | null>(null);
+  /** Schalter „Bauleiter" — steuert, ob das Farbfeld überhaupt erscheint. */
+  const [istBauleiter, setIstBauleiter] = useState(false);
   const [editingSensitive, setEditingSensitive] = useState<
     Database["public"]["Tables"]["profiles_sensitive"]["Row"] | null
   >(null);
@@ -210,6 +212,7 @@ export default function Mitarbeiter() {
 
   const openEdit = async (p: Profile) => {
     setEditing(p);
+    setIstBauleiter(!!p.ist_bauleiter);
     setEditingSensitive(null);
     // Sensitive-Daten parallel laden — RLS lässt nur Admin oder eigene Daten durch
     const { data } = await supabase
@@ -379,7 +382,12 @@ export default function Mitarbeiter() {
       partie_id: (fd.get("partie_id") as string) || null,
       is_partieleiter: fd.get("is_partieleiter") === "on",
       ist_bauleiter: fd.get("ist_bauleiter") === "on",
-      planungsfarbe: str("planungsfarbe"),
+      // Balkenfarbe NUR für Bauleiter speichern. Das Farbfeld ist immer mit
+      // Grau vorbelegt — vorher bekam dadurch JEDER beim Speichern eine
+      // Farbe verpasst, auch ohne Bauleiter-Häkchen. Genau daran hingen
+      // Leute in der Poliereinsatz-Legende, die keine Bauleiter sind.
+      planungsfarbe:
+        fd.get("ist_bauleiter") === "on" ? str("planungsfarbe") : null,
       geburtsdatum: str("geburtsdatum"),
       geburtsort: str("geburtsort"),
       staatsangehoerigkeit: str("staatsangehoerigkeit"),
@@ -1246,31 +1254,41 @@ export default function Mitarbeiter() {
                     <Switch
                       id="ist_bauleiter"
                       name="ist_bauleiter"
-                      defaultChecked={!!editing.ist_bauleiter}
+                      checked={istBauleiter}
+                      onCheckedChange={setIstBauleiter}
                     />
                     <Label htmlFor="ist_bauleiter">Bauleiter (im Baustellen-Formular wählbar)</Label>
                   </div>
-                  <div>
-                    <Label
-                      htmlFor="planungsfarbe"
-                      className="text-[10px] uppercase tracking-wide"
-                    >
-                      Balkenfarbe (Poliereinsatz)
-                    </Label>
-                    <div className="flex items-center gap-2 mt-1">
-                      <input
-                        id="planungsfarbe"
-                        name="planungsfarbe"
-                        type="color"
-                        defaultValue={editing.planungsfarbe ?? "#6b7280"}
-                        className="h-9 w-14 rounded-md border bg-background p-0.5 cursor-pointer"
-                      />
-                      <span className="text-[10px] text-muted-foreground">
-                        Nur für Bauleiter — Farbe der Balken in der
-                        Poliereinsatz-Ansicht.
-                      </span>
+                  {/* Farbe nur zeigen, wenn der Schalter an ist — sonst
+                      suggeriert ein gefülltes Farbfeld eine Bauleiter-
+                      Eigenschaft, die gar nicht gesetzt ist. */}
+                  {istBauleiter ? (
+                    <div>
+                      <Label
+                        htmlFor="planungsfarbe"
+                        className="text-[10px] uppercase tracking-wide"
+                      >
+                        Balkenfarbe (Poliereinsatz)
+                      </Label>
+                      <div className="flex items-center gap-2 mt-1">
+                        <input
+                          id="planungsfarbe"
+                          name="planungsfarbe"
+                          type="color"
+                          defaultValue={editing.planungsfarbe ?? "#6b7280"}
+                          className="h-9 w-14 rounded-md border bg-background p-0.5 cursor-pointer"
+                        />
+                        <span className="text-[10px] text-muted-foreground">
+                          Farbe der Balken in der Poliereinsatz-Ansicht.
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="text-[10px] text-muted-foreground pt-7">
+                      Balkenfarbe gibt es nur für Bauleiter — beim Speichern
+                      wird eine vorhandene Farbe entfernt.
+                    </div>
+                  )}
                 </div>
               </section>
 
