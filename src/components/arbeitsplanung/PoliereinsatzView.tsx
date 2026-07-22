@@ -442,10 +442,13 @@ export function PoliereinsatzView({
     setPdfBusy(true);
     try {
       const [{ data: zRaw, error: zErr }, { data: fzRaw }] = await Promise.all([
+        // BEWUSST ohne obere Grenze: Das PDF soll die VOLLSTÄNDIGE Liste
+        // zeigen — auch Einsätze, die erst nach dem gewählten Zeitraum
+        // beginnen. Sie stehen dann mit ihrem Zeitraum da, nur ohne Balken
+        // (genau wie am Bildschirm, wenn man nicht so weit rechts ist).
         supabase
           .from("poliereinsatz_zeitraeume" as any)
           .select("*")
-          .lte("von_datum", pdfBis)
           .gte("bis_datum", pdfVon)
           .range(0, 9999),
         supabase
@@ -511,17 +514,21 @@ export function PoliereinsatzView({
         // Freitag im PDF ein normaler Arbeitstag (am Bildschirm ist er grau).
         freieTage: [...kalenderFrei],
         buTage: [...buTage],
+        // Bauleiter kommen IMMER mit (auch ohne Abwesenheit — sie haben am
+        // Bildschirm ebenfalls eine feste Zeile im unteren Block), alle
+        // anderen nur, wenn sie tatsächlich abwesend sind.
         abwesenheiten: profiles
-          .filter((p) => abwMap.has(p.id))
+          .filter((p) => abwMap.has(p.id) || bauleiterIds.has(p.id))
           .map((p) => ({
             name: p.nachname,
             vollname: `${p.vorname} ${p.nachname}`,
             partieId: p.partie_id,
-            tage: abwMap.get(p.id)!,
+            tage: abwMap.get(p.id) ?? new Map<string, string>(),
             planungsfarbe: (p as any).planungsfarbe ?? null,
             // Bauleiter und Partie-lose stehen unten, alle anderen bei
             // ihrer Partie — wie die Ansicht es aufteilt.
             imUnterenBlock: bauleiterIds.has(p.id) || !inGruppe.has(p.id),
+            immerZeigen: bauleiterIds.has(p.id),
           })),
       });
       doc.save(`Arbeitseinteilung_${pdfVon}_bis_${pdfBis}.pdf`);

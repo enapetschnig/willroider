@@ -55,6 +55,8 @@ export type PdfAbwesenheit = {
   planungsfarbe?: string | null;
   /** true = erscheint im unteren Block statt bei einer Partie. */
   imUnterenBlock?: boolean;
+  /** true = Zeile auch ohne Abwesenheit zeigen (Bauleiter). */
+  immerZeigen?: boolean;
 };
 
 export type PoliereinsatzPdfInput = {
@@ -499,16 +501,18 @@ export function makePoliereinsatzPdf(input: PoliereinsatzPdfInput): jsPDF {
 
   // ── Partien ────────────────────────────────────────────────────────
   for (const p of input.partien) {
-    const eigene = input.zeitraeume
-      .filter(
-        (z) =>
-          z.partie_id === p.id && z.bis_datum >= input.von && z.von_datum <= input.bis,
-      )
+    // ALLE Einsätze der Partie — auch die, deren Balken außerhalb des
+    // gewählten Zeitraums liegt. Vorher wurden sie weggefiltert; damit
+    // fehlten im PDF Zeilen, die am Bildschirm sehr wohl stehen (im Test
+    // 42 von 88). Die Spalte „Zeitraum" sagt, wann der Einsatz ist.
+    const eigene = [...input.zeitraeume]
+      .filter((z) => z.partie_id === p.id)
       .sort((a, b) => a.von_datum.localeCompare(b.von_datum));
     const abw = input.abwesenheiten.filter(
       (a) => !a.imUnterenBlock && a.partieId === p.id && a.tage.size > 0,
     );
-    if (eigene.length === 0 && abw.length === 0) continue;
+    // Partien ohne Einsätze bleiben stehen (Ansicht zeigt „— leer —") —
+    // sonst verschwinden ganze Partien aus dem Ausdruck.
 
     platz(2);
     // Gruppenkopf — getönt wie am Bildschirm (dort farbcode + 18 = ~9 %)
@@ -529,12 +533,27 @@ export function makePoliereinsatzPdf(input: PoliereinsatzPdfInput): jsPDF {
     }
     y += ROW_H;
 
-    if (abw.length > 0) zeichneAbwesenheitsZeile(abw);
-    eigene.forEach(zeichneEinsatz);
+    // Abwesend-Zeile IMMER — auch leer, wie am Bildschirm
+    zeichneAbwesenheitsZeile(abw);
+    if (eigene.length === 0) {
+      platz();
+      zeichneRaster(y);
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(5.4);
+      doc.setTextColor(140);
+      doc.text("— leer —", M + 3.5, y + 3.7);
+      y += ROW_H;
+    } else {
+      eigene.forEach(zeichneEinsatz);
+    }
   }
 
   // ── Unterer Block: Urlaube / Abwesenheiten ─────────────────────────
-  const unten = input.abwesenheiten.filter((a) => a.imUnterenBlock && a.tage.size > 0);
+  // Bauleiter stehen hier IMMER (auch ohne Abwesenheit) — wie am
+  // Bildschirm; alle übrigen nur, wenn sie tatsächlich abwesend sind.
+  const unten = input.abwesenheiten.filter(
+    (a) => a.imUnterenBlock && (a.immerZeigen || a.tage.size > 0),
+  );
   if (unten.length > 0) {
     platz(2);
     zeichneRaster(y, [232, 232, 236]);
