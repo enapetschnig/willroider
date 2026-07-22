@@ -42,10 +42,13 @@ import {
   Maximize2,
   Minimize2,
   Users2,
+  FileDown,
+  Loader2,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
 import { useNavigate } from "react-router-dom";
+import { makePoliereinsatzPdf } from "@/lib/poliereinsatzPdf";
 import { feiertagAt } from "@/lib/feiertage";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -400,6 +403,122 @@ export function PoliereinsatzView({
   // ─── Gruppen: Partien mit Leiter oder Einsätzen ──────────────────────
   /** Heute als ISO — trennt abgeschlossene von künftigen Einsätzen. */
   const heuteIso = localIso(new Date());
+
+  // ─── PDF-Export ──────────────────────────────────────────────────────
+  const [pdfOffen, setPdfOffen] = useState(false);
+  const [pdfVon, setPdfVon] = useState("");
+  const [pdfBis, setPdfBis] = useState("");
+  const [pdfBusy, setPdfBusy] = useState(false);
+
+  /**
+   * Erzeugt das PDF für den gewählten Zeitraum. Lädt die Daten BEWUSST
+   * frisch aus der Datenbank statt aus dem Ansichts-Zustand: Der gewählte
+   * Zeitraum kann über die gerade angezeigten Wochen hinausgehen — sonst
+   * fehlten im PDF genau die Einsätze, die man exportieren wollte.
+   */
+  const erzeugePdf = async () => {
+    if (!pdfVon || !pdfBis || pdfBis < pdfVon) {
+      toast({
+        variant: "destructive",
+        title: "Zeitraum ungültig",
+        description: `Das Bis-Datum muss nach dem Von-Datum liegen.`,
+      });
+      return;
+    }
+    // Sicherheitsnetz gegen unlesbare Ausgaben
+    const tage =
+      (new Date(pdfBis + "T00:00:00").getTime() -
+        new Date(pdfVon + "T00:00:00").getTime()) /
+        DAY_MS +
+      1;
+    if (tage > 120) {
+      toast({
+        variant: "destructive",
+        title: "Zeitraum zu lang",
+        description: "Bitte höchstens rund 17 Wochen wählen — sonst werden die Balken unlesbar schmal.",
+      });
+      return;
+    }
+    setPdfBusy(true);
+    try {
+      const [{ data: zRaw, error: zErr }, { data: fzRaw }] = await Promise.all([
+        supabase
+          .from("poliereinsatz_zeitraeume" as any)
+          .select("*")
+          .lte("von_datum", pdfBis)
+          .gte("bis_datum", pdfVon)
+          .range(0, 9999),
+        supabase
+          .from("stunden_tage")
+          .select("mitarbeiter_id, datum, tag_status")
+          .in("tag_status", ["urlaub", "krank", "schlechtwetter"])
+          .gte("datum", pdfVon)
+          .lte("datum", pdfBis)
+          .range(0, 9999),
+      ]);
+      if (zErr) {
+        toast({ variant: "destructive", title: "Laden fehlgeschlagen", description: zErr.message });
+        return;
+      }
+
+      const abwMap = new Map<string, Map<string, string>>();
+      ((fzRaw as any[]) ?? []).forEach((r) => {
+        if (!abwMap.has(r.mitarbeiter_id)) abwMap.set(r.mitarbeiter_id, new Map());
+        abwMap.get(r.mitarbeiter_id)!.set(r.datum, r.tag_status);
+      });
+
+      const baustellenMap: Record<string, any> = {};
+      Object.values(baustellenById).forEach((b: any) => {
+        const bl = b.bauleiter_id ? profilesById[b.bauleiter_id] : null;
+        baustellenMap[b.id] = {
+          bvh_name: b.bvh_name,
+          kostenstelle: b.kostenstelle,
+          bauleiterName: bl ? bl.nachname : null,
+          farbe: (bl as any)?.planungsfarbe ?? "#6b7280",
+        };
+      });
+
+      const doc = makePoliereinsatzPdf({
+        von: pdfVon,
+        bis: pdfBis,
+        partien: partien.map((p) => ({
+          id: p.id,
+          name: p.name,
+          farbcode: p.farbcode,
+          leiterName: p.partieleiter_id
+            ? (profilesById[p.partieleiter_id]?.nachname ?? null)
+            : null,
+        })),
+        zeitraeume: ((zRaw as any[]) ?? []).map((z) => ({
+          id: z.id,
+          partie_id: z.partie_id,
+          baustelle_id: z.baustelle_id,
+          von_datum: z.von_datum,
+          bis_datum: z.bis_datum,
+          start_fix: z.start_fix,
+        })),
+        baustellen: baustellenMap,
+        abwesenheiten: profiles
+          .filter((p) => abwMap.has(p.id))
+          .map((p) => ({
+            name: `${p.nachname} ${p.vorname}`,
+            partieId: p.partie_id,
+            tage: abwMap.get(p.id)!,
+          })),
+      });
+      doc.save(`Arbeitseinteilung_${pdfVon}_bis_${pdfBis}.pdf`);
+      setPdfOffen(false);
+      toast({ title: "PDF gespeichert" });
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "PDF fehlgeschlagen",
+        description: (e as Error).message,
+      });
+    } finally {
+      setPdfBusy(false);
+    }
+  };
 
   const gruppen = useMemo(() => {
     const byPartie = new Map<string, Zeitraum[]>();
@@ -1004,6 +1123,23 @@ export function PoliereinsatzView({
               <span className="hidden sm:inline ml-1.5">Partien verwalten</span>
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              // Vorschlag: ab heute vier Wochen — der übliche Aushang.
+              const heute = localIso(new Date());
+              const bis = new Date();
+              bis.setDate(bis.getDate() + 27);
+              setPdfVon(heute);
+              setPdfBis(localIso(bis));
+              setPdfOffen(true);
+            }}
+            title="Arbeitseinteilung als PDF speichern"
+          >
+            <FileDown className="h-4 w-4" />
+            <span className="hidden sm:inline ml-1.5">PDF</span>
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -1662,6 +1798,77 @@ export function PoliereinsatzView({
           </>
         );
       })()}
+
+      {/* PDF-Zeitraum wählen */}
+      <Dialog open={pdfOffen} onOpenChange={(o) => !o && setPdfOffen(false)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileDown className="h-5 w-5 text-primary" />
+              Arbeitseinteilung als PDF
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs">Von</Label>
+                <Input
+                  type="date"
+                  value={pdfVon}
+                  onChange={(e) => setPdfVon(e.target.value)}
+                  className="h-11"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Bis</Label>
+                <Input
+                  type="date"
+                  value={pdfBis}
+                  onChange={(e) => setPdfBis(e.target.value)}
+                  className="h-11"
+                />
+              </div>
+            </div>
+            {/* Schnellwahl — der Aushang ist fast immer „ab heute X Wochen". */}
+            <div className="flex flex-wrap gap-1.5">
+              {[2, 4, 6, 8].map((w) => (
+                <Button
+                  key={w}
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const start = new Date();
+                    const ende = new Date();
+                    ende.setDate(ende.getDate() + w * 7 - 1);
+                    setPdfVon(localIso(start));
+                    setPdfBis(localIso(ende));
+                  }}
+                >
+                  {w} Wochen
+                </Button>
+              ))}
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              Querformat, eine Zeile je Baustelle, Abwesenheiten farbig. Bei
+              längeren Zeiträumen werden die Balken schmäler — für den Aushang
+              sind 4 Wochen am besten lesbar.
+            </div>
+          </div>
+          <DialogFooter className="flex-row gap-2">
+            <Button variant="outline" onClick={() => setPdfOffen(false)} className="flex-1">
+              Abbrechen
+            </Button>
+            <Button onClick={erzeugePdf} disabled={pdfBusy} className="flex-1">
+              {pdfBusy ? (
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              ) : (
+                <FileDown className="h-4 w-4 mr-1.5" />
+              )}
+              PDF speichern
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Neu/Bearbeiten-Dialog */}
       <Dialog open={!!editDialog} onOpenChange={(o) => !o && setEditDialog(null)}>
