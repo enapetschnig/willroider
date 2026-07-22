@@ -1331,6 +1331,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
               ) : (
                 <FileListView
                   files={filtered}
+                  versand={versand}
                   selected={selected}
                   renamingId={renamingId}
                   renameValue={renameValue}
@@ -1417,6 +1418,9 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         open={!!sendItems}
         onOpenChange={(o) => !o && setSendItems(null)}
         items={sendItems ?? []}
+        // Nach dem Versenden neu laden — sonst bliebe das Kennzeichen
+        // auf „Noch nicht versendet" stehen, obwohl die Mail raus ist.
+        onSent={load}
       />
 
       {/* Verschieben-Dialog: Folder-Picker für die selektierten Dateien */}
@@ -1750,8 +1754,11 @@ function FileListView({
   sortBy,
   sortDir,
   onSort,
+  versand,
 }: {
   files: Dokument[];
+  /** dokument_id → letzter Versand; undefined = nie versendet. */
+  versand?: Map<string, VersandInfo>;
   selected: Set<string>;
   renamingId: string | null;
   renameValue: string;
@@ -1877,7 +1884,25 @@ function FileListView({
                           className="w-full text-sm border rounded px-1 py-0.5 bg-background"
                         />
                       ) : (
-                        <span className="font-medium">{d.dateiname}</span>
+                        <span className="font-medium inline-flex items-center gap-1.5 flex-wrap">
+                          {d.dateiname}
+                          {/* Versand-Status auch hier — sonst zeigt die
+                              Listen-Ansicht weniger als die Kachel-Ansicht. */}
+                          {versand?.get(d.id) ? (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-medium text-emerald-800"
+                              title={`Versendet am ${new Date(versand.get(d.id)!.am).toLocaleString("de-AT")} an ${versand.get(d.id)!.an}`}
+                            >
+                              <MailCheck className="h-2.5 w-2.5" />
+                              Versendet
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[9px] font-medium text-amber-800">
+                              <MailWarning className="h-2.5 w-2.5" />
+                              Offen
+                            </span>
+                          )}
+                        </span>
                       )}
                     </td>
                     <td className="px-2 py-1.5 hidden sm:table-cell text-xs text-muted-foreground tabular-nums">
