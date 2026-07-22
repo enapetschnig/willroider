@@ -2,7 +2,15 @@
 <html lang="de">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover ist Voraussetzung dafür, dass env(safe-area-inset-*)
+         auf dem iPhone echte Werte liefert. Ohne das war jeder Schutzabstand
+         in der App wirkungslos (immer 0) und die untere Leiste lag direkt auf
+         der Home-Indikator-/Siri-Zone. Kopf- und Fußbereich fangen die Insets
+         in AppShell.tsx ab. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
     <title>Holzbau Willroider – Baustellenmanagement</title>
     <meta name="description" content="Digitales Baustellenmanagement, Arbeitsplanung & Zeiterfassung für Holzbau Willroider GmbH" />
     <meta name="author" content="Holzbau Willroider GmbH" />

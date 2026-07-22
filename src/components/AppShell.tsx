@@ -229,7 +229,17 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Main column */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="bg-card border-b sticky top-0 z-30">
+        {/* Kopfzeile: seit viewport-fit=cover reicht die Seite bis unter die
+            Statusleiste/Dynamic Island — ohne diesen Abstand läge der Titel
+            in der installierten App darunter. */}
+        <header
+          className="bg-card border-b sticky top-0 z-30"
+          style={{
+            paddingTop: "env(safe-area-inset-top, 0px)",
+            paddingLeft: "env(safe-area-inset-left, 0px)",
+            paddingRight: "env(safe-area-inset-right, 0px)",
+          }}
+        >
           <div className="flex items-center justify-between px-3 sm:px-4 lg:px-6 py-3 gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <Link
@@ -345,14 +355,26 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className="flex-1 px-3 sm:px-4 lg:px-6 py-3 sm:py-6 max-w-full pb-28 lg:pb-6">
+        {/* pb-safe-nav (index.css): Freiraum für die fixierte Leiste inkl.
+            Home-Indikator-Zone, am Desktop wieder klein. */}
+        <main className="flex-1 px-3 sm:px-4 lg:px-6 py-3 sm:py-6 max-w-full pb-safe-nav">
           {children}
         </main>
 
-        {/* Mobile bottom nav with safe-area */}
+        {/* Mobile bottom nav.
+            paddingBottom: hebt die Knöpfe über die Home-Indikator-Zone. Ein
+            Druck auf den untersten Bildschirmrand löst dort sonst Siri/die
+            Home-Geste aus. max(…, 10px) gibt auch Geräten ohne Indikator
+            (iPhone SE, Android) Luft.
+            paddingLeft/Right: die abgerundeten Ecken beschneiden im Querformat
+            sonst die äußeren Knöpfe. */}
         <nav
           className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-card border-t flex"
-          style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+          style={{
+            paddingBottom: "max(env(safe-area-inset-bottom, 0px), 10px)",
+            paddingLeft: "env(safe-area-inset-left, 0px)",
+            paddingRight: "env(safe-area-inset-right, 0px)",
+          }}
         >
           {([
             { to: "/", label: "Start", icon: LayoutDashboard, end: true, perm: "dashboard.view" as const },

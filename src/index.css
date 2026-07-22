@@ -127,3 +127,17 @@
   @apply rounded-sm shadow-sm;
   border: 1px solid rgba(0, 0, 0, 0.1);
 }
+
+/* ── iPhone Safe-Area ────────────────────────────────────────────────
+   Freiraum unter dem Seiteninhalt: muss die fixierte Navigationsleiste
+   PLUS die Home-Indikator-Zone abdecken, sonst verdeckt die Leiste die
+   letzte Zeile. Als Klasse (nicht inline), damit die lg-Regel greift —
+   am Desktop gibt es keine untere Leiste. */
+.pb-safe-nav {
+  padding-bottom: calc(7rem + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 1024px) {
+  .pb-safe-nav {
+    padding-bottom: 1.5rem;
+  }
+}

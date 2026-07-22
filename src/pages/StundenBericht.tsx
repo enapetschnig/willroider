@@ -979,7 +979,7 @@ export default function StundenBericht() {
       {/* Mobile-Sticky-Footer mit Safe-Area-Padding */}
       <div
         className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-card border-t shadow-[0_-2px_10px_-2px_rgba(0,0,0,0.08)]"
-        style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 8px)" }}
+        style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 10px)" }}
       >
         <div className="px-3 pt-3 pb-1 space-y-2">
           {versandPreviewBlock}

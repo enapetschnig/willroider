@@ -496,7 +496,7 @@ export default function HalleErfassung() {
       {/* Mobile Sticky Submit */}
       <div
         className="lg:hidden fixed left-0 right-0 z-20 px-3 py-2 bg-card border-t shadow-lg"
-        style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 56px)" }}
+        style={{ bottom: "calc(max(env(safe-area-inset-bottom, 0px), 10px) + 56px)" }}
       >
         <Button
           onClick={submit}
