@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,12 +9,16 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { generateBaustellenanlageDocx, DOCX_MIME } from "@/lib/baustellenanlageDocx";
-import { Save } from "lucide-react";
+import { Save, Mail } from "lucide-react";
+import { DocSendDialog, type DocSendItem } from "@/components/dokumente/DocSendDialog";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
+
+/** Feste Empfänger der Baustellenmeldung — im Dialog ergänzbar. */
+const FESTE_EMPFAENGER = "schneider@willroider.at, maurer@willroider.at";
 
 /** Sammel-Kostenstellen mit automatischer Nummernvergabe (<Basis>-<JJ><NN>). */
 const SAMMEL_KST = [
@@ -42,6 +46,12 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
   const { toast } = useToast();
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [saving, setSaving] = useState(false);
+  /** Nach dem Anlegen gleich die Mail-Maske öffnen (Standard: ja). */
+  const [versendenNachAnlegen, setVersendenNachAnlegen] = useState(true);
+  const [sendItem, setSendItem] = useState<DocSendItem | null>(null);
+  const [sendBvh, setSendBvh] = useState("");
+  /** Zuletzt gespeicherte Baustellen-ID — für onSaved nach dem Versand. */
+  const gespeicherteIdRef = useRef<string | null>(null);
 
   const [bvhName, setBvhName] = useState(initial?.bvh_name ?? "");
   const [bauherr, setBauherr] = useState(initial?.bauherr ?? "");
@@ -199,6 +209,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
           return p ? `${p.vorname} ${p.nachname}` : "";
         })()
       : "";
+    let frischesDokument: DocSendItem | null = null;
     try {
       const docxBlob = await generateBaustellenanlageDocx(
         { ...savedRow, ...payload },
@@ -210,15 +221,30 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
         .from("baustellen")
         .upload(path, docxBlob, { contentType: DOCX_MIME, upsert: true });
       if (!upErr) {
-        await supabase.from("dokumente").insert({
-          baustelle_id: id!,
-          ordner: "1-baustellenmanagement",
-          dateiname: `Baustellenanlage ${bvhName} ${dateStr}.docx`,
+        const dateiname = `Baustellenanlage ${bvhName} ${dateStr}.docx`;
+        const { data: dok } = await supabase
+          .from("dokumente")
+          .insert({
+            baustelle_id: id!,
+            ordner: "1-baustellenmanagement",
+            dateiname,
+            storage_path: path,
+            mimetype: DOCX_MIME,
+            groesse: docxBlob.size,
+            hochgeladen_von: user?.id ?? null,
+          } as any)
+          .select("id")
+          .single();
+        // Für den direkt anschließenden Mailversand merken (inkl. ID, damit
+        // der Versand-Nachweis am Dokument hängt).
+        frischesDokument = {
+          id: (dok as any)?.id,
+          bucket: "baustellen",
           storage_path: path,
-          mimetype: DOCX_MIME,
+          dateiname,
           groesse: docxBlob.size,
-          hochgeladen_von: user?.id ?? null,
-        } as any);
+          mimetype: DOCX_MIME,
+        };
       }
     } catch (err: any) {
       toast({
@@ -233,6 +259,16 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
       description: "Baustellenmeldung als DOCX im Ordner Baustellenanlage abgelegt.",
     });
     setSaving(false);
+
+    // Direkt versenden: Der Versand-Dialog öffnet sich vorausgefüllt mit den
+    // festen Empfängern und der frisch erzeugten DOCX. Das Formular bleibt
+    // stehen, bis der Dialog zu ist — sonst verschwände der Anhang mit ihm.
+    if (versendenNachAnlegen && frischesDokument) {
+      gespeicherteIdRef.current = id!;
+      setSendItem(frischesDokument);
+      setSendBvh(bvhName);
+      return; // onSaved erst nach dem Dialog (siehe onOpenChange unten)
+    }
     onSaved?.(id!);
   };
 
@@ -429,6 +465,26 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
             placeholder="Hinweis, der bei jedem Bericht oben sichtbar wird"
           />
         </Field>
+
+        {/* Direktversand — der übliche Weg: anlegen und sofort ans Büro. */}
+        <div className="flex items-center gap-3 rounded-md border p-3 bg-muted/20">
+          <Switch
+            id="mailversand"
+            checked={versendenNachAnlegen}
+            onCheckedChange={setVersendenNachAnlegen}
+          />
+          <Label htmlFor="mailversand" className="cursor-pointer flex-1">
+            <span className="flex items-center gap-1.5 font-medium">
+              <Mail className="h-4 w-4 text-primary" />
+              Danach gleich per Mail versenden
+            </span>
+            <span className="block text-[11px] text-muted-foreground font-normal mt-0.5">
+              Öffnet die Mail-Maske mit {FESTE_EMPFAENGER.split(",").length} festen
+              Empfängern und der Baustellenmeldung im Anhang — weitere Adressen
+              lassen sich dort ergänzen.
+            </span>
+          </Label>
+        </div>
       </div>
 
       <div
@@ -445,6 +501,28 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
           {saving ? "Speichert…" : initial?.id ? "Speichern + DOCX aktualisieren" : "Baustelle anlegen + DOCX erstellen"}
         </Button>
       </div>
+
+      {/* Versand-Maske nach dem Anlegen. Erst wenn sie zu ist, meldet das
+          Formular „fertig" — sonst würde der Dialog mit dem Formular
+          verschwinden, bevor die Mail raus ist. */}
+      <DocSendDialog
+        open={!!sendItem}
+        onOpenChange={(o) => {
+          if (!o) {
+            setSendItem(null);
+            const id = gespeicherteIdRef.current;
+            gespeicherteIdRef.current = null;
+            if (id) onSaved?.(id);
+          }
+        }}
+        items={sendItem ? [sendItem] : []}
+        defaultEmpfaenger={FESTE_EMPFAENGER}
+        defaultBetreff={`Baustellenmeldung ${sendBvh}`}
+        defaultBody={
+          `Hallo,\n\nim Anhang die Baustellenmeldung für „${sendBvh}".\n\n` +
+          `Mit freundlichen Grüßen`
+        }
+      />
     </form>
   );
 }

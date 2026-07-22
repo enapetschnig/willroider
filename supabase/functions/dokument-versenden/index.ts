@@ -76,16 +76,31 @@ Deno.serve(async (req) => {
     if (!body?.empfaenger || !body.attachments?.length) {
       return jsonResponse({ ok: false, error: "Felder fehlen" }, 400);
     }
-    const empfaenger = body.empfaenger.trim();
-    if (!MAIL_RE.test(empfaenger)) {
+    // Mehrere Empfänger: durch Komma, Semikolon oder Zeilenumbruch getrennt
+    // (die Baustellenmeldung geht z.B. immer an zwei feste Adressen).
+    const splitMails = (s: string): string[] =>
+      s
+        .split(/[,;\n]/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+
+    const empfaengerListe = splitMails(body.empfaenger);
+    if (empfaengerListe.length === 0) {
+      return jsonResponse({ ok: false, error: "Kein Empfänger angegeben" }, 400);
+    }
+    const ungueltig = empfaengerListe.find((m) => !MAIL_RE.test(m));
+    if (ungueltig) {
       return jsonResponse(
-        { ok: false, error: `Ungültige Empfänger-Adresse: ${empfaenger}` },
+        { ok: false, error: `Ungültige Empfänger-Adresse: ${ungueltig}` },
         400,
       );
     }
-    if (body.cc && body.cc.trim() && !MAIL_RE.test(body.cc.trim())) {
+    const empfaenger = empfaengerListe.join(", "); // nur noch für Protokoll/Antwort
+    const ccListe = body.cc ? splitMails(body.cc) : [];
+    const ccUngueltig = ccListe.find((m) => !MAIL_RE.test(m));
+    if (ccUngueltig) {
       return jsonResponse(
-        { ok: false, error: `Ungültige CC-Adresse: ${body.cc}` },
+        { ok: false, error: `Ungültige CC-Adresse: ${ccUngueltig}` },
         400,
       );
     }
@@ -128,7 +143,7 @@ Deno.serve(async (req) => {
     const payload: Record<string, unknown> = {
       from: `Holzbau Willroider <${FROM}>`,
       reply_to: [senderMail],
-      to: [empfaenger],
+      to: empfaengerListe,
       subject: body.betreff,
       text:
         body.text +
@@ -138,7 +153,7 @@ Deno.serve(async (req) => {
         content: a.contentBase64,
       })),
     };
-    if (body.cc && body.cc.trim()) payload.cc = [body.cc.trim()];
+    if (ccListe.length > 0) payload.cc = ccListe;
     if (body.html) payload.html = body.html;
 
     const resendRes = await fetch("https://api.resend.com/emails", {

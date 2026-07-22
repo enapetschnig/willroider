@@ -53,6 +53,10 @@ interface DocSendDialogProps {
 const LS_LAST_RECIPIENT = "willroider:lastDocRecipient";
 const MAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** Mehrere Adressen aus einem Feld — durch Komma, Semikolon oder Umbruch. */
+const splitMails = (s: string): string[] =>
+  s.split(/[,;\n]/).map((x) => x.trim()).filter(Boolean);
+
 async function blobToBase64(blob: Blob): Promise<string> {
   const buf = await blob.arrayBuffer();
   const bytes = new Uint8Array(buf);
@@ -113,20 +117,27 @@ export function DocSendDialog({
 
   const handleSend = async () => {
     const to = empfaenger.trim();
-    if (!MAIL_RE.test(to)) {
+    // Mehrere Adressen erlaubt (Komma/Semikolon) — die Baustellenmeldung
+    // geht z.B. immer an zwei feste Empfänger.
+    const toListe = splitMails(to);
+    const toUngueltig = toListe.find((m) => !MAIL_RE.test(m));
+    if (toListe.length === 0 || toUngueltig) {
       toast({
         variant: "destructive",
         title: "Empfänger-Adresse ungültig",
-        description: "Bitte gültige E-Mail-Adresse eintragen.",
+        description: toUngueltig
+          ? `„${toUngueltig}" ist keine gültige E-Mail-Adresse.`
+          : "Bitte mindestens eine E-Mail-Adresse eintragen.",
       });
       return;
     }
     const ccTrim = cc.trim();
-    if (ccTrim && !MAIL_RE.test(ccTrim)) {
+    const ccUngueltig = splitMails(ccTrim).find((m) => !MAIL_RE.test(m));
+    if (ccUngueltig) {
       toast({
         variant: "destructive",
         title: "CC-Adresse ungültig",
-        description: "Bitte gültige E-Mail-Adresse oder leer lassen.",
+        description: `„${ccUngueltig}" ist keine gültige E-Mail-Adresse.`,
       });
       return;
     }
@@ -202,10 +213,11 @@ export function DocSendDialog({
 
         <div className="space-y-3">
           <div className="space-y-1">
-            <Label htmlFor="empf">Empfänger *</Label>
+            <Label htmlFor="empf">Empfänger * <span className="font-normal text-muted-foreground">(mehrere mit Komma trennen)</span></Label>
             <Input
               id="empf"
-              type="email"
+              type="text"
+              inputMode="email"
               value={empfaenger}
               onChange={(e) => setEmpfaenger(e.target.value)}
               placeholder="name@firma.at"
