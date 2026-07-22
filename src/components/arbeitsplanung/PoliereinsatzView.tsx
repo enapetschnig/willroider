@@ -926,6 +926,18 @@ export function PoliereinsatzView({
           ? "fixed inset-0 z-50 bg-background overflow-auto p-3 space-y-3"
           : "space-y-3"
       }
+      // Im Vollbild deckt die Ansicht den ganzen Schirm — ohne Safe-Area
+      // läge die Navigationsleiste unter Statusleiste bzw. Home-Indikator.
+      style={
+        vollbild
+          ? {
+              paddingTop: "calc(0.75rem + env(safe-area-inset-top, 0px))",
+              paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
+              paddingLeft: "calc(0.75rem + env(safe-area-inset-left, 0px))",
+              paddingRight: "calc(0.75rem + env(safe-area-inset-right, 0px))",
+            }
+          : undefined
+      }
     >
       {/* Kopf: Navigation + Legende */}
       <Card>

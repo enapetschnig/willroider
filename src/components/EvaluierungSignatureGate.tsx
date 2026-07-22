@@ -255,7 +255,12 @@ function SignatureOverlay({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-background overflow-hidden flex flex-col">
+    // Pflicht-Overlay über den ganzen Schirm — braucht die Safe-Area oben,
+    // sonst liegt der Titel in der installierten App unter der Statusleiste.
+    <div
+      className="fixed inset-0 z-50 bg-background overflow-hidden flex flex-col"
+      style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
+    >
       <div className="bg-primary text-primary-foreground px-4 py-3 flex items-center gap-3">
         <ShieldAlert className="h-5 w-5 shrink-0" />
         <div className="flex-1 min-w-0">

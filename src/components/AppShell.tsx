@@ -190,8 +190,19 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-muted/30 flex">
-      {/* Sidebar (desktop) */}
-      <aside className="hidden lg:flex w-64 shrink-0 flex-col bg-card border-r">
+      {/* Seitenleiste (ab lg — am iPad quer also sichtbar).
+          Braucht dieselben Safe-Area-Abstände wie die Kopfzeile: In der
+          installierten App zeichnet die Seite unter die Statusleiste
+          (black-translucent), sonst lag das Logo unter Uhrzeit und Datum.
+          Links zusätzlich gegen die runde Ecke im Querformat. */}
+      <aside
+        className="hidden lg:flex w-64 shrink-0 flex-col bg-card border-r"
+        style={{
+          paddingTop: "env(safe-area-inset-top, 0px)",
+          paddingLeft: "env(safe-area-inset-left, 0px)",
+          paddingBottom: "env(safe-area-inset-bottom, 0px)",
+        }}
+      >
         <Link
           to="/"
           className="px-4 py-4 border-b flex items-center gap-3 hover:bg-muted/40 transition-colors"
