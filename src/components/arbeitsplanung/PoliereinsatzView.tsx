@@ -56,7 +56,12 @@ type Zeitraum = Database["public"]["Tables"]["poliereinsatz_zeitraeume"]["Row"];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAY_W = 22; // px pro Tag — wie die Mitarbeiter-Ansicht
-const LEFT_W = 380; // linke Spaltengruppe
+const LEFT_W = 476; // linke Spaltengruppe (inkl. Zeitraum-Spalte)
+
+/** „2026-09-14" → „14.09." — kompakt genug für die schmale Spalte. */
+function kurzDatum(iso: string): string {
+  return iso.slice(8, 10) + "." + iso.slice(5, 7) + ".";
+}
 
 function startOfISOWeek(d: Date): Date {
   const date = new Date(d);
@@ -393,6 +398,9 @@ export function PoliereinsatzView({
   };
 
   // ─── Gruppen: Partien mit Leiter oder Einsätzen ──────────────────────
+  /** Heute als ISO — trennt abgeschlossene von künftigen Einsätzen. */
+  const heuteIso = localIso(new Date());
+
   const gruppen = useMemo(() => {
     const byPartie = new Map<string, Zeitraum[]>();
     zeitraeume.forEach((z) => {
@@ -1019,6 +1027,7 @@ export function PoliereinsatzView({
                 style={{ height: 42 }}
               >
                 <div className="flex-1 pb-1">Polier / BVH</div>
+                <div className="w-24 pb-1 text-right pr-1">Zeitraum</div>
                 <div className="w-12 pb-1">KST</div>
                 <div className="w-6 pb-1 text-center" title="x = Baustelle, leer = Firma/Halle">B</div>
                 <div className="w-16 pb-1">Bauleiter</div>
@@ -1153,11 +1162,31 @@ export function PoliereinsatzView({
                     return (
                       <div
                         key={z.id}
-                        className="border-b flex items-center px-2 text-[11px] hover:bg-muted/30"
+                        // bg-card: die Zeile muss deckend sein, sonst
+                        // scheinen beim Scrollen nach rechts Balken durch,
+                        // die unter die fixierte Spalte wandern.
+                        className={`border-b flex items-center px-2 text-[11px] bg-card hover:bg-muted/30 ${
+                          z.bis_datum < heuteIso ? "opacity-50" : ""
+                        }`}
                         style={{ height: ROW_H }}
                       >
                         <div className="flex-1 truncate pl-5" title={b?.bvh_name ?? "?"}>
                           {b?.bvh_name ?? "?"}
+                        </div>
+                        {/* Zeitraum im Klartext. Ohne ihn standen bei einer
+                            Partie mit vielen Einsätzen lauter Zeilen OHNE
+                            Balken da (deren Termin liegt außerhalb des
+                            sichtbaren Ausschnitts) — man sah nicht, ob sie
+                            ungeplant sind oder nur weiter rechts liegen. */}
+                        <div
+                          className={`w-24 text-[9px] tabular-nums whitespace-nowrap text-right pr-1 ${
+                            z.von_datum > heuteIso
+                              ? "text-muted-foreground"
+                              : "text-foreground font-medium"
+                          }`}
+                          title={`${z.von_datum} – ${z.bis_datum}`}
+                        >
+                          {kurzDatum(z.von_datum)}–{kurzDatum(z.bis_datum)}
                         </div>
                         {/* Einzeilig + abgeschnitten — lange Unter-KSTs
                             (1404030-2602) brachen sonst in die Nachbarzeile um */}
