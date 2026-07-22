@@ -475,8 +475,16 @@ export function PoliereinsatzView({
           kostenstelle: b.kostenstelle,
           bauleiterName: bl ? bl.nachname : null,
           farbe: (bl as any)?.planungsfarbe ?? "#6b7280",
+          // Spalte „B": x = Baustelle, leer = Firma/Halle (wie am Schirm)
+          istBaustelle: !!b && b.kategorie !== "maschine",
         };
       });
+
+      // Wer unten im Block „Urlaube / Abwesenheiten" steht statt bei einer
+      // Partie — exakt dieselbe Aufteilung wie in der Ansicht.
+      const inGruppe = new Set<string>();
+      gruppen.forEach((g) => g.member.forEach((m) => inGruppe.add(m.id)));
+      const bauleiterIds = new Set(bauleiter.map((b) => b.id));
 
       const doc = makePoliereinsatzPdf({
         von: pdfVon,
@@ -498,12 +506,22 @@ export function PoliereinsatzView({
           start_fix: z.start_fix,
         })),
         baustellen: baustellenMap,
+        heute: localIso(new Date()),
+        // Freie Tage/BU aus dem Arbeitszeitkalender — sonst wäre ein freier
+        // Freitag im PDF ein normaler Arbeitstag (am Bildschirm ist er grau).
+        freieTage: [...kalenderFrei],
+        buTage: [...buTage],
         abwesenheiten: profiles
           .filter((p) => abwMap.has(p.id))
           .map((p) => ({
-            name: `${p.nachname} ${p.vorname}`,
+            name: p.nachname,
+            vollname: `${p.vorname} ${p.nachname}`,
             partieId: p.partie_id,
             tage: abwMap.get(p.id)!,
+            planungsfarbe: (p as any).planungsfarbe ?? null,
+            // Bauleiter und Partie-lose stehen unten, alle anderen bei
+            // ihrer Partie — wie die Ansicht es aufteilt.
+            imUnterenBlock: bauleiterIds.has(p.id) || !inGruppe.has(p.id),
           })),
       });
       doc.save(`Arbeitseinteilung_${pdfVon}_bis_${pdfBis}.pdf`);
