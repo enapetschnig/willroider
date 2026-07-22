@@ -35,6 +35,8 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  MailCheck,
+  MailWarning,
 } from "lucide-react";
 import { DocViewerDialog, type DocViewerItem } from "@/components/dokumente/DocViewerDialog";
 import { DocSendDialog, type DocSendItem } from "@/components/dokumente/DocSendDialog";
@@ -79,6 +81,9 @@ import {
 const FOLDER_COLOR = "#eab308";
 
 type Dokument = Database["public"]["Tables"]["dokumente"]["Row"];
+
+/** Letzter Mailversand eines Dokuments — Quelle: Tabelle dokument_versand. */
+type VersandInfo = { am: string; an: string; anzahl: number };
 type OrdnerMarker = Database["public"]["Tables"]["dokument_ordner"]["Row"];
 
 // Wrapper für Icon-Auswahl analog zu vorher (alle FileText außer Fotos)
@@ -106,6 +111,8 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const { toast } = useToast();
   const { role } = useAuth();
   const [docs, setDocs] = useState<Dokument[]>([]);
+  /** dokument_id → letzter Versand (für „schon verschickt?"). */
+  const [versand, setVersand] = useState<Map<string, VersandInfo>>(new Map());
   const [folderMarkers, setFolderMarkers] = useState<OrdnerMarker[]>([]);
   const [loading, setLoading] = useState(true);
   // "root" = Top-Level-Übersicht (alle 14 Ordner). Sonst = im Ordner drin.
@@ -177,8 +184,32 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         .select("*")
         .eq("baustelle_id", baustelleId),
     ]);
-    setDocs((d.data as Dokument[]) ?? []);
+    const liste = (d.data as Dokument[]) ?? [];
+    setDocs(liste);
     setFolderMarkers((m.data as OrdnerMarker[]) ?? []);
+
+    // Versand-Nachweis je Dokument: letzter Versand + Anzahl. Separat
+    // geladen, weil die Protokoll-Tabelle nicht an dokumente hängt.
+    if (liste.length > 0) {
+      const { data: vs } = await supabase
+        .from("dokument_versand" as any)
+        .select("dokument_id, empfaenger, versendet_am")
+        .in(
+          "dokument_id",
+          liste.map((x) => x.id),
+        )
+        .order("versendet_am", { ascending: false });
+      const map = new Map<string, VersandInfo>();
+      ((vs as any[]) ?? []).forEach((v) => {
+        const cur = map.get(v.dokument_id);
+        if (cur) cur.anzahl += 1;
+        // absteigend sortiert → der erste Treffer ist der jüngste
+        else map.set(v.dokument_id, { am: v.versendet_am, an: v.empfaenger, anzahl: 1 });
+      });
+      setVersand(map);
+    } else {
+      setVersand(new Map());
+    }
     setLoading(false);
   };
 
@@ -382,6 +413,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     e?.stopPropagation();
     setSendItems([
       {
+        id: d.id,
         bucket: "baustellen",
         storage_path: d.storage_path,
         dateiname: d.dateiname,
@@ -433,6 +465,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     if (selectedDocs.length === 0) return;
     setSendItems(
       selectedDocs.map((d) => ({
+        id: d.id,
         bucket: "baustellen",
         storage_path: d.storage_path,
         dateiname: d.dateiname,
@@ -1268,6 +1301,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
                     <FileCard
                       key={d.id}
                       d={d}
+                      versandInfo={versand.get(d.id)}
                       isSelected={selected.has(d.id)}
                       isRenaming={renamingId === d.id}
                       renameValue={renameValue}
@@ -1520,6 +1554,8 @@ interface FileCardProps {
   onStartRename: () => void;
   onMove: () => void;
   onDragStart: (e: React.DragEvent) => void;
+  /** Letzter Mailversand — undefined = noch nie versendet. */
+  versandInfo?: VersandInfo;
 }
 
 function FileCard({
@@ -1538,6 +1574,7 @@ function FileCard({
   onStartRename,
   onMove,
   onDragStart,
+  versandInfo,
 }: FileCardProps) {
   return (
     <ContextMenu>
@@ -1607,6 +1644,28 @@ function FileCard({
               {new Date(d.created_at).toLocaleDateString("de-AT")}
               {d.groesse ? ` · ${(d.groesse / 1024).toFixed(0)} KB` : ""}
             </div>
+            {/* Versand-Status: beantwortet „ist die Mail schon raus?" */}
+            {versandInfo ? (
+              <div
+                className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-medium text-emerald-800 max-w-full"
+                title={`Versendet am ${new Date(versandInfo.am).toLocaleString("de-AT")} an ${versandInfo.an}${versandInfo.anzahl > 1 ? ` · insgesamt ${versandInfo.anzahl}×` : ""}`}
+              >
+                <MailCheck className="h-2.5 w-2.5 shrink-0" />
+                <span className="truncate">
+                  Versendet{" "}
+                  {new Date(versandInfo.am).toLocaleDateString("de-AT", {
+                    day: "2-digit",
+                    month: "2-digit",
+                  })}
+                  {versandInfo.anzahl > 1 ? ` (${versandInfo.anzahl}×)` : ""}
+                </span>
+              </div>
+            ) : (
+              <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[9px] font-medium text-amber-800">
+                <MailWarning className="h-2.5 w-2.5 shrink-0" />
+                Noch nicht versendet
+              </div>
+            )}
           </div>
           {/* Quick-Actions (on hover, NICHT bei Selektion sichtbar) */}
           {!isSelected && !isRenaming && (

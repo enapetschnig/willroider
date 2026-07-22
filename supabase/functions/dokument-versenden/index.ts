@@ -21,6 +21,9 @@ interface VersendenRequest {
   text: string;
   html?: string;
   attachments: { filename: string; contentBase64: string }[];
+  /** IDs der versendeten Dokumente — für den Versand-Nachweis. Optional,
+   *  damit ältere Aufrufer weiter funktionieren. */
+  dokumentIds?: string[];
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -155,11 +158,36 @@ Deno.serve(async (req) => {
     }
     const resendJson = await resendRes.json();
 
+    // Versand-Nachweis schreiben — ERST nach erfolgreichem Mailversand,
+    // damit nie ein "versendet" ohne tatsächliche Mail entsteht. Ein Fehler
+    // hier darf den Versand nicht als gescheitert melden (die Mail IST raus).
+    let protokolliert = 0;
+    if (body.dokumentIds?.length) {
+      try {
+        const { error: logErr, count } = await admin
+          .from("dokument_versand")
+          .insert(
+            body.dokumentIds.map((id) => ({
+              dokument_id: id,
+              empfaenger,
+              betreff: body.betreff,
+              versendet_von: user?.id ?? null,
+            })),
+            { count: "exact" },
+          );
+        if (logErr) console.error("Versand-Protokoll:", logErr.message);
+        else protokolliert = count ?? body.dokumentIds.length;
+      } catch (e) {
+        console.error("Versand-Protokoll:", (e as Error).message);
+      }
+    }
+
     return jsonResponse({
       ok: true,
       sentTo: empfaenger,
       count: body.attachments.length,
       resendId: resendJson?.id,
+      protokolliert,
     });
   } catch (e) {
     return jsonResponse(

@@ -253,6 +253,7 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
     e?.stopPropagation();
     setSendItems([
       {
+        id: d.id,
         bucket: "angebote",
         storage_path: d.storage_path,
         dateiname: d.dateiname,

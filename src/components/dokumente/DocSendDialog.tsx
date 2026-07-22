@@ -29,6 +29,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { Loader2, Mail, FileIcon } from "lucide-react";
 
 export interface DocSendItem {
+  /** Dokument-ID — wird für den Versand-Nachweis mitgeschickt. */
+  id?: string;
   bucket: string;
   storage_path: string;
   dateiname: string;
@@ -156,6 +158,11 @@ export function DocSendDialog({
             betreff,
             text: body,
             attachments,
+            // Für den Versand-Nachweis: die Function trägt nach
+            // erfolgreichem Mailversand einen Eintrag je Dokument ein.
+            // filter(Boolean) — Aufrufer ohne id (z.B. Ad-hoc-Dateien)
+            // sollen keinen leeren Eintrag erzeugen.
+            dokumentIds: items.map((i) => i.id).filter(Boolean),
           },
         },
       );
