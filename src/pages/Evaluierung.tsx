@@ -547,13 +547,37 @@ export default function Evaluierung() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="col-span-2 space-y-1.5">
                   <Label>Baustelle *</Label>
+                  {/* Kontrolliert (value + onChange), NICHT defaultValue:
+                      Kommt man aus einer Baustelle (?baustelle=<id>), ist
+                      editing.baustelle_id sofort gesetzt, die Baustellenliste
+                      lädt aber async nach. Mit defaultValue blieb das Feld auf
+                      „— wählen —" hängen, weil beim ersten Render noch kein
+                      passender Eintrag existierte. */}
                   <select
                     name="baustelle_id"
-                    defaultValue={editing.baustelle_id ?? ""}
+                    value={editing.baustelle_id ?? ""}
+                    onChange={(e) =>
+                      setEditing((prev) => ({ ...prev, baustelle_id: e.target.value }))
+                    }
                     required
                     className="w-full h-10 rounded-md border bg-background px-3 text-sm"
                   >
                     <option value="">— wählen —</option>
+                    {/* Die vorausgewählte Baustelle sicherheitshalber immer als
+                        Option anbieten — auch wenn sie (z.B. bei einem Polier)
+                        nicht in baustellenForCreate steht, sonst wäre sie
+                        unsichtbar trotz gesetztem Wert. */}
+                    {editing.baustelle_id &&
+                      !baustellenForCreate.some((b) => b.id === editing.baustelle_id) &&
+                      (() => {
+                        const b = baustellen.find((x) => x.id === editing.baustelle_id);
+                        return b ? (
+                          <option value={b.id}>
+                            {b.bvh_name}
+                            {b.kostenstelle ? ` · ${b.kostenstelle}` : ""}
+                          </option>
+                        ) : null;
+                      })()}
                     {baustellenForCreate.map((b) => (
                       <option key={b.id} value={b.id}>
                         {b.bvh_name}
