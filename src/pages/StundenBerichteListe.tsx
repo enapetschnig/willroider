@@ -111,8 +111,13 @@ export default function StundenBerichteListe() {
     });
   }, [berichteRaw]);
 
-  // Versand erlaubt für alle Status außer „offen"
-  const versendbar = berichte.filter((b) => b.status !== "offen");
+  // Versendbar = NUR was noch nicht raus ist. Vorher zählte „!== offen"
+  // auch bereits versendete mit; „Alle auswählen" markierte sie, und die
+  // Edge Function bricht bei einem einzigen versendeten Bericht den GESAMTEN
+  // Lauf ab (Doppel-Mail-Schutz) — es ging dann keine einzige Mail raus.
+  const versendbar = berichte.filter(
+    (b) => b.status === "unterschrieben" || b.status === "bestaetigt",
+  );
   const allVersendbarSelected =
     versendbar.length > 0 &&
     versendbar.every((b) => selected.has(b.id));
@@ -335,7 +340,9 @@ export default function StundenBerichteListe() {
                 )}
                 {berichte.map((b) => {
                   const badge = STATUS_BADGE[b.status];
-                  const istVersendbar = b.status !== "offen";
+                  // Nur noch nicht Versendetes ist ankreuzbar (siehe versendbar).
+                  const istVersendbar =
+                    b.status === "unterschrieben" || b.status === "bestaetigt";
                   const unterschriebenTag = fmtTag(b.unterschrieben_am);
                   const versendetTag = fmtTag(b.versendet_am);
                   return (

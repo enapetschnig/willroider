@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { edgeFunctionErrorMessage } from "@/lib/edgeError";
 import type { AppRole, Database } from "@/integrations/supabase/types";
 import { normalizeAtPhone } from "@/lib/phone";
 import { Loader2, UserPlus } from "lucide-react";
@@ -42,24 +43,8 @@ const todayIso = () => {
   ].join("-");
 };
 
-/**
- * Liest die echte Fehlermeldung einer fehlgeschlagenen Edge Function aus.
- * supabase.functions.invoke wirft FunctionsHttpError mit dem Response-Objekt
- * in error.context — dort steckt im JSON-Body das .error-Feld (z.B.
- * "Telefonnummer schon vergeben"). Fallback: generische error.message.
- */
-async function edgeFunctionErrorMessage(error: unknown): Promise<string> {
-  const err = error as { message?: string; context?: Response };
-  try {
-    if (err?.context && typeof err.context.json === "function") {
-      const body = await err.context.json();
-      if (body?.error) return String(body.error);
-    }
-  } catch {
-    // Body kein JSON / nicht lesbar → Fallback unten
-  }
-  return err?.message ?? "Unbekannter Fehler";
-}
+// edgeFunctionErrorMessage lebt jetzt zentral in lib/edgeError.ts —
+// damit alle Aufrufer denselben echten Fehlertext bekommen.
 
 export interface CredentialsResult {
   user_id: string;

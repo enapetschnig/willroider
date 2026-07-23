@@ -79,12 +79,27 @@ export function UrlaubAntraegeCard({ userId }: { userId: string }) {
 
   const stornieren = async (id: string) => {
     if (!window.confirm("Antrag wirklich stornieren?")) return;
-    const { error } = await supabase
+    // Nur OFFENE Anträge stornieren + Zeilenzahl prüfen: bei 0 Treffern
+    // liefert PostgREST error=null, ein blindes „Storniert" wäre gelogen
+    // (z.B. wenn das Büro den Antrag schon genehmigt/abgelehnt hat).
+    const { data, error } = await supabase
       .from("urlaubsantraege")
       .update({ status: "storniert" })
-      .eq("id", id);
-    if (error) toast({ variant: "destructive", title: "Fehler", description: error.message });
-    else toast({ title: "Storniert" });
+      .eq("id", id)
+      .eq("status", "offen")
+      .select("id");
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    if (!data || data.length === 0) {
+      toast({
+        title: "Nicht storniert",
+        description: "Der Antrag wurde inzwischen schon bearbeitet.",
+      });
+      return;
+    }
+    toast({ title: "Storniert" });
   };
 
   return (

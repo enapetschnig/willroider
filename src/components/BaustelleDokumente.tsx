@@ -554,12 +554,22 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       setRenamingId(null);
       return;
     }
-    const { error } = await supabase
+    // .select() + Zeilenzahl: ohne das meldete die App „Umbenannt", auch
+    // wenn RLS den Update verwarf (fremdes Dokument) — 0 Zeilen liefern
+    // error=null.
+    const { data, error } = await supabase
       .from("dokumente")
       .update({ dateiname: newName })
-      .eq("id", renamingId);
+      .eq("id", renamingId)
+      .select("id");
     if (error) {
       toast({ variant: "destructive", title: "Umbenennen fehlgeschlagen", description: error.message });
+    } else if (!data || data.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Nicht umbenannt",
+        description: "Keine Berechtigung für diese Datei.",
+      });
     } else {
       toast({ title: "Umbenannt", description: newName });
     }
@@ -587,10 +597,11 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     targetSubpath: string,
   ) => {
     if (ids.length === 0) return;
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("dokumente")
       .update({ ordner: targetOrdner, subpath: targetSubpath || null })
-      .in("id", ids);
+      .in("id", ids)
+      .select("id");
     if (error) {
       toast({
         variant: "destructive",
@@ -599,9 +610,22 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       });
       return;
     }
+    // Echte Zahl statt ids.length — sonst „5 verschoben", obwohl RLS 3
+    // davon still verworfen hat.
+    const bewegt = data?.length ?? 0;
+    if (bewegt === 0) {
+      toast({
+        variant: "destructive",
+        title: "Nicht verschoben",
+        description: "Keine Berechtigung für diese Dateien.",
+      });
+      return;
+    }
     toast({
-      title: `${ids.length} Datei(en) verschoben`,
-      description: `→ ${folderMeta(targetOrdner).label}${targetSubpath ? ` / ${targetSubpath}` : ""}`,
+      title: `${bewegt} Datei(en) verschoben`,
+      description:
+        (bewegt < ids.length ? `${ids.length - bewegt} ohne Berechtigung übersprungen · ` : "") +
+        `→ ${folderMeta(targetOrdner).label}${targetSubpath ? ` / ${targetSubpath}` : ""}`,
     });
     clearSelection();
     load();

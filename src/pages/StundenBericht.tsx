@@ -302,9 +302,12 @@ export default function StundenBericht() {
     bericht.status === "bestaetigt" || bericht.status === "versendet";
   const kannUnterschreiben = bericht.status === "offen" && istEigentuemer;
   const kannBestaetigen = bericht.status === "unterschrieben" && isAdmin;
-  const kannReVersenden =
-    (bericht.status === "bestaetigt" || bericht.status === "versendet") &&
-    isAdmin;
+  // NUR 'bestaetigt' zeigt den Senden-Knopf. Für 'versendet' blendete die
+  // App früher „Erneut ans Büro senden" ein — die Edge Function lehnt einen
+  // bereits versendeten Bericht aber IMMER ab (Doppel-Mail-Schutz), der
+  // Knopf schlug also garantiert fehl. Ein echtes Re-Send bräuchte einen
+  // eigenen, bewussten Weg; bis dahin kein irreführender Knopf.
+  const kannReVersenden = bericht.status === "bestaetigt" && isAdmin;
 
   const maName = bericht.mitarbeiter
     ? `${bericht.mitarbeiter.vorname ?? ""} ${bericht.mitarbeiter.nachname ?? ""}`.trim()
@@ -969,9 +972,7 @@ export default function StundenBericht() {
             className="min-w-[180px] h-12"
           >
             <Mail className="h-4 w-4 mr-1.5" />
-            {bericht.status === "versendet"
-              ? "Erneut ans Büro senden"
-              : "Ans Büro senden"}
+            Ans Büro senden
           </Button>
         )}
       </div>
@@ -1008,9 +1009,7 @@ export default function StundenBericht() {
               className="w-full h-11 text-base font-semibold"
             >
               <Mail className="h-5 w-5 mr-2" />
-              {bericht.status === "versendet"
-                ? "Erneut ans Büro senden"
-                : "Ans Büro senden"}
+              Ans Büro senden
             </Button>
           )}
           <Button

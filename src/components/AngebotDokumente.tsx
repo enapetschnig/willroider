@@ -268,8 +268,31 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
   const remove = async (d: Dokument, e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (!confirm(`Datei "${d.dateiname}" löschen?`)) return;
-    await supabase.storage.from("angebote").remove([d.storage_path]);
-    await supabase.from("angebot_dokumente").delete().eq("id", d.id);
+    // ERST die DB-Zeile (mit Berechtigungsprüfung über die Zeilenzahl),
+    // DANN die Datei. Vorher lief es umgekehrt und ungeprüft: bei fehlender
+    // Berechtigung war die Datei schon weg, die Zeile blieb — die Ansicht
+    // zeigte danach einen toten Eintrag.
+    const { data, error } = await supabase
+      .from("angebot_dokumente")
+      .delete()
+      .eq("id", d.id)
+      .select("id");
+    if (error) {
+      toast({ variant: "destructive", title: "Löschen fehlgeschlagen", description: error.message });
+      return;
+    }
+    if (!data || data.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Nicht gelöscht",
+        description: "Keine Berechtigung für diese Datei.",
+      });
+      return;
+    }
+    // Datei erst jetzt entfernen — ein Fehler hier hinterlässt nur eine
+    // verwaiste Storage-Datei, keinen toten DB-Eintrag.
+    const { error: stErr } = await supabase.storage.from("angebote").remove([d.storage_path]);
+    if (stErr) console.error("Storage-Löschung:", stErr.message);
     toast({ title: "Datei gelöscht" });
     load();
   };

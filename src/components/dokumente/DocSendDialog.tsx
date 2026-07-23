@@ -26,6 +26,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { pruefeEdgeAntwort } from "@/lib/edgeError";
 import { Loader2, Mail, FileIcon } from "lucide-react";
 
 export interface DocSendItem {
@@ -160,27 +161,23 @@ export function DocSendDialog({
         });
       }
 
-      const { data, error } = await supabase.functions.invoke(
-        "dokument-versenden",
-        {
-          body: {
-            empfaenger: to,
-            cc: ccTrim || undefined,
-            betreff,
-            text: body,
-            attachments,
-            // Für den Versand-Nachweis: die Function trägt nach
-            // erfolgreichem Mailversand einen Eintrag je Dokument ein.
-            // filter(Boolean) — Aufrufer ohne id (z.B. Ad-hoc-Dateien)
-            // sollen keinen leeren Eintrag erzeugen.
-            dokumentIds: items.map((i) => i.id).filter(Boolean),
-          },
+      const antwort = await supabase.functions.invoke("dokument-versenden", {
+        body: {
+          empfaenger: to,
+          cc: ccTrim || undefined,
+          betreff,
+          text: body,
+          attachments,
+          // Für den Versand-Nachweis: die Function trägt nach
+          // erfolgreichem Mailversand einen Eintrag je Dokument ein.
+          // filter(Boolean) — Aufrufer ohne id (z.B. Ad-hoc-Dateien)
+          // sollen keinen leeren Eintrag erzeugen.
+          dokumentIds: items.map((i) => i.id).filter(Boolean),
         },
-      );
-      if (error) throw error;
-      if (data && (data as any).ok === false) {
-        throw new Error((data as any).error ?? "Unbekannter Fehler");
-      }
+      });
+      // Wirft mit dem ECHTEN Fehlertext (403, „Empfänger ungültig", …)
+      // statt des generischen „non-2xx status code".
+      await pruefeEdgeAntwort(antwort);
       localStorage.setItem(LS_LAST_RECIPIENT, to);
       toast({
         title: "Mail versendet",

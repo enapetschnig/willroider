@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { edgeFunctionErrorMessage } from "@/lib/edgeError";
 import { Loader2, Mail, FileText } from "lucide-react";
 import { buildBerichtPdf } from "@/lib/bsbPdfHelper";
 
@@ -190,7 +191,9 @@ export function BsbVersendenDialog({
           },
         },
       );
-      if (error) throw error;
+      // Bei 4xx/5xx steckt der echte Text im Response-Body, nicht in
+      // error.message („non-2xx status code").
+      if (error) throw new Error(await edgeFunctionErrorMessage(error));
       const res = data as any;
       if (!res?.ok) {
         throw new Error(res?.error ?? "Versand fehlgeschlagen");

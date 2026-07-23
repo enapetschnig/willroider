@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { pruefeEdgeAntwort } from "@/lib/edgeError";
 import { useAuth } from "@/contexts/AuthContext";
 import { generateBaustellenanlageDocx, DOCX_MIME } from "@/lib/baustellenanlageDocx";
 import { Save, Mail, X } from "lucide-react";
@@ -262,29 +263,53 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
       const { error: upErr } = await supabase.storage
         .from("baustellen")
         .upload(path, docxBlob, { contentType: DOCX_MIME, upsert: true });
-      if (!upErr) {
+      if (upErr) {
+        // Datei nicht abgelegt → kein Doku-Eintrag, kein Mailversand, und
+        // vor allem KEIN falsches „Erfolg". Der Nutzer weiß sonst nicht,
+        // dass die DOCX fehlt.
+        toast({
+          variant: "destructive",
+          title: "Baustelle gespeichert, aber DOCX-Ablage fehlgeschlagen",
+          description: `${upErr.message} — Bitte die Baustellenmeldung später erneut speichern.`,
+        });
+      } else {
         const dateiname = `Baustellenanlage ${bvhName} ${dateStr}.docx`;
-        const { data: dok } = await supabase
+        // Pfad enthält nur Datum → beim mehrfachen Speichern am selben Tag
+        // wird die Datei überschrieben (upsert). Deshalb den vorhandenen
+        // dokumente-Eintrag AKTUALISIEREN statt jedes Mal einen neuen
+        // anzulegen — sonst zeigten mehrere Zeilen auf dieselbe Datei.
+        const { data: vorhanden } = await supabase
           .from("dokumente")
-          .insert({
-            baustelle_id: id!,
-            ordner: "1-baustellenmanagement",
-            dateiname,
-            storage_path: path,
-            mimetype: DOCX_MIME,
-            groesse: docxBlob.size,
-            hochgeladen_von: user?.id ?? null,
-          } as any)
           .select("id")
-          .single();
+          .eq("storage_path", path)
+          .maybeSingle();
+        let dokId = (vorhanden as any)?.id as string | undefined;
+        if (dokId) {
+          await supabase
+            .from("dokumente")
+            .update({ dateiname, groesse: docxBlob.size } as any)
+            .eq("id", dokId);
+        } else {
+          const { data: dok, error: insErr } = await supabase
+            .from("dokumente")
+            .insert({
+              baustelle_id: id!,
+              ordner: "1-baustellenmanagement",
+              dateiname,
+              storage_path: path,
+              mimetype: DOCX_MIME,
+              groesse: docxBlob.size,
+              hochgeladen_von: user?.id ?? null,
+            } as any)
+            .select("id")
+            .single();
+          if (insErr) console.error("Dokument-Eintrag:", insErr.message);
+          dokId = (dok as any)?.id;
+        }
         // Für den direkt anschließenden Mailversand merken. Die DOCX liegt
         // ohnehin schon im Speicher — kein erneuter Download nötig.
         if (aktiveEmpfaenger.length > 0) {
-          docxFuerMail = {
-            dateiname,
-            base64: await blobToBase64(docxBlob),
-            dokumentId: (dok as any)?.id,
-          };
+          docxFuerMail = { dateiname, base64: await blobToBase64(docxBlob), dokumentId: dokId };
         }
       }
     } catch (err: any) {
@@ -297,7 +322,9 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
 
     toast({
       title: initial?.id ? "Baustelle aktualisiert" : "Baustelle angelegt",
-      description: "Baustellenmeldung als DOCX im Ordner Baustellenanlage abgelegt.",
+      description: docxFuerMail
+        ? "Baustellenmeldung als DOCX im Ordner Baustellenanlage abgelegt."
+        : "Gespeichert.",
     });
 
     // Versand direkt im Anschluss — die Empfänger stehen schon im Formular,
@@ -306,7 +333,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
     if (aktiveEmpfaenger.length > 0 && docxFuerMail) {
       setVersendend(true);
       try {
-        const { data, error } = await supabase.functions.invoke("dokument-versenden", {
+        const antwort = await supabase.functions.invoke("dokument-versenden", {
           body: {
             empfaenger: aktiveEmpfaenger.join(", "),
             betreff: `Baustellenmeldung ${bvhName}`,
@@ -319,10 +346,8 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
             dokumentIds: docxFuerMail.dokumentId ? [docxFuerMail.dokumentId] : [],
           },
         });
-        if (error) throw error;
-        if (data && (data as any).ok === false) {
-          throw new Error((data as any).error ?? "Unbekannter Fehler");
-        }
+        // Echter Fehlertext statt „non-2xx status code"
+        await pruefeEdgeAntwort(antwort);
         toast({
           title: "Baustellenmeldung versendet",
           description: `An ${aktiveEmpfaenger.join(", ")}.`,
