@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
 import { BaustelleDokumente } from "@/components/BaustelleDokumente";
 import { Button } from "@/components/ui/button";
@@ -341,10 +341,19 @@ export default function BaustelleDetail() {
 
   return (
     <div className="space-y-4">
-      <Button variant="ghost" size="sm" asChild>
-        <Link to="/baustellen">
-          <ArrowLeft className="h-4 w-4 mr-2" /> Zurück
-        </Link>
+      {/* Einen Schritt in der History zurück statt fix auf /baustellen —
+          so kommt die Baustellen-Liste mit der vorherigen Suche (in der URL)
+          zurück. Fallback auf die Liste, falls die Seite direkt (Deep-Link,
+          kein Verlauf) geöffnet wurde. */}
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => {
+          if (window.history.length > 1) navigate(-1);
+          else navigate("/baustellen");
+        }}
+      >
+        <ArrowLeft className="h-4 w-4 mr-2" /> Zurück
       </Button>
 
       <PageHeader

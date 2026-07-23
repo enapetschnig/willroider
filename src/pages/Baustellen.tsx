@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -38,8 +38,25 @@ export default function Baustellen() {
   const { canCreateBaustelle, user } = useAuth();
   const [data, setData] = useState<Baustelle[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("alle");
+  // Suche + Statusfilter liegen in der URL, nicht in lokalem State: Beim
+  // Öffnen einer Baustelle und Zurückgehen wird die Seite neu gemountet —
+  // lokaler State ginge dabei verloren. Über die URL bleibt die Suche
+  // erhalten (und ist per Zurück-Taste/Teilen wiederherstellbar).
+  const [params, setParams] = useSearchParams();
+  const search = params.get("q") ?? "";
+  const statusFilter = params.get("status") ?? "alle";
+  const setSearch = (v: string) => {
+    const n = new URLSearchParams(params);
+    if (v) n.set("q", v);
+    else n.delete("q");
+    setParams(n, { replace: true });
+  };
+  const setStatusFilter = (v: string) => {
+    const n = new URLSearchParams(params);
+    if (v && v !== "alle") n.set("status", v);
+    else n.delete("status");
+    setParams(n, { replace: true });
+  };
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const load = async () => {
