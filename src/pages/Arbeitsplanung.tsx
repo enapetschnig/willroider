@@ -123,6 +123,10 @@ export default function Arbeitsplanung() {
       : "polier",
   );
   const [weeksVisible, setWeeksVisible] = useState(20);
+  /** Optisch markierte Zeile — zeigt, in welcher Zeile man gerade arbeitet.
+   *  Wird beim Klick auf eine andere Zeile umgesetzt und beim Klick
+   *  daneben geleert. */
+  const [markierteZeile, setMarkierteZeile] = useState<string | null>(null);
   const [anchorWeek, setAnchorWeek] = useState<Date>(() => {
     const today = new Date();
     today.setDate(today.getDate() - 14); // start 2 weeks ago
@@ -1739,7 +1743,13 @@ export default function Arbeitsplanung() {
             wuchs der Behälter mit dem Inhalt, scrollte nie selbst, und das
             sticky lief ins Leere: die Kopfzeile rutschte mit weg. Gleicher
             Aufbau wie im Poliereinsatz. */}
-        <div className="flex relative overflow-auto max-h-[calc(100vh-13rem)]">
+        <div
+          className="flex relative overflow-auto max-h-[calc(100vh-13rem)]"
+          onPointerDown={(e) => {
+            const el = (e.target as HTMLElement).closest?.("[data-zeile]");
+            setMarkierteZeile(el ? el.getAttribute("data-zeile") : null);
+          }}
+        >
           {/* Left fixed: Polier + Mitarbeiter — auch waagrecht fixiert, damit
               die Namen beim Scrollen nach rechts sichtbar bleiben. */}
           <div
@@ -1806,6 +1816,7 @@ export default function Arbeitsplanung() {
                             draggedRecentlyRef.current = false;
                           }
                         }}
+                        data-zeile={m.id}
                         className={`border-b flex items-center gap-2 px-2 text-[11px] w-full text-left transition ${
                           isAdmin
                             ? "hover:bg-muted cursor-grab active:cursor-grabbing"
@@ -1814,7 +1825,7 @@ export default function Arbeitsplanung() {
                           nameDrag?.active && nameDrag.member.id === m.id
                             ? "opacity-40"
                             : ""
-                        }`}
+                        } ${markierteZeile === m.id ? "bg-primary/10" : ""}`}
                         style={{ height: 28, touchAction: isAdmin ? "none" : undefined }}
                         title={
                           isAdmin
@@ -1874,7 +1885,12 @@ export default function Arbeitsplanung() {
           {/* Timeline — kein eigener Scroll-Behälter mehr: das Scrollen macht
               der äußere Bereich, sonst gäbe es zwei Scrollleisten und die
               Kopfzeile könnte nicht kleben. */}
-          <div className="flex-1">
+          {/* relative z-0 = eigener Ebenen-Kontext für die ganze Zeitachse.
+              Dadurch bleiben ALLE inneren Ebenen (Balken, Wochenend-Overlays
+              mit z-30, Zieh-Vorschau) innerhalb dieses Kontexts und können
+              nie über die linke Spalte (z-20) malen. Vorher schoben sich die
+              grauen Wochenend-Streifen beim Scrollen über die Namen. */}
+          <div className="flex-1 relative z-0">
             <div style={{ width: totalDays * dayWidth, position: "relative" }}>
               {/* Headers */}
               <div className="bg-muted sticky top-0 z-10">
@@ -2128,7 +2144,10 @@ export default function Arbeitsplanung() {
                             const iso = isoDate(dayHeaders[idx].date);
                             onCellPointerDown(e, m.id, iso);
                           }}
-                          className="border-b relative"
+                          data-zeile={m.id}
+                          className={`border-b relative ${
+                            markierteZeile === m.id ? "bg-primary/10" : ""
+                          }`}
                           style={{
                             height: 28,
                             cursor: isAdmin ? "pointer" : "default",

@@ -405,6 +405,9 @@ export function PoliereinsatzView({
   const heuteIso = localIso(new Date());
 
   // ─── PDF-Export ──────────────────────────────────────────────────────
+  /** Optisch markierte Zeile (Zeitraum-ID) — zeigt, in welcher Zeile man
+   *  gerade arbeitet. Klick daneben leert sie wieder. */
+  const [markierteZeile, setMarkierteZeile] = useState<string | null>(null);
   const [pdfOffen, setPdfOffen] = useState(false);
   const [pdfVon, setPdfVon] = useState("");
   const [pdfBis, setPdfBis] = useState("");
@@ -1201,6 +1204,10 @@ export function PoliereinsatzView({
             className={`flex relative overflow-auto ${
               vollbild ? "max-h-[calc(100vh-6rem)]" : "max-h-[calc(100vh-11rem)]"
             }`}
+            onPointerDown={(e) => {
+              const el = (e.target as HTMLElement).closest?.("[data-zeile]");
+              setMarkierteZeile(el ? el.getAttribute("data-zeile") : null);
+            }}
           >
             {/* Linke Spaltengruppe — horizontal fixiert */}
             <div className="shrink-0 border-r bg-card sticky left-0 z-20" style={{ width: LEFT_W }}>
@@ -1345,12 +1352,13 @@ export function PoliereinsatzView({
                     return (
                       <div
                         key={z.id}
+                        data-zeile={z.id}
                         // bg-card: die Zeile muss deckend sein, sonst
                         // scheinen beim Scrollen nach rechts Balken durch,
                         // die unter die fixierte Spalte wandern.
-                        className={`border-b flex items-center px-2 text-[11px] bg-card hover:bg-muted/30 ${
-                          z.bis_datum < heuteIso ? "opacity-50" : ""
-                        }`}
+                        className={`border-b flex items-center px-2 text-[11px] hover:bg-muted/30 ${
+                          markierteZeile === z.id ? "bg-primary/10" : "bg-card"
+                        } ${z.bis_datum < heuteIso ? "opacity-50" : ""}`}
                         style={{ height: ROW_H }}
                       >
                         <div className="flex-1 truncate pl-5" title={b?.bvh_name ?? "?"}>
@@ -1426,8 +1434,11 @@ export function PoliereinsatzView({
               ))}
             </div>
 
-            {/* Zeitachse + Balken — scrollt mit dem Außen-Container */}
-            <div className="shrink-0">
+            {/* Zeitachse + Balken — scrollt mit dem Außen-Container.
+                relative z-0 = eigener Ebenen-Kontext: alles darin (Balken,
+                Heute-Linie, Zieh-Vorschau) bleibt darunter und kann nie über
+                die linke Spalte (z-20) malen, wenn man nach rechts scrollt. */}
+            <div className="shrink-0 relative z-0">
               <div style={{ width: totalDays * DAY_W, position: "relative" }}>
                 {/* Wochen-Header — vertikal fixiert. z-10 (unter der linken
                     z-20-Spalte, sonst übermalt er beim Horizontal-Scroll die Ecke) */}
@@ -1562,7 +1573,14 @@ export function PoliereinsatzView({
                     {g.einsaetze.map((z) => {
                       const b = baustellenById[z.baustelle_id];
                       return (
-                        <div key={z.id} className="relative border-b" style={{ height: ROW_H }}>
+                        <div
+                          key={z.id}
+                          data-zeile={z.id}
+                          className={`relative border-b ${
+                            markierteZeile === z.id ? "bg-primary/10" : ""
+                          }`}
+                          style={{ height: ROW_H }}
+                        >
                           <GridBg days={days} />
                           {renderBar(z, b?.bvh_name ?? "?")}
                         </div>
