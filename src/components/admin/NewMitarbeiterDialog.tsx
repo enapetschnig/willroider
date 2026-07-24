@@ -23,7 +23,6 @@ type Partie = Database["public"]["Tables"]["partien"]["Row"];
 const ROLES: { value: AppRole; label: string }[] = [
   { value: "mitarbeiter", label: "Mitarbeiter" },
   { value: "bauleiter", label: "Vorarbeiter" },
-  { value: "zimmermeister", label: "Zimmermeister" },
   { value: "buero", label: "Büro" },
   { value: "geschaeftsfuehrung", label: "Geschäftsführung" },
 ];

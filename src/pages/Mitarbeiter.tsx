@@ -1469,7 +1469,6 @@ const ROLE_LABELS: { value: AppRole; label: string }[] = [
   { value: "geschaeftsfuehrung", label: "Geschäftsführung" },
   { value: "buero", label: "Büro" },
   { value: "bauleiter", label: "Vorarbeiter / Polier" },
-  { value: "zimmermeister", label: "Zimmermeister" },
   { value: "mitarbeiter", label: "Mitarbeiter" },
 ];
 
