@@ -111,12 +111,14 @@ export default function Arbeitsplanung() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [fahrzeuge, setFahrzeuge] = useState<Fahrzeug[]>([]);
   const [filterPartie, setFilterPartie] = useState<string>("alle");
-  /** Ansicht: MA-Zeilen (klassisch) oder Poliereinsatz (MS-Project-Stil). */
-  // Deep-Link: /arbeitsplanung?ansicht=polier öffnet direkt den Poliereinsatz
+  /** Ansicht: Poliereinsatz (MS-Project-Stil) oder MA-Zeilen.
+   *  Poliereinsatz ist die Standard-Ansicht — dort wird geplant; der
+   *  Mitarbeiter-Reiter zeigt nur noch Abwesenheiten.
+   *  Deep-Link: /arbeitsplanung?ansicht=ma öffnet direkt die MA-Ansicht. */
   const [ansicht, setAnsicht] = useState<"ma" | "polier">(() =>
-    new URLSearchParams(window.location.search).get("ansicht") === "polier"
-      ? "polier"
-      : "ma",
+    new URLSearchParams(window.location.search).get("ansicht") === "ma"
+      ? "ma"
+      : "polier",
   );
   const [weeksVisible, setWeeksVisible] = useState(20);
   const [anchorWeek, setAnchorWeek] = useState<Date>(() => {
@@ -1574,12 +1576,14 @@ export default function Arbeitsplanung() {
         }
       />
 
-      {/* Ansicht-Umschalter: Mitarbeiter-Zeilen ↔ Poliereinsatz (MS-Project-Stil) */}
+      {/* Ansicht-Umschalter: Poliereinsatz (MS-Project-Stil) ↔ Mitarbeiter.
+          Poliereinsatz steht vorne — dort wird geplant, der Mitarbeiter-
+          Reiter zeigt nur Abwesenheiten. */}
       <div className="inline-flex rounded-md border bg-card p-0.5">
         {(
           [
-            { key: "ma", label: "Mitarbeiter" },
             { key: "polier", label: "Poliereinsatz" },
+            { key: "ma", label: "Mitarbeiter" },
           ] as const
         ).map((t) => (
           <button
