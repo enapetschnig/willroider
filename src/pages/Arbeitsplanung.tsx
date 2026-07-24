@@ -1753,7 +1753,9 @@ export default function Arbeitsplanung() {
           {/* Left fixed: Polier + Mitarbeiter — auch waagrecht fixiert, damit
               die Namen beim Scrollen nach rechts sichtbar bleiben. */}
           <div
-            className="shrink-0 border-r bg-card sticky left-0 z-20"
+            // self-start: sonst deckt bg-card nur die erste Bildschirmhöhe ab
+            // und weiter unten scheinen die Balken durch (siehe Poliereinsatz).
+            className="shrink-0 self-start border-r bg-card sticky left-0 z-20"
             style={{ width: 240 }}
           >
             <div

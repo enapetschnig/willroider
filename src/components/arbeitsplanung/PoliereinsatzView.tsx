@@ -1210,7 +1210,15 @@ export function PoliereinsatzView({
             }}
           >
             {/* Linke Spaltengruppe — horizontal fixiert */}
-            <div className="shrink-0 border-r bg-card sticky left-0 z-20" style={{ width: LEFT_W }}>
+            <div
+              // self-start: OHNE das wird die Spalte als Flex-Element nur auf
+              // die sichtbare Container-Höhe gestreckt — ihr bg-card deckte
+              // dann bloß die erste Bildschirmhöhe ab, und weiter unten
+              // schienen die Balken durch die transparenten Zeilen. Mit
+              // self-start wächst die Box auf die volle Inhaltshöhe.
+              className="shrink-0 self-start border-r bg-card sticky left-0 z-20"
+              style={{ width: LEFT_W }}
+            >
               {/* Kopfzeile — Ecke: horizontal + vertikal fixiert */}
               <div
                 className="border-b bg-muted flex items-end px-2 text-[10px] font-semibold uppercase tracking-wide sticky top-0 z-30"
