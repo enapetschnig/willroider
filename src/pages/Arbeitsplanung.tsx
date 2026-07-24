@@ -67,6 +67,8 @@ type AssignmentCell = {
   isReadOnly?: boolean;
 };
 
+const MONAT_KURZ = ["Jän","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+
 const FEHLZEIT_LABEL: Record<string, string> = {
   U: "Urlaub",
   K: "Krank",
@@ -1745,7 +1747,7 @@ export default function Arbeitsplanung() {
             style={{ width: 240 }}
           >
             <div
-              className="bg-muted/60 border-b sticky top-0 z-30 px-3 text-[10px] font-semibold uppercase tracking-wide flex items-end"
+              className="bg-muted border-b sticky top-0 z-30 px-3 text-[10px] font-semibold uppercase tracking-wide flex items-end"
               style={{ height: 56 }}
             >
               <span className="pb-1">Polier · Mitarbeiter</span>
@@ -1875,17 +1877,36 @@ export default function Arbeitsplanung() {
           <div className="flex-1">
             <div style={{ width: totalDays * dayWidth, position: "relative" }}>
               {/* Headers */}
-              <div className="bg-muted/60 sticky top-0 z-10">
+              <div className="bg-muted sticky top-0 z-10">
                 <div className="flex border-b" style={{ height: 28 }}>
-                  {weekHeaders.map((w, i) => (
-                    <div
-                      key={i}
-                      className="text-[11px] font-semibold flex items-center justify-center border-r"
-                      style={{ width: w.widthDays * dayWidth }}
-                    >
-                      KW {w.week}
-                    </div>
-                  ))}
+                  {weekHeaders.map((w, i) => {
+                    // Datum des ersten sichtbaren Tages der Woche mitanzeigen
+                    // („KW 28 · 6. Jul") — gleiche Schreibweise wie im
+                    // Poliereinsatz. Jahr nur beim Jahreswechsel.
+                    const wd = dayHeaders[w.offsetDays]?.date;
+                    const datumLabel = wd
+                      ? `${wd.getDate()}. ${MONAT_KURZ[wd.getMonth()]}${
+                          wd.getFullYear() !== new Date().getFullYear()
+                            ? ` '${String(wd.getFullYear()).slice(-2)}`
+                            : ""
+                        }`
+                      : "";
+                    const breite = w.widthDays * dayWidth;
+                    return (
+                      <div
+                        key={i}
+                        className="text-[11px] font-semibold flex items-center justify-center border-r whitespace-nowrap overflow-hidden"
+                        style={{ width: breite }}
+                        title={`KW ${w.week}${datumLabel ? ` · ${datumLabel}` : ""}`}
+                      >
+                        {/* Schmale Wochen (Rand des Zeitraums) zeigen nur die
+                            KW — sonst wird der Text abgeschnitten. */}
+                        {breite >= 78 && datumLabel
+                          ? `KW ${w.week} · ${datumLabel}`
+                          : `KW ${w.week}`}
+                      </div>
+                    );
+                  })}
                 </div>
                 <div className="flex border-b" style={{ height: 28 }}>
                   {dayHeaders.map((d, i) => {

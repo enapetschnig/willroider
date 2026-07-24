@@ -1206,7 +1206,7 @@ export function PoliereinsatzView({
             <div className="shrink-0 border-r bg-card sticky left-0 z-20" style={{ width: LEFT_W }}>
               {/* Kopfzeile — Ecke: horizontal + vertikal fixiert */}
               <div
-                className="border-b bg-muted/60 flex items-end px-2 text-[10px] font-semibold uppercase tracking-wide sticky top-0 z-30"
+                className="border-b bg-muted flex items-end px-2 text-[10px] font-semibold uppercase tracking-wide sticky top-0 z-30"
                 style={{ height: 42 }}
               >
                 <div className="flex-1 pb-1">Polier / BVH</div>
