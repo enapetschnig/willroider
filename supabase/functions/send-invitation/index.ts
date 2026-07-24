@@ -32,6 +32,9 @@ const corsHeaders = {
 interface InvitationRequest {
   /** Profil-ID (= auth.users.id). Pflicht — Hard-Gate prüft angelegt_manuell. */
   profile_id: string;
+  /** Ausdrückliche Bestätigung, dass das bestehende Passwort eines
+   *  selbst registrierten Nutzers zurückgesetzt werden darf. */
+  reset_bestaetigt?: boolean;
   /** Optional: neue/abweichende Telefonnummer. Format: AT (0664…) oder E.164.
    *  Wird normalisiert und in profiles.telefon + auth.users.phone übernommen. */
   telefon_override?: string;
@@ -92,11 +95,15 @@ Deno.serve(async (req) => {
       return jsonResponse({ success: false, error: 'Mitarbeiter nicht gefunden' });
     }
 
-    if (!profile.angelegt_manuell) {
+    // Selbst registrierte Nutzer sind geschützt: ein Versand setzt ihr
+    // Passwort zurück. Das darf nicht VERSEHENTLICH passieren — mit
+    // ausdrücklicher Bestätigung aus der Oberfläche (reset_bestaetigt)
+    // ist es aber erlaubt, sonst käme man an sie nie wieder heran.
+    if (!profile.angelegt_manuell && !body.reset_bestaetigt) {
       return jsonResponse({
         success: false,
         error:
-          'Dieser Mitarbeiter hat sich selbst registriert. Zugang per SMS verschicken ist nur für manuell angelegte Mitarbeiter erlaubt.',
+          'Dieser Mitarbeiter hat sich selbst registriert. Ein Versand setzt sein bestehendes Passwort zurück — bitte in der Oberfläche ausdrücklich bestätigen.',
       });
     }
 
@@ -125,13 +132,26 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Die ECHTE Login-Nummer aus auth.users holen. Der Abgleich muss gegen
+    // sie laufen — nicht gegen profiles.telefon. Beide können auseinander-
+    // laufen (z.B. wenn sich jemand mit Nummer A registriert hat und im
+    // Profil Nummer B steht). Vorher wurde nur profiles.telefon verglichen:
+    // stimmten SMS-Ziel und Profil überein, blieb die Login-Nummer
+    // unangetastet — der Mitarbeiter bekam ein Passwort für eine Nummer,
+    // mit der er sich gar nicht anmelden kann.
+    const { data: authUser } = await supabase.auth.admin.getUserById(profile.id);
+    const nurZiffern = (s: unknown) => String(s ?? '').replace(/\D/g, '');
+    const loginNrAktuell = authUser?.user?.phone ?? null;
+    const loginNrWeichtAb = nurZiffern(telefonE164) !== nurZiffern(loginNrAktuell);
+
     // ─── Neues Initial-Passwort setzen ─────────────────────────────────
     const initialPassword = generateReadablePassword(10);
     const updatePayload: Record<string, unknown> = {
       password: initialPassword,
     };
-    // Auch die phone-Spalte in auth.users syncen, falls geändert
-    if (telefonE164 !== profile.telefon) {
+    // auth.users.phone auf die SMS-Zielnummer setzen, wenn sie abweicht —
+    // sonst passt das verschickte Passwort nicht zur Anmelde-Nummer.
+    if (loginNrWeichtAb) {
       updatePayload.phone = telefonE164;
       updatePayload.phone_confirm = true;
     }

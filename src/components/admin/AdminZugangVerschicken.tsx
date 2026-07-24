@@ -20,6 +20,8 @@ type Row = {
   telefon: string | null;
   email: string | null;
   letzte_einladung: string | null;
+  /** false = hat sich selbst registriert → Versand setzt sein Passwort zurück. */
+  angelegt_manuell: boolean;
 };
 
 export function AdminZugangVerschicken() {
@@ -40,8 +42,7 @@ export function AdminZugangVerschicken() {
     // wir das letzte gesendete Datum pro Profil brauchen.
     const { data: profileRows, error: profErr } = await supabase
       .from("profiles")
-      .select("id, vorname, nachname, telefon, email")
-      .eq("angelegt_manuell", true)
+      .select("id, vorname, nachname, telefon, email, angelegt_manuell")
       .eq("is_active", true)
       .order("nachname");
     if (profErr) {
@@ -76,6 +77,7 @@ export function AdminZugangVerschicken() {
       telefon: p.telefon,
       email: p.email,
       letzte_einladung: letzte.get(p.id) ?? null,
+      angelegt_manuell: p.angelegt_manuell === true,
     }));
 
     setRows(list);
@@ -135,17 +137,25 @@ export function AdminZugangVerschicken() {
 
   const sendZugang = async (row: Row) => {
     if (!row.telefon) return;
-    if (
-      !window.confirm(
-        `SMS an ${row.vorname} ${row.nachname} (${row.telefon}) verschicken?\n\n` +
-          `Es wird ein NEUES Initial-Passwort generiert. Frühere Passwörter funktionieren danach nicht mehr.`,
-      )
-    ) {
-      return;
-    }
+    // Selbst registrierte Mitarbeiter arbeiten bereits mit einem eigenen
+    // Passwort — hier deutlich stärker warnen als beim Normalfall.
+    const warnung = row.angelegt_manuell
+      ? `SMS an ${row.vorname} ${row.nachname} (${row.telefon}) verschicken?\n\n` +
+        `Es wird ein NEUES Initial-Passwort generiert. Frühere Passwörter funktionieren danach nicht mehr.`
+      : `ACHTUNG: ${row.vorname} ${row.nachname} hat sich SELBST registriert und ` +
+        `arbeitet bereits mit einem eigenen Passwort.\n\n` +
+        `Beim Verschicken wird dieses Passwort ZURÜCKGESETZT — die bisherige ` +
+        `Anmeldung funktioniert dann nicht mehr. Er meldet sich danach mit ` +
+        `${row.telefon} und dem neuen Passwort aus der SMS an.\n\n` +
+        `Wirklich zurücksetzen und senden?`;
+    if (!window.confirm(warnung)) return;
     setSending(row.id);
     const { data, error } = await supabase.functions.invoke("send-invitation", {
-      body: { profile_id: row.id },
+      body: {
+        profile_id: row.id,
+        // Nur nach ausdrücklicher Bestätigung — die Function blockt sonst.
+        reset_bestaetigt: !row.angelegt_manuell,
+      },
     });
     setSending(null);
 
@@ -257,6 +267,18 @@ export function AdminZugangVerschicken() {
                     </div>
                   )}
                 </div>
+                {/* Selbst registriert = hat schon ein eigenes Passwort.
+                    Deutlich kennzeichnen, damit niemand versehentlich
+                    jemandem den laufenden Zugang zurücksetzt. */}
+                {!row.angelegt_manuell && (
+                  <Badge
+                    variant="outline"
+                    className="bg-orange-50 text-orange-800 border-orange-300 text-[10px]"
+                    title="Hat sich selbst registriert und arbeitet mit einem eigenen Passwort. Ein Versand setzt es zurück."
+                  >
+                    Selbst registriert
+                  </Badge>
+                )}
                 {sentBefore ? (
                   <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]">
                     <CheckCircle2 className="h-3 w-3 mr-1" />
