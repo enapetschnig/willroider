@@ -50,6 +50,7 @@ import { localIso } from "@/lib/dateFmt";
 import { useNavigate } from "react-router-dom";
 import { makePoliereinsatzPdf } from "@/lib/poliereinsatzPdf";
 import { feiertagAt } from "@/lib/feiertage";
+import { vergleichePartien } from "@/lib/tagesplanung";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
@@ -565,12 +566,8 @@ export function PoliereinsatzView({
         ),
       }))
       // Reihenfolge wie im MS-Project-Ausdruck: sort_order zuerst, dann Name.
-      .sort((a, b) => {
-        const sa = a.partie.sort_order ?? 9999;
-        const sb = b.partie.sort_order ?? 9999;
-        if (sa !== sb) return sa - sb;
-        return a.partie.name.localeCompare(b.partie.name);
-      });
+      // Gemeinsame Funktion — der Tagesplan sortiert mit derselben.
+      .sort((a, b) => vergleichePartien(a.partie, b.partie));
   }, [partien, zeitraeume, profiles, profilesById]);
 
   /**

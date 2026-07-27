@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
-import { getPoliereinsatzFuerTag } from "@/lib/tagesplanung";
+import { getPoliereinsatzFuerTag, vergleichePartien } from "@/lib/tagesplanung";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -17,6 +17,14 @@ export interface EinteilungMitDetails {
   baustelle: Baustelle | null;
   fahrzeuge: Fahrzeug[];
   mitarbeiter: { ma: EinteilungMa; profil: Profile | null; istLeiter: boolean }[];
+  /** Die Partie, der diese Einteilung zugerechnet wird — bestimmt die
+   *  Reihenfolge im Tagesplan (wie im Poliereinsatz). */
+  partie: Partie | null;
+  /** TRUE, wenn die Einteilung ursprünglich Leute hatte, aber ALLE davon
+   *  `in_tagesplanung = false` sind (Büro). Solche Zeilen sind Altlasten und
+   *  werden im Ausdruck weggelassen — anders als eine frisch angelegte
+   *  Baustelle, die noch niemanden hat und sichtbar bleiben muss. */
+  nurAusgeblendete: boolean;
 }
 
 export interface AbwesenheitDetail {
@@ -136,25 +144,32 @@ export function useTagesplanung(datum: string) {
         efByEinteilung.set(e.einteilung_id, arr);
       });
 
+      // Wer gehört überhaupt in die Tagesplanung? Das Büro (10 Personen) ist
+      // per profiles.in_tagesplanung = false ausgenommen. In Einteilungen von
+      // vor dieser Umstellung stehen die Leute aber noch drin und würden
+      // mitgedruckt — deshalb hier an der Quelle aussortieren.
+      const gehoertInPlanung = (id: string) =>
+        (mitarbeiter.get(id) as any)?.in_tagesplanung !== false;
+
       const emByEinteilung = new Map<string, { ma: EinteilungMa; profil: Profile | null }[]>();
+      /** Einteilungen, die NUR ausgeblendete Personen hatten (reine Büro-Zeilen). */
+      const hatteRohzeilen = new Set<string>();
       (emRaw ?? []).forEach((e: any) => {
+        hatteRohzeilen.add(e.einteilung_id);
+        if (!gehoertInPlanung(e.mitarbeiter_id)) return;
+        // Kein auflösbares Profil = ausgetretener Mitarbeiter (profiles wird
+        // mit is_active = true geladen), der noch in alten Einteilungen steht.
+        // Anzeigbar ist er nicht; früher belegte er dort stumm einen Platz und
+        // brachte im PDF die Fettschrift des Poliers aus dem Takt, weil er
+        // ohne Nachnamen an erster Stelle sortierte.
+        const profil = mitarbeiter.get(e.mitarbeiter_id) ?? null;
+        if (!profil) return;
         const arr = emByEinteilung.get(e.einteilung_id) ?? [];
-        arr.push({ ma: e as EinteilungMa, profil: mitarbeiter.get(e.mitarbeiter_id) ?? null });
+        arr.push({ ma: e as EinteilungMa, profil });
         emByEinteilung.set(e.einteilung_id, arr);
       });
 
-      // Reihenfolge wie die Polier-Vorlage: Baustelle → sort_order der
-      // Partie, die laut Poliereinsatz heute dort ist. Baustellen ohne
-      // Polier-Zuordnung kommen dahinter (alphabetisch).
-      const partieSort = new Map(
-        ((pRaw as Partie[]) ?? []).map((p: any) => [p.id, p.sort_order ?? 9999]),
-      );
-      const bstSort = new Map<string, number>();
-      ((polierRaw as any[]) ?? []).forEach((z: any) => {
-        const so = partieSort.get(z.partie_id) ?? 9999;
-        const cur = bstSort.get(z.baustelle_id);
-        if (cur === undefined || so < cur) bstSort.set(z.baustelle_id, so);
-      });
+      const partienById = new Map(((pRaw as Partie[]) ?? []).map((p: any) => [p.id, p as Partie]));
 
       // Wer ist WIRKLICH Vorarbeiter/Polier? Live aus der Partie-Verwaltung
       // (partien.partieleiter_id) — nicht aus dem is_partieleiter-Flag, das
@@ -164,13 +179,73 @@ export function useTagesplanung(datum: string) {
           .map((p: any) => p.partieleiter_id)
           .filter(Boolean),
       );
+      /** Partieleiter → seine Partie. */
+      const partieVonLeiter = new Map(
+        ((pRaw as Partie[]) ?? [])
+          .filter((p: any) => p.partieleiter_id)
+          .map((p: any) => [p.partieleiter_id as string, p.id as string]),
+      );
+      /** Poliereinsatz des Tages: Baustelle → Partie (Rückfall ohne Mannschaft). */
+      const partieVonBaustelle = new Map<string, string>();
+      ((polierRaw as any[]) ?? []).forEach((z: any) => {
+        if (!z.baustelle_id || !z.partie_id) return;
+        const bisher = partieVonBaustelle.get(z.baustelle_id);
+        if (
+          bisher === undefined ||
+          vergleichePartien(partienById.get(z.partie_id), partienById.get(bisher)) < 0
+        ) {
+          partieVonBaustelle.set(z.baustelle_id, z.partie_id);
+        }
+      });
+
+      /**
+       * Welcher Partie gehört diese Einteilung?
+       *
+       * Vorher hing der Sortierschlüssel an der BAUSTELLE. Arbeiten dort zwei
+       * Partien (z.B. HMH Skrube: Gruber montiert, die Werkstatt fertigt vor),
+       * bekamen beide Zeilen denselben Schlüssel und klebten aneinander — die
+       * Werkstatt rutschte von Platz 8 auf Platz 3.
+       */
+      const partieDerEinteilung = (
+        e: any,
+        mas: { profil: Profile | null }[],
+      ): Partie | null => {
+        // 1. Der Partieleiter in der Mannschaft entscheidet.
+        for (const m of mas) {
+          const pid = m.profil ? partieVonLeiter.get(m.profil.id) : undefined;
+          if (pid) return partienById.get(pid) ?? null;
+        }
+        // 2. Sonst die häufigste Partie der Mitarbeiter; bei Gleichstand die
+        //    in der Polierplanung vordere.
+        const zaehler = new Map<string, number>();
+        for (const m of mas) {
+          const pid = (m.profil as any)?.partie_id;
+          if (pid) zaehler.set(pid, (zaehler.get(pid) ?? 0) + 1);
+        }
+        let best: string | null = null;
+        let bestN = 0;
+        for (const [pid, n] of zaehler) {
+          const gewinnt =
+            best === null ||
+            n > bestN ||
+            (n === bestN &&
+              vergleichePartien(partienById.get(pid), partienById.get(best)) < 0);
+          if (gewinnt) {
+            best = pid;
+            bestN = n;
+          }
+        }
+        if (best) return partienById.get(best) ?? null;
+        // 3. Ohne Mannschaft: der Poliereinsatz der Baustelle (altes Verhalten).
+        const viaBaustelle = e.baustelle_id
+          ? partieVonBaustelle.get(e.baustelle_id)
+          : undefined;
+        return viaBaustelle ? partienById.get(viaBaustelle) ?? null : null;
+      };
 
       const einteilungen: EinteilungMitDetails[] = (einteilungenRaw ?? [])
-        .map((e: any) => ({
-          einteilung: e as Einteilung,
-          baustelle: baustellen.get(e.baustelle_id) ?? null,
-          fahrzeuge: efByEinteilung.get(e.id) ?? [],
-          mitarbeiter: (emByEinteilung.get(e.id) ?? [])
+        .map((e: any) => {
+          const mas = (emByEinteilung.get(e.id) ?? [])
             .map((m) => ({ ...m, istLeiter: !!m.profil && leiterIds.has(m.profil.id) }))
             .sort((a, b) => {
               // Polier/Partieleiter immer ganz oben, danach alphabetisch.
@@ -180,20 +255,27 @@ export function useTagesplanung(datum: string) {
               const an = a.profil?.nachname ?? "";
               const bn = b.profil?.nachname ?? "";
               return an.localeCompare(bn);
-            }),
-        }))
+            });
+          return {
+            einteilung: e as Einteilung,
+            baustelle: baustellen.get(e.baustelle_id) ?? null,
+            fahrzeuge: efByEinteilung.get(e.id) ?? [],
+            mitarbeiter: mas,
+            partie: partieDerEinteilung(e, mas),
+            nurAusgeblendete: mas.length === 0 && hatteRohzeilen.has(e.id),
+          };
+        })
+        // Reihenfolge wie die Polierplanung, dann BVH-Name als Stichentscheid.
         .sort((a, b) => {
-          const sa = bstSort.get(a.einteilung.baustelle_id ?? "") ?? 99999;
-          const sb = bstSort.get(b.einteilung.baustelle_id ?? "") ?? 99999;
-          if (sa !== sb) return sa - sb;
+          const p = vergleichePartien(a.partie, b.partie);
+          if (p !== 0) return p;
           return (a.baustelle?.bvh_name ?? "").localeCompare(b.baustelle?.bvh_name ?? "");
         });
 
       // Abwesende: stunden_tage + genehmigte urlaubsantraege (deduped).
       // Personen außerhalb der Tagesplanung (Büro/Bauleitung, in_tagesplanung
       // = false) werden hier nicht gelistet — sie sind nie eingeteilt.
-      const inPlanung = (id: string) =>
-        (mitarbeiter.get(id) as any)?.in_tagesplanung !== false;
+      const inPlanung = gehoertInPlanung;
       const abwesendIds = new Set<string>();
       const abwesende: AbwesenheitDetail[] = [];
       (tageRaw ?? []).forEach((t: any) => {

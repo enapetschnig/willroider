@@ -66,7 +66,13 @@ export function makeTagesplanungPdf(plan: TagesPlanData): jsPDF {
   let y = titelY + 20;
 
   // ─── Tabelle BVH | Fahrz. | Tätigkeit | Mitarbeiter ─────────────────
-  const body = plan.einteilungen.map((e) => {
+  //
+  // Zeilen, in denen NUR Büro-Leute standen (in_tagesplanung = false), sind
+  // Altlasten aus der Zeit vor dem Kennzeichen — sie kämen sonst als leere
+  // BVH-Zeile heraus. Frisch angelegte Baustellen ohne Mitarbeiter bleiben
+  // dagegen drin (Mitarbeiterspalte „—"), sie sind eine Arbeitsanweisung.
+  const zeilen = plan.einteilungen.filter((e) => !e.nurAusgeblendete);
+  const body = zeilen.map((e) => {
     const bvhText = e.baustelle
       ? `${e.baustelle.bvh_name}\n${e.baustelle.kostenstelle ?? ""}`
       : "(intern)";
@@ -83,9 +89,7 @@ export function makeTagesplanungPdf(plan: TagesPlanData): jsPDF {
   });
   // Polier/Partieleiter steht (durch die Hook-Sortierung) an erster Stelle —
   // im PDF wird er wie in der App FETT gedruckt (Eigen-Rendering der Zelle).
-  const leiterErste = plan.einteilungen.map(
-    (e) => !!e.mitarbeiter[0]?.istLeiter,
-  );
+  const leiterErste = zeilen.map((e) => !!e.mitarbeiter[0]?.istLeiter);
 
   autoTable(doc, {
     startY: y,

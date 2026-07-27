@@ -48,7 +48,9 @@ export function TagesplanPreview({ datum }: { datum: string }) {
     );
   }
 
-  const einteilungen = plan?.einteilungen ?? [];
+  // Wie PDF und Bild: reine Büro-Zeilen (nur in_tagesplanung = false)
+  // weglassen. Das ist die Ausgabe-Ansicht, nicht die Bearbeitung.
+  const einteilungen = (plan?.einteilungen ?? []).filter((e) => !e.nurAusgeblendete);
   const abwesende = plan?.abwesende ?? [];
   const urlaub = abwesende.filter((a) => a.status === "urlaub");
   const krank = abwesende.filter((a) => a.status === "krank");

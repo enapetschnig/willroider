@@ -104,6 +104,31 @@ export async function getBaustellenForMaToday(
     }));
 }
 
+/** Was zum Sortieren einer Partie gebraucht wird. */
+export interface PartieReihenfolge {
+  sort_order: number | null;
+  name: string;
+}
+
+/**
+ * Die Reihenfolge der Polierplanung: `sort_order`, dann Name.
+ *
+ * Partien ohne `sort_order` stehen hinten (aktuell Sirnitzer und Büro) —
+ * bewusst so, damit Tagesplan und Poliereinsatz-Gantt dieselbe Abfolge
+ * zeigen. Diese Funktion ist die EINZIGE Definition dieser Reihenfolge;
+ * vorher stand der Vergleich in PoliereinsatzView und in useTagesplanung
+ * getrennt und lief auseinander.
+ */
+export function vergleichePartien(
+  a: PartieReihenfolge | null | undefined,
+  b: PartieReihenfolge | null | undefined,
+): number {
+  const sa = a?.sort_order ?? 9999;
+  const sb = b?.sort_order ?? 9999;
+  if (sa !== sb) return sa - sb;
+  return (a?.name ?? "zzz").localeCompare(b?.name ?? "zzz");
+}
+
 /**
  * Baustelle je Partie an einem Tag, direkt aus dem Poliereinsatz.
  *

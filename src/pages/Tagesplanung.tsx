@@ -71,7 +71,7 @@ import {
   CalendarRange,
 } from "lucide-react";
 import { makeTagesplanungPdf } from "@/lib/tagesplanungPdf";
-import { getPoliereinsatzFuerTag } from "@/lib/tagesplanung";
+import { getPoliereinsatzFuerTag, vergleichePartien } from "@/lib/tagesplanung";
 import { makeTagesplanungBild } from "@/lib/tagesplanungBild";
 import {
   teilePdfDirektDownload,
@@ -92,6 +92,7 @@ import type { Database } from "@/integrations/supabase/types";
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Fahrzeug = Database["public"]["Tables"]["fahrzeuge"]["Row"];
+type PartieRow = Database["public"]["Tables"]["partien"]["Row"];
 
 const todayIso = () => localIso();
 
@@ -2020,6 +2021,7 @@ function MitarbeiterSicht({
     ma: Profile;
     einteilungId: string | null;
     baustelle: Baustelle | null;
+    partie: PartieRow | null;
   };
   const eingeteilt: MaZeile[] = [];
   const eingeteiltIds = new Set<string>();
@@ -2027,7 +2029,12 @@ function MitarbeiterSicht({
     for (const m of e.mitarbeiter) {
       if (m.profil && !eingeteiltIds.has(m.profil.id)) {
         eingeteiltIds.add(m.profil.id);
-        eingeteilt.push({ ma: m.profil, einteilungId: e.einteilung.id, baustelle: e.baustelle });
+        eingeteilt.push({
+          ma: m.profil,
+          einteilungId: e.einteilung.id,
+          baustelle: e.baustelle,
+          partie: e.partie,
+        });
       }
     }
   }
@@ -2035,20 +2042,30 @@ function MitarbeiterSicht({
   const abwesendIds = new Set(plan.abwesende.map((a) => a.ma.id));
   const nichtEingeteilt: MaZeile[] = plan.alleMa
     .filter((m) => !eingeteiltIds.has(m.id) && !abwesendIds.has(m.id))
-    .map((m) => ({ ma: m, einteilungId: null, baustelle: null }));
+    .map((m) => ({ ma: m, einteilungId: null, baustelle: null, partie: null }));
 
   // Eingeteilte nach Baustelle gruppieren — NUR belegte Baustellen
   // (Wunsch: Baustellen ohne Mitarbeiter erscheinen im Tagesplan nicht).
-  const groupedByBaustelle = new Map<string, { baustelle: Baustelle | null; rows: MaZeile[] }>();
+  const groupedByBaustelle = new Map<
+    string,
+    { baustelle: Baustelle | null; rows: MaZeile[]; partie: PartieRow | null }
+  >();
   for (const z of eingeteilt) {
     const key = z.baustelle?.id ?? "ohne-baustelle";
     if (!groupedByBaustelle.has(key))
-      groupedByBaustelle.set(key, { baustelle: z.baustelle, rows: [] });
-    groupedByBaustelle.get(key)!.rows.push(z);
+      groupedByBaustelle.set(key, { baustelle: z.baustelle, rows: [], partie: null });
+    const g = groupedByBaustelle.get(key)!;
+    g.rows.push(z);
+    // Arbeiten zwei Partien auf einer Baustelle, bestimmt die in der
+    // Polierplanung vordere den Platz der Gruppe.
+    if (g.partie === null || vergleichePartien(z.partie, g.partie) < 0) g.partie = z.partie;
   }
-  const groupList = Array.from(groupedByBaustelle.values()).sort((a, b) =>
-    (a.baustelle?.bvh_name ?? "zzz").localeCompare(b.baustelle?.bvh_name ?? "zzz"),
-  );
+  // Reihenfolge wie die Polierplanung — vorher rein alphabetisch nach BVH.
+  const groupList = Array.from(groupedByBaustelle.values()).sort((a, b) => {
+    const p = vergleichePartien(a.partie, b.partie);
+    if (p !== 0) return p;
+    return (a.baustelle?.bvh_name ?? "zzz").localeCompare(b.baustelle?.bvh_name ?? "zzz");
+  });
 
   // Heutige Baustellen (für den Picker — Quick-Aktionen)
   const heutigeBaustellen = plan.einteilungen

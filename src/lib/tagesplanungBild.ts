@@ -81,7 +81,9 @@ function layout(ctx: CanvasRenderingContext2D, plan: TagesPlanData, draw: boolea
   y += 24;
 
   // ── Einteilungen ───────────────────────────────────────────────────
-  for (const e of plan.einteilungen) {
+  // Reine Büro-Zeilen (nur in_tagesplanung = false) weglassen — wie im PDF.
+  const zeilen = plan.einteilungen.filter((e) => !e.nurAusgeblendete);
+  for (const e of zeilen) {
     const startY = y;
     y += 18;
 
@@ -146,7 +148,7 @@ function layout(ctx: CanvasRenderingContext2D, plan: TagesPlanData, draw: boolea
     y += 16;
   }
 
-  if (plan.einteilungen.length === 0) {
+  if (zeilen.length === 0) {
     text("Keine Einteilungen für diesen Tag.", "30px Georgia, serif", "#777", PAD, y);
     y += 44;
   }
