@@ -104,6 +104,18 @@ const FEHLZEIT_TAG_STATI = Object.keys(TAG_STATUS_CODE) as TagStatus[];
 const cellKey = (workerId: string, iso: string) => `${workerId}:${iso}`;
 const isoDate = (d: Date) => localIso(d);
 
+/**
+ * Breite der linken, fixierten Spalte (Polier · Mitarbeiter).
+ *
+ * Ausgemessen mit den echten Namen: die Kopfzeile braucht neben dem Namen
+ * ~178px für Einklapp-Pfeil, Farbpunkt, „N MA" und die drei Knöpfe. Der
+ * längste Eintrag („NORBERT HINTEREGGER · Hinteregger", 14px fett
+ * großgeschrieben) misst 245px — bei den früheren 240px blieben davon 38px
+ * übrig, weshalb oben nur noch „N…" stand.
+ * Der Poliereinsatz nutzt für seine linke Spaltengruppe 476px.
+ */
+const LEFT_W = 420;
+
 export default function Arbeitsplanung() {
   const { canCreateBaustelle, isAdmin, user, hasPermission } = useAuth();
   const { toast } = useToast();
@@ -1756,7 +1768,7 @@ export default function Arbeitsplanung() {
             // self-start: sonst deckt bg-card nur die erste Bildschirmhöhe ab
             // und weiter unten scheinen die Balken durch (siehe Poliereinsatz).
             className="shrink-0 self-start border-r bg-card sticky left-0 z-20"
-            style={{ width: 240 }}
+            style={{ width: LEFT_W }}
           >
             <div
               className="bg-muted border-b sticky top-0 z-30 px-3 text-[10px] font-semibold uppercase tracking-wide flex items-end"
@@ -2781,7 +2793,9 @@ function PolierHeader({
         height: isMobile ? undefined : members.length > 0 ? 56 : 36,
       }}
     >
-      <div className="flex items-center gap-2">
+      {/* gap-1.5 statt gap-2: die gesparten Pixel gehen an den Namen, der
+          sonst zu „N…" zusammenschrumpft. */}
+      <div className="flex items-center gap-1.5">
         {onToggleCollapse && (
           <button
             onClick={onToggleCollapse}
@@ -2825,40 +2839,43 @@ function PolierHeader({
         {/* Zählt Partie-Mitglieder, stand aber fälschlich als „BVH"
             (Bauvorhaben) da — in der reinen Abwesenheits-Ansicht erst recht
             irreführend. */}
-        <span className="text-[10px] opacity-70 shrink-0">
+        <span className="text-[10px] opacity-70 shrink-0 tabular-nums">
           {maCount} MA
         </span>
+        {/* Die drei Verwaltungsknöpfe als engen Block: einzeln mit gap-2 und
+            24px kosteten sie 96px der Zeile, jetzt 64px. */}
+        <div className="flex items-center gap-0.5 shrink-0">
         {isAdmin && partie && onEditPartie && (
           <button
             onClick={() => onEditPartie(partie)}
-            className="h-6 w-6 rounded-full bg-white/70 hover:bg-white border flex items-center justify-center shrink-0 transition"
+            className="h-5 w-5 rounded-full bg-white/70 hover:bg-white border flex items-center justify-center shrink-0 transition"
             style={{ color: farbe }}
             title={`Partie „${partie.name}" bearbeiten`}
             aria-label={`Partie ${partie.name} bearbeiten`}
           >
-            <Pencil className="h-3.5 w-3.5" />
+            <Pencil className="h-3 w-3" />
           </button>
         )}
         {isAdmin && partie && onDeletePartie && (
           <button
             onClick={() => onDeletePartie(partie.id, partie.name)}
-            className="h-6 w-6 rounded-full bg-white/70 hover:bg-destructive hover:text-destructive-foreground border flex items-center justify-center shrink-0 transition"
+            className="h-5 w-5 rounded-full bg-white/70 hover:bg-destructive hover:text-destructive-foreground border flex items-center justify-center shrink-0 transition"
             style={{ color: farbe }}
             title={`Partie „${partie.name}" löschen`}
             aria-label={`Partie ${partie.name} löschen`}
           >
-            <Trash2 className="h-3.5 w-3.5" />
+            <Trash2 className="h-3 w-3" />
           </button>
         )}
         {isAdmin && partie && (
           <Popover>
             <PopoverTrigger asChild>
               <button
-                className="h-6 w-6 rounded-full bg-white/70 hover:bg-white border flex items-center justify-center shrink-0"
+                className="h-5 w-5 rounded-full bg-white/70 hover:bg-white border flex items-center justify-center shrink-0"
                 style={{ color: farbe }}
                 title="Mitarbeiter hinzufügen"
               >
-                <UserPlus className="h-3.5 w-3.5" />
+                <UserPlus className="h-3 w-3" />
               </button>
             </PopoverTrigger>
             <PopoverContent align="end" className="w-64 p-2 max-h-72 overflow-y-auto">
@@ -2892,6 +2909,7 @@ function PolierHeader({
             </PopoverContent>
           </Popover>
         )}
+        </div>
       </div>
       {members.length > 0 && (
         <div
