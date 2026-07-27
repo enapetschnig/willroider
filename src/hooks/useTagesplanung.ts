@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
+import { getPoliereinsatzFuerTag } from "@/lib/tagesplanung";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -110,16 +111,17 @@ export function useTagesplanung(datum: string) {
             () => ({ data: null, error: null } as any),
           ),
         // Poliereinsatz des Tages → Reihenfolge der Baustellen wie im
-        // MS-Project-Ausdruck (Partie-sort_order).
-        supabase
-          .from("poliereinsatz_zeitraeume" as any)
-          .select("partie_id, baustelle_id")
-          .lte("von_datum", datum)
-          .gte("bis_datum", datum)
-          .then(
-            (r) => r,
-            () => ({ data: null, error: null } as any),
-          ),
+        // MS-Project-Ausdruck (Partie-sort_order). Gemeinsamer Helfer, damit
+        // hier und in der Vorbelegung dieselbe Partie→Baustelle-Paarung gilt.
+        getPoliereinsatzFuerTag(datum).then(
+          (m) => ({
+            data: Array.from(m.entries()).map(([partie_id, baustelle_id]) => ({
+              partie_id,
+              baustelle_id,
+            })),
+          }),
+          () => ({ data: null } as any),
+        ),
       ]);
 
       const baustellen = new Map((bsRaw ?? []).map((b: any) => [b.id, b as Baustelle]));

@@ -71,6 +71,7 @@ import {
   CalendarRange,
 } from "lucide-react";
 import { makeTagesplanungPdf } from "@/lib/tagesplanungPdf";
+import { getPoliereinsatzFuerTag } from "@/lib/tagesplanung";
 import { makeTagesplanungBild } from "@/lib/tagesplanungBild";
 import {
   teilePdfDirektDownload,
@@ -915,15 +916,14 @@ export default function Tagesplanung() {
     }
     setCopyBusy(true);
     try {
-      const { data: zeitraeume } = await supabase
-        .from("poliereinsatz_zeitraeume")
-        .select("partie_id, baustelle_id, von_datum")
-        .lte("von_datum", datum)
-        .gte("bis_datum", datum)
-        // Früher begonnene (laufende) Einsätze zuerst → sie gelten als
-        // Hauptbaustelle der Partie, wenn mehrere gleichzeitig aktiv sind.
-        .order("von_datum", { ascending: true });
-      if (!zeitraeume || zeitraeume.length === 0) {
+      // Gemeinsamer Helfer — dieselbe Partie→Baustelle-Paarung, die auch die
+      // Vorbelegung in der Stundenerfassung und „Mein Tag" verwenden. Bei
+      // mehreren laufenden Zeiträumen gewinnt der früher begonnene; er gilt
+      // als Hauptbaustelle der Partie.
+      const zeitraeume = Array.from(
+        (await getPoliereinsatzFuerTag(datum)).entries(),
+      ).map(([partie_id, baustelle_id]) => ({ partie_id, baustelle_id }));
+      if (zeitraeume.length === 0) {
         toast({
           variant: "destructive",
           title: "Keine Polierplanung für diesen Tag",

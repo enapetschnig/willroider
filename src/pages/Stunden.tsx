@@ -75,7 +75,7 @@ import {
   type SaveFahrt,
 } from "@/hooks/useStundenTag";
 import { useSollHoursForDayBulk } from "@/hooks/useSollHoursForDayBulk";
-import { getBaustellenForMaToday } from "@/lib/tagesplanung";
+import { getPlanFuerTag, type PlanEintrag } from "@/lib/tagesplanung";
 import { berechneTaggeld } from "@/lib/taggeld";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -135,37 +135,129 @@ export default function Stunden() {
   const [searchParams] = useSearchParams();
   const baustelleParam = searchParams.get("baustelle");
 
-  // Vorarbeiter-/Admin-Vorausfüllung: Kollegen der heutigen Einteilung
-  // werden mitselektiert. Läuft einmal pro (user, date, baustelle)-Kontext.
-  const prefilledKeyRef = useRef<string>("");
+  // ─── Der Plan des Tages ─────────────────────────────────────────────
+  //
+  // EINE Abfrage für den ganzen Tag (plan_fuer_tag), statt wie früher eine
+  // pro ausgewähltem Mitarbeiter. Sie liefert Tagesplanung, ersatzweise den
+  // Poliereinsatz und dazu die Abwesenheiten — dieselbe Quelle, die auch
+  // „Mein Tag" und der Berichte-Dialog benutzen.
+  const [plan, setPlan] = useState<PlanEintrag[]>([]);
+  const [planGeladen, setPlanGeladen] = useState(false);
+  const [planNonce, setPlanNonce] = useState(0);
   useEffect(() => {
-    if (!user || !date || !rollenGeladen) return;
-    const key = `${user.id}|${date}|${baustelleParam ?? ""}`;
-    if (prefilledKeyRef.current === key) return;
+    if (!date) return;
     let cancelled = false;
+    setPlanGeladen(false);
     (async () => {
-      const initial = new Set<string>([user.id]);
-      if (isAdmin || polierPartie) {
-        const eint = await getBaustellenForMaToday(user.id, date);
-        const ziel = baustelleParam
-          ? eint.find((e) => e.baustelle_id === baustelleParam) ?? eint[0]
-          : eint[0];
-        if (ziel) {
-          const { data: ems } = await supabase
-            .from("einteilung_mitarbeiter")
-            .select("mitarbeiter_id")
-            .eq("einteilung_id", ziel.einteilung_id);
-          (ems ?? []).forEach((e: any) => initial.add(e.mitarbeiter_id));
-        }
-      }
+      const p = await getPlanFuerTag(date);
       if (cancelled) return;
-      prefilledKeyRef.current = key;
-      setForUserIds(initial);
+      setPlan(p);
+      setPlanGeladen(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [user, date, polierPartie, isAdmin, baustelleParam, rollenGeladen]);
+  }, [date, planNonce]);
+
+  // Ändert jemand die Planung, während das Formular offen ist, soll die
+  // Vorbelegung nachziehen. Bereits Getipptes bleibt unangetastet — dafür
+  // sorgt die Vorausfüllung selbst (sie füllt nur leere Blöcke).
+  useEffect(() => {
+    const ch = supabase
+      .channel("stunden-planung")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "einteilungen" },
+        () => setPlanNonce((n) => n + 1),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "einteilung_mitarbeiter" },
+        () => setPlanNonce((n) => n + 1),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "poliereinsatz_zeitraeume" },
+        () => setPlanNonce((n) => n + 1),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, []);
+
+  /** Der Plan-Eintrag je Mitarbeiter — Basis für Vorauswahl und Vorbelegung. */
+  const planPerMa = useMemo(() => {
+    const m = new Map<string, PlanEintrag>();
+    for (const p of plan) if (!m.has(p.mitarbeiter_id)) m.set(p.mitarbeiter_id, p);
+    return m;
+  }, [plan]);
+
+  /** Die Baustelle, auf der der Erfassende selbst heute steht. `?baustelle=`
+   *  aus der Verlinkung (Mein Tag, Dashboard) schlägt den Plan. */
+  const eigeneBaustelle = useMemo(() => {
+    if (baustelleParam) return baustelleParam;
+    const eigen = plan.find(
+      (p) => p.mitarbeiter_id === user?.id && p.baustelle_id,
+    );
+    return eigen?.baustelle_id ?? null;
+  }, [plan, baustelleParam, user]);
+
+  // Vorauswahl: die Mannschaft DERSELBEN Baustelle. Abwesende der eigenen
+  // Partie kommen mit — sie erscheinen dann mit Urlaub/Krank statt Stunden,
+  // damit der Tag vollständig ist und niemand schlicht fehlt.
+  // Läuft einmal pro (user, date, baustelle)-Kontext.
+  const geplanteMannschaft = useMemo(() => {
+    const ids = new Set<string>();
+    if (!user) return ids;
+    ids.add(user.id);
+    if (!canCreateForOthers && !polierPartie) return ids;
+    const eigenePartieIds = new Set(
+      allMembers
+        .filter((m) => polierPartie && (m as any).partie_id === polierPartie.id)
+        .map((m) => m.id),
+    );
+    for (const p of plan) {
+      const gleicheBaustelle =
+        !!eigeneBaustelle && p.baustelle_id === eigeneBaustelle;
+      const abwesendInEigenerPartie =
+        p.abwesend && eigenePartieIds.has(p.mitarbeiter_id);
+      if (gleicheBaustelle || abwesendInEigenerPartie) ids.add(p.mitarbeiter_id);
+    }
+    return ids;
+  }, [plan, user, canCreateForOthers, polierPartie, allMembers, eigeneBaustelle]);
+
+  const prefilledKeyRef = useRef<string>("");
+  useEffect(() => {
+    if (!user || !date || !rollenGeladen || !planGeladen) return;
+    const key = `${user.id}|${date}|${baustelleParam ?? ""}`;
+    if (prefilledKeyRef.current === key) {
+      // Planung hat sich geändert, während das Formular offen ist: neu
+      // Hinzugekommene ergänzen, aber NIE abwählen — sonst verliert der
+      // Polier eine Auswahl, die er gerade selbst getroffen hat.
+      setForUserIds((cur) => {
+        const next = new Set(cur);
+        let changed = false;
+        geplanteMannschaft.forEach((id) => {
+          if (!next.has(id)) {
+            next.add(id);
+            changed = true;
+          }
+        });
+        return changed ? next : cur;
+      });
+      return;
+    }
+    prefilledKeyRef.current = key;
+    setForUserIds(new Set(geplanteMannschaft));
+  }, [
+    user,
+    date,
+    baustelleParam,
+    rollenGeladen,
+    planGeladen,
+    geplanteMannschaft,
+  ]);
 
   // Polier-Partie / Members
   useEffect(() => {
@@ -203,19 +295,45 @@ export default function Stunden() {
   }, [user, canCreateForOthers]);
 
   // Baustellen
+  //
+  // Früher: Filter auf das statische Feld baustellen.partie_id. Das ist in
+  // der Praxis bei 1 von 56 aktiven Baustellen gesetzt — die Liste war für
+  // jeden Polier leer („Aktuell keine aktiven Baustellen für deine Partie.")
+  // und die Vorbelegung hatte keinen passenden Listeneintrag.
+  //
+  // Jetzt: alle aktiven/geplanten Baustellen laden und nur SORTIEREN — die
+  // heute geplanten nach oben. Nichts wird weggefiltert, damit kein
+  // vorbelegter Wert ohne Option dasteht und Nachträge möglich bleiben.
   useEffect(() => {
     (async () => {
-      const partieFilter = polierPartie?.id ?? (profile as any)?.partie_id ?? null;
-      let q = supabase
+      const { data } = await supabase
         .from("baustellen")
         .select("*")
         .in("status", ["aktiv", "geplant"])
         .order("bvh_name");
-      if (!isAdmin && partieFilter) q = q.eq("partie_id", partieFilter);
-      const { data } = await q;
       setBaustellen((data as Baustelle[]) ?? []);
     })();
-  }, [polierPartie, profile, isAdmin]);
+  }, []);
+
+  /** Heute relevante Baustellen zuerst: geplante, eigene Partie, Vorauswahl. */
+  const baustellenSortiert = useMemo(() => {
+    const relevant = new Set<string>();
+    for (const p of plan) if (p.baustelle_id) relevant.add(p.baustelle_id);
+    if (eigeneBaustelle) relevant.add(eigeneBaustelle);
+    const partieId = polierPartie?.id ?? (profile as any)?.partie_id ?? null;
+    if (partieId) {
+      baustellen.forEach((b) => {
+        if ((b as any).partie_id === partieId) relevant.add(b.id);
+      });
+    }
+    if (relevant.size === 0) return baustellen;
+    return [...baustellen].sort((a, b) => {
+      const ra = relevant.has(a.id) ? 0 : 1;
+      const rb = relevant.has(b.id) ? 0 : 1;
+      if (ra !== rb) return ra - rb;
+      return (a.bvh_name ?? "").localeCompare(b.bvh_name ?? "");
+    });
+  }, [baustellen, plan, eigeneBaustelle, polierPartie, profile]);
 
   const mode: Mode = canCreateForOthers ? "admin" : polierPartie ? "polier" : "self";
   const hasPicker = mode !== "self";
@@ -262,34 +380,34 @@ export default function Stunden() {
   const { data: limits } = useArbeitszeitLimits();
   const { sollPerMa } = useSollHoursForDayBulk(Array.from(forUserIds), date);
 
-  // Tagesplanung-Daten pro selektiertem MA (Baustelle + Tätigkeit)
-  const [tagesplanungPerMa, setTagesplanungPerMa] = useState<
-    Map<string, { baustelle_id: string; taetigkeit: string | null }>
-  >(new Map());
-  useEffect(() => {
-    if (forUserIds.size === 0 || !date) {
-      setTagesplanungPerMa(new Map());
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const m = new Map<string, { baustelle_id: string; taetigkeit: string | null }>();
-      for (const uid of forUserIds) {
-        const eint = await getBaustellenForMaToday(uid, date);
-        const ziel =
-          uid === primaryUserId && baustelleParam
-            ? eint.find((e) => e.baustelle_id === baustelleParam) ?? eint[0]
-            : eint[0];
-        if (ziel) {
-          m.set(uid, { baustelle_id: ziel.baustelle_id, taetigkeit: ziel.taetigkeit });
-        }
+  // Vorbelegung je selektiertem MA — direkt aus dem einmal geladenen Plan.
+  // (Früher: eine Abfrage pro Mitarbeiter in einer Schleife.)
+  const tagesplanungPerMa = useMemo(() => {
+    const m = new Map<
+      string,
+      {
+        baustelle_id: string | null;
+        taetigkeit: string | null;
+        abwesend: boolean;
+        abwesenheit_art: string | null;
       }
-      if (!cancelled) setTagesplanungPerMa(m);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [forUserIds, date, baustelleParam, primaryUserId]);
+    >();
+    for (const uid of forUserIds) {
+      const p = planPerMa.get(uid);
+      if (!p) continue;
+      m.set(uid, {
+        // Die Verlinkung mit ?baustelle= gilt nur für den Erfassenden selbst.
+        baustelle_id:
+          uid === primaryUserId && baustelleParam
+            ? baustelleParam
+            : p.baustelle_id,
+        taetigkeit: p.taetigkeit,
+        abwesend: p.abwesend,
+        abwesenheit_art: p.abwesenheit_art,
+      });
+    }
+    return m;
+  }, [forUserIds, planPerMa, baustelleParam, primaryUserId]);
 
   // Status-Map fürs Picker-UI (zeigt pro MA „4,5h" wenn schon was gebucht)
   const memberIds = useMemo(
@@ -456,6 +574,24 @@ export default function Stunden() {
         if (statusForDateMap.has(uid)) continue;
         const tp = tagesplanungPerMa.get(uid);
         const soll = sollPerMa.get(uid) ?? 0;
+        // Urlaub / Krank / Schlechtwetter: statt Baustellenstunden die
+        // Abwesenheit vorbelegen. Sonst stünde für jemanden im Urlaub ein
+        // voller Arbeitstag auf einer Baustelle im Formular.
+        if (tp?.abwesend && tp.abwesenheit_art) {
+          maEintraege[uid] = [
+            {
+              key: newKey(),
+              art: tp.abwesenheit_art as TagStatus,
+              baustelle_id: null,
+              taetigkeit_id: null,
+              taetigkeit_freitext: "",
+              stunden: soll,
+              notiz: "",
+            },
+          ];
+          changed = true;
+          continue;
+        }
         if (aktive.size > 0) {
           // Aktive Arten der anderen MA übernehmen
           const newRows: EintragRow[] = [];
@@ -1198,7 +1334,7 @@ export default function Stunden() {
               single={selectedMaList.length === 1}
               eintraege={form.maEintraege[ma.id] ?? []}
               onChange={(rows) => setEintraege(ma.id, rows)}
-              baustellen={baustellen}
+              baustellen={baustellenSortiert}
               taetigkeitenStamm={taetigkeitenStamm}
               soll={sollPerMa.get(ma.id) ?? 0}
               collapsed={collapsed.has(ma.id)}

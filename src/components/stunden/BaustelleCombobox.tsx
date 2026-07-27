@@ -49,9 +49,12 @@ export function BaustelleCombobox({
   if (liste.length === 0) {
     return (
       <div className="text-xs text-muted-foreground p-3 bg-muted/40 rounded">
+        {/* Die Liste wird nicht mehr nach Partie gefiltert (das statische Feld
+            baustellen.partie_id ist kaum gepflegt) — hier steht also wirklich
+            nur noch etwas, wenn gar keine Baustelle angelegt ist. */}
         {istMaschine
           ? "Aktuell keine Werke/Maschinen angelegt."
-          : "Aktuell keine aktiven Baustellen für deine Partie."}
+          : "Aktuell keine aktiven oder geplanten Baustellen angelegt."}
       </div>
     );
   }

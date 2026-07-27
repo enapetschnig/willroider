@@ -1022,7 +1022,9 @@ function DetailMa({
   const taetById = new Map(taetigkeitenStamm.map((s) => [s.id, s.bezeichnung]));
   const aggTaet = aggregiereTaetigkeiten(tage, taetigkeitenStamm);
   const aggZul = aggregiereZulagen(tage, zulagenTypen);
-  const aggTg = aggregiereTaggeld(tage, pausenDauer, maschinenIds);
+  // maschinenIds ist der FÜNFTE Parameter — vorher landete das Set auf
+  // satz_kurz_eur, das Taggeld wurde damit NaN und Maschinen-Tage zählten mit.
+  const aggTg = aggregiereTaggeld(tage, pausenDauer, undefined, undefined, maschinenIds);
   const aggKm = aggregiereKilometergeld(tage, limits?.kilometergeld_satz_eur ?? 0.5);
 
   return (

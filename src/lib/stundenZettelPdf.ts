@@ -89,7 +89,14 @@ export function renderStundenzettel(
 
   const aggTaet = aggregiereTaetigkeiten(data.tage, data.taetigkeitenStamm);
   const aggZul = aggregiereZulagen(data.tage, data.zulagenTypen);
-  const aggTg = aggregiereTaggeld(data.tage, data.pausen, data.maschinenIds);
+  // maschinenIds ist der FÜNFTE Parameter (siehe stundenAggregation.ts).
+  const aggTg = aggregiereTaggeld(
+    data.tage,
+    data.pausen,
+    undefined,
+    undefined,
+    data.maschinenIds,
+  );
   const aggKm = aggregiereKilometergeld(data.tage, data.kilometergeldSatz);
 
   // Header

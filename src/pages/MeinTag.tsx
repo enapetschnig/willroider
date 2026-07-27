@@ -35,6 +35,12 @@ import {
 } from "@/components/ui/dialog";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
+import {
+  getPlanFuerTag,
+  planQuelleLabel,
+  type PlanEintrag,
+  type PlanQuelle,
+} from "@/lib/tagesplanung";
 import { fmtStunden, fmtTage } from "@/lib/konten";
 import { useToast } from "@/hooks/use-toast";
 
@@ -43,10 +49,15 @@ type Partie = Database["public"]["Tables"]["partien"]["Row"];
 
 /**
  * Heute-Karte: zeigt dem MA seine konkrete heutige Einteilung
- * (Baustelle, Fahrzeug, Polier) — fallback auf den letzten freigegebenen Tag.
+ * (Baustelle, Fahrzeug, Polier).
  *
- * UI-Prinzip: Der MA sieht nur seine Einteilung, NICHT den Workflow-Status
- * (freigegeben/in Bearbeitung). Wenn nichts da ist → Card erscheint nicht.
+ * Quelle ist `plan_fuer_tag` (siehe src/lib/tagesplanung.ts) — dieselbe, die
+ * auch die Stundenerfassung benutzt. Sie liefert die Tagesplanung und, wenn
+ * für den Tag noch nichts geplant ist, die Baustelle aus dem Poliereinsatz.
+ * Vorher hing die Karte an der Tagesplanungs-Freigabe und blieb dadurch
+ * praktisch immer leer.
+ *
+ * UI-Prinzip: Der MA sieht nur seine Einteilung, NICHT den Workflow-Status.
  */
 function HeuteEinteilungCard({ userId }: { userId: string }) {
   const { toast } = useToast();
@@ -64,105 +75,123 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
     fahrzeuge: { kennzeichen: string }[];
     polier: { vorname: string; nachname: string; telefon: string | null } | null;
     einteilungId: string | null;
+    quelle: PlanQuelle | null;
+    abwesenheitArt: string | null;
   } | null>(null);
 
   const lade = async () => {
     setLoading(true);
-    // Strategie: erst heute, sonst letzten freigegebenen Tag suchen
-    const datumKandidaten: string[] = [today];
-    // Nur ECHT freigegebene Tage zählen (freigegeben_am gesetzt) — eine
-    // Zeile kann seit der Notiz-Entkopplung auch nur Hinweise tragen.
-    const { data: letzte } = await supabase
-      .from("tagesplanung_freigaben")
-      .select("datum")
-      .lte("datum", today)
-      .not("freigegeben_am", "is", null)
-      .order("datum", { ascending: false })
-      .limit(3);
-    (letzte ?? []).forEach((r: any) => {
-      if (!datumKandidaten.includes(r.datum)) datumKandidaten.push(r.datum);
-    });
 
-    for (const datum of datumKandidaten) {
-      const { data: frei } = await supabase
-        .from("tagesplanung_freigaben")
-        .select("datum")
-        .eq("datum", datum)
-        .not("freigegeben_am", "is", null)
+    // Heute zuerst. Liefert der Tag nichts (Wochenende, Feiertag), bis zu
+    // vier Tage zurückgehen — dann steht „Plan vom …" darüber.
+    let datum = today;
+    let eintrag: PlanEintrag | null = null;
+    for (let i = 0; i <= 4; i++) {
+      const d = new Date(`${today}T00:00:00`);
+      d.setDate(d.getDate() - i);
+      const iso = localIso(d);
+      const p = (await getPlanFuerTag(iso)).find(
+        (x) => x.mitarbeiter_id === userId && x.baustelle_id,
+      );
+      if (p) {
+        datum = iso;
+        eintrag = p;
+        break;
+      }
+      if (i === 0) datum = today;
+    }
+
+    // Polier: der Leiter der eigenen Partie. Früher lief das über
+    // baustellen.partie_id — das Feld ist bei 1 von 56 aktiven Baustellen
+    // gesetzt, der Kontakt erschien praktisch nie.
+    const { data: prof } = await supabase
+      .from("profiles")
+      .select("partie_id")
+      .eq("id", userId)
+      .maybeSingle();
+    let polier: { vorname: string; nachname: string; telefon: string | null } | null =
+      null;
+    if ((prof as any)?.partie_id) {
+      const { data: p } = await supabase
+        .from("partien")
+        .select(
+          "partieleiter_id, partieleiter:profiles!partien_partieleiter_id_fkey(vorname,nachname,telefon)",
+        )
+        .eq("id", (prof as any).partie_id)
         .maybeSingle();
-      if (datum !== today && !frei) continue;
+      // Der Polier selbst braucht sich nicht anzurufen.
+      polier =
+        (p as any)?.partieleiter_id === userId
+          ? null
+          : ((p as any)?.partieleiter as any) ?? null;
+    }
 
-      const { data: ems } = await supabase
-        .from("einteilung_mitarbeiter")
-        .select("id, einteilung_id, einteilung:einteilungen!inner(datum,baustelle_id,taetigkeit,abfahrtszeit,treffpunkt)")
-        .eq("mitarbeiter_id", userId)
-        .eq("einteilung.datum", datum);
-      if (!ems || ems.length === 0) {
-        // an diesem Tag keine Einteilung für den MA → nächsten Kandidat
-        if (datum === today) {
-          // heute keine Einteilung, aber heute IST der Tag → trotzdem Ergebnis zurück
-          setData({
-            datum,
-            isToday: true,
-            baustelle: null,
-            taetigkeit: null,
-            abfahrtszeit: null,
-            treffpunkt: null,
-            fahrzeuge: [],
-            polier: null,
-            einteilungId: null,
-          });
-          setLoading(false);
-          return;
-        }
-        continue;
-      }
-      const em = ems[0] as any;
-      const einteilung = em.einteilung;
-      const [{ data: bs }, { data: efs }] = await Promise.all([
-        einteilung.baustelle_id
-          ? supabase.from("baustellen").select("*").eq("id", einteilung.baustelle_id).maybeSingle()
-          : Promise.resolve({ data: null }),
-        supabase
-          .from("einteilung_fahrzeuge")
-          .select("fahrzeug:fahrzeuge(kennzeichen)")
-          .eq("einteilung_id", em.einteilung_id),
-      ]);
-      const baustelle = (bs as Baustelle) ?? null;
-      let polier: { vorname: string; nachname: string; telefon: string | null } | null = null;
-      if (baustelle?.partie_id) {
-        const { data: p } = await supabase
-          .from("partien")
-          .select("partieleiter:profiles!partien_partieleiter_id_fkey(vorname,nachname,telefon)")
-          .eq("id", baustelle.partie_id)
-          .maybeSingle();
-        polier = ((p as any)?.partieleiter as any) ?? null;
-      }
+    if (!eintrag) {
       setData({
-        datum,
-        isToday: datum === today,
-        baustelle,
-        taetigkeit: einteilung.taetigkeit,
-        abfahrtszeit: einteilung.abfahrtszeit,
-        treffpunkt: einteilung.treffpunkt,
-        fahrzeuge: (efs ?? []).map((e: any) => e.fahrzeug).filter(Boolean),
+        datum: today,
+        isToday: true,
+        baustelle: null,
+        taetigkeit: null,
+        abfahrtszeit: null,
+        treffpunkt: null,
+        fahrzeuge: [],
         polier,
-        einteilungId: em.einteilung_id,
+        einteilungId: null,
+        quelle: null,
+        abwesenheitArt: null,
       });
       setLoading(false);
       return;
     }
-    setData(null);
+
+    // Fahrzeug / Abfahrtszeit / Treffpunkt gibt es nur, wenn der Tag konkret
+    // geplant wurde — beim Poliereinsatz-Ersatz fehlen sie naturgemäß.
+    const [{ data: bs }, { data: eint }, { data: efs }] = await Promise.all([
+      supabase
+        .from("baustellen")
+        .select("*")
+        .eq("id", eintrag.baustelle_id as string)
+        .maybeSingle(),
+      eintrag.einteilung_id
+        ? supabase
+            .from("einteilungen")
+            .select("abfahrtszeit, treffpunkt")
+            .eq("id", eintrag.einteilung_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      eintrag.einteilung_id
+        ? supabase
+            .from("einteilung_fahrzeuge")
+            .select("fahrzeug:fahrzeuge(kennzeichen)")
+            .eq("einteilung_id", eintrag.einteilung_id)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    setData({
+      datum,
+      isToday: datum === today,
+      baustelle: (bs as Baustelle) ?? null,
+      taetigkeit: eintrag.taetigkeit,
+      abfahrtszeit: (eint as any)?.abfahrtszeit ?? null,
+      treffpunkt: (eint as any)?.treffpunkt ?? null,
+      fahrzeuge: ((efs as any[]) ?? []).map((e: any) => e.fahrzeug).filter(Boolean),
+      polier,
+      einteilungId: eintrag.einteilung_id,
+      quelle: eintrag.quelle,
+      abwesenheitArt: eintrag.abwesend ? eintrag.abwesenheit_art : null,
+    });
     setLoading(false);
   };
 
   useEffect(() => {
     lade();
+    // Ändert sich die Planung — egal ob konkreter Tagesplan oder
+    // Poliereinsatz —, zieht die Karte sofort nach.
     const channel = supabase
       .channel(`mein-tag-heute-${userId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "tagesplanung_freigaben" },
+        { event: "*", schema: "public", table: "einteilungen" },
         () => lade(),
       )
       .on(
@@ -173,6 +202,11 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
           table: "einteilung_mitarbeiter",
           filter: `mitarbeiter_id=eq.${userId}`,
         },
+        () => lade(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "poliereinsatz_zeitraeume" },
         () => lade(),
       )
       .subscribe();
@@ -221,9 +255,28 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
   return (
     <Card className="border-primary/30 bg-primary/5">
       <CardContent className="p-4 space-y-3">
-        <div className="text-xs uppercase tracking-wide text-primary font-semibold">
-          {data.isToday ? "Heute" : `Plan vom ${data.datum}`}
+        <div className="flex items-baseline justify-between gap-2 flex-wrap">
+          <div className="text-xs uppercase tracking-wide text-primary font-semibold">
+            {data.isToday ? "Heute" : `Plan vom ${data.datum}`}
+          </div>
+          {data.quelle && (
+            <div className="text-[11px] text-muted-foreground">
+              {planQuelleLabel(data.quelle)}
+            </div>
+          )}
         </div>
+
+        {data.abwesenheitArt && (
+          <div className="text-sm font-medium text-amber-700 dark:text-amber-500">
+            Für heute bist du als{" "}
+            {data.abwesenheitArt === "krank"
+              ? "krank"
+              : data.abwesenheitArt === "urlaub"
+              ? "auf Urlaub"
+              : "abwesend (Schlechtwetter)"}{" "}
+            eingetragen.
+          </div>
+        )}
 
         {data.baustelle ? (
           <>
@@ -474,24 +527,37 @@ export default function MeinTag() {
 
     const today = localIso();
 
-    const [partieRes, bsRes, colleaguesRes] = await Promise.all([
+    // Die Baustellen des Tages kommen aus der Planung (Tagesplanung, sonst
+    // Poliereinsatz) — nicht mehr aus dem statischen Feld
+    // baustellen.partie_id, das nur bei 1 von 56 aktiven Baustellen gesetzt
+    // ist und den Abschnitt praktisch immer leer ließ.
+    const [partieRes, colleaguesRes, plan] = await Promise.all([
       supabase.from("partien").select("*").eq("id", profile.partie_id).maybeSingle(),
-      supabase
-        .from("baustellen")
-        .select("*")
-        .eq("partie_id", profile.partie_id)
-        .lte("start_datum", today)
-        .or(`end_datum.gte.${today},end_datum.is.null`)
-        .order("start_datum", { ascending: false }),
       supabase
         .from("profiles")
         .select("id, vorname, nachname")
         .eq("partie_id", profile.partie_id)
         .neq("id", user.id),
+      getPlanFuerTag(today),
     ]);
 
+    const partieMitglieder = new Set<string>([
+      user.id,
+      ...((colleaguesRes.data as any[]) ?? []).map((c) => c.id),
+    ]);
+    const bsIds = Array.from(
+      new Set(
+        plan
+          .filter((p) => p.baustelle_id && partieMitglieder.has(p.mitarbeiter_id))
+          .map((p) => p.baustelle_id as string),
+      ),
+    );
+    const { data: bsRows } = bsIds.length
+      ? await supabase.from("baustellen").select("*").in("id", bsIds).order("bvh_name")
+      : { data: [] as Baustelle[] };
+
     setPartie((partieRes.data as Partie) ?? null);
-    setBaustellen((bsRes.data as Baustelle[]) ?? []);
+    setBaustellen((bsRows as Baustelle[]) ?? []);
     setColleagues((colleaguesRes.data as any[]) ?? []);
     setLoading(false);
   };
@@ -502,6 +568,18 @@ export default function MeinTag() {
       .channel("mein-tag")
       .on("postgres_changes", { event: "*", schema: "public", table: "baustellen" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "partien" }, load)
+      // Planung ändert sich → Baustelle des Tages zieht sofort nach.
+      .on("postgres_changes", { event: "*", schema: "public", table: "einteilungen" }, load)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "einteilung_mitarbeiter" },
+        load,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "poliereinsatz_zeitraeume" },
+        load,
+      )
       // Realtime auf eigenes Profil — wenn Admin Partie wechselt, sehen wir's sofort
       .on(
         "postgres_changes",
@@ -699,7 +777,9 @@ export default function MeinTag() {
                           Baustellen-Details
                         </Button>
                       </Link>
-                      <Link to="/stunden" className="flex-1">
+                      {/* Baustelle mitgeben, damit die Erfassung sie direkt
+                          vorbelegt — sonst muss sie erneut gesucht werden. */}
+                      <Link to={`/stunden?baustelle=${b.id}`} className="flex-1">
                         <Button className="w-full h-12 text-sm">
                           <ClockIcon className="h-4 w-4 mr-1.5" /> Stunden buchen
                         </Button>
