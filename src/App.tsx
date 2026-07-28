@@ -24,6 +24,7 @@ import Stundenauswertung from "@/pages/Stundenauswertung";
 import StundenBericht from "@/pages/StundenBericht";
 import StundenBerichteListe from "@/pages/StundenBerichteListe";
 import HalleErfassung from "@/pages/HalleErfassung";
+import Taetigkeitsbericht from "@/pages/Taetigkeitsbericht";
 import Berichte from "@/pages/Berichte";
 import Notizen from "@/pages/Notizen";
 import Aenderungswuensche from "@/pages/Aenderungswuensche";
@@ -102,6 +103,10 @@ const App = () => (
               <Route path="/evaluierung" element={<RequirePermission perm="evaluierungen.view"><Evaluierung /></RequirePermission>} />
               <Route path="/stunden" element={<RequirePermission perm="stunden.view_eigene"><Stunden /></RequirePermission>} />
               <Route path="/halle" element={<RequirePermission perm="stunden.view_eigene"><HalleErfassung /></RequirePermission>} />
+              {/* Wer den Bericht im Menü sieht, steuert das Profil-Feld
+                  zeiterfassung_typ (siehe AppShell). Die Route selbst bleibt
+                  für jeden mit eigener Zeiterfassung erreichbar. */}
+              <Route path="/taetigkeitsbericht" element={<RequirePermission perm="stunden.view_eigene"><Taetigkeitsbericht /></RequirePermission>} />
               <Route path="/stunden/auswertung" element={<RequirePermission perm="stunden.view_alle"><Stundenauswertung /></RequirePermission>} />
               <Route path="/stundenberichte" element={<RequirePermission perm="stunden.bsb.bestaetigen"><StundenBerichteListe /></RequirePermission>} />
               <Route path="/stundenbericht/:id" element={<RequirePermission perm="stunden.view_eigene"><StundenBericht /></RequirePermission>} />

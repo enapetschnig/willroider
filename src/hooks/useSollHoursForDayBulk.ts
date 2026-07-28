@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { isoWeekParts, weekdayIndexMonFirst } from "@/lib/stundenTime";
+import { angestelltenSoll } from "@/lib/taetigkeitsbericht";
 
 /**
  * Bulk-Variante von useSollHoursForDay: berechnet Soll-Arbeitsstunden für
@@ -65,7 +66,8 @@ export function useSollHoursForDayBulk(
         const modell = (s?.arbeitszeitmodell ?? "zimmerei_sommer") as
           | "zimmerei_sommer"
           | "fix_40h"
-          | "individuell";
+          | "individuell"
+          | "angestellter";
         const tagesnorm = Number(s?.tagesnorm_stunden ?? 8);
         const grad = Number(s?.beschaeftigungsgrad ?? 1);
 
@@ -77,6 +79,9 @@ export function useSollHoursForDayBulk(
             : isWorkday
             ? tagesnorm
             : 0;
+        } else if (modell === "angestellter") {
+          // 8,5 Mo–Do, 5 Fr = 39 h (siehe lib/taetigkeitsbericht.ts).
+          hours = angestelltenSoll(date);
         } else if (modell === "fix_40h") {
           hours = isWorkday ? 8 : 0;
         } else {

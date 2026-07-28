@@ -26,8 +26,12 @@ function easterDate(year: number): Date {
 
 export type FeiertagInfo = {
   name: string;
-  /** "bundesweit" (gesetzlich AT) oder "kaernten" (Landesfeiertag) */
-  scope: "bundesweit" | "kaernten";
+  /**
+   * "bundesweit" (gesetzlich AT), "kaernten" (Landesfeiertag) oder
+   * "betrieblich" (24.12./31.12. — kein gesetzlicher Feiertag, im Betrieb
+   * aber frei; im Tätigkeitsbericht laufen sie als Sonderurlaub).
+   */
+  scope: "bundesweit" | "kaernten" | "betrieblich";
 };
 
 /**
@@ -65,6 +69,25 @@ export function austrianHolidays(year: number): Map<string, FeiertagInfo> {
   fixed(10, 10, "10. Oktober (Tag der Volksabstimmung)", "kaernten");
 
   return map;
+}
+
+/**
+ * 24.12. und 31.12. — im Betrieb frei, aber **kein gesetzlicher Feiertag**.
+ *
+ * Bewusst NICHT in `austrianHolidays` und damit nicht in `feiertagAt`:
+ * daran hängen die Soll-Stunden aller Mitarbeiter ([konten.ts]
+ * `werktageImMonat`), die Urlaubstage-Zählung und die Planungs-Rückfragen.
+ * Würden diese zwei Tage dort mitlaufen, sänke still das Dezember-Soll.
+ *
+ * Im Tätigkeitsbericht der Angestellten laufen sie als Sonderurlaub — so
+ * hält es auch die alte Excel („WEIHNACHTEN", „SILVESTER" als Beschriftung,
+ * die Stunden in der Sonderurlaub-Zeile).
+ */
+export function betrieblichFreiAt(iso: string): FeiertagInfo | null {
+  const md = iso.slice(5, 10);
+  if (md === "12-24") return { name: "Weihnachten", scope: "betrieblich" };
+  if (md === "12-31") return { name: "Silvester", scope: "betrieblich" };
+  return null;
 }
 
 // In-Memory-Cache pro Jahr — verhindert wiederholte Berechnungen

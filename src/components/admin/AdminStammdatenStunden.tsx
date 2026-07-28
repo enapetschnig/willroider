@@ -280,7 +280,9 @@ function TaetigkeitenStammCard() {
   const { data: list = [], isLoading } = useTaetigkeitenStamm({ onlyActive: false });
   const mut = useTaetigkeitMutation();
   const [newName, setNewName] = useState("");
-  const [newBereich, setNewBereich] = useState<"baustelle" | "halle" | "beide">("baustelle");
+  const [newBereich, setNewBereich] = useState<"baustelle" | "halle" | "beide" | "buero">("baustelle");
+  // Nur für bereich = "buero": die 4-stellige Kostenstelle des Tätigkeitsberichts.
+  const [newKst, setNewKst] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
 
@@ -292,8 +294,12 @@ function TaetigkeitenStammCard() {
         bezeichnung: newName.trim(),
         sort_order: maxSort + 10,
         bereich: newBereich,
-      });
+        ...(newBereich === "buero" && newKst.trim()
+          ? { kostenstelle: newKst.trim() }
+          : {}),
+      } as any);
       setNewName("");
+      setNewKst("");
       toast({ title: "Tätigkeit hinzugefügt" });
     } catch (e) {
       toast({ variant: "destructive", title: "Fehler", description: (e as Error).message });
@@ -354,7 +360,18 @@ function TaetigkeitenStammCard() {
             <option value="baustelle">Baustelle</option>
             <option value="halle">Halle</option>
             <option value="beide">Beide</option>
+            <option value="buero">Büro / Kostenstelle</option>
           </select>
+          {newBereich === "buero" && (
+            <Input
+              value={newKst}
+              onChange={(e) => setNewKst(e.target.value)}
+              placeholder="Kst, z.B. 4890"
+              onKeyDown={(e) => e.key === "Enter" && add()}
+              className="h-10 w-32"
+              title="4-stellige Kostenstelle für den Tätigkeitsbericht"
+            />
+          )}
           <Button onClick={add} disabled={!newName.trim() || mut.create.isPending}>
             <Plus className="h-4 w-4 mr-1.5" /> Hinzufügen
           </Button>
@@ -390,7 +407,14 @@ function TaetigkeitenStammCard() {
                 </>
               ) : (
                 <>
-                  <div className="flex-1 text-sm">{t.bezeichnung}</div>
+                  <div className="flex-1 text-sm">
+                    {(t as any).kostenstelle && (
+                      <span className="font-mono text-xs text-muted-foreground mr-2">
+                        {(t as any).kostenstelle}
+                      </span>
+                    )}
+                    {t.bezeichnung}
+                  </div>
                   <Badge
                     variant="outline"
                     className={`text-[10px] ${
@@ -398,14 +422,18 @@ function TaetigkeitenStammCard() {
                         ? "border-amber-500 text-amber-800 bg-amber-50"
                         : t.bereich === "beide"
                           ? "border-violet-500 text-violet-800 bg-violet-50"
-                          : "border-blue-500 text-blue-800 bg-blue-50"
+                          : t.bereich === "buero"
+                            ? "border-emerald-500 text-emerald-800 bg-emerald-50"
+                            : "border-blue-500 text-blue-800 bg-blue-50"
                     }`}
                   >
                     {t.bereich === "halle"
                       ? "Halle"
                       : t.bereich === "beide"
                         ? "Beide"
-                        : "Baustelle"}
+                        : t.bereich === "buero"
+                          ? "Büro"
+                          : "Baustelle"}
                   </Badge>
                   {!t.is_active && (
                     <Badge variant="outline" className="text-[10px]">

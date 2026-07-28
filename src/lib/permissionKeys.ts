@@ -34,6 +34,7 @@ export type PermissionKey =
   | "stunden.freigeben_zm"
   | "stunden.freigeben_buero"
   | "stunden.bsb.bestaetigen"
+  | "stunden.taetigkeitsbericht"
   | "urlaub.genehmigen"
   | "feedback.view_alle"
   | "feedback.bearbeiten"

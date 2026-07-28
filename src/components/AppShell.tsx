@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import ChangePasswordDialog from "@/components/ChangePasswordDialog";
 import { cn } from "@/lib/utils";
+import type { PermissionKey } from "@/lib/permissionKeys";
 
 type NavItem = {
   to: string;
@@ -55,9 +56,16 @@ type NavItem = {
   roles?: ("admin" | "review" | "gf" | "all")[];
   /** Permission-Key — wenn gesetzt, MUSS der User diese Permission haben.
    *  Überschreibt `roles`. */
-  perm?: import("@/lib/permissionKeys").PermissionKey;
+  perm?: PermissionKey;
   /** end=true → highlight nur wenn Pfad EXAKT übereinstimmt. Default true. */
   end?: boolean;
+  /**
+   * Zusätzliche Bedingung für Fälle, die kein Rollenrecht sind, sondern am
+   * Profil hängen — etwa `zeiterfassung_typ`: Angestellte sehen den
+   * Tätigkeitsbericht, Bauarbeiter die herkömmliche Erfassung. Wird
+   * ZUSÄTZLICH zu `perm` geprüft.
+   */
+  show?: (ctx: { istAngestellter: boolean; hasPermission: (p: PermissionKey) => boolean }) => boolean;
 };
 
 const NAV: NavItem[] = [
@@ -67,8 +75,17 @@ const NAV: NavItem[] = [
   { to: "/tagesplanung", label: "Tagesplanung", icon: ClipboardCheck, perm: "tagesplanung.edit", end: true },
   { to: "/angebote", label: "Angebote", icon: Briefcase, perm: "angebote.view", end: false },
   { to: "/baustellen", label: "Baustellen", icon: Building2, perm: "baustellen.view", end: false },
-  { to: "/stunden", label: "Zeiterfassung", icon: Clock, perm: "stunden.view_eigene", end: true },
-  { to: "/halle", label: "Halle", icon: Wrench, perm: "stunden.view_eigene", end: true },
+  // Angestellte erfassen im Tätigkeitsbericht, nicht hier — sonst gäbe es
+  // zwei Wege zu denselben Stunden.
+  { to: "/stunden", label: "Zeiterfassung", icon: Clock, perm: "stunden.view_eigene", end: true,
+    show: ({ istAngestellter }) => !istAngestellter },
+  { to: "/halle", label: "Halle", icon: Wrench, perm: "stunden.view_eigene", end: true,
+    show: ({ istAngestellter }) => !istAngestellter },
+  // Umgekehrt: der Bericht erscheint nur bei Angestellten — oder bei denen,
+  // die fremde Berichte sehen dürfen (Büro, Geschäftsführung).
+  { to: "/taetigkeitsbericht", label: "Tätigkeitsbericht", icon: ClipboardList, perm: "stunden.view_eigene", end: true,
+    show: ({ istAngestellter, hasPermission }) =>
+      istAngestellter || hasPermission("stunden.taetigkeitsbericht") },
   { to: "/stunden/auswertung", label: "Auswertung", icon: BarChart3, perm: "stunden.view_alle", end: true },
   { to: "/stundenberichte", label: "Stundenberichte", icon: FileSpreadsheet, perm: "stunden.bsb.bestaetigen", end: false },
   { to: "/berichte", label: "Berichte", icon: FileText, perm: "berichte.view", end: false },
@@ -162,7 +179,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   };
 
+  const istAngestellter = (profile as any)?.zeiterfassung_typ === "angestellter";
+
   const visibleNav = NAV.filter((n) => {
+    // Zusatzbedingung am Profil (z.B. Angestellter/Bauarbeiter) gilt immer.
+    if (n.show && !n.show({ istAngestellter, hasPermission })) return false;
     // Wenn perm gesetzt: das ist die einzige Quelle der Wahrheit.
     if (n.perm) return hasPermission(n.perm);
     // Fallback: alte roles-Logik (für Items ohne perm).
@@ -398,7 +419,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             hasPermission("arbeitsplanung.view")
               ? { to: "/arbeitsplanung", label: "Plan", icon: CalendarDays, end: false, perm: "arbeitsplanung.view" as const }
               : { to: "/mein-tag", label: "Heute", icon: ClipboardList, end: false, perm: "meintag.view" as const },
-            { to: "/stunden", label: "Stunden", icon: Clock, end: false, perm: "stunden.view_eigene" as const },
+            // Angestellte erfassen im Tätigkeitsbericht — der gehört hier an
+            // die Stelle der herkömmlichen Erfassung.
+            istAngestellter
+              ? { to: "/taetigkeitsbericht", label: "Stunden", icon: ClipboardList, end: false, perm: "stunden.view_eigene" as const }
+              : { to: "/stunden", label: "Stunden", icon: Clock, end: false, perm: "stunden.view_eigene" as const },
             { to: "/berichte", label: "Berichte", icon: FileText, end: false, perm: "berichte.view" as const },
             { to: "/baustellen", label: "Baustellen", icon: Building2, end: false, perm: "baustellen.view" as const },
           ] as const)

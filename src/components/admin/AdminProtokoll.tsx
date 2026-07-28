@@ -19,6 +19,7 @@ const FELD_LABEL: Record<string, string> = {
   is_active: "Aktiv",
   is_partieleiter: "Partieleiter-Flag",
   in_tagesplanung: "In Tagesplanung",
+  zeiterfassung_typ: "Zeiterfassung",
   rolle_id: "Rolle",
   partieleiter_id: "Partieleiter",
 };

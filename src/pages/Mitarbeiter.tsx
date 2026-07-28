@@ -379,6 +379,10 @@ export default function Mitarbeiter() {
       fuehrerschein: str("fuehrerschein"),
       kran_berechtigung: fd.get("kran_berechtigung") === "on",
       in_tagesplanung: fd.get("in_tagesplanung") === "on",
+      zeiterfassung_typ:
+        (fd.get("zeiterfassung_typ") as string) === "angestellter"
+          ? "angestellter"
+          : "bauarbeiter",
       partie_id: (fd.get("partie_id") as string) || null,
       is_partieleiter: fd.get("is_partieleiter") === "on",
       ist_bauleiter: fd.get("ist_bauleiter") === "on",
@@ -432,6 +436,44 @@ export default function Mitarbeiter() {
     if (sErr) {
       // Wenn RLS blockt (Nicht-Admin) → ignorieren, profile-Update ist trotzdem durch
       console.warn("profiles_sensitive update failed", sErr.message);
+    }
+
+    // Das Soll-Modell muss dem Schalter folgen: Angestellte rechnen mit
+    // 8,5 Mo–Do / 5 Fr, Bauarbeiter mit dem Arbeitszeitkalender. Bliebe das
+    // Modell stehen, wäre das DELTA im Tätigkeitsbericht dauerhaft falsch.
+    //
+    // Nur anfassen, wenn es sich wirklich ändert — ein bewusst gesetztes
+    // Sondermodell (fix_40h, individuell) darf nicht überschrieben werden,
+    // bloß weil jemand das Personalblatt gespeichert hat.
+    const istAngestellter = profilePayload.zeiterfassung_typ === "angestellter";
+    const { data: kSet } = await supabase
+      .from("profile_konten_settings")
+      .select("arbeitszeitmodell")
+      .eq("profile_id", editing.id)
+      .maybeSingle();
+    const modellJetzt = (kSet as any)?.arbeitszeitmodell ?? null;
+    const modellSoll = istAngestellter
+      ? "angestellter"
+      : modellJetzt === "angestellter"
+      ? "zimmerei_sommer" // zurück auf den Arbeiter-Kalender
+      : modellJetzt; // Sondermodell unangetastet lassen
+    if (modellSoll !== modellJetzt || modellJetzt === null) {
+      const { error: kErr } = await supabase
+        .from("profile_konten_settings")
+        .upsert(
+          {
+            profile_id: editing.id,
+            arbeitszeitmodell: modellSoll ?? "zimmerei_sommer",
+          } as any,
+          { onConflict: "profile_id" },
+        );
+      if (kErr) {
+        toast({
+          variant: "destructive",
+          title: "Zeiterfassungs-Art gespeichert, Soll-Modell nicht",
+          description: kErr.message,
+        });
+      }
     }
 
     toast({ title: "Mitarbeiter aktualisiert" });
@@ -1138,6 +1180,48 @@ export default function Mitarbeiter() {
                         Aus = erscheint nicht in der Auswahl/Übernahme (Büro, Bauleitung …)
                       </span>
                     </Label>
+                  </div>
+
+                  {/* Wo schreibt diese Person ihre Stunden? Steuert den
+                      Menüpunkt und die Soll-Stunden (Angestellte: 8,5 Mo–Do,
+                      5 Fr = 39 h statt Arbeitszeitkalender). */}
+                  <div className="sm:col-span-2 pt-1">
+                    <Label className="text-xs">Zeiterfassung</Label>
+                    <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
+                      {[
+                        {
+                          wert: "bauarbeiter",
+                          titel: "Bauarbeiter",
+                          text: "Tageserfassung mit Baustelle, Zulagen, Taggeld und Fahrtgeld",
+                        },
+                        {
+                          wert: "angestellter",
+                          titel: "Angestellter",
+                          text: "Tätigkeitsbericht — Kostenstelle × Tag, Periode 21.–20.",
+                        },
+                      ].map((o) => (
+                        <label
+                          key={o.wert}
+                          className="flex items-start gap-2 rounded-md border p-2 cursor-pointer hover:bg-muted/50 has-[:checked]:border-primary has-[:checked]:bg-primary/5"
+                        >
+                          <input
+                            type="radio"
+                            name="zeiterfassung_typ"
+                            value={o.wert}
+                            defaultChecked={
+                              ((editing as any).zeiterfassung_typ ?? "bauarbeiter") === o.wert
+                            }
+                            className="mt-1"
+                          />
+                          <span className="text-sm leading-tight">
+                            {o.titel}
+                            <span className="block text-[11px] font-normal text-muted-foreground">
+                              {o.text}
+                            </span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </section>

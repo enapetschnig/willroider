@@ -81,6 +81,10 @@ export type Database = {
           je_freigeschaltet: boolean | null;
           /** True = Bauleiter (wählbar im Baustellen-Formular). */
           ist_bauleiter: boolean | null;
+          /** FALSE = erscheint nicht in der Tagesplanung (Büro, Bauleitung, GF). */
+          in_tagesplanung: boolean | null;
+          /** 'bauarbeiter' = /stunden · 'angestellter' = /taetigkeitsbericht */
+          zeiterfassung_typ: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -706,7 +710,10 @@ export type Database = {
           bezeichnung: string;
           sort_order: number;
           is_active: boolean;
-          bereich: 'baustelle' | 'halle' | 'beide';
+          /** 'buero' = interne Kostenstelle des Tätigkeitsberichts (Angestellte). */
+          bereich: 'baustelle' | 'halle' | 'beide' | 'buero';
+          /** Nur bei bereich = 'buero': 4-stellige Kostenstelle, z.B. 4890. */
+          kostenstelle: string | null;
           created_at: string;
           updated_at: string;
         };

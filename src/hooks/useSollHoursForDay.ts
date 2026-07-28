@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { isoWeekParts, weekdayIndexMonFirst } from "@/lib/stundenTime";
+import { angestelltenSoll } from "@/lib/taetigkeitsbericht";
 
 interface SollResult {
   /** Soll-Arbeitsstunden für (Mitarbeiter, Tag) gemäß Modell. Bei 0 ist es ein freier Tag. */
   sollHours: number;
-  /** "zimmerei_sommer" | "fix_40h" | "individuell" — woraus errechnet */
-  source: "zimmerei_sommer" | "fix_40h" | "individuell" | "fallback";
+  /** woraus errechnet */
+  source: "zimmerei_sommer" | "fix_40h" | "individuell" | "angestellter" | "fallback";
   isLoading: boolean;
 }
 
@@ -49,7 +50,8 @@ export function useSollHoursForDay(
       const modell = (settings?.arbeitszeitmodell ?? "zimmerei_sommer") as
         | "zimmerei_sommer"
         | "fix_40h"
-        | "individuell";
+        | "individuell"
+        | "angestellter";
       const tagesnorm = Number(settings?.tagesnorm_stunden ?? 8);
       const grad = Number(settings?.beschaeftigungsgrad ?? 1);
 
@@ -85,6 +87,10 @@ export function useSollHoursForDay(
           hours = isWorkday ? tagesnorm : 0;
           usedSource = "fallback";
         }
+      } else if (modell === "angestellter") {
+        // 8,5 Mo–Do, 5 Fr = 39 h. Feiertage senken das Soll NICHT — sie
+        // werden im Tätigkeitsbericht als geleistete Zeit gegengerechnet.
+        hours = angestelltenSoll(date);
       } else if (modell === "fix_40h") {
         hours = isWorkday ? 8 : 0;
       } else {
