@@ -49,8 +49,11 @@ import {
   istArbeitArt,
   newKey,
   gruppiereSections,
+  aufStundenRaster,
+  STUNDEN_SCHRITT,
   type EintragRow,
 } from "@/components/stunden/zeiterfassungUi";
+import { StundenInput } from "@/components/stunden/StundenInput";
 import { StatusButtonsLeiste } from "@/components/stunden/StatusButtonsLeiste";
 import { ArtSection } from "@/components/stunden/ArtSection";
 import {
@@ -1786,18 +1789,17 @@ function ZulagenStundenInput({
         className="h-9 w-9 shrink-0"
         onClick={() => {
           const cur = value ?? 0;
-          onChange(Math.max(0, +(cur - 0.25).toFixed(2)));
+          onChange(Math.max(0, aufStundenRaster(cur - STUNDEN_SCHRITT)));
         }}
       >
         <Minus className="h-4 w-4" />
       </Button>
-      <Input
-        type="number"
-        step={0.25}
-        min={0}
-        value={value ?? ""}
-        onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+      <StundenInput
+        value={value}
+        onChange={onChange}
+        leerAlsNull
         placeholder="alle"
+        ariaLabel="Zulagen-Stunden"
         className="h-9 w-20 text-center text-sm font-semibold tabular-nums"
       />
       <Button
@@ -1807,7 +1809,7 @@ function ZulagenStundenInput({
         className="h-9 w-9 shrink-0"
         onClick={() => {
           const cur = value ?? 0;
-          onChange(+(cur + 0.25).toFixed(2));
+          onChange(aufStundenRaster(cur + STUNDEN_SCHRITT));
         }}
       >
         <Plus className="h-4 w-4" />

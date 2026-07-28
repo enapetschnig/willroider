@@ -45,6 +45,7 @@ import {
   type Periode,
 } from "@/lib/taetigkeitsbericht";
 import { makeTaetigkeitsberichtPdf } from "@/lib/taetigkeitsberichtPdf";
+import { aufStundenRaster } from "@/components/stunden/zeiterfassungUi";
 import type { Database } from "@/integrations/supabase/types";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -738,7 +739,7 @@ function ZellEingabe({
 
   const commit = () => {
     const v = Number(text.replace(",", ".").trim() || "0");
-    const gerundet = Number.isFinite(v) && v >= 0 ? Math.round(v * 4) / 4 : 0;
+    const gerundet = Number.isFinite(v) && v >= 0 ? aufStundenRaster(v) : 0;
     if (gerundet === wert) {
       setText(wert ? String(wert).replace(".", ",") : "");
       return;

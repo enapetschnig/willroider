@@ -61,6 +61,14 @@ export interface BerichtPdfInput {
   taetigkeiten: BerichtTaetigkeit[];
   aufmass: BerichtAufmass[];
   fotos: { signedUrl: string; bildunterschrift?: string | null }[];
+  /** Unterschriften von Polier und/oder Kunde. Beide freiwillig — fehlt
+   *  eine, wird nur die Linie zum händischen Unterschreiben gedruckt. */
+  unterschriften?: {
+    rolle: "polier" | "kunde";
+    name: string | null;
+    unterschrift_data: string;
+    unterschrieben_am: string;
+  }[];
 }
 
 /** Caching für das Logo — nur bei Erfolg cachen, damit später ein neuer
@@ -190,6 +198,7 @@ function drawSectionTitle(doc: jsPDF, y: number, text: string, margin: number): 
 /** Erzeugt das PDF-Dokument. */
 export async function makeBerichtPdf(input: BerichtPdfInput): Promise<jsPDF> {
   const { bericht, baustelle, polier, mitarbeiter, taetigkeiten, aufmass, fotos } = input;
+  const unterschriften = input.unterschriften ?? [];
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const PAGE_W = doc.internal.pageSize.getWidth();
   const PAGE_H = doc.internal.pageSize.getHeight();
@@ -503,6 +512,57 @@ export async function makeBerichtPdf(input: BerichtPdfInput): Promise<jsPDF> {
       }
       y += rowH;
     }
+  }
+
+  // ─── Unterschriften ────────────────────────────────────────────────
+  // Beim Regiebericht bestätigen Polier und Kunde die geleistete Arbeit.
+  // Beide sind freiwillig: fehlt eine, bleibt die Linie leer und kann von
+  // Hand unterschrieben werden.
+  if (bericht.typ === "regiebericht" || unterschriften.length > 0) {
+    const blockH = 32;
+    if (y + blockH > PAGE_H - 18) {
+      doc.addPage();
+      y = 20;
+    }
+    y += 4;
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...TEXT_DARK);
+    doc.text("Unterschriften", MARGIN, y);
+    y += 4;
+
+    const spaltenB = (PAGE_W - 2 * MARGIN - 10) / 2;
+    ([
+      { rolle: "polier" as const, titel: "Polier" },
+      { rolle: "kunde" as const, titel: "Kunde" },
+    ]).forEach(({ rolle, titel }, i) => {
+      const x = MARGIN + i * (spaltenB + 10);
+      const u = unterschriften.find((s2) => s2.rolle === rolle);
+      if (u?.unterschrift_data) {
+        // jsPDF wirft bei beschädigtem Base64 — das darf das ganze PDF
+        // nicht verhindern.
+        try {
+          const dataUrl = u.unterschrift_data.startsWith("data:")
+            ? u.unterschrift_data
+            : `data:image/png;base64,${u.unterschrift_data}`;
+          doc.addImage(dataUrl, "PNG", x, y, 44, 16, undefined, "FAST");
+        } catch {
+          /* ignore */
+        }
+      }
+      doc.setDrawColor(...TEXT_MUTED);
+      doc.setLineWidth(0.3);
+      doc.line(x, y + 17, x + spaltenB, y + 17);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(...TEXT_MUTED);
+      const rechts = u
+        ? `${u.name ? u.name + " · " : ""}${new Date(u.unterschrieben_am).toLocaleDateString("de-AT")}`
+        : "";
+      doc.text(titel, x, y + 21);
+      if (rechts) doc.text(rechts, x + spaltenB, y + 21, { align: "right" });
+    });
+    y += blockH;
   }
 
   // ─── Footer auf allen Seiten ───────────────────────────────────────

@@ -100,9 +100,35 @@ export const newKey = () =>
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2);
 
-/** Rundet auf das nächste Viertelstunden-Raster (0,25 h). */
-export const aufViertelstunde = (n: number) =>
-  Math.round((Number(n) || 0) / 0.25) * 0.25;
+/**
+ * Raster der Stundenerfassung.
+ *
+ * Halbe Stunden — so wird es tatsächlich gebucht: von 423 erfassten Zeilen
+ * waren 414 volle halbe Stunden. Die Schrittweite steht bewusst nur HIER,
+ * vorher war die 0,25 an vier Stellen ausgeschrieben.
+ */
+export const STUNDEN_SCHRITT = 0.5;
+
+/** Rundet auf das Stunden-Raster (siehe STUNDEN_SCHRITT). */
+export const aufStundenRaster = (n: number) =>
+  Math.round((Number(n) || 0) / STUNDEN_SCHRITT) * STUNDEN_SCHRITT;
+
+/**
+ * Liest eine getippte Stundenangabe — Komma UND Punkt sind erlaubt.
+ * Liefert null, wenn daraus keine gültige Zahl wird (dann bleibt der alte
+ * Wert stehen, statt still auf 0 zu springen).
+ */
+export function parseStunden(text: string): number | null {
+  const s = text.replace(",", ".").trim();
+  if (s === "") return 0;
+  const v = Number(s);
+  if (!Number.isFinite(v) || v < 0) return null;
+  return aufStundenRaster(v);
+}
+
+/** Stundenwert für die Anzeige im Eingabefeld: deutsches Komma, 0 = leer. */
+export const stundenText = (n: number): string =>
+  n ? String(n).replace(".", ",") : "";
 
 /** Eine Art-Section im MA-Block (eine pro Art bei Abwesenheiten, ggf. mehrere
  *  bei Baustelle — eine je Baustellen-Auswahl). */

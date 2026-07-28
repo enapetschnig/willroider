@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { StundenInput } from "@/components/stunden/StundenInput";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
@@ -305,16 +306,12 @@ export function AdminTagEditModal({
                           </option>
                         ))}
                       </select>
-                      <Input
-                        type="number"
-                        step="0.25"
-                        min={0}
-                        value={e.stunden}
-                        onChange={(ev) =>
-                          updateEintrag(idx, {
-                            stunden: Number(ev.target.value) || 0,
-                          })
+                      <StundenInput
+                        value={Number(e.stunden) || 0}
+                        onChange={(v) =>
+                          updateEintrag(idx, { stunden: Number(v) || 0 })
                         }
+                        ariaLabel="Stunden"
                         className="h-8 w-20 text-xs text-center tabular-nums"
                       />
                       <span className="text-xs text-muted-foreground">h</span>
@@ -434,15 +431,11 @@ export function AdminTagEditModal({
                   </div>
                   <div className="col-span-4">
                     <Label className="text-[10px]">Stunden (leer = ganzer Tag)</Label>
-                    <Input
-                      type="number"
-                      step="0.25"
-                      value={z.stunden ?? ""}
-                      onChange={(e) =>
-                        updateZul(idx, {
-                          stunden: e.target.value === "" ? null : Number(e.target.value),
-                        })
-                      }
+                    <StundenInput
+                      value={z.stunden ?? null}
+                      onChange={(v) => updateZul(idx, { stunden: v })}
+                      leerAlsNull
+                      ariaLabel="Zulagen-Stunden"
                       className="h-8 text-xs"
                     />
                   </div>

@@ -9,7 +9,7 @@
  *   - Mitarbeiter-Editor
  *   - Tätigkeiten-Editor
  *   - Foto-Uploader (Compress + EXIF + Doppelablage-Vermeidung)
- *   - Aufmaß-Editor (Pflicht bei Regiebericht)
+ *   - Aufmaß-Editor (optional, auch beim Regiebericht)
  *   - Freitext-Besonderheiten
  *   - Audit-Log
  *   - Status-Bar (Einreichen → Freigeben → Archivieren; PDF wird bei Freigabe generiert)
@@ -25,6 +25,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { StundenInput } from "@/components/stunden/StundenInput";
+import { UnterschriftDialog } from "@/components/UnterschriftDialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
@@ -61,6 +63,7 @@ import type {
 } from "@/integrations/supabase/types";
 import {
   useBericht,
+  type BerichtUnterschrift,
   useSetBerichtStatus,
   useUpdateBerichtFelder,
   useDeleteBericht,
@@ -324,12 +327,11 @@ export default function BerichtDetail() {
         onChange={() => refetch()}
       />
 
-      {/* Aufmaß (Pflicht bei Regie) */}
+      {/* Aufmaß — optional, auch beim Regiebericht */}
       {(istRegie || bericht.aufmass.length > 0) && (
         <AufmassEditor
           berichtId={b.id}
           aufmass={bericht.aufmass}
-          pflicht={istRegie}
           kannEditieren={kannEditieren}
           onChange={() => refetch()}
         />
@@ -343,6 +345,17 @@ export default function BerichtDetail() {
         kannEditieren={kannEditieren}
         onChange={() => refetch()}
       />
+
+      {/* Unterschriften — beim Regiebericht immer, sonst nur wenn schon
+          welche da sind. Freiwillig: keiner, einer oder beide. */}
+      {(istRegie || bericht.unterschriften.length > 0) && (
+        <UnterschriftenEditor
+          berichtId={b.id}
+          unterschriften={bericht.unterschriften}
+          gesperrt={istArchiviert}
+          onChange={() => refetch()}
+        />
+      )}
 
       {/* Freitext */}
       <Card>
@@ -769,15 +782,12 @@ function MitarbeiterEditor({
                   className="h-7 text-xs mt-1"
                 />
               </div>
-              <Input
-                type="number"
-                step={0.25}
-                min={0}
-                defaultValue={m.stunden_netto}
-                onBlur={(e) =>
-                  Number(e.target.value) !== Number(m.stunden_netto) &&
-                  updateStd(m.id, Number(e.target.value) || 0)
+              <StundenInput
+                value={Number(m.stunden_netto) || 0}
+                onChange={(v) =>
+                  Number(v) !== Number(m.stunden_netto) && updateStd(m.id, Number(v) || 0)
                 }
+                ariaLabel="Stunden des Mitarbeiters"
                 disabled={!kannEditieren}
                 className="h-9 w-20 text-right"
               />
@@ -865,15 +875,13 @@ function TaetigkeitenEditor({
               disabled={!kannEditieren}
               className="h-9 flex-1"
             />
-            <Input
-              type="number"
-              step={0.25}
-              min={0}
-              defaultValue={t.summe_stunden}
-              onBlur={(e) =>
-                Number(e.target.value) !== Number(t.summe_stunden) &&
-                update(t.id, { summe_stunden: Number(e.target.value) || 0 })
+            <StundenInput
+              value={Number(t.summe_stunden) || 0}
+              onChange={(v) =>
+                Number(v) !== Number(t.summe_stunden) &&
+                update(t.id, { summe_stunden: Number(v) || 0 })
               }
+              ariaLabel="Stunden der Tätigkeit"
               disabled={!kannEditieren}
               className="h-9 w-20 text-right"
             />
@@ -904,12 +912,10 @@ function TaetigkeitenEditor({
               onKeyDown={(e) => e.key === "Enter" && add()}
               className="h-9 flex-1"
             />
-            <Input
-              type="number"
-              step={0.25}
-              min={0}
+            <StundenInput
               value={neuStd}
-              onChange={(e) => setNeuStd(Number(e.target.value) || 0)}
+              onChange={(v) => setNeuStd(Number(v) || 0)}
+              ariaLabel="Stunden der neuen Tätigkeit"
               className="h-9 w-20 text-right"
             />
             <Button size="sm" onClick={add} disabled={!neuBezeichnung.trim()}>
@@ -922,18 +928,187 @@ function TaetigkeitenEditor({
   );
 }
 
+// ─── Unterschriften ───────────────────────────────────────────────────────
+//
+// Polier und Kunde unterschreiben am selben Gerät — der Kunde tippt seinen
+// Namen dazu, weil er kein Konto hat. Beide sind freiwillig: der Bericht
+// lässt sich auch ohne freigeben und bleibt danach bearbeitbar. Geschrieben
+// wird über die RPC, weil die RLS Nicht-Admins außerhalb von „Entwurf"
+// sperrt — der Polier soll aber auch einen eingereichten Bericht
+// unterschreiben können.
+
+const ROLLEN: { rolle: "polier" | "kunde"; titel: string; hinweis: string }[] = [
+  { rolle: "polier", titel: "Polier", hinweis: "bestätigt die geleistete Arbeit" },
+  { rolle: "kunde", titel: "Kunde", hinweis: "bestätigt die Abnahme vor Ort" },
+];
+
+function UnterschriftenEditor({
+  berichtId,
+  unterschriften,
+  gesperrt,
+  onChange,
+}: {
+  berichtId: string;
+  unterschriften: BerichtUnterschrift[];
+  gesperrt: boolean;
+  onChange: () => void;
+}) {
+  const { toast } = useToast();
+  const [offen, setOffen] = useState<"polier" | "kunde" | null>(null);
+  const [kundenName, setKundenName] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const vorhanden = (rolle: string) => unterschriften.find((u) => u.rolle === rolle);
+
+  const speichern = async (rolle: "polier" | "kunde", dataUrl: string) => {
+    setBusy(true);
+    try {
+      const { error } = await (supabase.rpc as any)("bericht_unterschreiben", {
+        p_bericht: berichtId,
+        p_rolle: rolle,
+        p_name: rolle === "kunde" ? kundenName.trim() || null : null,
+        p_unterschrift: dataUrl,
+      });
+      if (error) throw error;
+      setOffen(null);
+      setKundenName("");
+      onChange();
+      toast({ title: "Unterschrift gespeichert" });
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Nicht gespeichert",
+        description: (e as Error).message,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const entfernen = async (rolle: "polier" | "kunde") => {
+    if (!window.confirm(`Unterschrift „${rolle === "kunde" ? "Kunde" : "Polier"}" entfernen?`))
+      return;
+    const { error } = await (supabase.rpc as any)("bericht_unterschrift_entfernen", {
+      p_bericht: berichtId,
+      p_rolle: rolle,
+    });
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    onChange();
+  };
+
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-3">
+        <Label className="text-sm font-semibold flex items-center gap-1.5">
+          <Edit className="h-4 w-4 text-primary" />
+          Unterschriften
+          <span className="text-muted-foreground text-xs font-normal ml-1">
+            optional
+          </span>
+        </Label>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          {ROLLEN.map(({ rolle, titel, hinweis }) => {
+            const u = vorhanden(rolle);
+            return (
+              <div key={rolle} className="rounded-md border p-3 space-y-2">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-sm font-medium">{titel}</span>
+                  {u && (
+                    <span className="text-[11px] text-muted-foreground">
+                      {new Date(u.unterschrieben_am).toLocaleString("de-AT", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  )}
+                </div>
+
+                {u ? (
+                  <>
+                    <img
+                      src={u.unterschrift_data}
+                      alt={`Unterschrift ${titel}`}
+                      className="h-16 w-full object-contain border rounded bg-white"
+                    />
+                    {u.name && (
+                      <div className="text-xs text-muted-foreground">{u.name}</div>
+                    )}
+                    {!gesperrt && (
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex-1"
+                          onClick={() => setOffen(rolle)}
+                        >
+                          Neu unterschreiben
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => entfernen(rolle)}
+                          aria-label={`Unterschrift ${titel} entfernen`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-muted-foreground">{hinweis}</p>
+                    {rolle === "kunde" && !gesperrt && (
+                      <Input
+                        value={kundenName}
+                        onChange={(e) => setKundenName(e.target.value)}
+                        placeholder="Name des Kunden (optional)"
+                        className="h-9 text-sm"
+                      />
+                    )}
+                    <Button
+                      size="sm"
+                      className="w-full"
+                      disabled={gesperrt}
+                      onClick={() => setOffen(rolle)}
+                    >
+                      {titel} unterschreibt
+                    </Button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <UnterschriftDialog
+          open={offen !== null}
+          onOpenChange={(o) => !o && setOffen(null)}
+          onSave={(dataUrl) => offen && speichern(offen, dataUrl)}
+          titel={offen === "kunde" ? "Unterschrift Kunde" : "Unterschrift Polier"}
+          busy={busy}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Aufmaß-Editor ────────────────────────────────────────────────────────
 
 function AufmassEditor({
   berichtId,
   aufmass,
-  pflicht,
   kannEditieren,
   onChange,
 }: {
   berichtId: string;
   aufmass: Database["public"]["Tables"]["bericht_aufmass"]["Row"][];
-  pflicht: boolean;
   kannEditieren: boolean;
   onChange: () => void;
 }) {
@@ -973,16 +1148,14 @@ function AufmassEditor({
   };
 
   return (
-    <Card className={pflicht && aufmass.length === 0 ? "border-amber-300" : undefined}>
+    <Card>
       <CardContent className="p-4 space-y-2">
         <div className="flex items-center justify-between">
           <Label className="text-sm font-semibold">
             Aufmaß ({aufmass.length})
-            {pflicht && (
-              <span className="text-amber-700 ml-1.5 text-xs">
-                Pflicht beim Regiebericht
-              </span>
-            )}
+            <span className="text-muted-foreground ml-1.5 text-xs font-normal">
+              optional
+            </span>
           </Label>
         </div>
         {aufmass.map((a, idx) => (
@@ -1456,6 +1629,7 @@ function StatusBar({
         taetigkeiten: bericht_full.taetigkeiten,
         aufmass: bericht_full.aufmass,
         fotos: fotoSignedUrls.filter((x): x is { signedUrl: string; bildunterschrift: string | null } => !!x),
+        unterschriften: bericht_full.unterschriften,
       });
 
       await updateMut.mutateAsync({
@@ -1488,15 +1662,9 @@ function StatusBar({
     );
 
   const freigeben = async () => {
-    // Validierung: Aufmaß-Pflicht beim Regiebericht
-    if (bericht.typ === "regiebericht" && bericht_full && bericht_full.aufmass.length === 0) {
-      if (
-        !window.confirm(
-          "Regiebericht ohne Aufmaß freigeben? Das ist meist nicht gewollt.",
-        )
-      )
-        return;
-    }
+    // Kein Aufmaß-Zwang: der Regiebericht lässt sich auch ohne freigeben.
+    // Früher stand hier eine Rückfrage — auf Wunsch aus der Baustelle
+    // entfallen, weil das Aufmaß oft erst später kommt.
     // Erst freigeben, dann PDF erzeugen (das PDF gehört zum freigegebenen
     // Bericht). Achtung: generatePdf wirft nie — Fehler kommen als Rückgabewert,
     // ein try/catch hier wäre toter Code. Schlägt die PDF-Erzeugung fehl, wird

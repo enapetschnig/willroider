@@ -17,6 +17,17 @@ type BerichtAuf = Database["public"]["Tables"]["bericht_aufmass"]["Row"];
 type BerichtFoto = Database["public"]["Tables"]["bericht_fotos"]["Row"];
 type BerichtAend = Database["public"]["Tables"]["bericht_aenderungen"]["Row"];
 
+/** Unterschrift am Bericht — Polier und/oder Kunde, beide freiwillig. */
+export interface BerichtUnterschrift {
+  id: string;
+  bericht_id: string;
+  rolle: "polier" | "kunde";
+  name: string | null;
+  unterschrift_data: string;
+  unterschrieben_von: string | null;
+  unterschrieben_am: string;
+}
+
 export interface BerichtFull {
   bericht: Bericht;
   mitarbeiter: BerichtMA[];
@@ -24,6 +35,7 @@ export interface BerichtFull {
   aufmass: BerichtAuf[];
   fotos: BerichtFoto[];
   aenderungen: BerichtAend[];
+  unterschriften: BerichtUnterschrift[];
 }
 
 export function useBericht(id: string | null | undefined) {
@@ -39,7 +51,8 @@ export function useBericht(id: string | null | undefined) {
            bericht_taetigkeiten(*),
            bericht_aufmass(*),
            bericht_fotos(*),
-           bericht_aenderungen(*)`,
+           bericht_aenderungen(*),
+           bericht_unterschriften(*)`,
         )
         .eq("id", id)
         .maybeSingle();
@@ -75,6 +88,7 @@ export function useBericht(id: string | null | undefined) {
         taetigkeiten: ((row.bericht_taetigkeiten ?? []) as BerichtTaet[]).sort(
           (a, b) => a.position - b.position,
         ),
+        unterschriften: (row.bericht_unterschriften ?? []) as BerichtUnterschrift[],
         aufmass: ((row.bericht_aufmass ?? []) as BerichtAuf[]).sort(
           (a, b) => a.position - b.position,
         ),
