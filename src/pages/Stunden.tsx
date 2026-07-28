@@ -54,6 +54,7 @@ import {
   type EintragRow,
 } from "@/components/stunden/zeiterfassungUi";
 import { StundenInput } from "@/components/stunden/StundenInput";
+import { MeineStundenListe } from "@/components/stunden/MeineStundenListe";
 import { StatusButtonsLeiste } from "@/components/stunden/StatusButtonsLeiste";
 import { ArtSection } from "@/components/stunden/ArtSection";
 import {
@@ -1207,86 +1208,11 @@ export default function Stunden() {
                   vom Büro freigegeben – nicht mehr änderbar
                 </span>
               </div>
-              {tageList.slice(0, 5).map((t) => {
-                const buchungStatus = t.tag.status;
-                const istFreigegeben =
-                  buchungStatus === "buero_freigabe" ||
-                  buchungStatus === "exportiert";
-                const istBestaetigt =
-                  buchungStatus === "ma_bestaetigt" ||
-                  buchungStatus === "zm_freigabe";
-                const istOffen = buchungStatus === "erfasst";
-                const istAbgelehnt = buchungStatus === "abgelehnt";
-                const dotClass = istFreigegeben
-                  ? "bg-emerald-500"
-                  : istBestaetigt
-                  ? "bg-sky-500"
-                  : istAbgelehnt
-                  ? "bg-red-500"
-                  : istOffen
-                  ? "bg-amber-500"
-                  : "bg-muted-foreground/40";
-                const statusLabel = istFreigegeben
-                  ? "freigegeben"
-                  : istBestaetigt
-                  ? "bestätigt"
-                  : istAbgelehnt
-                  ? "abgelehnt"
-                  : istOffen
-                  ? "offen"
-                  : (buchungStatus ?? "");
-                return (
-                  <div
-                    key={t.tag.id}
-                    className="flex items-center gap-2 text-xs rounded px-2 py-1.5 bg-muted/40"
-                  >
-                    <span
-                      className={`inline-block h-2 w-2 rounded-full shrink-0 ${dotClass}`}
-                      aria-hidden
-                    />
-                    <span className="font-bold tabular-nums shrink-0">
-                      {fmtH(Number(t.tag.netto_stunden))}
-                    </span>
-                    <span className="text-muted-foreground tabular-nums shrink-0">
-                      {new Date(t.tag.datum).toLocaleDateString("de-AT", {
-                        weekday: "short",
-                        day: "2-digit",
-                        month: "2-digit",
-                      })}
-                    </span>
-                    <Badge variant="outline" className="text-[10px]">
-                      {STATUS_LABELS[t.tag.tag_status]}
-                    </Badge>
-                    <Badge
-                      variant="outline"
-                      className={`text-[10px] ${
-                        istFreigegeben
-                          ? "border-emerald-400 text-emerald-800 bg-emerald-50"
-                          : istBestaetigt
-                          ? "border-sky-300 text-sky-800 bg-sky-50"
-                          : istAbgelehnt
-                          ? "border-red-300 text-red-800 bg-red-50"
-                          : istOffen
-                          ? "border-amber-300 text-amber-800 bg-amber-50"
-                          : ""
-                      }`}
-                    >
-                      {statusLabel}
-                    </Badge>
-                    <span className="flex-1" />
-                    {istOffen && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 w-7 p-0 text-destructive"
-                        onClick={() => onDeleteTag(t)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
-                  </div>
-                );
-              })}
+              <MeineStundenListe
+                tage={tageList}
+                maxAnzahl={5}
+                onDelete={onDeleteTag}
+              />
             </div>
           </CardContent>
         </Card>

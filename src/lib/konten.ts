@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { feiertagAt } from "@/lib/feiertage";
+import { ANGESTELLTEN_SOLL } from "@/lib/taetigkeitsbericht";
 import { localIso } from "@/lib/dateFmt";
 
 export function fmtTage(v: number | null | undefined): string {
@@ -69,7 +70,11 @@ export type TagessollKalender = {
   soll_so: number | null;
 };
 
-export type ArbeitszeitModell = "zimmerei_sommer" | "fix_40h" | "individuell";
+export type ArbeitszeitModell =
+  | "zimmerei_sommer"
+  | "fix_40h"
+  | "individuell"
+  | "angestellter";
 
 /** ISO-8601-konformer KW-Helper (Donnerstag-Regel). */
 export function isoToYearKw(date: Date): { jahr: number; kw: number } {
@@ -117,6 +122,11 @@ export function tagesSoll(
   }
   if (modell === "individuell") {
     return dow >= 1 && dow <= 5 ? tagesnorm * beschaeftigungsgrad : 0;
+  }
+  if (modell === "angestellter") {
+    // 8,5 Mo–Do, 5 Fr = 39 h. Der Arbeitszeitkalender gilt für die
+    // Arbeiter (Kurz-/Langwoche) und passt für Angestellte nicht.
+    return ANGESTELLTEN_SOLL[(dow + 6) % 7] * beschaeftigungsgrad;
   }
   // zimmerei_sommer
   const { jahr, kw } = isoToYearKw(d);
