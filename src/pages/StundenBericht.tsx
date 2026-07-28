@@ -223,10 +223,17 @@ export default function StundenBericht() {
         let label: string;
         let kst = "";
         if (e.art === "baustelle") {
-          key = `b:${e.baustelle_id ?? "none"}`;
-          const b = e.baustelle_id ? baustelleMap.get(e.baustelle_id) : null;
+          // Werk-Stunden laufen auf die Baustelle, für die vorgefertigt
+          // wurde; die Maschine steht in Klammern dahinter.
+          const zielId = (e as any).ziel_baustelle_id ?? e.baustelle_id;
+          key = `b:${zielId ?? "none"}`;
+          const b = zielId ? baustelleMap.get(zielId) : null;
           label = b?.bvh_name ?? "Baustelle";
           kst = b?.kostenstelle ?? "";
+          if ((e as any).ziel_baustelle_id && e.baustelle_id) {
+            const mName = baustelleMap.get(e.baustelle_id)?.bvh_name;
+            if (mName) label = `${label} (${mName})`;
+          }
         } else if (e.art === "firma") {
           key = "firma";
           label = "Firma";

@@ -22,6 +22,9 @@ export interface SaveEintrag {
   taetigkeit_id: string | null;
   taetigkeit_freitext: string | null;
   baustelle_id: string | null;
+  /** Nur bei Werk-/Hallenstunden: die Baustelle, FÜR die gearbeitet wird.
+   *  baustelle_id bleibt die Maschine — daran hängt der Taggeld-Ausschluss. */
+  ziel_baustelle_id?: string | null;
   stunden: number;
   notiz: string | null;
 }
@@ -174,6 +177,7 @@ export function useSaveStundenTag() {
             taetigkeit_id: t.taetigkeit_id,
             taetigkeit_freitext: t.taetigkeit_freitext,
             baustelle_id: t.baustelle_id,
+            ziel_baustelle_id: t.ziel_baustelle_id ?? null,
             stunden: t.stunden,
             notiz: t.notiz,
           })),

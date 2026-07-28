@@ -10,6 +10,10 @@ import type { StundenTagFull } from "@/hooks/useStundenTag";
 export interface SnapshotEintrag {
   art: string;
   baustelle_id: string | null;
+  /** Erst ab Juli 2026. Ältere Schnappschüsse haben das Feld nicht — beide
+   *  Seiten normalisieren fehlend und null gleich, damit Altberichte nicht
+   *  plötzlich als geändert (gelb) erscheinen. */
+  ziel_baustelle_id?: string | null;
   taetigkeit_id: string | null;
   taetigkeit_freitext: string | null;
   stunden: number | string;
@@ -22,6 +26,7 @@ function normEintrag(e: SnapshotEintrag): string {
   return [
     e.art,
     e.baustelle_id ?? "",
+    e.ziel_baustelle_id ?? "",
     e.taetigkeit_id ?? "",
     (e.taetigkeit_freitext ?? "").trim(),
     (Number(e.stunden) || 0).toFixed(2),

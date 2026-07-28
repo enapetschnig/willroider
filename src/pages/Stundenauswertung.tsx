@@ -371,9 +371,13 @@ export default function Stundenauswertung() {
   // ─── Baustellenauswertung ────────────────────────────────────────────
   const baustellenMitBuchungen = useMemo(() => {
     const ids = new Set<string>();
+    // Werk-Stunden zählen auf die Baustelle, für die vorgefertigt wurde.
+    // ziel_baustelle_id gewinnt, sonst wie bisher baustelle_id.
     for (const t of tage)
-      for (const tt of t.taetigkeiten)
-        if (tt.baustelle_id) ids.add(tt.baustelle_id);
+      for (const tt of t.taetigkeiten) {
+        const id = (tt as any).ziel_baustelle_id ?? tt.baustelle_id;
+        if (id) ids.add(id);
+      }
     return [...ids]
       .map((id) => ({ id, name: baustellenMap.get(id) ?? "Baustelle" }))
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -384,7 +388,8 @@ export default function Stundenauswertung() {
     const m = new Map<string, number>();
     for (const t of tage) {
       for (const tt of t.taetigkeiten) {
-        if (tt.baustelle_id === selectedBaustelle) {
+        const zielId = (tt as any).ziel_baustelle_id ?? tt.baustelle_id;
+        if (zielId === selectedBaustelle) {
           m.set(
             t.tag.mitarbeiter_id,
             (m.get(t.tag.mitarbeiter_id) ?? 0) + Number(tt.stunden ?? 0),

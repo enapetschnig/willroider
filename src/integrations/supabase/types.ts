@@ -818,6 +818,8 @@ export type Database = {
           taetigkeit_id: string | null;
           taetigkeit_freitext: string | null;
           baustelle_id: string | null;
+          /** Nur Werk/Halle: Baustelle, für die vorgefertigt wird. */
+          ziel_baustelle_id: string | null;
           stunden: number;
           notiz: string | null;
           created_at: string;

@@ -85,7 +85,10 @@ export const STATUS_OPTIONS: TagStatus[] = [
 export interface EintragRow {
   key: string;
   art: TagStatus;
+  /** Bei Werk-/Hallenstunden die Maschine, sonst die Baustelle. */
   baustelle_id: string | null;
+  /** Nur Werk/Halle: die Baustelle, für die vorgefertigt wird. */
+  ziel_baustelle_id?: string | null;
   taetigkeit_id: string | null;
   taetigkeit_freitext: string;
   stunden: number;
@@ -138,13 +141,18 @@ export interface ArtSectionData {
   art: TagStatus;
   /** Die Baustelle der Section (nur bei art=baustelle, sonst null). */
   baustelleId: string | null;
+  /** Nur Werk/Halle: die Baustelle, für die vorgefertigt wird. */
+  zielBaustelleId: string | null;
   rows: EintragRow[];
 }
 
 /** Gruppiert die Einträge eines Tages in Art-Sections.
- *  - Bei `baustelle`: Gruppierung nach `baustelle_id`. Zeilen mit
- *    `baustelle_id=null` bekommen je ihren eigenen Section-Key (mit ihrem
- *    `row.key`), damit zwei unausgefüllte Baustellen nicht mergen.
+ *  - Bei `baustelle`: Gruppierung nach `baustelle_id` UND `ziel_baustelle_id`.
+ *    Die Ziel-Baustelle gehört in den Schlüssel, sonst verschmölzen zwei
+ *    Ziele an derselben Maschine zu einer Section und man könnte sie nicht
+ *    mehr getrennt zuordnen. Zeilen mit `baustelle_id=null` bekommen je
+ *    ihren eigenen Section-Key (mit ihrem `row.key`), damit zwei
+ *    unausgefüllte Baustellen nicht mergen.
  *  - Bei anderen Arten: maximal eine Section pro Art. */
 export function gruppiereSections(eintraege: EintragRow[]): ArtSectionData[] {
   const out: ArtSectionData[] = [];
@@ -152,7 +160,9 @@ export function gruppiereSections(eintraege: EintragRow[]): ArtSectionData[] {
     if (art === "baustelle") {
       const groups = new Map<string, EintragRow[]>();
       for (const r of eintraege.filter((e) => e.art === "baustelle")) {
-        const k = r.baustelle_id ?? `null:${r.key}`;
+        const k = r.baustelle_id
+          ? `${r.baustelle_id}|${r.ziel_baustelle_id ?? ""}`
+          : `null:${r.key}`;
         const arr = groups.get(k);
         if (arr) arr.push(r);
         else groups.set(k, [r]);
@@ -162,13 +172,14 @@ export function gruppiereSections(eintraege: EintragRow[]): ArtSectionData[] {
           key: `baustelle:${key}`,
           art,
           baustelleId: rows[0]?.baustelle_id ?? null,
+          zielBaustelleId: rows[0]?.ziel_baustelle_id ?? null,
           rows,
         });
       }
     } else {
       const rows = eintraege.filter((e) => e.art === art);
       if (rows.length > 0) {
-        out.push({ key: art, art, baustelleId: null, rows });
+        out.push({ key: art, art, baustelleId: null, zielBaustelleId: null, rows });
       }
     }
   }

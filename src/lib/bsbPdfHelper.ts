@@ -150,10 +150,19 @@ export async function buildBerichtPdf(
       let label: string;
       let kst = "";
       if (e.art === "baustelle") {
-        key = `b:${e.baustelle_id ?? "none"}`;
-        const b = e.baustelle_id ? baustelleMap.get(e.baustelle_id) : null;
+        // Werk-Stunden laufen auf die Baustelle, für die vorgefertigt
+        // wurde; die Maschine wandert in den Tätigkeitstext. Genau das
+        // meint „Stunden müssen auf die Baustelle gebucht werden".
+        const zielId = e.ziel_baustelle_id ?? e.baustelle_id;
+        key = `b:${zielId ?? "none"}`;
+        const b = zielId ? baustelleMap.get(zielId) : null;
         label = (b as any)?.bvh_name ?? "Baustelle";
         kst = (b as any)?.kostenstelle ?? "";
+        if (e.ziel_baustelle_id && e.baustelle_id) {
+          const maschine = baustelleMap.get(e.baustelle_id);
+          const mName = (maschine as any)?.bvh_name;
+          if (mName) label = `${label} (${mName})`;
+        }
       } else if (e.art === "firma") {
         key = "firma";
         label = "Firma";

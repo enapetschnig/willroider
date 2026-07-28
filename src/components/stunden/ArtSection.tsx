@@ -31,6 +31,8 @@ export function ArtSection({
   onAddSplit,
   onSectionBaustelle,
   kategorie = "baustelle",
+  zielBaustellen,
+  onSectionZielBaustelle,
 }: {
   art: TagStatus;
   rows: EintragRow[];
@@ -42,11 +44,17 @@ export function ArtSection({
   onSectionBaustelle: (baustelle_id: string | null) => void;
   /** Filtert Combobox + setzt Label: 'maschine' für Halle-Erfassung. */
   kategorie?: "baustelle" | "maschine";
+  /** Nur Werk/Halle: alle echten Baustellen für die Ziel-Auswahl.
+   *  Fehlt die Liste, erscheint das zweite Feld nicht. */
+  zielBaustellen?: Baustelle[];
+  onSectionZielBaustelle?: (ziel_baustelle_id: string | null) => void;
 }) {
   const Icon = STATUS_ICONS[art];
   const arbeit = istArbeitArt(art);
   const sectionBaustelleId =
     art === "baustelle" ? rows[0]?.baustelle_id ?? null : null;
+  const sectionZielId =
+    art === "baustelle" ? rows[0]?.ziel_baustelle_id ?? null : null;
   const istMaschine = kategorie === "maschine";
   const artLabel =
     istMaschine && art === "baustelle" ? "Werk/Maschine" : STATUS_LABELS[art];
@@ -72,6 +80,25 @@ export function ArtSection({
             allowClear={!istMaschine}
             kategorie={kategorie}
           />
+
+          {/* Werk/Halle: für welche Baustelle wird hier vorgefertigt?
+              Die Stunden zählen dann auf diese Baustelle — die Maschine
+              bleibt oben stehen und sorgt weiterhin dafür, dass es für
+              Werkstattarbeit kein Taggeld gibt. */}
+          {istMaschine && zielBaustellen && onSectionZielBaustelle && (
+            <div className="mt-2 space-y-1">
+              <span className="text-[11px] font-medium text-muted-foreground">
+                Für welche Baustelle? <span className="font-normal">(optional)</span>
+              </span>
+              <BaustelleCombobox
+                baustellen={zielBaustellen}
+                value={sectionZielId ?? ""}
+                onChange={(v) => onSectionZielBaustelle(v || null)}
+                allowClear
+                kategorie="baustelle"
+              />
+            </div>
+          )}
         </div>
       )}
 

@@ -85,6 +85,22 @@ export default function HalleErfassung() {
     })();
   }, []);
 
+  // Echte Baustellen für „für welche Baustelle wird hier vorgefertigt".
+  // Die Stunden zählen dann dort mit; die Maschine bleibt in baustelle_id
+  // und sorgt weiterhin dafür, dass Werkstattarbeit kein Taggeld erzeugt.
+  const [zielBaustellen, setZielBaustellen] = useState<Baustelle[]>([]);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("baustellen")
+        .select("*")
+        .neq("kategorie", "maschine")
+        .in("status", ["aktiv", "geplant"])
+        .order("bvh_name");
+      setZielBaustellen((data as Baustelle[]) ?? []);
+    })();
+  }, []);
+
   const maschinenIds = useMemo(
     () => new Set(maschinen.map((m) => m.id)),
     [maschinen],
@@ -139,6 +155,7 @@ export default function HalleErfassung() {
         key: newKey(),
         art: tt.art,
         baustelle_id: tt.baustelle_id,
+        ziel_baustelle_id: (tt as any).ziel_baustelle_id ?? null,
         taetigkeit_id: tt.taetigkeit_id,
         taetigkeit_freitext: tt.taetigkeit_freitext ?? "",
         stunden: Number(tt.stunden),
@@ -207,6 +224,15 @@ export default function HalleErfassung() {
       es.map((r) => (set.has(r.key) ? { ...r, baustelle_id } : r)),
     );
   };
+  const setSectionZielBaustelle = (
+    rowKeys: string[],
+    ziel_baustelle_id: string | null,
+  ) => {
+    const set = new Set(rowKeys);
+    setEintraege((es) =>
+      es.map((r) => (set.has(r.key) ? { ...r, ziel_baustelle_id } : r)),
+    );
+  };
   const addWeitereMaschine = () =>
     setEintraege((es) => [
       ...es,
@@ -264,6 +290,8 @@ export default function HalleErfassung() {
                 ? e.taetigkeit_freitext.trim() || null
                 : null,
             baustelle_id: e.art === "baustelle" ? e.baustelle_id : null,
+            ziel_baustelle_id:
+              e.art === "baustelle" ? e.ziel_baustelle_id ?? null : null,
             stunden: Number(e.stunden),
             notiz: e.notiz.trim() || null,
           };
@@ -280,6 +308,7 @@ export default function HalleErfassung() {
             taetigkeit_id: tt.taetigkeit_id,
             taetigkeit_freitext: tt.taetigkeit_freitext,
             baustelle_id: tt.baustelle_id,
+            ziel_baustelle_id: (tt as any).ziel_baustelle_id ?? null,
             stunden: Number(tt.stunden),
             notiz: tt.notiz,
           })) ?? [];
@@ -455,6 +484,10 @@ export default function HalleErfassung() {
                   setSectionBaustelle(s.rows.map((r) => r.key), b)
                 }
                 kategorie="maschine"
+                zielBaustellen={zielBaustellen}
+                onSectionZielBaustelle={(z) =>
+                  setSectionZielBaustelle(s.rows.map((r) => r.key), z)
+                }
               />
               {idx === lastBaustelleIdx && (
                 <Button

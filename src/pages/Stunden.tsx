@@ -488,6 +488,7 @@ export default function Stunden() {
             key: newKey(),
             art: tt.art,
             baustelle_id: tt.baustelle_id,
+            ziel_baustelle_id: (tt as any).ziel_baustelle_id ?? null,
             taetigkeit_id: tt.taetigkeit_id,
             taetigkeit_freitext: tt.taetigkeit_freitext ?? "",
             stunden: Number(tt.stunden),
