@@ -27,6 +27,7 @@ import { UrlaubAntraegeCard } from "@/components/UrlaubAntragDialog";
 import { KrankmeldungenCard } from "@/components/MeinTag/KrankmeldungenCard";
 import { LohnzettelCard } from "@/components/MeinTag/LohnzettelCard";
 import { MeineStundenCard } from "@/components/MeinTag/MeineStundenCard";
+import { UnterweisungOffenCard } from "@/components/MeinTag/UnterweisungOffenCard";
 import { TagesplanPreview } from "@/components/TagesplanPreview";
 import {
   Dialog,
@@ -667,6 +668,10 @@ export default function MeinTag() {
 
       {/* Heutige Einteilung aus Tagesplanung */}
       <HeuteEinteilungCard userId={user!.id} />
+
+      {/* Offene Unterweisung zuerst — ohne sie darf man nicht auf die
+          Baustelle, und ab Ablauf der Karenz sperrt die App. */}
+      <UnterweisungOffenCard />
 
       {/* Geschriebene Stunden — aufklappbar, mit Ist/Soll des Monats */}
       <MeineStundenCard />

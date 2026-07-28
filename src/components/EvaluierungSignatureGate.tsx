@@ -8,10 +8,17 @@ import { getUnterweisung } from "@/lib/unterweisungen";
 import type { EvaluierungTyp, Json } from "@/integrations/supabase/types";
 import { localIso, werktageSeit } from "@/lib/dateFmt";
 
-/** Karenzfrist in Werktagen — danach geht der harte Auto-Overlay an. */
+/**
+ * Karenzfrist in Werktagen, wenn die Unterweisung selbst keine hinterlegt
+ * hat — danach geht die harte Vollbild-Sperre an.
+ *
+ * Steht jetzt je Unterweisung in `evaluierungen.karenz_werktage`. „Ab dem
+ * ersten Tag sperren" ist damit eine Zahl in der Verwaltung und kein
+ * Programmiereinsatz mehr.
+ */
 export const SIGNATURE_KARENZ_WERKTAGE = 3;
 
-type OpenSignature = {
+export type OpenSignature = {
   unterschriftId: string;
   evaluierungId: string;
   typ: EvaluierungTyp;
@@ -20,14 +27,16 @@ type OpenSignature = {
   baustelleName: string;
   kostenstelle: string | null;
   datum: string;
+  /** Werktage Karenz, bis die App gesperrt wird. 0 = ab dem ersten Tag. */
+  karenzWerktage: number;
 };
 
 /** Lädt offene Unterschriften (status='offen') des angemeldeten MA. */
-async function ladeOffene(userId: string): Promise<OpenSignature[]> {
+export async function ladeOffeneUnterschriften(userId: string): Promise<OpenSignature[]> {
   const { data } = await supabase
     .from("evaluierung_unterschriften")
     .select(
-      "id, evaluierung_id, evaluierungen(id, typ, checkliste, notizen, datum, baustelle_id, baustellen(bvh_name, kostenstelle))",
+      "id, evaluierung_id, evaluierungen(id, typ, checkliste, notizen, datum, karenz_werktage, baustelle_id, baustellen(bvh_name, kostenstelle))",
     )
     .eq("mitarbeiter_id", userId)
     .eq("status", "offen");
@@ -40,6 +49,8 @@ async function ladeOffene(userId: string): Promise<OpenSignature[]> {
     baustelleName: r.evaluierungen?.baustellen?.bvh_name ?? "Baustelle",
     kostenstelle: r.evaluierungen?.baustellen?.kostenstelle ?? null,
     datum: r.evaluierungen?.datum ?? localIso(),
+    karenzWerktage:
+      r.evaluierungen?.karenz_werktage ?? SIGNATURE_KARENZ_WERKTAGE,
   }));
 }
 
@@ -75,15 +86,17 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
 
   const load = useCallback(async () => {
     if (!user) return;
-    setPending(await ladeOffene(user.id));
+    setPending(await ladeOffeneUnterschriften(user.id));
   }, [user]);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  // Jede Unterweisung bringt ihre eigene Karenz mit; gesperrt wird, sobald
+  // die erste davon abgelaufen ist.
   const ueberfaellig = pending.some(
-    (p) => werktageSeit(p.datum) >= SIGNATURE_KARENZ_WERKTAGE,
+    (p) => werktageSeit(p.datum) >= p.karenzWerktage,
   );
 
   if (!user || pending.length === 0 || !ueberfaellig) {
@@ -127,7 +140,7 @@ function SignatureOverlay({
     if (!userId) return;
     if (pending.length === 0) {
       (async () => {
-        const list = await ladeOffene(userId);
+        const list = await ladeOffeneUnterschriften(userId);
         setPending(list);
         if (list.length === 0) onAllDone();
       })();
