@@ -27,20 +27,23 @@ const STATUS_LABEL: Record<TagStatus, string> = {
   urlaub: "Urlaub",
   schlechtwetter: "Schlechtwetter",
   feiertag: "Feiertag",
+  berufsschule: "Berufsschule",
 };
 const ABWESEND_KUERZEL: Partial<Record<TagStatus, string>> = {
   urlaub: "U",
   krank: "K",
   schlechtwetter: "SW",
   feiertag: "F",
+  berufsschule: "BS",
 };
 const ART_ORDER: Record<TagStatus, number> = {
   baustelle: 0,
   firma: 1,
-  urlaub: 2,
-  krank: 3,
-  schlechtwetter: 4,
-  feiertag: 5,
+  berufsschule: 2,
+  urlaub: 3,
+  krank: 4,
+  schlechtwetter: 5,
+  feiertag: 6,
 };
 
 interface RasterRow {

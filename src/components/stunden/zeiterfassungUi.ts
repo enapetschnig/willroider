@@ -11,6 +11,7 @@ import {
   CloudRain,
   Factory,
   Calendar,
+  GraduationCap,
 } from "lucide-react";
 import type { TagStatus } from "@/integrations/supabase/types";
 
@@ -21,6 +22,7 @@ export const STATUS_LABELS: Record<TagStatus, string> = {
   urlaub: "Urlaub",
   schlechtwetter: "Schlechtwetter",
   feiertag: "Feiertag",
+  berufsschule: "Berufsschule",
 };
 
 export const STATUS_ICONS = {
@@ -30,6 +32,7 @@ export const STATUS_ICONS = {
   urlaub: Sun,
   schlechtwetter: CloudRain,
   feiertag: Calendar,
+  berufsschule: GraduationCap,
 };
 
 /** Solider Farb-Stil (Knöpfe + Badges, aktiver Zustand). */
@@ -40,6 +43,7 @@ export const STATUS_COLORS: Record<TagStatus, string> = {
   urlaub: "bg-amber-500 text-white border-amber-500",
   schlechtwetter: "bg-sky-500 text-white border-sky-500",
   feiertag: "bg-violet-500 text-white border-violet-500",
+  berufsschule: "bg-teal-600 text-white border-teal-600",
 };
 
 /** Outline-Stil (Top-Toggle inaktiv) — gleiche Farbe, transparenter Hintergrund. */
@@ -50,6 +54,7 @@ export const STATUS_OUTLINE: Record<TagStatus, string> = {
   urlaub: "bg-background text-amber-700 border-amber-200",
   schlechtwetter: "bg-background text-sky-700 border-sky-200",
   feiertag: "bg-background text-violet-700 border-violet-200",
+  berufsschule: "bg-background text-teal-700 border-teal-200",
 };
 
 /** Linke Akzent-Border je Eintrags-Art (für Section-Karten). */
@@ -60,19 +65,25 @@ export const ART_BORDER: Record<TagStatus, string> = {
   urlaub: "border-l-amber-500",
   schlechtwetter: "border-l-sky-500",
   feiertag: "border-l-violet-500",
+  berufsschule: "border-l-teal-600",
 };
 
 /** Reihenfolge, in der Art-Sections im MA-Block dargestellt werden. */
 export const ART_REIHENFOLGE: TagStatus[] = [
   "baustelle",
   "firma",
+  "berufsschule",
   "urlaub",
   "krank",
   "schlechtwetter",
   "feiertag",
 ];
 
-/** Auswahl für die Top-Toggles (ohne Feiertag — wird automatisch vergeben). */
+/** Auswahl für die Top-Toggles in der Stundenerfassung.
+ *  Ohne Feiertag (wird automatisch vergeben) und ohne Berufsschule —
+ *  die wird zentral im Abwesenheits-Fenster der Arbeitsplanung gepflegt,
+ *  damit es eine Pflegestelle bleibt. Angezeigt wird sie hier trotzdem,
+ *  falls der Tag schon so eingetragen ist. */
 export const STATUS_OPTIONS: TagStatus[] = [
   "baustelle",
   "firma",

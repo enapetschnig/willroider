@@ -217,7 +217,7 @@ export function PoliereinsatzView({
         .select("mitarbeiter_id, datum, tag_status")
         // Nicht nur Urlaub: ein Krankenstand blieb hier sonst unsichtbar und
         // der Polier plante jemanden ein, der gar nicht da ist.
-        .in("tag_status", ["urlaub", "krank", "schlechtwetter"])
+        .in("tag_status", ["urlaub", "krank", "schlechtwetter", "berufsschule"])
         .gte("datum", rangeStartIso)
         .lte("datum", rangeEndIso)
         // PostgREST kappt standardmäßig bei 1000 Zeilen — bei vielen
@@ -394,11 +394,13 @@ export function PoliereinsatzView({
     urlaub: "#0891b2",
     krank: "#ef4444",
     schlechtwetter: "#f59e0b",
+    berufsschule: "#0d9488",
   };
   const ABW_LABEL: Record<string, string> = {
     urlaub: "Urlaub",
     krank: "Krank",
     schlechtwetter: "Schlechtwetter",
+    berufsschule: "Berufsschule",
   };
 
   // ─── Gruppen: Partien mit Leiter oder Einsätzen ──────────────────────
@@ -458,7 +460,7 @@ export function PoliereinsatzView({
         supabase
           .from("stunden_tage")
           .select("mitarbeiter_id, datum, tag_status")
-          .in("tag_status", ["urlaub", "krank", "schlechtwetter"])
+          .in("tag_status", ["urlaub", "krank", "schlechtwetter", "berufsschule"])
           .gte("datum", pdfVon)
           .lte("datum", pdfBis)
           .range(0, 9999),

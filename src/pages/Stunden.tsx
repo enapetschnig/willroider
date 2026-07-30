@@ -1104,8 +1104,10 @@ export default function Stunden() {
                 <span className="font-medium">
                   {ma.vorname} {ma.nachname}:
                 </span>{" "}
+                {/* STATUS_LABELS statt eigener Liste — sonst stand hier bei
+                    einer neuen Art der rohe Datenbank-Wert. */}
                 {tagStatus
-                  ? ({ urlaub: "Urlaub", krank: "Krank", schlechtwetter: "Schlechtwetter", feiertag: "Feiertag" }[tagStatus] ?? tagStatus) +
+                  ? (STATUS_LABELS[tagStatus as TagStatus] ?? tagStatus) +
                     (h > 0 ? ` + ${fmtH(h)}` : "")
                   : fmtH(h)}
               </li>

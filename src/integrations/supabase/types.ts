@@ -30,7 +30,16 @@ export type ZaBuchungArt =
   | 'korrektur' | 'auszahlung';
 
 // Zeiterfassung-Redesign (Phase A)
-export type TagStatus = 'baustelle' | 'firma' | 'krank' | 'urlaub' | 'schlechtwetter' | 'feiertag';
+export type TagStatus =
+  | 'baustelle'
+  | 'firma'
+  | 'krank'
+  | 'urlaub'
+  | 'schlechtwetter'
+  | 'feiertag'
+  /** Berufsschultag eines Lehrlings — zählt als Arbeitszeit (§ 9 BAG),
+   *  wird nur im Abwesenheits-Fenster der Arbeitsplanung erfasst. */
+  | 'berufsschule';
 export type BuchungStatus =
   | 'erfasst'
   | 'ma_bestaetigt'

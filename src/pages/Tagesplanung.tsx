@@ -300,7 +300,7 @@ export default function Tagesplanung() {
       .select("id")
       .in("mitarbeiter_id", anfassbar)
       .eq("datum", datum)
-      .in("tag_status", ["urlaub", "krank", "schlechtwetter", "feiertag"])
+      .in("tag_status", ["urlaub", "krank", "schlechtwetter", "feiertag", "berufsschule"])
       .in("status", ["erfasst", "ma_bestaetigt"]);
     const ids = (tage ?? []).map((t: any) => t.id as string);
     if (ids.length === 0) return { entfernt: 0, ausAntrag };
@@ -649,7 +649,7 @@ export default function Tagesplanung() {
         .from("stunden_tage")
         .select("mitarbeiter_id")
         .eq("datum", datum)
-        .in("tag_status", ["urlaub", "krank", "schlechtwetter"]),
+        .in("tag_status", ["urlaub", "krank", "schlechtwetter", "berufsschule"]),
       supabase
         .from("urlaubsantraege")
         .select("mitarbeiter_id")

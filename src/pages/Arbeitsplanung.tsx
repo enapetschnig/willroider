@@ -74,6 +74,7 @@ const FEHLZEIT_LABEL: Record<string, string> = {
   K: "Krank",
   F: "Feiertag",
   SW: "Schlechtwetter",
+  BS: "Berufsschule",
   "U?": "Urlaub beantragt",
 };
 const FEHLZEIT_COLOR: Record<string, string> = {
@@ -81,6 +82,7 @@ const FEHLZEIT_COLOR: Record<string, string> = {
   K: "#ef4444",
   F: "#8b5cf6",
   SW: "#f59e0b",
+  BS: "#0d9488",
   "U?": "#f59e0b",
 };
 // Mapping Planungs-Code → stunden_tage.tag_status (Enum der Zeiterfassung).
@@ -91,6 +93,11 @@ const FEHLZEIT_TAG_STATUS: Record<string, TagStatus> = {
   K: "krank",
   F: "feiertag",
   SW: "schlechtwetter",
+  // Berufsschultag eines Lehrlings. Zählt als Arbeitszeit (§ 9 BAG) —
+  // der Monatsabschluss schreibt jeder Nicht-Arbeits-Art das Tages-Soll
+  // gut, es entsteht also kein Minus im Zeitausgleich. Vom Urlaub wird
+  // nichts abgezogen; das hängt allein an Einträgen mit art = 'urlaub'.
+  BS: "berufsschule",
 };
 // Rück-Mapping tag_status → Planungs-Code (für Anzeige im Gantt)
 const TAG_STATUS_CODE: Record<string, string> = {
@@ -98,6 +105,7 @@ const TAG_STATUS_CODE: Record<string, string> = {
   krank: "K",
   feiertag: "F",
   schlechtwetter: "SW",
+  berufsschule: "BS",
 };
 const FEHLZEIT_TAG_STATI = Object.keys(TAG_STATUS_CODE) as TagStatus[];
 

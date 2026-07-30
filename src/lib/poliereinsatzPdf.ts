@@ -49,7 +49,7 @@ export type PdfAbwesenheit = {
   /** Voller Name für den unteren Block. */
   vollname: string;
   partieId: string | null;
-  /** ISO-Datum → urlaub | krank | schlechtwetter */
+  /** ISO-Datum → urlaub | krank | schlechtwetter | berufsschule */
   tage: Map<string, string>;
   /** Eigene Farbe (Bauleiter) — sonst die Abwesenheits-Farbe. */
   planungsfarbe?: string | null;

@@ -30,7 +30,7 @@ export interface PlanEintrag {
   einteilung_id: string | null;
   quelle: PlanQuelle;
   abwesend: boolean;
-  /** "urlaub" | "krank" | "schlechtwetter", sonst null. */
+  /** "urlaub" | "krank" | "schlechtwetter" | "berufsschule", sonst null. */
   abwesenheit_art: string | null;
 }
 

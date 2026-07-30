@@ -83,7 +83,7 @@ export function useTagesplanung(datum: string) {
           .from("stunden_tage")
           .select("mitarbeiter_id, tag_status, datum")
           .eq("datum", datum)
-          .in("tag_status", ["urlaub", "krank", "schlechtwetter"]),
+          .in("tag_status", ["urlaub", "krank", "schlechtwetter", "berufsschule"]),
         // Neue Tabellen — defensiv, falls Migration noch nicht durchgelaufen
         supabase
           .from("urlaubsantraege")
