@@ -80,7 +80,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [{ data: prof }, { data: roleData }] = await Promise.all([
       supabase
         .from("profiles")
-        .select("id, vorname, nachname, email, is_active, is_partieleiter, partie_id, pers_nr")
+        // zeiterfassung_typ steuert die Sichtbarkeit des Tätigkeitsberichts
+        // in der Seitenleiste — es fehlte hier, wodurch istAngestellter für
+        // ALLE false war. Aufgefallen erst, als das Büro das Fremdzugriffs-
+        // Recht verlor und die zweite Hälfte der Bedingung allein trug.
+        .select(
+          "id, vorname, nachname, email, is_active, is_partieleiter, partie_id, pers_nr, zeiterfassung_typ, fahrtenbuch_kennzeichen",
+        )
         .eq("id", userId)
         .maybeSingle(),
       supabase.from("user_roles").select("role").eq("user_id", userId).maybeSingle(),
