@@ -1,10 +1,13 @@
 /**
  * Tätigkeitsbericht — Zeiterfassung der Angestellten.
  *
- * Nachbau der alten Excel: Matrix Kostenstelle × Tag, Periode 21.–20.,
- * darunter die Summenzeilen Zwischensumme / Urlaub / Sonderurlaub /
- * Krankheit / Feiertag / Stundensumme / Sollstunden / DELTA, dann Taggeld,
- * Kilometer und das Unterschriftenfeld.
+ * Nachbau der Excel-Vorlage (Tätigkeitsbericht_Vorlage.xlsx): Matrix
+ * Kostenstelle × Tag, Periode 21.–20., darunter die Summenzeilen, dann
+ * Taggeld, Kilometer und die Unterschrift. Farben und Rahmen kommen aus
+ * TB_FARBEN — Bildschirm und PDF nutzen dieselben Werte.
+ *
+ * Zweiter Reiter: das Fahrtenbuch derselben Periode. Seine Kilometer
+ * fließen direkt in die Zeile „gefahrene km" des Berichts.
  *
  * Gespeichert wird in `stunden_tage` + `stunden_taetigkeiten` — dieselben
  * Tabellen wie die herkömmliche Erfassung. Fremde Einträge desselben Tages
@@ -12,7 +15,7 @@
  * erhalten; das Muster stammt aus HalleErfassung.tsx.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,14 +25,15 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { ChevronLeft, ChevronRight, Loader2, Plus, Printer, Trash2, Users } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Pen, Plus, Printer, Trash2, Users } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { useStundenTageList, useSaveStundenTag, type SaveEintrag } from "@/hooks/useStundenTag";
+import { useStundenTageList, useSaveStundenTag, useDeleteStundenTag, type SaveEintrag } from "@/hooks/useStundenTag";
 import { localIso } from "@/lib/dateFmt";
 import {
   ANGESTELLTEN_SOLL,
+  TB_FARBEN,
   UEBERSTUNDEN_GRENZE,
   UEBERSTUNDEN_WARNUNG,
   WOCHENTAG_KURZ,
@@ -39,14 +43,20 @@ import {
   periodeVerschieben,
   periodeVonDatum,
   r2,
+  tagSpaltenFarbe,
   tagesBeschriftung,
   wochentagIndex,
   type BerichtZeile,
   type Periode,
 } from "@/lib/taetigkeitsbericht";
-import { makeTaetigkeitsberichtPdf } from "@/lib/taetigkeitsberichtPdf";
+import {
+  makeFahrtenbuchPdf,
+  makeTaetigkeitsberichtPdf,
+} from "@/lib/taetigkeitsberichtPdf";
 import { aufStundenRaster } from "@/components/stunden/zeiterfassungUi";
-import type { Database } from "@/integrations/supabase/types";
+import { UnterschriftDialog } from "@/components/UnterschriftDialog";
+import { FahrtenbuchTab, type FahrtRow } from "@/components/taetigkeitsbericht/FahrtenbuchTab";
+import type { Database, TagStatus } from "@/integrations/supabase/types";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 
@@ -57,26 +67,28 @@ const z = (n: number | null | undefined): string => {
 };
 
 // ─── Excel-Optik ───────────────────────────────────────────────────────
-// Serifenschrift, durchgehend dünne schwarze Linien, keine Rundungen.
+// Serifenschrift, feine schwarze Linien; die Blöcke (Kopf, Summen) trennen
+// sich über stärkere Rahmen — wie in der Vorlage.
 const SERIF = '"Times New Roman", Times, Georgia, serif';
 const LINIE = "1px solid #000";
 const td: React.CSSProperties = {
   border: LINIE,
-  padding: "1px 3px",
+  padding: "2px 4px",
   fontFamily: SERIF,
-  fontSize: 12,
-  lineHeight: 1.25,
+  fontSize: 13,
+  lineHeight: 1.3,
   whiteSpace: "nowrap",
 };
-const tdZahl: React.CSSProperties = { ...td, textAlign: "right", width: 34, minWidth: 34 };
+const tdZahl: React.CSSProperties = { ...td, textAlign: "right", minWidth: 34 };
 const tdLabel: React.CSSProperties = { ...td, textAlign: "left", fontWeight: 700 };
 
 export default function Taetigkeitsbericht() {
-  const { user, profile, hasPermission } = useAuth();
+  const { user, profile, isAdmin, hasPermission } = useAuth();
   const { toast } = useToast();
   const darfFremde = hasPermission("stunden.taetigkeitsbericht");
 
   const [periode, setPeriode] = useState<Periode>(() => periodeVonDatum(localIso()));
+  const [tab, setTab] = useState<"bericht" | "fahrtenbuch">("bericht");
   const [maId, setMaId] = useState<string>("");
   const [angestellte, setAngestellte] = useState<Profile[]>([]);
   const [zeilenStamm, setZeilenStamm] = useState<BerichtZeile[]>([]);
@@ -85,6 +97,8 @@ export default function Taetigkeitsbericht() {
   const [pickerOffen, setPickerOffen] = useState(false);
 
   const zielMa = maId || user?.id || "";
+  const istEigener = zielMa === user?.id;
+  const kannBearbeiten = istEigener || isAdmin;
 
   // ─── Stammdaten ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -117,6 +131,67 @@ export default function Taetigkeitsbericht() {
     return m;
   }, [tageList]);
 
+  // ─── Fahrtenbuch der Periode ─────────────────────────────────────────
+  const [fahrten, setFahrten] = useState<FahrtRow[]>([]);
+  const ladeFahrten = useCallback(async () => {
+    if (!zielMa) return;
+    const { data } = await supabase
+      .from("fahrtenbuch_eintraege" as any)
+      .select("*")
+      .eq("mitarbeiter_id", zielMa)
+      .gte("datum", periode.von)
+      .lte("datum", periode.bis)
+      .order("datum")
+      .order("abfahrt", { ascending: true, nullsFirst: true });
+    setFahrten((data as any as FahrtRow[]) ?? []);
+  }, [zielMa, periode.von, periode.bis]);
+  useEffect(() => {
+    ladeFahrten();
+  }, [ladeFahrten]);
+
+  // ─── Unterschrift der Periode ────────────────────────────────────────
+  const [unterschrift, setUnterschrift] = useState<{ data: string; am: string } | null>(null);
+  const [signOffen, setSignOffen] = useState(false);
+  const ladeUnterschrift = useCallback(async () => {
+    if (!zielMa) return;
+    const { data } = await supabase
+      .from("taetigkeitsbericht_unterschriften" as any)
+      .select("unterschrift_data, unterschrieben_am")
+      .eq("mitarbeiter_id", zielMa)
+      .eq("jahr", periode.jahr)
+      .eq("monat", periode.monat)
+      .maybeSingle();
+    const row = data as any;
+    setUnterschrift(
+      row ? { data: row.unterschrift_data, am: row.unterschrieben_am } : null,
+    );
+  }, [zielMa, periode.jahr, periode.monat]);
+  useEffect(() => {
+    ladeUnterschrift();
+  }, [ladeUnterschrift]);
+
+  async function speichereUnterschrift(dataUrl: string) {
+    const { error } = await supabase
+      .from("taetigkeitsbericht_unterschriften" as any)
+      .upsert(
+        {
+          mitarbeiter_id: zielMa,
+          jahr: periode.jahr,
+          monat: periode.monat,
+          unterschrift_data: dataUrl,
+          unterschrieben_am: new Date().toISOString(),
+        },
+        { onConflict: "mitarbeiter_id,jahr,monat" },
+      );
+    if (error) {
+      toast({ variant: "destructive", title: "Nicht gespeichert", description: error.message });
+      return;
+    }
+    setSignOffen(false);
+    ladeUnterschrift();
+    toast({ title: "Unterschrift gespeichert" });
+  }
+
   // ─── Matrix aus den geladenen Tagen aufbauen ─────────────────────────
   /** `zellen[zeilenKey][iso]` = Stunden */
   const zellen = useMemo(() => {
@@ -137,8 +212,9 @@ export default function Taetigkeitsbericht() {
     return out;
   }, [tageList]);
 
-  /** Abwesenheiten — nur Anzeige. Urlaub/Krank kommen aus Antrag bzw.
-   *  Krankmeldung, Feiertag aus dem Kalender, Sonderurlaub aus dem Stamm. */
+  /** Abwesenheiten. Urlaub ist hier BEARBEITBAR (eigene Zeile in der
+   *  Tabelle); Krankheit kommt aus der Krankmeldung, Feiertag aus dem
+   *  Kalender, Sonderurlaub aus dem Stamm. */
   const sonder = useMemo(() => {
     const leer = () => ({} as Record<string, number>);
     const out: Record<string, Record<string, number>> = {
@@ -162,8 +238,14 @@ export default function Taetigkeitsbericht() {
     for (const t of tageList) {
       const iso = t.tag.datum;
       const st = t.tag.tag_status;
-      if (st === "urlaub") out.urlaub[iso] = Number(t.tag.netto_stunden) || sollVon(iso);
-      else if (st === "krank") out.krankheit[iso] = Number(t.tag.netto_stunden) || sollVon(iso);
+      // Urlaub: erst die stundenweisen Einträge (bearbeitbar), dann der
+      // 0-h-Marker aus dem genehmigten Antrag (zeigt das Tages-Soll).
+      const urlaubStd = t.taetigkeiten
+        .filter((e) => e.art === "urlaub")
+        .reduce((a, e) => a + Number(e.stunden), 0);
+      if (urlaubStd > 0) out.urlaub[iso] = r2(urlaubStd);
+      else if (st === "urlaub") out.urlaub[iso] = Number(t.tag.netto_stunden) || sollVon(iso);
+      if (st === "krank") out.krankheit[iso] = Number(t.tag.netto_stunden) || sollVon(iso);
       // Sonderurlaub-Einträge aus dem Stamm ergänzen die Feiertags-Ableitung.
       const sonderStd = t.taetigkeiten
         .filter((e) => e.taetigkeit_id && zeilenStamm.some(
@@ -202,7 +284,8 @@ export default function Taetigkeitsbericht() {
     [periode.tage, zellen, sonder],
   );
 
-  /** Taggeld und Kilometer je Tag aus stunden_fahrt. */
+  /** Taggeld aus stunden_fahrt; Kilometer aus dem FAHRTENBUCH — die alte
+   *  stunden_fahrt-Quelle bleibt nur als Rückfall für Tage ohne Fahrten. */
   const fahrtWerte = useMemo(() => {
     const tg6: Record<string, number> = {};
     const tg11: Record<string, number> = {};
@@ -213,14 +296,19 @@ export default function Taetigkeitsbericht() {
       if (t.fahrt.taggeld_lang) tg11[t.tag.datum] = Number(t.fahrt.taggeld_lang);
       if (t.fahrt.km_gefahren) km[t.tag.datum] = Number(t.fahrt.km_gefahren);
     }
-    return { tg6, tg11, km };
-  }, [tageList]);
+    const kmFb: Record<string, number> = {};
+    for (const f of fahrten) {
+      kmFb[f.datum] = r2((kmFb[f.datum] ?? 0) + Number(f.km ?? 0));
+    }
+    return { tg6, tg11, km: { ...km, ...kmFb } };
+  }, [tageList, fahrten]);
 
   const summeVon = (m: Record<string, number>) =>
     r2(periode.tage.reduce((a, t) => a + (m[t] ?? 0), 0));
 
   // ─── Speichern einer Zelle ───────────────────────────────────────────
   const saveMut = useSaveStundenTag();
+  const deleteMut = useDeleteStundenTag();
 
   async function speichereZelle(zeile: BerichtZeile, iso: string, wert: number) {
     if (!zielMa) return;
@@ -246,6 +334,7 @@ export default function Taetigkeitsbericht() {
             taetigkeit_id: e.taetigkeit_id,
             taetigkeit_freitext: e.taetigkeit_freitext,
             baustelle_id: e.baustelle_id,
+            ziel_baustelle_id: (e as any).ziel_baustelle_id ?? null,
             stunden: Number(e.stunden),
             notiz: e.notiz,
           })) ?? [];
@@ -318,6 +407,130 @@ export default function Taetigkeitsbericht() {
     }
   }
 
+  // ─── Urlaub direkt in der Tabelle ändern ─────────────────────────────
+  //
+  // „Es kann sein, dass man den eingetragenen Urlaub dann doch nicht
+  // konsumiert hat." Die Falle dabei: die Antrags-Genehmigung bucht das
+  // Urlaubskonto PAUSCHAL ab und legt 0-Stunden-Marker an. Schriebe man
+  // hier einfach Stunden hinein, würde der Auto-Buchungs-Trigger den Tag
+  // ein ZWEITES Mal abziehen. Deshalb wird ein Antrags-Tag beim ersten
+  // Bearbeiten einmalig mit +1 Tag neutralisiert — danach führt allein
+  // der Stunden-Eintrag das Konto, und Ändern/Löschen stimmt automatisch.
+  async function speichereUrlaub(iso: string, wert: number) {
+    if (!zielMa) return;
+    setBusy(`urlaub|${iso}`);
+    try {
+      const vorhanden = tagByIso.get(iso);
+      const status = vorhanden?.tag.status;
+      if (status && status !== "erfasst" && status !== "ma_bestaetigt") {
+        toast({
+          variant: "destructive",
+          title: "Tag ist bereits freigegeben",
+          description: "Dieser Tag wurde vom Büro abgezeichnet und kann hier nicht mehr geändert werden.",
+        });
+        return;
+      }
+
+      // Stammt der Tag aus einem genehmigten Antrag? Dann einmalig das
+      // Konto neutralisieren (Guard über die Notiz-Markierung).
+      const { data: antraege } = await supabase
+        .from("urlaubsantraege")
+        .select("id")
+        .eq("mitarbeiter_id", zielMa)
+        .eq("status", "genehmigt")
+        .lte("von", iso)
+        .gte("bis", iso)
+        .limit(1);
+      if ((antraege ?? []).length > 0) {
+        const marker = `TB-STORNO:${iso}`;
+        const { data: schon } = await supabase
+          .from("urlaubs_buchungen")
+          .select("id")
+          .eq("mitarbeiter_id", zielMa)
+          .like("notiz", `${marker}%`)
+          .limit(1);
+        if (!schon || schon.length === 0) {
+          const { error: bErr } = await supabase.from("urlaubs_buchungen").insert({
+            mitarbeiter_id: zielMa,
+            art: "korrektur",
+            tage: 1,
+            wirksam_am: iso,
+            notiz: `${marker} · Antrags-Tag neutralisiert — Urlaub im Tätigkeitsbericht geändert`,
+          } as any);
+          if (bErr) {
+            // Ohne Admin-Recht darf man nicht ins Konto schreiben — der Tag
+            // wird trotzdem geändert, aber das Büro muss korrigieren.
+            toast({
+              variant: "destructive",
+              title: "Urlaubskonto bitte vom Büro korrigieren",
+              description:
+                "Der Tag stammt aus einem genehmigten Antrag. Damit er nicht doppelt abgezogen wird, muss das Büro dem Konto +1 Tag gutschreiben.",
+            });
+          }
+        }
+      }
+
+      const andere: SaveEintrag[] =
+        vorhanden?.taetigkeiten
+          .filter((e) => e.art !== "urlaub")
+          .map((e) => ({
+            position: 0,
+            art: e.art,
+            taetigkeit_id: e.taetigkeit_id,
+            taetigkeit_freitext: e.taetigkeit_freitext,
+            baustelle_id: e.baustelle_id,
+            ziel_baustelle_id: (e as any).ziel_baustelle_id ?? null,
+            stunden: Number(e.stunden),
+            notiz: e.notiz,
+          })) ?? [];
+      const eigene: SaveEintrag[] =
+        wert > 0
+          ? [{
+              position: 0,
+              art: "urlaub" as TagStatus,
+              taetigkeit_id: null,
+              taetigkeit_freitext: null,
+              baustelle_id: null,
+              stunden: wert,
+              notiz: null,
+            }]
+          : [];
+      const taetigkeiten = [...andere, ...eigene].map((e, i) => ({ ...e, position: i + 1 }));
+
+      if (taetigkeiten.length === 0 && vorhanden?.tag.id) {
+        // Ohne Urlaub und ohne andere Einträge bliebe der Tag als leerer
+        // „urlaub"-Torso stehen und würde weiter als Urlaubstag angezeigt —
+        // deshalb ganz löschen.
+        await deleteMut.mutateAsync(vorhanden.tag.id);
+      } else if (taetigkeiten.length > 0) {
+        await saveMut.mutateAsync({
+          id: vorhanden?.tag.id,
+          mitarbeiter_id: zielMa,
+          datum: iso,
+          arbeitsbeginn: vorhanden?.tag.arbeitsbeginn?.slice(0, 5) ?? null,
+          anmerkung: vorhanden?.tag.anmerkung ?? null,
+          taetigkeiten,
+          zulagen:
+            vorhanden?.zulagen.map((zu) => ({
+              zulagen_typ_id: zu.zulagen_typ_id,
+              stunden: zu.stunden != null ? Number(zu.stunden) : null,
+              notiz: zu.notiz,
+            })) ?? [],
+          fahrt: null,
+        });
+      }
+      await refetch();
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Nicht gespeichert",
+        description: (e as Error).message,
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   // ─── Realtime ────────────────────────────────────────────────────────
   useEffect(() => {
     const ch = supabase
@@ -326,6 +539,7 @@ export default function Taetigkeitsbericht() {
       .on("postgres_changes", { event: "*", schema: "public", table: "stunden_taetigkeiten" }, () => refetch())
       .on("postgres_changes", { event: "*", schema: "public", table: "urlaubsantraege" }, () => refetch())
       .on("postgres_changes", { event: "*", schema: "public", table: "krankmeldungen" }, () => refetch())
+      .on("postgres_changes", { event: "*", schema: "public", table: "fahrtenbuch_eintraege" }, () => ladeFahrten())
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
@@ -342,7 +556,22 @@ export default function Taetigkeitsbericht() {
     return m ? `${m.vorname} ${m.nachname}`.trim() : "";
   }, [zielMa, user, profile, angestellte]);
 
+  const kennzeichen = useMemo(() => {
+    if (zielMa === user?.id) return ((profile as any)?.fahrtenbuch_kennzeichen as string) ?? "";
+    return ((angestellte.find((a) => a.id === zielMa) as any)?.fahrtenbuch_kennzeichen as string) ?? "";
+  }, [zielMa, user, profile, angestellte]);
+
   function druck() {
+    if (tab === "fahrtenbuch") {
+      const doc = makeFahrtenbuchPdf({
+        name: maName,
+        kennzeichen,
+        periode,
+        fahrten,
+      });
+      doc.save(`Fahrtenbuch_${maName.replace(/\s+/g, "_")}_${periode.jahr}-${String(periode.monat).padStart(2, "0")}.pdf`);
+      return;
+    }
     const doc = makeTaetigkeitsberichtPdf({
       name: maName,
       titel: periodeTitel(periode),
@@ -358,87 +587,156 @@ export default function Taetigkeitsbericht() {
       taggeld11: fahrtWerte.tg11,
       km: fahrtWerte.km,
       kmSatz: KM_SATZ,
+      unterschrift: unterschrift?.data ?? null,
+      unterschriebenAm: unterschrift
+        ? new Date(unterschrift.am).toLocaleDateString("de-AT")
+        : null,
     });
     doc.save(`Taetigkeitsbericht_${maName.replace(/\s+/g, "_")}_${periode.jahr}-${String(periode.monat).padStart(2, "0")}.pdf`);
   }
 
   // ─── Render ──────────────────────────────────────────────────────────
-  const freierTag = (iso: string) => ANGESTELLTEN_SOLL[wochentagIndex(iso)] === 0;
+  /** Spaltenfarbe: Feiertag/So dunkel, Sa hell — über die GANZE Spalte. */
+  const spalte = tagSpaltenFarbe;
 
   return (
     <div className="p-3 sm:p-6 pb-safe-nav">
       <PageHeader
         title="Tätigkeitsbericht"
-        description={`Zeiterfassung für Angestellte · ${periodeTitel(periode)}`}
+        description="Zeiterfassung für Angestellte"
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => setPeriode((p) => periodeVerschieben(p, -1))}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setPeriode(periodeVonDatum(localIso()))}>
-              Heute
-            </Button>
+            {/* Die Periode steht GROSS zwischen den Pfeilen — vorher stand
+                hier nur „Heute" und man wusste nie, wo man gerade ist. */}
+            <span className="px-1 text-sm sm:text-base font-bold whitespace-nowrap tabular-nums">
+              {periodeTitel(periode)}
+            </span>
             <Button variant="outline" size="sm" onClick={() => setPeriode((p) => periodeVerschieben(p, 1))}>
               <ChevronRight className="h-4 w-4" />
             </Button>
-            <Button size="sm" onClick={druck} disabled={zeilen.length === 0}>
+            <Button variant="outline" size="sm" onClick={() => setPeriode(periodeVonDatum(localIso()))}>
+              Heute
+            </Button>
+            <Button size="sm" onClick={druck} disabled={tab === "bericht" && zeilen.length === 0}>
               <Printer className="h-4 w-4 mr-1.5" /> PDF
             </Button>
           </>
         }
       />
 
-      {darfFremde && angestellte.length > 0 && (
-        <div className="mb-3 flex items-center gap-2 text-sm">
-          <Users className="h-4 w-4 text-muted-foreground" />
-          <select
-            className="h-9 rounded-md border bg-background px-2 text-sm"
-            value={zielMa}
-            onChange={(e) => setMaId(e.target.value)}
-          >
-            {angestellte.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.nachname} {a.vorname}
-              </option>
-            ))}
-          </select>
+      <div className="mb-3 flex items-center gap-3 flex-wrap">
+        {/* Reiter wie in der Jahresplanung (Poliereinsatz ↔ Mitarbeiter) */}
+        <div className="inline-flex rounded-lg border p-0.5 bg-muted/40">
+          {(
+            [
+              ["bericht", "Tätigkeitsbericht"],
+              ["fahrtenbuch", "Fahrtenbuch"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={`px-4 h-9 rounded-md text-sm font-medium transition ${
+                tab === key
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-      )}
+
+        {darfFremde && angestellte.length > 0 && (
+          <div className="flex items-center gap-2 text-sm">
+            <Users className="h-4 w-4 text-muted-foreground" />
+            <select
+              className="h-9 rounded-md border bg-background px-2 text-sm"
+              value={zielMa}
+              onChange={(e) => setMaId(e.target.value)}
+            >
+              {angestellte.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.nachname} {a.vorname}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
 
       <Card className="overflow-hidden">
         <CardContent className="p-0">
-          <div className="overflow-auto max-h-[calc(100vh-14rem)]">
-            <table style={{ borderCollapse: "collapse", background: "#fff", color: "#000" }}>
-              {/* Titel wie in der Excel: gesperrt gesetzt, über alles verbunden */}
+          {tab === "fahrtenbuch" ? (
+            <FahrtenbuchTab
+              mitarbeiterId={zielMa}
+              periode={periode}
+              fahrten={fahrten}
+              onReload={ladeFahrten}
+              kennzeichen={kennzeichen}
+              fahrerName={maName}
+              kannBearbeiten={kannBearbeiten}
+              kostenstellen={Array.from(new Set(zeilenStamm.map((s) => s.kst))).sort()}
+            />
+          ) : (
+          <div className="overflow-auto max-h-[calc(100vh-15rem)]">
+            <table style={{ borderCollapse: "collapse", background: "#fff", color: "#000", width: "100%" }}>
+              {/* Titelband wie in der Excel: silbergrau, über alles */}
               <thead>
                 <tr>
                   <th
                     colSpan={periode.tage.length + 3}
                     style={{
                       ...td,
-                      border: "none",
+                      border: LINIE,
+                      background: TB_FARBEN.titel,
                       textAlign: "center",
-                      fontSize: 16,
+                      fontSize: 20,
                       fontWeight: 700,
                       letterSpacing: "0.35em",
-                      padding: "10px 0 6px",
+                      padding: "10px 0 8px",
                     }}
                   >
                     TÄTIGKEITSBERICHT
                   </th>
                 </tr>
+                {/* Name + Monat — groß und klar, Name auf gelbem Eingabefeld */}
                 <tr>
-                  <th colSpan={2} style={{ ...td, border: "none", textAlign: "left", fontWeight: 700 }}>
-                    NAME: <span style={{ fontWeight: 400 }}>{maName}</span>
+                  <th colSpan={2} style={{ ...td, border: "none", textAlign: "left", fontWeight: 700, fontSize: 15, paddingTop: 8, paddingBottom: 8 }}>
+                    NAME:{" "}
+                    <span
+                      style={{
+                        fontWeight: 700,
+                        background: TB_FARBEN.eingabe,
+                        padding: "2px 10px",
+                        border: "1px solid #999",
+                      }}
+                    >
+                      {maName}
+                    </span>
                   </th>
                   <th
                     colSpan={periode.tage.length + 1}
-                    style={{ ...td, border: "none", textAlign: "left", fontWeight: 700, paddingLeft: 24 }}
+                    style={{ ...td, border: "none", textAlign: "left", fontWeight: 700, fontSize: 15, paddingLeft: 24 }}
                   >
-                    Monat/Jahr: <span style={{ fontWeight: 400 }}>{periodeTitel(periode)}</span>
+                    Monat/Jahr:{" "}
+                    <span
+                      style={{
+                        fontWeight: 700,
+                        background: TB_FARBEN.eingabe,
+                        padding: "2px 10px",
+                        border: "1px solid #999",
+                      }}
+                    >
+                      {periodeTitel(periode)}
+                    </span>
                   </th>
                 </tr>
-                {/* Wochentage */}
+                {/* Wochentage — Sa/So/Feiertag tragen schon hier ihre Farbe */}
                 <tr>
                   <th style={{ ...td, border: "none" }} />
                   <th style={{ ...td, border: "none" }} />
@@ -450,7 +748,7 @@ export default function Taetigkeitsbericht() {
                         border: "none",
                         fontWeight: 400,
                         textAlign: "center",
-                        color: freierTag(iso) ? "#888" : "#000",
+                        background: spalte(iso),
                       }}
                     >
                       {WOCHENTAG_KURZ[wochentagIndex(iso)]}
@@ -460,10 +758,10 @@ export default function Taetigkeitsbericht() {
                 </tr>
                 {/* Kst | Baustelle | Tage | Gesamt */}
                 <tr>
-                  <th style={{ ...td, fontStyle: "italic", textDecoration: "underline", textAlign: "left", width: 46 }}>
+                  <th style={{ ...td, fontStyle: "italic", textDecoration: "underline", textAlign: "left", width: 50, borderBottom: "2px solid #000" }}>
                     Kst
                   </th>
-                  <th style={{ ...td, fontStyle: "italic", textDecoration: "underline", textAlign: "left", minWidth: 190 }}>
+                  <th style={{ ...td, fontStyle: "italic", textDecoration: "underline", textAlign: "left", minWidth: 190, borderBottom: "2px solid #000" }}>
                     Baustelle
                   </th>
                   {periode.tage.map((iso) => (
@@ -472,21 +770,24 @@ export default function Taetigkeitsbericht() {
                       style={{
                         ...tdZahl,
                         textAlign: "center",
-                        background: freierTag(iso) ? "#eee" : undefined,
+                        fontWeight: 700,
+                        background: spalte(iso),
+                        borderBottom: "2px solid #000",
                       }}
                       title={tagesBeschriftung(iso)?.name}
                     >
                       {iso.slice(8)}.
                     </th>
                   ))}
-                  <th style={{ ...td, fontStyle: "italic", textDecoration: "underline", textAlign: "right", width: 48 }}>
+                  <th style={{ ...td, fontStyle: "italic", textDecoration: "underline", textAlign: "right", width: 52, borderBottom: "2px solid #000" }}>
                     Gesamt
                   </th>
                 </tr>
               </thead>
 
               <tbody>
-                {/* Feiertags-Beschriftung senkrecht über den Kst-Block */}
+                {/* Feiertags-Namen senkrecht über den Kst-Block — die Spalte
+                    selbst ist durchgehend dunkel, wie in der Vorlage */}
                 <tr>
                   <td colSpan={2} style={{ ...td, border: "none" }} />
                   {periode.tage.map((iso) => {
@@ -497,9 +798,10 @@ export default function Taetigkeitsbericht() {
                         style={{
                           ...tdZahl,
                           border: "none",
-                          height: 92,
+                          height: 96,
                           verticalAlign: "bottom",
                           padding: 0,
+                          background: spalte(iso),
                         }}
                       >
                         {info && (
@@ -512,7 +814,7 @@ export default function Taetigkeitsbericht() {
                               fontWeight: 700,
                               letterSpacing: "0.04em",
                               textTransform: "uppercase",
-                              color: info.scope === "betrieblich" ? "#666" : "#000",
+                              color: "#000",
                               whiteSpace: "nowrap",
                               margin: "0 auto",
                             }}
@@ -537,7 +839,7 @@ export default function Taetigkeitsbericht() {
                       <td style={{ ...td, textAlign: "left" }}>
                         <span className="inline-flex items-center gap-1">
                           {zz.bezeichnung}
-                          {gesamt === 0 && (
+                          {gesamt === 0 && kannBearbeiten && (
                             <button
                               type="button"
                               onClick={() => setSichtbar((c) => c.filter((k) => k !== zz.key))}
@@ -554,15 +856,19 @@ export default function Taetigkeitsbericht() {
                           key={iso}
                           style={{
                             ...tdZahl,
-                            background: freierTag(iso) ? "#f4f4f4" : undefined,
+                            background: spalte(iso),
                             padding: 0,
                           }}
                         >
-                          <ZellEingabe
-                            wert={werte[iso] ?? 0}
-                            busy={busy === `${zz.key}|${iso}`}
-                            onCommit={(v) => speichereZelle(zz, iso, v)}
-                          />
+                          {kannBearbeiten ? (
+                            <ZellEingabe
+                              wert={werte[iso] ?? 0}
+                              busy={busy === `${zz.key}|${iso}`}
+                              onCommit={(v) => speichereZelle(zz, iso, v)}
+                            />
+                          ) : (
+                            <span style={{ padding: "1px 3px", display: "block", textAlign: "right" }}>{z(werte[iso])}</span>
+                          )}
                         </td>
                       ))}
                       <td style={{ ...tdZahl, fontWeight: 700 }}>{z(gesamt)}</td>
@@ -571,6 +877,7 @@ export default function Taetigkeitsbericht() {
                 })}
 
                 {/* Zeile hinzufügen */}
+                {kannBearbeiten && (
                 <tr>
                   <td colSpan={2} style={{ ...td, textAlign: "left" }}>
                     <Popover open={pickerOffen} onOpenChange={setPickerOffen}>
@@ -610,20 +917,45 @@ export default function Taetigkeitsbericht() {
                     </Popover>
                   </td>
                   {periode.tage.map((iso) => (
-                    <td key={iso} style={{ ...tdZahl, background: freierTag(iso) ? "#f4f4f4" : undefined }} />
+                    <td key={iso} style={{ ...tdZahl, background: spalte(iso) }} />
                   ))}
                   <td style={td} />
                 </tr>
+                )}
 
-                {/* ── Summenzeilen ── */}
-                <SummenZeile label="Zwischensumme" tage={periode.tage} werte={summen.zwischensumme} gesamt={summen.zwischensummeGesamt} fett />
-                <SummenZeile label="Urlaub" tage={periode.tage} werte={sonder.urlaub} gesamt={summeVon(sonder.urlaub)} grau />
-                <SummenZeile label="Sonderurlaub" tage={periode.tage} werte={sonder.sonderurlaub} gesamt={summeVon(sonder.sonderurlaub)} grau />
-                <SummenZeile label="Krankheit" tage={periode.tage} werte={sonder.krankheit} gesamt={summeVon(sonder.krankheit)} grau />
-                <SummenZeile label="Feiertag" tage={periode.tage} werte={sonder.feiertag} gesamt={summeVon(sonder.feiertag)} grau />
-                <SummenZeile label="Stundensumme/Tag" tage={periode.tage} werte={summen.stundensumme} gesamt={summen.stundensummeGesamt} fett />
-                <SummenZeile label="Sollstunden/Tag" tage={periode.tage} werte={summen.soll} gesamt={summen.sollGesamt} />
-                <SummenZeile label="DELTA" tage={periode.tage} werte={summen.delta} gesamt={summen.deltaGesamt} fett />
+                {/* ── Summenzeilen — Farben wie in der Vorlage ── */}
+                <SummenZeile label="Zwischensumme" tage={periode.tage} werte={summen.zwischensumme} gesamt={summen.zwischensummeGesamt} fett farbe={TB_FARBEN.zwischensumme} spalte={spalte} dickOben />
+
+                {/* Urlaub ist BEARBEITBAR — „doch nicht konsumiert" */}
+                <tr>
+                  <td colSpan={2} style={tdLabel}>
+                    Urlaub
+                    <span style={{ fontWeight: 400, fontSize: 10, marginLeft: 6, color: "#666" }}>
+                      (änderbar)
+                    </span>
+                  </td>
+                  {periode.tage.map((iso) => (
+                    <td key={iso} style={{ ...tdZahl, background: spalte(iso), padding: 0 }}>
+                      {kannBearbeiten ? (
+                        <ZellEingabe
+                          wert={sonder.urlaub[iso] ?? 0}
+                          busy={busy === `urlaub|${iso}`}
+                          onCommit={(v) => speichereUrlaub(iso, v)}
+                        />
+                      ) : (
+                        <span style={{ padding: "1px 3px", display: "block", textAlign: "right" }}>{z(sonder.urlaub[iso])}</span>
+                      )}
+                    </td>
+                  ))}
+                  <td style={{ ...tdZahl, fontWeight: 700 }}>{z(summeVon(sonder.urlaub))}</td>
+                </tr>
+
+                <SummenZeile label="Sonderurlaub" tage={periode.tage} werte={sonder.sonderurlaub} gesamt={summeVon(sonder.sonderurlaub)} spalte={spalte} />
+                <SummenZeile label="Krankheit" tage={periode.tage} werte={sonder.krankheit} gesamt={summeVon(sonder.krankheit)} spalte={spalte} />
+                <SummenZeile label="Feiertag" tage={periode.tage} werte={sonder.feiertag} gesamt={summeVon(sonder.feiertag)} spalte={spalte} />
+                <SummenZeile label="Stundensumme/Tag" tage={periode.tage} werte={summen.stundensumme} gesamt={summen.stundensummeGesamt} fett farbe={TB_FARBEN.stundensumme} spalte={spalte} dickOben />
+                <SummenZeile label="Sollstunden/Tag" tage={periode.tage} werte={summen.soll} gesamt={summen.sollGesamt} spalte={spalte} />
+                <SummenZeile label="DELTA" tage={periode.tage} werte={summen.delta} gesamt={summen.deltaGesamt} fett spalte={spalte} />
 
                 {/* Warnhinweis wie die Excel-Formel IF(DELTA>15; …) */}
                 {summen.deltaGesamt > UEBERSTUNDEN_GRENZE && (
@@ -634,41 +966,72 @@ export default function Taetigkeitsbericht() {
                   </tr>
                 )}
 
-                <SummenZeile label="Taggeld > 6 Std." tage={periode.tage} werte={fahrtWerte.tg6} gesamt={summeVon(fahrtWerte.tg6)} />
-                <SummenZeile label="Taggeld > 11 Std." tage={periode.tage} werte={fahrtWerte.tg11} gesamt={summeVon(fahrtWerte.tg11)} />
-                <SummenZeile label="gefahrene km" tage={periode.tage} werte={fahrtWerte.km} gesamt={summeVon(fahrtWerte.km)} />
+                <SummenZeile label="Taggeld > 6 Std." tage={periode.tage} werte={fahrtWerte.tg6} gesamt={summeVon(fahrtWerte.tg6)} spalte={spalte} dickOben />
+                <SummenZeile label="Taggeld > 11 Std." tage={periode.tage} werte={fahrtWerte.tg11} gesamt={summeVon(fahrtWerte.tg11)} spalte={spalte} />
+                <SummenZeile label="gefahrene km" tage={periode.tage} werte={fahrtWerte.km} gesamt={summeVon(fahrtWerte.km)} spalte={spalte} />
                 <tr>
-                  <td colSpan={2} style={tdLabel}>{String(KM_SATZ).replace(".", ",")}</td>
+                  <td colSpan={2} style={tdLabel}>{String(KM_SATZ).replace(".", ",")} € / km</td>
                   {periode.tage.map((iso) => (
-                    <td key={iso} style={tdZahl} />
+                    <td key={iso} style={{ ...tdZahl, background: spalte(iso) }} />
                   ))}
                   <td style={{ ...tdZahl, fontWeight: 700 }}>
                     {z(r2(summeVon(fahrtWerte.km) * KM_SATZ))}
                   </td>
                 </tr>
 
-                {/* Datum + Unterschrift */}
+                {/* Datum + Unterschrift — jetzt DIGITAL (Maus/Stift) */}
                 <tr>
                   <td colSpan={periode.tage.length + 3} style={{ ...td, border: "none", paddingTop: 18 }}>
-                    <span style={{ fontFamily: SERIF, fontSize: 12 }}>
-                      Datum: {new Date().toLocaleDateString("de-AT")}
-                      <span style={{ display: "inline-block", width: 60 }} />
-                      Unterschrift: ..................................................
-                    </span>
+                    <div className="flex items-end gap-6 flex-wrap" style={{ fontFamily: SERIF, fontSize: 14 }}>
+                      <span>
+                        Datum:{" "}
+                        {unterschrift
+                          ? new Date(unterschrift.am).toLocaleDateString("de-AT")
+                          : new Date().toLocaleDateString("de-AT")}
+                      </span>
+                      <span className="inline-flex items-end gap-2">
+                        Unterschrift:
+                        {unterschrift ? (
+                          <img
+                            src={unterschrift.data}
+                            alt="Unterschrift"
+                            style={{ height: 46, borderBottom: "1px solid #000" }}
+                          />
+                        ) : (
+                          <span style={{ display: "inline-block", width: 220, borderBottom: "1px dotted #000" }}>&nbsp;</span>
+                        )}
+                      </span>
+                      {kannBearbeiten && (
+                        <Button size="sm" variant="outline" className="h-8" onClick={() => setSignOffen(true)}>
+                          <Pen className="h-3.5 w-3.5 mr-1.5" />
+                          {unterschrift ? "Neu unterschreiben" : "Unterschreiben"}
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               </tbody>
             </table>
           </div>
+          )}
         </CardContent>
       </Card>
 
-      <p className="text-xs text-muted-foreground mt-3">
-        Urlaub, Krankheit und Feiertag füllen sich selbst — Urlaub aus dem
-        genehmigten Antrag, Krankheit aus der Krankmeldung, Feiertage aus dem
-        österreichischen Kalender. Der 24. und 31. Dezember stehen als
-        Sonderurlaub, weil sie keine gesetzlichen Feiertage sind.
-      </p>
+      {tab === "bericht" && (
+        <p className="text-xs text-muted-foreground mt-3">
+          Krankheit und Feiertag füllen sich selbst — Krankheit aus der
+          Krankmeldung, Feiertage aus dem österreichischen Kalender. Urlaub
+          lässt sich direkt in der Zeile ändern, falls er doch nicht konsumiert
+          wurde. Die gefahrenen Kilometer kommen aus dem Fahrtenbuch.
+        </p>
+      )}
+
+      <UnterschriftDialog
+        open={signOffen}
+        onOpenChange={setSignOffen}
+        onSave={speichereUnterschrift}
+        titel="Tätigkeitsbericht unterschreiben"
+      />
     </div>
   );
 }
@@ -683,31 +1046,42 @@ function SummenZeile({
   werte,
   gesamt,
   fett,
-  grau,
+  farbe,
+  spalte,
+  dickOben,
 }: {
   label: string;
   tage: string[];
   werte: Record<string, number>;
   gesamt: number;
   fett?: boolean;
-  grau?: boolean;
+  /** Zeilenfarbe aus der Vorlage (Zwischensumme blau, Stundensumme grün). */
+  farbe?: string;
+  /** Spaltenfarbe je Tag — Wochenende/Feiertag übersteuert die Zeilenfarbe. */
+  spalte: (iso: string) => string | undefined;
+  /** Stärkere Linie oberhalb — Blocktrennung wie in der Vorlage. */
+  dickOben?: boolean;
 }) {
-  const zahl: React.CSSProperties = {
-    ...tdZahl,
-    fontWeight: fett ? 700 : 400,
-    background: grau ? "#f4f4f4" : undefined,
-  };
+  const basis: React.CSSProperties = dickOben ? { borderTop: "2px solid #000" } : {};
   return (
     <tr>
-      <td colSpan={2} style={{ ...tdLabel, background: grau ? "#f4f4f4" : undefined }}>
+      <td colSpan={2} style={{ ...tdLabel, ...basis, background: farbe }}>
         {label}
       </td>
       {tage.map((iso) => (
-        <td key={iso} style={zahl}>
+        <td
+          key={iso}
+          style={{
+            ...tdZahl,
+            ...basis,
+            fontWeight: fett ? 700 : 400,
+            background: spalte(iso) ?? farbe,
+          }}
+        >
           {z(werte[iso] ?? 0)}
         </td>
       ))}
-      <td style={{ ...zahl, fontWeight: 700 }}>{z(gesamt)}</td>
+      <td style={{ ...tdZahl, ...basis, fontWeight: 700, background: farbe }}>{z(gesamt)}</td>
     </tr>
   );
 }
@@ -773,7 +1147,7 @@ function ZellEingabe({
         background: "transparent",
         textAlign: "right",
         fontFamily: SERIF,
-        fontSize: 12,
+        fontSize: 13,
         padding: "1px 3px",
       }}
     />

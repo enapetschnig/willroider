@@ -83,6 +83,21 @@ export function periodeVerschieben(p: Periode, schritte: number): Periode {
  * Über den Jahreswechsel schreibt die Excel „Dez.25 - Jän. 2026" — hier
  * einheitlich mit beiden Jahren, das ist eindeutiger.
  */
+/** Fahrtdauer in Stunden aus Abfahrt/Ankunft („08:30" → „12:15" = 3,75). */
+export function fahrtDauerH(abfahrt: string | null, ankunft: string | null): number {
+  if (!abfahrt || !ankunft) return 0;
+  const [ah, am] = abfahrt.split(":").map(Number);
+  const [bh, bm] = ankunft.split(":").map(Number);
+  const diff = bh * 60 + bm - (ah * 60 + am);
+  return diff > 0 ? r2(diff / 60) : 0;
+}
+
+/** Kurzlabel der Periode fürs Fahrtenbuch/Lohnbüro: „Mai-Juni". */
+export function periodeKurz(p: Periode): string {
+  const vonMonat = p.monat === 1 ? 12 : p.monat - 1;
+  return `${MONATE[vonMonat - 1]}-${MONATE[p.monat - 1]}`;
+}
+
 export function periodeTitel(p: Periode): string {
   const vonMonat = p.monat === 1 ? 12 : p.monat - 1;
   const vonJahr = p.monat === 1 ? p.jahr - 1 : p.jahr;
@@ -99,6 +114,43 @@ export function periodeTitel(p: Periode): string {
  * Entspricht Zeile „Sollstunden/Tag" der Excel.
  */
 export const ANGESTELLTEN_SOLL = [8.5, 8.5, 8.5, 8.5, 5, 0, 0] as const;
+
+/**
+ * Farbwelt der Excel-Vorlage (Tätigkeitsbericht_Vorlage.xlsx), aus der
+ * Datei ausgelesen — Bildschirm und PDF greifen auf DIESELBEN Werte zu,
+ * damit beide gleich aussehen.
+ */
+export const TB_FARBEN = {
+  /** Titelband „TÄTIGKEITSBERICHT" */
+  titel: "#c0c0c0",
+  /** Eingabefelder (Name, Fahrer, Kennzeichen) */
+  eingabe: "#ffffcc",
+  /** Samstag — 15 % Grau */
+  samstag: "#d9d9d9",
+  /** Sonntag und Feiertag — 35 % Grau, über die GANZE Spalte */
+  sonnFeiertag: "#a6a6a6",
+  /** Zwischensummen-Zeile */
+  zwischensumme: "#d6e4f0",
+  /** Stundensumme/Tag und GESAMT km */
+  stundensumme: "#e2efda",
+  /** Fahrtenbuch: Titelband (Schrift weiß) */
+  fahrtenbuchTitel: "#1f3864",
+  /** Fahrtenbuch: Kopfzeile (Schrift weiß) */
+  fahrtenbuchKopf: "#2e75b6",
+} as const;
+
+/**
+ * Spaltenfarbe eines Tages: Feiertag und Sonntag dunkel, Samstag hell —
+ * wie in der Vorlage über die gesamte Spalte, von der Kopfzeile bis zur
+ * letzten Summenzeile.
+ */
+export function tagSpaltenFarbe(isoDatum: string): string | undefined {
+  if (tagesBeschriftung(isoDatum)) return TB_FARBEN.sonnFeiertag;
+  const wt = wochentagIndex(isoDatum);
+  if (wt === 6) return TB_FARBEN.sonnFeiertag;
+  if (wt === 5) return TB_FARBEN.samstag;
+  return undefined;
+}
 
 /**
  * Tages-Soll eines Angestellten.
