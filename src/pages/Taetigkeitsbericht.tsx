@@ -764,51 +764,35 @@ export default function Taetigkeitsbericht() {
                   <th style={{ ...td, fontStyle: "italic", textDecoration: "underline", textAlign: "left", minWidth: 190, borderBottom: "2px solid #000" }}>
                     Baustelle
                   </th>
-                  {periode.tage.map((iso) => (
-                    <th
-                      key={iso}
-                      style={{
-                        ...tdZahl,
-                        textAlign: "center",
-                        fontWeight: 700,
-                        background: spalte(iso),
-                        borderBottom: "2px solid #000",
-                      }}
-                      title={tagesBeschriftung(iso)?.name}
-                    >
-                      {iso.slice(8)}.
-                    </th>
-                  ))}
-                  <th style={{ ...td, fontStyle: "italic", textDecoration: "underline", textAlign: "right", width: 52, borderBottom: "2px solid #000" }}>
-                    Gesamt
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {/* Feiertags-Namen senkrecht über den Kst-Block — die Spalte
-                    selbst ist durchgehend dunkel, wie in der Vorlage */}
-                <tr>
-                  <td colSpan={2} style={{ ...td, border: "none" }} />
                   {periode.tage.map((iso) => {
                     const info = tagesBeschriftung(iso);
                     return (
-                      <td
+                      <th
                         key={iso}
                         style={{
                           ...tdZahl,
-                          border: "none",
-                          height: 96,
-                          verticalAlign: "bottom",
-                          padding: 0,
+                          textAlign: "center",
+                          fontWeight: 700,
                           background: spalte(iso),
+                          borderBottom: "2px solid #000",
+                          position: "relative",
                         }}
+                        title={info?.name}
                       >
+                        {iso.slice(8)}.
+                        {/* Feiertagsname läuft von hier aus senkrecht durch die
+                            dunkle Spalte nach unten — wie im PDF und in der
+                            Excel, statt in einer eigenen Leerzeile darüber.
+                            pointer-events aus, damit die Zellen darunter
+                            bedienbar bleiben. */}
                         {info && (
-                          <div
+                          <span
                             style={{
+                              position: "absolute",
+                              top: "calc(100% + 4px)",
+                              left: "50%",
+                              transform: "translateX(-50%) rotate(180deg)",
                               writingMode: "vertical-rl",
-                              transform: "rotate(180deg)",
                               fontFamily: SERIF,
                               fontSize: 10,
                               fontWeight: 700,
@@ -816,19 +800,23 @@ export default function Taetigkeitsbericht() {
                               textTransform: "uppercase",
                               color: "#000",
                               whiteSpace: "nowrap",
-                              margin: "0 auto",
+                              pointerEvents: "none",
+                              zIndex: 1,
                             }}
-                            title={info.name}
                           >
                             {info.name}
-                          </div>
+                          </span>
                         )}
-                      </td>
+                      </th>
                     );
                   })}
-                  <td style={{ ...td, border: "none" }} />
+                  <th style={{ ...td, fontStyle: "italic", textDecoration: "underline", textAlign: "right", width: 52, borderBottom: "2px solid #000" }}>
+                    Gesamt
+                  </th>
                 </tr>
+              </thead>
 
+              <tbody>
                 {/* Kostenstellen-Zeilen */}
                 {zeilen.map((zz) => {
                   const werte = zellen[zz.key] ?? {};
