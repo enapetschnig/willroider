@@ -17,7 +17,6 @@ import {
   UEBERSTUNDEN_GRENZE,
   UEBERSTUNDEN_WARNUNG,
   WOCHENTAG_KURZ,
-  fahrtDauerH,
   periodeKurz,
   periodeTitel,
   r2,
@@ -70,8 +69,17 @@ const GRUEN = rgb(TB_FARBEN.stundensumme);
 const NAVY = rgb(TB_FARBEN.fahrtenbuchTitel);
 const KOPFBLAU = rgb(TB_FARBEN.fahrtenbuchKopf);
 
-/** Zahl wie in der Excel: Komma, 0 bleibt leer. */
-const z = (n: number | null | undefined): string =>
+/** Stundenzahl: immer EINE Kommastelle („8,0"), 0 bleibt leer — wie am
+ *  Bildschirm. Zwei Stellen nur bei Viertelstunden-Altwerten. */
+const z = (n: number | null | undefined): string => {
+  if (n == null || n === 0) return "";
+  const v = r2(n);
+  const stellen = Math.round(Math.abs(v) * 100) % 10 !== 0 ? 2 : 1;
+  return v.toFixed(stellen).replace(".", ",");
+};
+
+/** Zähler ohne Kommastellen — fürs Taggeld („1", nicht „1,0"). */
+const zGanz = (n: number | null | undefined): string =>
   n == null || n === 0 ? "" : String(r2(n)).replace(".", ",");
 
 const summeVon = (tage: string[], m: Record<string, number>) =>
@@ -148,20 +156,24 @@ export function renderTaetigkeitsbericht(
   });
   const matrixZeilen = input.zeilen.length;
 
+  /** DELTA-Zeile — negative Werte werden rot gedruckt. */
+  let deltaZeile = -1;
+
   const summenZeile = (
     label: string,
     werte: Record<string, number>,
     gesamt: number,
-    opt: { farbe?: [number, number, number]; fett?: boolean } = {},
+    opt: { farbe?: [number, number, number]; fett?: boolean; ganz?: boolean } = {},
   ) => {
     if (opt.farbe) zeilenFarbe.set(body.length, opt.farbe);
     if (opt.fett) fettZeilen.add(body.length);
+    const fmt = opt.ganz ? zGanz : z;
     // Die Beschriftung braucht BEIDE linken Spalten (11 + 44 mm), sonst wird
     // sie abgeschnitten — „Zwischensumme" wurde zu „Zwischen".
     body.push([
       { content: label, colSpan: 2, styles: { halign: "left", fontStyle: "bold" } },
-      ...tage.map((t) => z(werte[t])),
-      z(gesamt),
+      ...tage.map((t) => fmt(werte[t])),
+      fmt(gesamt),
     ]);
   };
 
@@ -173,11 +185,12 @@ export function renderTaetigkeitsbericht(
   summenZeile("Feiertag", input.sonder.feiertag ?? {}, summeVon(tage, input.sonder.feiertag ?? {}));
   summenZeile("Stundensumme/Tag", s.stundensumme, s.stundensummeGesamt, { fett: true, farbe: GRUEN });
   summenZeile("Sollstunden/Tag", s.soll, s.sollGesamt);
+  deltaZeile = body.length;
   summenZeile("DELTA", s.delta, s.deltaGesamt, { fett: true });
-  summenZeile("Taggeld > 6 Std.", input.taggeld6, summeVon(tage, input.taggeld6));
-  summenZeile("Taggeld > 11 Std.", input.taggeld11, summeVon(tage, input.taggeld11));
+  summenZeile("Taggeld > 6 Std.", input.taggeld6, summeVon(tage, input.taggeld6), { ganz: true });
+  summenZeile("Taggeld > 11 Std.", input.taggeld11, summeVon(tage, input.taggeld11), { ganz: true });
   summenZeile("gefahrene km", input.km, summeVon(tage, input.km));
-  // Kilometergeld: Satz links, Betrag rechts — wie Zeile 40 der Excel.
+  // Kilometergeld bildet sich von selbst: km × Satz je Tag, Betrag rechts.
   fettZeilen.add(body.length);
   body.push([
     {
@@ -185,7 +198,7 @@ export function renderTaetigkeitsbericht(
       colSpan: 2,
       styles: { halign: "left", fontStyle: "bold" },
     },
-    ...tage.map(() => ""),
+    ...tage.map((t) => z(r2((input.km[t] ?? 0) * input.kmSatz))),
     z(r2(summeVon(tage, input.km) * input.kmSatz)),
   ]);
 
@@ -261,6 +274,10 @@ export function renderTaetigkeitsbericht(
       if (fettZeilen.has(zeile)) data.cell.styles.fontStyle = "bold";
       if ((zeilenFarbe.has(zeile) || fettZeilen.has(zeile)) && spalte === 0) {
         data.cell.styles.halign = "left";
+      }
+      // DELTA: Minusstunden rot — fällt beim Lohnbüro sofort ins Auge.
+      if (zeile === deltaZeile && String(data.cell.raw ?? "").startsWith("-")) {
+        data.cell.styles.textColor = [192, 0, 0];
       }
     },
     didDrawCell: (data) => {
@@ -414,13 +431,12 @@ export function makeFahrtenbuchPdf(input: FahrtenbuchPdfInput): jsPDF {
     f.abfahrt?.slice(0, 5) ?? "",
     f.ankunft?.slice(0, 5) ?? "",
     f.reiseweg ?? "",
-    z(f.km_start),
-    z(f.km_ende),
+    // km-Stände ohne erzwungene Kommastelle — „154320", nicht „154320,0".
+    zGanz(f.km_start),
+    zGanz(f.km_ende),
     z(f.km),
     f.kostenstelle ?? "",
-    z(fahrtDauerH(f.abfahrt, f.ankunft)),
   ]);
-  const gesamt = r2(input.fahrten.reduce((a, f) => a + Number(f.km ?? 0), 0));
 
   autoTable(doc, {
     startY: 28,
@@ -434,15 +450,8 @@ export function makeFahrtenbuchPdf(input: FahrtenbuchPdfInput): jsPDF {
       "km-Stand\nAnkunft",
       "gefahrene km",
       "Kostenstelle",
-      "Dauer (h)",
     ]],
     body,
-    foot: [[
-      { content: "GESAMT km:", colSpan: 7, styles: { halign: "right", fontStyle: "bold" } },
-      { content: z(gesamt), styles: { halign: "right", fontStyle: "bold", fillColor: GRUEN } },
-      "",
-      "",
-    ]],
     theme: "grid",
     styles: {
       font: "times",
@@ -460,12 +469,6 @@ export function makeFahrtenbuchPdf(input: FahrtenbuchPdfInput): jsPDF {
       halign: "center",
       valign: "middle",
     },
-    footStyles: {
-      fillColor: [255, 255, 255],
-      textColor: [0, 0, 0],
-      lineColor: [0, 0, 0],
-      lineWidth: 0.15,
-    },
     columnStyles: {
       0: { cellWidth: 30, fontStyle: "bold" },
       1: { cellWidth: 22 },
@@ -475,7 +478,6 @@ export function makeFahrtenbuchPdf(input: FahrtenbuchPdfInput): jsPDF {
       6: { cellWidth: 20, halign: "right" },
       7: { cellWidth: 18, halign: "right", fontStyle: "bold" },
       8: { cellWidth: 26 },
-      9: { cellWidth: 15, halign: "right" },
     },
     margin: { left: margin, right: margin },
   });

@@ -60,11 +60,18 @@ import type { Database, TagStatus } from "@/integrations/supabase/types";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 
-/** Zahl wie in der Excel: Komma, keine überflüssigen Nullen, 0 bleibt leer. */
+/** Stundenzahl: immer EINE Kommastelle („8,0"), 0 bleibt leer. Zwei
+ *  Stellen nur, wenn ein Altwert wirklich auf die Viertelstunde geht. */
 const z = (n: number | null | undefined): string => {
   if (n == null || n === 0) return "";
-  return String(r2(n)).replace(".", ",");
+  const v = r2(n);
+  const stellen = Math.round(Math.abs(v) * 100) % 10 !== 0 ? 2 : 1;
+  return v.toFixed(stellen).replace(".", ",");
 };
+
+/** Zähler ohne Kommastellen — fürs Taggeld („1", nicht „1,0"). */
+const zGanz = (n: number | null | undefined): string =>
+  n == null || n === 0 ? "" : String(r2(n)).replace(".", ",");
 
 // ─── Excel-Optik ───────────────────────────────────────────────────────
 // Serifenschrift, feine schwarze Linien; die Blöcke (Kopf, Summen) trennen
@@ -75,7 +82,8 @@ const td: React.CSSProperties = {
   border: LINIE,
   padding: "2px 4px",
   fontFamily: SERIF,
-  fontSize: 13,
+  // Auf Wunsch größer — die Werte waren am Bildschirm schwer lesbar.
+  fontSize: 15,
   lineHeight: 1.3,
   whiteSpace: "nowrap",
 };
@@ -531,6 +539,75 @@ export default function Taetigkeitsbericht() {
     }
   }
 
+  // ─── Taggeld direkt in der Tabelle eintragen ─────────────────────────
+  //
+  // Wie in der Excel: man trägt eine 1 ein, rechts zählt die Summe, wie
+  // oft es im Monat Taggeld gab. Gespeichert wird in stunden_fahrt
+  // (Ganzzahl-Spalten taggeld_kurz/taggeld_lang), taggeld_manuell=true,
+  // damit keine Automatik den Wert wieder überschreibt.
+  async function speichereTaggeld(iso: string, feld: "kurz" | "lang", wert: number) {
+    if (!zielMa) return;
+    setBusy(`tg-${feld}|${iso}`);
+    try {
+      const vorhanden = tagByIso.get(iso);
+      const status = vorhanden?.tag.status;
+      if (status && status !== "erfasst" && status !== "ma_bestaetigt") {
+        toast({
+          variant: "destructive",
+          title: "Tag ist bereits freigegeben",
+          description: "Dieser Tag wurde vom Büro abgezeichnet und kann hier nicht mehr geändert werden.",
+        });
+        return;
+      }
+      const ganz = Math.max(0, Math.round(wert));
+      if (!vorhanden && ganz === 0) return;
+
+      await saveMut.mutateAsync({
+        id: vorhanden?.tag.id,
+        mitarbeiter_id: zielMa,
+        datum: iso,
+        arbeitsbeginn: vorhanden?.tag.arbeitsbeginn?.slice(0, 5) ?? null,
+        anmerkung: vorhanden?.tag.anmerkung ?? null,
+        // Alles andere am Tag bleibt unverändert stehen.
+        taetigkeiten:
+          vorhanden?.taetigkeiten.map((e, i) => ({
+            position: i + 1,
+            art: e.art,
+            taetigkeit_id: e.taetigkeit_id,
+            taetigkeit_freitext: e.taetigkeit_freitext,
+            baustelle_id: e.baustelle_id,
+            ziel_baustelle_id: (e as any).ziel_baustelle_id ?? null,
+            stunden: Number(e.stunden),
+            notiz: e.notiz,
+          })) ?? [],
+        zulagen:
+          vorhanden?.zulagen.map((zu) => ({
+            zulagen_typ_id: zu.zulagen_typ_id,
+            stunden: zu.stunden != null ? Number(zu.stunden) : null,
+            notiz: zu.notiz,
+          })) ?? [],
+        fahrt: {
+          fahrtgeld_eur: Number(vorhanden?.fahrt?.fahrtgeld_eur ?? 0),
+          privat_pkw: vorhanden?.fahrt?.privat_pkw ?? false,
+          km_gefahren:
+            vorhanden?.fahrt?.km_gefahren != null ? Number(vorhanden.fahrt.km_gefahren) : null,
+          taggeld_kurz: feld === "kurz" ? ganz : Number(vorhanden?.fahrt?.taggeld_kurz ?? 0),
+          taggeld_lang: feld === "lang" ? ganz : Number(vorhanden?.fahrt?.taggeld_lang ?? 0),
+          taggeld_manuell: true,
+        },
+      });
+      await refetch();
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Nicht gespeichert",
+        description: (e as Error).message,
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   // ─── Realtime ────────────────────────────────────────────────────────
   useEffect(() => {
     const ch = supabase
@@ -943,7 +1020,7 @@ export default function Taetigkeitsbericht() {
                 <SummenZeile label="Feiertag" tage={periode.tage} werte={sonder.feiertag} gesamt={summeVon(sonder.feiertag)} spalte={spalte} />
                 <SummenZeile label="Stundensumme/Tag" tage={periode.tage} werte={summen.stundensumme} gesamt={summen.stundensummeGesamt} fett farbe={TB_FARBEN.stundensumme} spalte={spalte} dickOben />
                 <SummenZeile label="Sollstunden/Tag" tage={periode.tage} werte={summen.soll} gesamt={summen.sollGesamt} spalte={spalte} />
-                <SummenZeile label="DELTA" tage={periode.tage} werte={summen.delta} gesamt={summen.deltaGesamt} fett spalte={spalte} />
+                <SummenZeile label="DELTA" tage={periode.tage} werte={summen.delta} gesamt={summen.deltaGesamt} fett spalte={spalte} negRot />
 
                 {/* Warnhinweis wie die Excel-Formel IF(DELTA>15; …) */}
                 {summen.deltaGesamt > UEBERSTUNDEN_GRENZE && (
@@ -954,13 +1031,43 @@ export default function Taetigkeitsbericht() {
                   </tr>
                 )}
 
-                <SummenZeile label="Taggeld > 6 Std." tage={periode.tage} werte={fahrtWerte.tg6} gesamt={summeVon(fahrtWerte.tg6)} spalte={spalte} dickOben />
-                <SummenZeile label="Taggeld > 11 Std." tage={periode.tage} werte={fahrtWerte.tg11} gesamt={summeVon(fahrtWerte.tg11)} spalte={spalte} />
+                {/* Taggeld ist BEARBEITBAR — eine 1 je Tag, rechts die Anzahl */}
+                {([
+                  ["Taggeld > 6 Std.", "kurz", fahrtWerte.tg6, true],
+                  ["Taggeld > 11 Std.", "lang", fahrtWerte.tg11, false],
+                ] as const).map(([label, feld, werte, dick]) => (
+                  <tr key={feld}>
+                    <td colSpan={2} style={{ ...tdLabel, ...(dick ? { borderTop: "2px solid #000" } : {}) }}>
+                      {label}
+                      <span style={{ fontWeight: 400, fontSize: 10, marginLeft: 6, color: "#666" }}>
+                        (1 eintragen)
+                      </span>
+                    </td>
+                    {periode.tage.map((iso) => (
+                      <td key={iso} style={{ ...tdZahl, ...(dick ? { borderTop: "2px solid #000" } : {}), background: spalte(iso), padding: 0 }}>
+                        {kannBearbeiten ? (
+                          <ZellEingabe
+                            wert={werte[iso] ?? 0}
+                            busy={busy === `tg-${feld}|${iso}`}
+                            fmt={zGanz}
+                            onCommit={(v) => speichereTaggeld(iso, feld, v)}
+                          />
+                        ) : (
+                          <span style={{ padding: "1px 3px", display: "block", textAlign: "right" }}>{zGanz(werte[iso])}</span>
+                        )}
+                      </td>
+                    ))}
+                    <td style={{ ...tdZahl, ...(dick ? { borderTop: "2px solid #000" } : {}), fontWeight: 700 }}>{zGanz(summeVon(werte))}</td>
+                  </tr>
+                ))}
                 <SummenZeile label="gefahrene km" tage={periode.tage} werte={fahrtWerte.km} gesamt={summeVon(fahrtWerte.km)} spalte={spalte} />
+                {/* Kilometergeld bildet sich von selbst: km × 0,50 € je Tag */}
                 <tr>
                   <td colSpan={2} style={tdLabel}>{String(KM_SATZ).replace(".", ",")} € / km</td>
                   {periode.tage.map((iso) => (
-                    <td key={iso} style={{ ...tdZahl, background: spalte(iso) }} />
+                    <td key={iso} style={{ ...tdZahl, background: spalte(iso) }}>
+                      {z(r2((fahrtWerte.km[iso] ?? 0) * KM_SATZ))}
+                    </td>
                   ))}
                   <td style={{ ...tdZahl, fontWeight: 700 }}>
                     {z(r2(summeVon(fahrtWerte.km) * KM_SATZ))}
@@ -1037,12 +1144,15 @@ function SummenZeile({
   farbe,
   spalte,
   dickOben,
+  negRot,
 }: {
   label: string;
   tage: string[];
   werte: Record<string, number>;
   gesamt: number;
   fett?: boolean;
+  /** Negative Werte rot — für die DELTA-Zeile. */
+  negRot?: boolean;
   /** Zeilenfarbe aus der Vorlage (Zwischensumme blau, Stundensumme grün). */
   farbe?: string;
   /** Spaltenfarbe je Tag — Wochenende/Feiertag übersteuert die Zeilenfarbe. */
@@ -1064,12 +1174,13 @@ function SummenZeile({
             ...basis,
             fontWeight: fett ? 700 : 400,
             background: spalte(iso) ?? farbe,
+            color: negRot && (werte[iso] ?? 0) < 0 ? "#c00000" : undefined,
           }}
         >
           {z(werte[iso] ?? 0)}
         </td>
       ))}
-      <td style={{ ...tdZahl, ...basis, fontWeight: 700, background: farbe }}>{z(gesamt)}</td>
+      <td style={{ ...tdZahl, ...basis, fontWeight: 700, background: farbe, color: negRot && gesamt < 0 ? "#c00000" : undefined }}>{z(gesamt)}</td>
     </tr>
   );
 }
@@ -1082,12 +1193,15 @@ function ZellEingabe({
   wert,
   busy,
   onCommit,
+  fmt = z,
 }: {
   wert: number;
   busy: boolean;
   onCommit: (v: number) => void;
+  /** Anzeigeformat — Stunden „8,0", Taggeld-Zähler „1". */
+  fmt?: (n: number) => string;
 }) {
-  const [text, setText] = useState(wert ? String(wert).replace(".", ",") : "");
+  const [text, setText] = useState(fmt(wert));
   const letzterWert = useRef(wert);
 
   // Von außen geändert (Realtime, Perioden-Wechsel) → übernehmen, solange
@@ -1095,19 +1209,20 @@ function ZellEingabe({
   useEffect(() => {
     if (letzterWert.current !== wert) {
       letzterWert.current = wert;
-      setText(wert ? String(wert).replace(".", ",") : "");
+      setText(fmt(wert));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wert]);
 
   const commit = () => {
     const v = Number(text.replace(",", ".").trim() || "0");
     const gerundet = Number.isFinite(v) && v >= 0 ? aufStundenRaster(v) : 0;
     if (gerundet === wert) {
-      setText(wert ? String(wert).replace(".", ",") : "");
+      setText(fmt(wert));
       return;
     }
     letzterWert.current = gerundet;
-    setText(gerundet ? String(gerundet).replace(".", ",") : "");
+    setText(fmt(gerundet));
     onCommit(gerundet);
   };
 
@@ -1125,7 +1240,7 @@ function ZellEingabe({
       onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-        if (e.key === "Escape") setText(wert ? String(wert).replace(".", ",") : "");
+        if (e.key === "Escape") setText(fmt(wert));
       }}
       inputMode="decimal"
       style={{
@@ -1135,7 +1250,8 @@ function ZellEingabe({
         background: "transparent",
         textAlign: "right",
         fontFamily: SERIF,
-        fontSize: 13,
+        fontSize: 15,
+        fontWeight: 600,
         padding: "1px 3px",
       }}
     />

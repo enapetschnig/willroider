@@ -3,8 +3,9 @@
  *
  * Spalten wie in der Vorlage: Tätigkeitsbericht (= Periodenlabel, fürs
  * Lohnbüro immer gefüllt) · Datum · Abfahrt · Ankunft · Reiseweg ·
- * km-Stände · gefahrene km · Kostenstelle · Dauer. Farben aus TB_FARBEN,
- * dieselben wie im Tätigkeitsbericht und im PDF.
+ * km-Stände · gefahrene km · Kostenstelle. Farben aus TB_FARBEN,
+ * dieselben wie im Tätigkeitsbericht und im PDF. Der km-Stand bei
+ * Ankunft rechnet sich selbst: Stand Abfahrt + gefahrene km.
  *
  * Die km je Tag fließen direkt in die Zeile „gefahrene km" des
  * Tätigkeitsberichts — eine Quelle, keine Doppelerfassung.
@@ -16,7 +17,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import {
   TB_FARBEN,
-  fahrtDauerH,
   periodeKurz,
   periodeTitel,
   r2,
@@ -41,7 +41,8 @@ const zelle: React.CSSProperties = {
   border: "1px solid #000",
   padding: "2px 4px",
   fontFamily: SERIF,
-  fontSize: 13,
+  // Auf Wunsch größer — die Werte waren am Bildschirm schwer lesbar.
+  fontSize: 15,
   background: "#fff",
 };
 
@@ -89,7 +90,8 @@ function FbText({
         outline: "none",
         background: "transparent",
         fontFamily: SERIF,
-        fontSize: 13,
+        fontSize: 15,
+        fontWeight: 600,
         textAlign: rechts ? "right" : "left",
       }}
     />
@@ -141,17 +143,20 @@ export function FahrtenbuchTab({
     }
   }
 
-  /** km-Stände: wenn beide da sind, gefahrene km automatisch mitrechnen. */
+  /** km-Stand Ankunft bildet sich selbst: Stand Abfahrt + gefahrene km.
+   *  Wer stattdessen den Ankunfts-Stand eintippt, bekommt die gefahrenen
+   *  km ausgerechnet — beide Richtungen funktionieren. */
   function patchMitKm(f: FahrtRow, patch: Partial<FahrtRow>): Partial<FahrtRow> {
     const start = patch.km_start !== undefined ? patch.km_start : f.km_start;
-    const ende = patch.km_ende !== undefined ? patch.km_ende : f.km_ende;
-    if (
-      (patch.km_start !== undefined || patch.km_ende !== undefined) &&
-      start != null &&
-      ende != null &&
-      ende >= start
-    ) {
-      return { ...patch, km: r2(ende - start) };
+    if (patch.km !== undefined || patch.km_start !== undefined) {
+      const km = patch.km !== undefined ? patch.km : f.km;
+      if (start != null && km != null) {
+        return { ...patch, km_ende: r2(Number(start) + Number(km)) };
+      }
+      return patch;
+    }
+    if (patch.km_ende != null && start != null && patch.km_ende >= start) {
+      return { ...patch, km: r2(patch.km_ende - start) };
     }
     return patch;
   }
@@ -162,10 +167,13 @@ export function FahrtenbuchTab({
       // Vorbelegung: heute, wenn es in der Periode liegt — sonst Periodenstart.
       const heute = new Date().toISOString().slice(0, 10);
       const datum = heute >= periode.von && heute <= periode.bis ? heute : periode.von;
+      // Abfahrts-Stand mit dem letzten bekannten Ankunfts-Stand vorbelegen.
+      const letzterStand = [...fahrten].reverse().find((f) => f.km_ende != null)?.km_ende ?? null;
       const { error } = await supabase.from("fahrtenbuch_eintraege" as any).insert({
         mitarbeiter_id: mitarbeiterId,
         datum,
         km: 0,
+        km_start: letzterStand,
       });
       if (error) throw error;
       onReload();
@@ -200,7 +208,6 @@ export function FahrtenbuchTab({
     if (error) fehler(error);
   }
 
-  const gesamtKm = r2(fahrten.reduce((a, f) => a + Number(f.km ?? 0), 0));
   const label = periodeKurz(periode);
   const kopfWeiss: React.CSSProperties = {
     ...zelle,
@@ -217,7 +224,7 @@ export function FahrtenbuchTab({
           {/* Titelband wie die Excel: Dunkelblau, weiß, über alle Spalten */}
           <tr>
             <th
-              colSpan={11}
+              colSpan={10}
               style={{
                 ...zelle,
                 background: TB_FARBEN.fahrtenbuchTitel,
@@ -242,7 +249,7 @@ export function FahrtenbuchTab({
             <th colSpan={2} style={{ ...zelle, textAlign: "left", fontWeight: 700 }}>
               Kennzeichen:
             </th>
-            <th colSpan={4} style={{ ...zelle, background: TB_FARBEN.eingabe, textAlign: "left", fontWeight: 400 }}>
+            <th colSpan={3} style={{ ...zelle, background: TB_FARBEN.eingabe, textAlign: "left", fontWeight: 400 }}>
               {kannBearbeiten ? (
                 <FbText wert={kennzeichen} onCommit={speichereKennzeichen} breit />
               ) : (
@@ -268,7 +275,6 @@ export function FahrtenbuchTab({
             </th>
             <th style={{ ...kopfWeiss, minWidth: 76 }}>gefahrene km</th>
             <th style={{ ...kopfWeiss, minWidth: 100 }}>Kostenstelle</th>
-            <th style={{ ...kopfWeiss, minWidth: 60 }}>Dauer (h)</th>
             <th style={{ ...kopfWeiss, width: 34 }} />
           </tr>
         </thead>
@@ -285,7 +291,7 @@ export function FahrtenbuchTab({
                     min={periode.von}
                     max={periode.bis}
                     onChange={(e) => e.target.value && aendern(f.id, { datum: e.target.value })}
-                    style={{ border: "none", background: "transparent", fontFamily: SERIF, fontSize: 13, width: "100%" }}
+                    style={{ border: "none", background: "transparent", fontFamily: SERIF, fontSize: 15, fontWeight: 600, width: "100%" }}
                   />
                 ) : (
                   new Date(f.datum + "T00:00:00").toLocaleDateString("de-AT")
@@ -298,7 +304,7 @@ export function FahrtenbuchTab({
                       type="time"
                       value={f[feld]?.slice(0, 5) ?? ""}
                       onChange={(e) => aendern(f.id, { [feld]: e.target.value || null })}
-                      style={{ border: "none", background: "transparent", fontFamily: SERIF, fontSize: 13, width: "100%" }}
+                      style={{ border: "none", background: "transparent", fontFamily: SERIF, fontSize: 15, fontWeight: 600, width: "100%" }}
                     />
                   ) : (
                     f[feld]?.slice(0, 5) ?? ""
@@ -340,7 +346,7 @@ export function FahrtenbuchTab({
                     rechts
                     onCommit={(v) => {
                       const n = Number(v.replace(",", ".").trim() || "0");
-                      if (Number.isFinite(n) && n >= 0) aendern(f.id, { km: r2(n) });
+                      if (Number.isFinite(n) && n >= 0) aendern(f.id, patchMitKm(f, { km: r2(n) }));
                     }}
                   />
                 ) : (
@@ -359,7 +365,6 @@ export function FahrtenbuchTab({
                   f.kostenstelle
                 )}
               </td>
-              <td style={{ ...zelle, textAlign: "right" }}>{zahl(fahrtDauerH(f.abfahrt, f.ankunft))}</td>
               <td style={{ ...zelle, textAlign: "center", padding: 0 }}>
                 {kannBearbeiten &&
                   (busy === f.id ? (
@@ -380,7 +385,7 @@ export function FahrtenbuchTab({
 
           {fahrten.length === 0 && (
             <tr>
-              <td colSpan={11} style={{ ...zelle, textAlign: "center", fontStyle: "italic", padding: "14px 0" }}>
+              <td colSpan={10} style={{ ...zelle, textAlign: "center", fontStyle: "italic", padding: "14px 0" }}>
                 Noch keine Fahrten in dieser Periode.
               </td>
             </tr>
@@ -388,7 +393,7 @@ export function FahrtenbuchTab({
 
           {kannBearbeiten && (
             <tr>
-              <td colSpan={11} style={{ ...zelle, textAlign: "left" }}>
+              <td colSpan={10} style={{ ...zelle, textAlign: "left" }}>
                 <button
                   type="button"
                   onClick={neu}
@@ -405,25 +410,6 @@ export function FahrtenbuchTab({
               </td>
             </tr>
           )}
-
-          {/* GESAMT wie in der Excel: grün hinterlegt */}
-          <tr>
-            <td colSpan={7} style={{ ...zelle, textAlign: "right", fontWeight: 700, border: "2px solid #000" }}>
-              GESAMT km:
-            </td>
-            <td
-              style={{
-                ...zelle,
-                textAlign: "right",
-                fontWeight: 700,
-                background: TB_FARBEN.stundensumme,
-                border: "2px solid #000",
-              }}
-            >
-              {zahl(gesamtKm)}
-            </td>
-            <td colSpan={3} style={{ ...zelle, border: "2px solid #000" }} />
-          </tr>
         </tbody>
       </table>
 
