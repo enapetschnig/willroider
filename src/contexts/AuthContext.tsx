@@ -58,7 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // wenn alle scheitern, markieren wir geladen (mit leerem Set als
     // Least-Privilege-Fallback) und loggen laut.
     for (let attempt = 1; attempt <= 3; attempt++) {
-      const { data, error } = await supabase.rpc("my_permissions");
+      const { data, error } = await (supabase.rpc as any)("my_permissions");
       if (!error) {
         setPermissions(new Set((data ?? []) as PermissionKey[]));
         setPermissionsLoaded(true);

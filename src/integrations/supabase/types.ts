@@ -95,6 +95,8 @@ export type Database = {
           /** 'bauarbeiter' = /stunden · 'angestellter' = /taetigkeitsbericht */
           zeiterfassung_typ: string | null;
           created_at: string;
+          /** Kennzeichen für den Fahrtenbuch-Kopf. */
+          fahrtenbuch_kennzeichen: string | null;
           updated_at: string;
         };
         Insert: Partial<Database['public']['Tables']['profiles']['Row']> & { id: string };
