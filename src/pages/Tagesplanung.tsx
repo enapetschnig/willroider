@@ -71,7 +71,7 @@ import {
   CalendarRange,
 } from "lucide-react";
 import { makeTagesplanungPdf } from "@/lib/tagesplanungPdf";
-import { getPoliereinsatzFuerTag, vergleichePartien } from "@/lib/tagesplanung";
+import { getPoliereinsatzPaareFuerTag, vergleichePartien } from "@/lib/tagesplanung";
 import { makeTagesplanungBild } from "@/lib/tagesplanungBild";
 import {
   teilePdfDirektDownload,
@@ -142,7 +142,21 @@ export default function Tagesplanung() {
   const [datum, setDatum] = useState<string>(todayIso());
   const [view, setView] = useState<"baustellen" | "mitarbeiter">("baustellen");
   const { data: plan, isLoading } = useTagesplanung(datum);
-  const { data: taetigkeitenStamm = [] } = useTaetigkeitenStamm();
+  const { data: taetigkeitenStammRoh = [] } = useTaetigkeitenStamm();
+  /** Auswahlliste der Tätigkeits-Spalte: alphabetisch (statt nach der
+   *  gepflegten Reihenfolge — in einer langen Liste sucht man nach dem
+   *  Namen) und ohne die Büro-Kostenstellen aus dem Tätigkeitsbericht
+   *  („Kalkulation", „Egger", „Pließnig" …), die hier nichts zu suchen
+   *  haben. Pflegen lässt sich die Liste in der Verwaltung unter
+   *  Arbeitszeit → Tätigkeiten. */
+  const taetigkeitenStamm = useMemo(
+    () =>
+      taetigkeitenStammRoh
+        .filter((t) => t.bereich !== "buero")
+        .slice()
+        .sort((a, b) => a.bezeichnung.localeCompare(b.bezeichnung, "de")),
+    [taetigkeitenStammRoh],
+  );
 
   /** Probe-Query bei Mount: prüft ob `tagesplanung_freigaben` in der Cloud-DB
    *  existiert. Wenn nicht, wird oben ein Banner + Setup-Dialog angeboten. */
@@ -921,9 +935,22 @@ export default function Tagesplanung() {
       // Vorbelegung in der Stundenerfassung und „Mein Tag" verwenden. Bei
       // mehreren laufenden Zeiträumen gewinnt der früher begonnene; er gilt
       // als Hauptbaustelle der Partie.
-      const zeitraeume = Array.from(
-        (await getPoliereinsatzFuerTag(datum)).entries(),
-      ).map(([partie_id, baustelle_id]) => ({ partie_id, baustelle_id }));
+      const paare = await getPoliereinsatzPaareFuerTag(datum);
+      // Je Baustelle ALLE dort geplanten Partien sammeln. Zwei Fälle, die
+      // vorher unter den Tisch fielen:
+      //  - eine Partie hat mehrere BVH am Tag  → jedes BVH wird angelegt
+      //  - mehrere Partien auf einer Baustelle → alle Leute kommen hin
+      const partienJeBaustelle = new Map<string, string[]>();
+      for (const pa of paare) {
+        if (!partienJeBaustelle.has(pa.baustelle_id)) {
+          partienJeBaustelle.set(pa.baustelle_id, []);
+        }
+        const l = partienJeBaustelle.get(pa.baustelle_id)!;
+        if (!l.includes(pa.partie_id)) l.push(pa.partie_id);
+      }
+      const zeitraeume = Array.from(partienJeBaustelle.entries()).map(
+        ([baustelle_id, partie_ids]) => ({ baustelle_id, partie_ids }),
+      );
       if (zeitraeume.length === 0) {
         toast({
           variant: "destructive",
@@ -933,7 +960,7 @@ export default function Tagesplanung() {
       }
       if (
         !window.confirm(
-          `${zeitraeume.length} Baustelle${zeitraeume.length === 1 ? "" : "n"} aus der Polierplanung für den ${new Date(datum).toLocaleDateString("de-AT")} übernehmen? Die Mitarbeiter der jeweiligen Partie werden eingeteilt.`,
+          `${zeitraeume.length} Baustelle${zeitraeume.length === 1 ? "" : "n"} aus der Polierplanung für den ${new Date(datum).toLocaleDateString("de-AT")} übernehmen? Die Mitarbeiter der jeweiligen Partie werden eingeteilt — hat eine Partie an dem Tag mehrere BVH, kommt sie auf alle.`,
         )
       )
         return;
@@ -966,94 +993,134 @@ export default function Tagesplanung() {
           if (!fzByPartie.has(f.partie_id)) fzByPartie.set(f.partie_id, []);
           fzByPartie.get(f.partie_id)!.push(f.id);
         });
-      // Ein Fahrzeug nur 1x/Tag: mit bereits zugeteilten vorbefüllen (frisch).
-      const schonFahrzeug = belegung.fzIds;
 
-      // Jeder Mitarbeiter darf pro Tag nur EINER Baustelle zugeteilt werden.
-      // WICHTIG: vorbefüllen mit den MA, die am Tag SCHON eingeteilt sind
-      // (manuell, Plan vom Vortag, Jahresplanung, übersprungene Baustellen)
-      // — sonst würde die Übernahme sie ein zweites Mal zuteilen.
-      const schonEingeteilt = belegung.maIds;
+      // Ein Mitarbeiter DARF an einem Tag auf mehreren BVH stehen — genau
+      // das war der Wunsch („Gerüst abholen, anschließend Millesistraße").
+      // Die Übernahme bringt ihn deshalb auf jede Baustelle seiner Partie.
+      //
+      // Bestand des Tages EINMAL laden: vorher fragte die Schleife je
+      // Baustelle vier Mal einzeln nach. Bei zehn BVH dauerte die Übernahme
+      // dadurch mehrere Sekunden, und wer die Seite in der Zwischenzeit
+      // verließ, hinterließ eine halb gefüllte Zeile.
+      const [{ data: bestandE }, { data: bestandM }, { data: bestandF }] = await Promise.all([
+        supabase.from("einteilungen").select("id, baustelle_id").eq("datum", datum),
+        supabase
+          .from("einteilung_mitarbeiter")
+          .select("einteilung_id, mitarbeiter_id, einteilung:einteilungen!inner(datum)")
+          .eq("einteilung.datum", datum),
+        supabase
+          .from("einteilung_fahrzeuge")
+          .select("einteilung_id, fahrzeug_id, einteilung:einteilungen!inner(datum)")
+          .eq("einteilung.datum", datum),
+      ]);
+      const einteilungJeBaustelle = new Map<string, string>();
+      ((bestandE as any[]) ?? []).forEach((e) => {
+        if (e.baustelle_id && !einteilungJeBaustelle.has(e.baustelle_id)) {
+          einteilungJeBaustelle.set(e.baustelle_id, e.id);
+        }
+      });
+      const maJeEinteilung = new Map<string, Set<string>>();
+      ((bestandM as any[]) ?? []).forEach((r) => {
+        if (!maJeEinteilung.has(r.einteilung_id)) maJeEinteilung.set(r.einteilung_id, new Set());
+        maJeEinteilung.get(r.einteilung_id)!.add(r.mitarbeiter_id);
+      });
+      const fzJeEinteilung = new Map<string, Set<string>>();
+      ((bestandF as any[]) ?? []).forEach((r) => {
+        if (!fzJeEinteilung.has(r.einteilung_id)) fzJeEinteilung.set(r.einteilung_id, new Set());
+        fzJeEinteilung.get(r.einteilung_id)!.add(r.fahrzeug_id);
+      });
+
       let saved = 0;
-      let skipped = 0;
+      let ergaenzt = 0;
       let ohneMa = 0;
       let fehler = 0;
       for (const z of zeitraeume) {
-        if (!z.baustelle_id) {
-          skipped++;
-          continue;
-        }
-        // Existiert für (Tag, Baustelle) schon eine Einteilung? Dann skippen.
-        // limit(1) statt maybeSingle(): verträgt auch Alt-Duplikate.
-        const { data: existing } = await supabase
-          .from("einteilungen")
-          .select("id")
-          .eq("datum", datum)
-          .eq("baustelle_id", z.baustelle_id)
-          .limit(1);
-        if (existing && existing.length > 0) {
-          skipped++;
-          continue;
-        }
-        // Nur noch nicht anderweitig eingeteilte Mitarbeiter zuweisen.
-        // KEINE Mitarbeiter verfügbar → Baustelle GAR NICHT anlegen:
-        // im Tagesplan sollen nur belegte Baustellen stehen.
-        const maIds = (maByPartie.get(z.partie_id) ?? []).filter(
-          (mid) => !schonEingeteilt.has(mid),
+        // Alle Leute aller dort geplanten Partien — ohne Abwesende.
+        const maIds = Array.from(
+          new Set(z.partie_ids.flatMap((pid) => maByPartie.get(pid) ?? [])),
         );
         if (maIds.length === 0) {
           ohneMa++;
           continue;
         }
+        const fzAllePartien = Array.from(
+          new Set(z.partie_ids.flatMap((pid) => fzByPartie.get(pid) ?? [])),
+        );
 
-        const { data: neu } = await supabase
-          .from("einteilungen")
-          .insert({
-            datum,
-            baustelle_id: z.baustelle_id,
-            created_by: user?.id ?? null,
-          })
-          .select("id")
-          .single();
-        if (!neu) {
-          fehler++;
+        // Gibt es für (Tag, Baustelle) schon eine Einteilung, wird sie
+        // ERGÄNZT statt übersprungen — sonst fehlt die zweite Partie, die
+        // auf derselben Baustelle geplant ist.
+        let einteilungId = einteilungJeBaustelle.get(z.baustelle_id);
+        const istNeu = !einteilungId;
+
+        if (!einteilungId) {
+          const { data: neu } = await supabase
+            .from("einteilungen")
+            .insert({
+              datum,
+              baustelle_id: z.baustelle_id,
+              created_by: user?.id ?? null,
+            })
+            .select("id")
+            .single();
+          if (!neu) {
+            fehler++;
+            continue;
+          }
+          einteilungId = neu.id;
+          einteilungJeBaustelle.set(z.baustelle_id, neu.id);
+        }
+
+        // Nur fehlende Personen/Fahrzeuge nachtragen — wer schon auf der
+        // Zeile steht, bleibt unberührt (kein Doppeleintrag, keine
+        // Verletzung des UNIQUE-Index).
+        const habenMa = maJeEinteilung.get(einteilungId) ?? new Set<string>();
+        const habenFz = fzJeEinteilung.get(einteilungId) ?? new Set<string>();
+        const neueMa = maIds.filter((mid) => !habenMa.has(mid));
+        const neueFz = fzAllePartien.filter((fid) => !habenFz.has(fid));
+
+        if (neueMa.length > 0) {
+          const { error: emErr } = await supabase.from("einteilung_mitarbeiter").insert(
+            neueMa.map((mid) => ({
+              einteilung_id: einteilungId,
+              mitarbeiter_id: mid,
+            })),
+          );
+          if (emErr) {
+            // Frisch angelegte, leer gebliebene Hülle wieder entfernen.
+            if (istNeu) {
+              await supabase.from("einteilungen").delete().eq("id", einteilungId);
+              einteilungJeBaustelle.delete(z.baustelle_id);
+            }
+            fehler++;
+            continue;
+          }
+          maJeEinteilung.set(einteilungId, new Set([...habenMa, ...neueMa]));
+        } else if (istNeu) {
+          // Kann nicht passieren (maIds war nicht leer), aber sicher ist sicher.
+          await supabase.from("einteilungen").delete().eq("id", einteilungId);
+          ohneMa++;
           continue;
         }
 
-        const { error: emErr } = await supabase.from("einteilung_mitarbeiter").insert(
-          maIds.map((mid) => ({
-            einteilung_id: neu.id,
-            mitarbeiter_id: mid,
-          })),
-        );
-        if (emErr) {
-          // Leere Hülle nicht stehen lassen — wieder entfernen.
-          await supabase.from("einteilungen").delete().eq("id", neu.id);
-          fehler++;
-          continue;
-        }
-        maIds.forEach((mid) => schonEingeteilt.add(mid));
-
-        // Stamm-Fahrzeuge der Partie mitgeben (jedes Fahrzeug nur 1x/Tag).
-        const fzIds = (fzByPartie.get(z.partie_id) ?? []).filter(
-          (fid) => !schonFahrzeug.has(fid),
-        );
-        if (fzIds.length > 0) {
+        if (neueFz.length > 0) {
           const { error: efErr } = await supabase.from("einteilung_fahrzeuge").insert(
-            fzIds.map((fid) => ({
-              einteilung_id: neu.id,
+            neueFz.map((fid) => ({
+              einteilung_id: einteilungId,
               fahrzeug_id: fid,
             })),
           );
           if (efErr) fehler++;
-          else fzIds.forEach((fid) => schonFahrzeug.add(fid));
+          else fzJeEinteilung.set(einteilungId, new Set([...habenFz, ...neueFz]));
         }
-        saved++;
+
+        if (istNeu) saved++;
+        else if (neueMa.length > 0 || neueFz.length > 0) ergaenzt++;
       }
       const hinweise = [
-        skipped > 0 ? `${skipped} übersprungen (bereits vorhanden)` : "",
+        ergaenzt > 0 ? `${ergaenzt} bestehende Baustelle${ergaenzt === 1 ? "" : "n"} ergänzt` : "",
         ohneMa > 0
-          ? `${ohneMa} nicht angelegt (keine freien Mitarbeiter — Partie mehrfach aktiv oder alle verplant)`
+          ? `${ohneMa} ohne Mitarbeiter (alle abwesend) — nicht angelegt`
           : "",
         fehler > 0 ? `${fehler} mit Fehler` : "",
       ].filter(Boolean);
@@ -2809,8 +2876,11 @@ function SonderfaelleBlock({
     return list
       .map((a) => {
         const name = `${a.ma.nachname} ${a.ma.vorname}`;
+        // Enddatum ist die wichtigste Angabe — bis wann fehlt der Mann.
         const suffix = a.seit && a.bis
           ? ` (${formatRange(a.seit, a.bis)})`
+          : a.bis
+          ? ` (bis ${shortDate(a.bis)})`
           : a.seit
           ? ` (seit ${shortDate(a.seit)})`
           : "";

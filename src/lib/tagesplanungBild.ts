@@ -163,8 +163,16 @@ function layout(ctx: CanvasRenderingContext2D, plan: TagesPlanData, draw: boolea
       krank: "krank",
       schlechtwetter: "SW",
     };
+    const kurz = (iso: string) => {
+      const d = new Date(iso + "T00:00:00");
+      return `${d.getDate()}.${d.getMonth() + 1}.`;
+    };
     const s = plan.abwesende
-      .map((a) => `${a.ma.nachname} ${a.ma.vorname} (${STATUS[a.status] ?? a.status})`)
+      .map((a) => {
+        const grund = STATUS[a.status] ?? a.status;
+        // Enddatum mit, damit auch im WhatsApp-Bild steht, bis wann.
+        return `${a.ma.nachname} ${a.ma.vorname} (${grund}${a.bis ? ` bis ${kurz(a.bis)}` : ""})`;
+      })
       .join(", ");
     ctx.font = "28px Georgia, serif";
     for (const line of wrap(ctx, s, INNER)) {

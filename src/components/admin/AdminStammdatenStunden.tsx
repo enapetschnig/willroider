@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,10 +36,16 @@ export function AdminStammdatenStunden() {
       <PausenConfigCard />
       <ArbeitszeitLimitsCard />
       <KilometergeldCard />
-      <TaetigkeitenStammCard />
       <ZulagenStammCard />
     </div>
   );
+}
+
+/** Tätigkeiten-Pflege — steht in der Verwaltung als eigener Reiter, weil
+ *  sie die Auswahllisten in Tagesplanung, Stundenerfassung und Halle
+ *  füttert und regelmäßig angepasst wird. */
+export function AdminTaetigkeiten() {
+  return <TaetigkeitenStammCard />;
 }
 
 // ─── Kilometergeld ─────────────────────────────────────────────────────────
@@ -277,7 +283,13 @@ function ArbeitszeitLimitsCard() {
 
 function TaetigkeitenStammCard() {
   const { toast } = useToast();
-  const { data: list = [], isLoading } = useTaetigkeitenStamm({ onlyActive: false });
+  const { data: listRoh = [], isLoading } = useTaetigkeitenStamm({ onlyActive: false });
+  // Alphabetisch — dieselbe Reihenfolge wie in den Auswahllisten, sonst
+  // sucht man den Eintrag, den man ändern will.
+  const list = useMemo(
+    () => listRoh.slice().sort((a, b) => a.bezeichnung.localeCompare(b.bezeichnung, "de")),
+    [listRoh],
+  );
   const mut = useTaetigkeitMutation();
   const [newName, setNewName] = useState("");
   const [newBereich, setNewBereich] = useState<"baustelle" | "halle" | "beide" | "buero">("baustelle");

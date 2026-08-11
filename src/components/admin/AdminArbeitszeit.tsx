@@ -1,22 +1,26 @@
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { CalendarRange, Coffee, UserCog } from "lucide-react";
+import { CalendarRange, Coffee, Tag, UserCog } from "lucide-react";
 import Kalender from "@/pages/Kalender";
-import { AdminStammdatenStunden } from "./AdminStammdatenStunden";
+import { AdminStammdatenStunden, AdminTaetigkeiten } from "./AdminStammdatenStunden";
 import { AdminEinstellungen } from "./AdminEinstellungen";
 
 /**
  * Bündelt alle arbeitszeitbezogenen Admin-Einstellungen an EINEM Ort:
  *  - Arbeitszeitkalender (L/K-Wochen, Tages-Soll) — die einzige Quelle
  *    für alle Soll-/Minusstunden-Berechnungen.
- *  - Pausen & Tageslimits.
+ *  - Pausen & Tageslimits, Kilometergeld, Zulagen.
+ *  - Tätigkeiten (Auswahllisten für Tagesplanung, Stunden, Halle).
  *  - Pro-Mitarbeiter-Einstellungen (Modell, Tagesnorm, Beschäftigungsgrad).
  */
-type Sub = "kalender" | "pausen" | "mitarbeiter";
+type Sub = "kalender" | "pausen" | "taetigkeiten" | "mitarbeiter";
 
 const SUBS: { key: Sub; label: string; icon: typeof CalendarRange }[] = [
   { key: "kalender", label: "Arbeitszeitkalender", icon: CalendarRange },
   { key: "pausen", label: "Pausen & Limits", icon: Coffee },
+  // Eigener Reiter: die Tätigkeitsliste lag unter „Pausen & Limits" und
+  // war dort nicht zu finden.
+  { key: "taetigkeiten", label: "Tätigkeiten", icon: Tag },
   { key: "mitarbeiter", label: "Mitarbeiter-Einstellungen", icon: UserCog },
 ];
 
@@ -50,6 +54,7 @@ export function AdminArbeitszeit() {
 
       {sub === "kalender" && <Kalender />}
       {sub === "pausen" && <AdminStammdatenStunden />}
+      {sub === "taetigkeiten" && <AdminTaetigkeiten />}
       {sub === "mitarbeiter" && <AdminEinstellungen />}
     </div>
   );

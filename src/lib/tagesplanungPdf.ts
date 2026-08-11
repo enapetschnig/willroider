@@ -171,9 +171,13 @@ export function makeTagesplanungPdf(plan: TagesPlanData): jsPDF {
     return list
       .map((a) => {
         const name = `${a.ma.nachname} ${a.ma.vorname}`;
+        // Enddatum ist die wichtigste Angabe — der Polier will wissen, ab
+        // wann er wieder mit dem Mann rechnen kann.
         const suffix =
           a.seit && a.bis
             ? ` (${shortDate(a.seit)} – ${shortDate(a.bis)})`
+            : a.bis
+            ? ` (bis ${shortDate(a.bis)})`
             : a.seit
             ? ` (seit ${shortDate(a.seit)})`
             : "";

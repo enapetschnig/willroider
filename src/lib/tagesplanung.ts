@@ -137,6 +137,36 @@ export function vergleichePartien(
  * laufenden Zeiträumen gewinnt der früher begonnene — das ist die
  * Hauptbaustelle der Partie.
  */
+/** ALLE am Tag laufenden Poliereinsatz-Zeiträume als (Partie, Baustelle)-
+ *  Paare — im Gegensatz zu getPoliereinsatzFuerTag(), das je Partie nur die
+ *  Hauptbaustelle liefert. Eine Partie kann an einem Tag mehrere BVH haben
+ *  („Gerüst abholen, anschließend Millesistraße"), und auf einer Baustelle
+ *  können mehrere Partien sein — die Tagesplanung braucht beides. Früher
+ *  begonnene Zeiträume stehen vorn. */
+export async function getPoliereinsatzPaareFuerTag(
+  datum: string,
+): Promise<{ partie_id: string; baustelle_id: string }[]> {
+  if (!datum) return [];
+  const { data } = await supabase
+    .from("poliereinsatz_zeitraeume")
+    .select("partie_id, baustelle_id, von_datum")
+    .lte("von_datum", datum)
+    .gte("bis_datum", datum)
+    .order("von_datum", { ascending: true });
+  const gesehen = new Set<string>();
+  const out: { partie_id: string; baustelle_id: string }[] = [];
+  ((data as any[]) ?? []).forEach((z) => {
+    if (!z.partie_id || !z.baustelle_id) return;
+    // Zwei Zeiträume derselben Partie auf derselben Baustelle (Verlängerung,
+    // Alt-Duplikat) sind ein Paar, nicht zwei.
+    const key = `${z.partie_id}|${z.baustelle_id}`;
+    if (gesehen.has(key)) return;
+    gesehen.add(key);
+    out.push({ partie_id: z.partie_id, baustelle_id: z.baustelle_id });
+  });
+  return out;
+}
+
 export async function getPoliereinsatzFuerTag(
   datum: string,
 ): Promise<Map<string, string>> {

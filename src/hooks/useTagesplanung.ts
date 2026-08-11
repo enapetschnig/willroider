@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
 import { getPoliereinsatzFuerTag, vergleichePartien } from "@/lib/tagesplanung";
+import { isWerktag } from "@/lib/feiertage";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -293,6 +294,89 @@ export function useTagesplanung(datum: string) {
         abwesende.push({ ma, status: "urlaub", seit: a.von, bis: a.bis });
       });
 
+      // ── Enddatum der Abwesenheit ("bis wann?") ───────────────────────
+      // Der Polier will wissen, wann jemand zurück ist. Ein Antrag bzw.
+      // eine Krankmeldung kennt das Ende — die meisten Abwesenheiten
+      // stehen aber nur als Tagesmarker in stunden_tage (Import, Knopf in
+      // der Arbeitsplanung). Deren Ende wird aus der Kette der folgenden
+      // Marker abgeleitet. Diese Marker liegen NUR auf Werktagen, also
+      // wird über Wochenenden und Feiertage hinweg weitergezählt — sonst
+      // endete jeder Urlaub am Freitag.
+      if (abwesende.length > 0) {
+        const VORSCHAU_TAGE = 60;
+        const plusTage = (n: number) => {
+          const d = new Date(datum + "T00:00:00");
+          d.setDate(d.getDate() + n);
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        };
+        const ids = abwesende.map((a) => a.ma.id);
+        const [{ data: folgeRaw }, { data: kmRaw }] = await Promise.all([
+          supabase
+            .from("stunden_tage")
+            .select("mitarbeiter_id, tag_status, datum")
+            .gt("datum", datum)
+            .lte("datum", plusTage(VORSCHAU_TAGE))
+            .in("tag_status", ["urlaub", "krank", "schlechtwetter", "berufsschule"])
+            .in("mitarbeiter_id", ids),
+          // Krankmeldung mit offenem Ende (bis = NULL) zählt nicht als Ende.
+          supabase
+            .from("krankmeldungen")
+            .select("mitarbeiter_id, bis")
+            .lte("von", datum)
+            .gte("bis", datum)
+            .in("mitarbeiter_id", ids)
+            .then(
+              (r) => r,
+              () => ({ data: null, error: null } as any),
+            ),
+        ]);
+
+        const markerTage = new Map<string, Set<string>>();
+        ((folgeRaw as any[]) ?? []).forEach((r) => {
+          const key = `${r.mitarbeiter_id}|${r.tag_status}`;
+          if (!markerTage.has(key)) markerTage.set(key, new Set());
+          markerTage.get(key)!.add(r.datum);
+        });
+        const krankBis = new Map<string, string>();
+        ((kmRaw as any[]) ?? []).forEach((r) => {
+          if (r.bis) krankBis.set(r.mitarbeiter_id, r.bis);
+        });
+
+        /** Letzter Tag der ununterbrochenen Marker-Kette ab `datum`. */
+        const kettenEnde = (maId: string, status: string): string | undefined => {
+          const tage = markerTage.get(`${maId}|${status}`);
+          let ende: string | undefined;
+          for (let i = 1; i <= VORSCHAU_TAGE; i++) {
+            const d = plusTage(i);
+            if (tage?.has(d)) {
+              ende = d;
+              continue;
+            }
+            // Kein Marker: an arbeitsfreien Tagen weiterschauen, an einem
+            // Werktag ohne Marker ist die Abwesenheit zu Ende.
+            if (!isWerktag(d)) continue;
+            break;
+          }
+          return ende;
+        };
+
+        abwesende.forEach((a) => {
+          const kandidaten = [
+            a.bis,
+            kettenEnde(a.ma.id, a.status),
+            a.status === "krank" ? krankBis.get(a.ma.id) : undefined,
+          ].filter((x): x is string => !!x && x >= datum);
+          if (kandidaten.length > 0) {
+            // Der späteste bekannte Tag gewinnt — ein Antrag kann über die
+            // bereits angelegten Tagesmarker hinausreichen.
+            a.bis = kandidaten.reduce((m, x) => (x > m ? x : m));
+          } else {
+            // Kein Folgetag: die Abwesenheit endet heute.
+            a.bis = a.bis ?? datum;
+          }
+        });
+      }
+
       return {
         datum,
         einteilungen,
@@ -312,22 +396,39 @@ export function useTagesplanung(datum: string) {
   // Realtime-Subscription
   useEffect(() => {
     if (!datum) return;
+
+    // Ereignisse BÜNDELN. Eine Übernahme aus der Polierplanung schreibt in
+    // wenigen Sekunden ~50 Zeilen (Baustellen, Mitarbeiter, Fahrzeuge) und
+    // löste damit ~50 vollständige Neuladungen des Tages aus — jede davon
+    // ein Dutzend Abfragen. Unter dieser Last scheiterten Abfragen, die
+    // Ansicht blieb auf dem alten Stand stehen und zeigte „Noch keine
+    // Einteilungen", obwohl alles gespeichert war. Ein kurzer Sammelpuffer
+    // macht daraus EINE Neuladung.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const neuLaden = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        void qc.invalidateQueries({ queryKey: ["tagesplan", datum] });
+      }, 400);
+    };
+
     const channel = supabase
       .channel(`tagesplan-${datum}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "einteilungen", filter: `datum=eq.${datum}` },
-        () => qc.invalidateQueries({ queryKey: ["tagesplan", datum] }),
+        neuLaden,
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "einteilung_mitarbeiter" },
-        () => qc.invalidateQueries({ queryKey: ["tagesplan", datum] }),
+        neuLaden,
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "einteilung_fahrzeuge" },
-        () => qc.invalidateQueries({ queryKey: ["tagesplan", datum] }),
+        neuLaden,
       )
       .on(
         "postgres_changes",
@@ -337,20 +438,21 @@ export function useTagesplanung(datum: string) {
           table: "tagesplanung_freigaben",
           filter: `datum=eq.${datum}`,
         },
-        () => qc.invalidateQueries({ queryKey: ["tagesplan", datum] }),
+        neuLaden,
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "stunden_tage", filter: `datum=eq.${datum}` },
-        () => qc.invalidateQueries({ queryKey: ["tagesplan", datum] }),
+        neuLaden,
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "urlaubsantraege" },
-        () => qc.invalidateQueries({ queryKey: ["tagesplan", datum] }),
+        neuLaden,
       )
       .subscribe();
     return () => {
+      if (timer) clearTimeout(timer);
       supabase.removeChannel(channel);
     };
   }, [datum, qc]);
