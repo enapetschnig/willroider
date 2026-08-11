@@ -676,6 +676,14 @@ export default function Taetigkeitsbericht() {
   /** Spaltenfarbe: Feiertag/So dunkel, Sa hell — über die GANZE Spalte. */
   const spalte = tagSpaltenFarbe;
 
+  // Fokus-Kreuz: die Zeile und die Tagesspalte der gerade bearbeiteten
+  // Zelle werden hervorgehoben, damit man in der breiten Tabelle sieht,
+  // wo man steht. Gesetzt/gelöscht über Focus-Capture an der Tabelle.
+  const [fokus, setFokus] = useState<{ zeile: number; spalte: number } | null>(null);
+  const fokusIso = fokus ? periode.tage[fokus.spalte] : null;
+  /** Spaltenfarbe inkl. Kreuz — läuft durch ALLE Zeilen der Tabelle. */
+  const spalteK = (iso: string) => (iso === fokusIso ? KREUZ_FARBE : spalte(iso));
+
   return (
     <div className="p-3 sm:p-6 pb-safe-nav">
       <PageHeader
@@ -761,7 +769,20 @@ export default function Taetigkeitsbericht() {
             />
           ) : (
           <div className="overflow-auto max-h-[calc(100vh-15rem)]">
-            <table style={{ borderCollapse: "collapse", background: "#fff", color: "#000", width: "100%" }}>
+            <table
+              style={{ borderCollapse: "collapse", background: "#fff", color: "#000", width: "100%" }}
+              onFocusCapture={(e) => {
+                const t = e.target as HTMLElement;
+                if (t.dataset?.tbZeile != null && t.dataset?.tbSpalte != null) {
+                  setFokus({ zeile: Number(t.dataset.tbZeile), spalte: Number(t.dataset.tbSpalte) });
+                }
+              }}
+              onBlurCapture={(e) => {
+                // Nur löschen, wenn der Fokus die Zellen wirklich verlässt —
+                // beim Springen zur Nachbarzelle bleibt das Kreuz stehen.
+                if (!(e.relatedTarget as HTMLElement | null)?.dataset?.tbZeile) setFokus(null);
+              }}
+            >
               {/* Titelband wie in der Excel: silbergrau, über alles */}
               <thead>
                 <tr>
@@ -850,7 +871,7 @@ export default function Taetigkeitsbericht() {
                           ...tdZahl,
                           textAlign: "center",
                           fontWeight: 700,
-                          background: spalte(iso),
+                          background: spalteK(iso),
                           borderBottom: "2px solid #000",
                           position: "relative",
                         }}
@@ -895,13 +916,14 @@ export default function Taetigkeitsbericht() {
 
               <tbody>
                 {/* Kostenstellen-Zeilen */}
-                {zeilen.map((zz) => {
+                {zeilen.map((zz, zi) => {
                   const werte = zellen[zz.key] ?? {};
                   const gesamt = summeVon(werte);
+                  const zeileImKreuz = fokus?.zeile === zi;
                   return (
                     <tr key={zz.key}>
-                      <td style={{ ...td, fontWeight: 700 }}>{zz.kst}</td>
-                      <td style={{ ...td, textAlign: "left" }}>
+                      <td style={{ ...td, fontWeight: 700, background: zeileImKreuz ? KREUZ_FARBE : undefined }}>{zz.kst}</td>
+                      <td style={{ ...td, textAlign: "left", background: zeileImKreuz ? KREUZ_FARBE : undefined }}>
                         <span className="inline-flex items-center gap-1">
                           {zz.bezeichnung}
                           {gesamt === 0 && kannBearbeiten && (
@@ -916,12 +938,12 @@ export default function Taetigkeitsbericht() {
                           )}
                         </span>
                       </td>
-                      {periode.tage.map((iso) => (
+                      {periode.tage.map((iso, si) => (
                         <td
                           key={iso}
                           style={{
                             ...tdZahl,
-                            background: spalte(iso),
+                            background: zeileImKreuz ? KREUZ_FARBE : spalteK(iso),
                             padding: 0,
                           }}
                         >
@@ -929,6 +951,8 @@ export default function Taetigkeitsbericht() {
                             <ZellEingabe
                               wert={werte[iso] ?? 0}
                               busy={busy === `${zz.key}|${iso}`}
+                              zeile={zi}
+                              spalte={si}
                               onCommit={(v) => speichereZelle(zz, iso, v)}
                             />
                           ) : (
@@ -936,7 +960,7 @@ export default function Taetigkeitsbericht() {
                           )}
                         </td>
                       ))}
-                      <td style={{ ...tdZahl, fontWeight: 700 }}>{z(gesamt)}</td>
+                      <td style={{ ...tdZahl, fontWeight: 700, background: zeileImKreuz ? KREUZ_FARBE : undefined }}>{z(gesamt)}</td>
                     </tr>
                   );
                 })}
@@ -982,29 +1006,31 @@ export default function Taetigkeitsbericht() {
                     </Popover>
                   </td>
                   {periode.tage.map((iso) => (
-                    <td key={iso} style={{ ...tdZahl, background: spalte(iso) }} />
+                    <td key={iso} style={{ ...tdZahl, background: spalteK(iso) }} />
                   ))}
                   <td style={td} />
                 </tr>
                 )}
 
                 {/* ── Summenzeilen — Farben wie in der Vorlage ── */}
-                <SummenZeile label="Zwischensumme" tage={periode.tage} werte={summen.zwischensumme} gesamt={summen.zwischensummeGesamt} fett farbe={TB_FARBEN.zwischensumme} spalte={spalte} dickOben />
+                <SummenZeile label="Zwischensumme" tage={periode.tage} werte={summen.zwischensumme} gesamt={summen.zwischensummeGesamt} fett farbe={TB_FARBEN.zwischensumme} spalte={spalteK} dickOben />
 
                 {/* Urlaub ist BEARBEITBAR — „doch nicht konsumiert" */}
                 <tr>
-                  <td colSpan={2} style={tdLabel}>
+                  <td colSpan={2} style={{ ...tdLabel, background: fokus?.zeile === zeilen.length ? KREUZ_FARBE : undefined }}>
                     Urlaub
                     <span style={{ fontWeight: 400, fontSize: 10, marginLeft: 6, color: "#666" }}>
                       (änderbar)
                     </span>
                   </td>
-                  {periode.tage.map((iso) => (
-                    <td key={iso} style={{ ...tdZahl, background: spalte(iso), padding: 0 }}>
+                  {periode.tage.map((iso, si) => (
+                    <td key={iso} style={{ ...tdZahl, background: fokus?.zeile === zeilen.length ? KREUZ_FARBE : spalteK(iso), padding: 0 }}>
                       {kannBearbeiten ? (
                         <ZellEingabe
                           wert={sonder.urlaub[iso] ?? 0}
                           busy={busy === `urlaub|${iso}`}
+                          zeile={zeilen.length}
+                          spalte={si}
                           onCommit={(v) => speichereUrlaub(iso, v)}
                         />
                       ) : (
@@ -1015,12 +1041,12 @@ export default function Taetigkeitsbericht() {
                   <td style={{ ...tdZahl, fontWeight: 700 }}>{z(summeVon(sonder.urlaub))}</td>
                 </tr>
 
-                <SummenZeile label="Sonderurlaub" tage={periode.tage} werte={sonder.sonderurlaub} gesamt={summeVon(sonder.sonderurlaub)} spalte={spalte} />
-                <SummenZeile label="Krankheit" tage={periode.tage} werte={sonder.krankheit} gesamt={summeVon(sonder.krankheit)} spalte={spalte} />
-                <SummenZeile label="Feiertag" tage={periode.tage} werte={sonder.feiertag} gesamt={summeVon(sonder.feiertag)} spalte={spalte} />
-                <SummenZeile label="Stundensumme/Tag" tage={periode.tage} werte={summen.stundensumme} gesamt={summen.stundensummeGesamt} fett farbe={TB_FARBEN.stundensumme} spalte={spalte} dickOben />
-                <SummenZeile label="Sollstunden/Tag" tage={periode.tage} werte={summen.soll} gesamt={summen.sollGesamt} spalte={spalte} />
-                <SummenZeile label="DELTA" tage={periode.tage} werte={summen.delta} gesamt={summen.deltaGesamt} fett spalte={spalte} negRot />
+                <SummenZeile label="Sonderurlaub" tage={periode.tage} werte={sonder.sonderurlaub} gesamt={summeVon(sonder.sonderurlaub)} spalte={spalteK} />
+                <SummenZeile label="Krankheit" tage={periode.tage} werte={sonder.krankheit} gesamt={summeVon(sonder.krankheit)} spalte={spalteK} />
+                <SummenZeile label="Feiertag" tage={periode.tage} werte={sonder.feiertag} gesamt={summeVon(sonder.feiertag)} spalte={spalteK} />
+                <SummenZeile label="Stundensumme/Tag" tage={periode.tage} werte={summen.stundensumme} gesamt={summen.stundensummeGesamt} fett farbe={TB_FARBEN.stundensumme} spalte={spalteK} dickOben />
+                <SummenZeile label="Sollstunden/Tag" tage={periode.tage} werte={summen.soll} gesamt={summen.sollGesamt} spalte={spalteK} />
+                <SummenZeile label="DELTA" tage={periode.tage} werte={summen.delta} gesamt={summen.deltaGesamt} fett spalte={spalteK} negRot />
 
                 {/* Warnhinweis wie die Excel-Formel IF(DELTA>15; …) */}
                 {summen.deltaGesamt > UEBERSTUNDEN_GRENZE && (
@@ -1035,21 +1061,23 @@ export default function Taetigkeitsbericht() {
                 {([
                   ["Taggeld > 6 Std.", "kurz", fahrtWerte.tg6, true],
                   ["Taggeld > 11 Std.", "lang", fahrtWerte.tg11, false],
-                ] as const).map(([label, feld, werte, dick]) => (
+                ] as const).map(([label, feld, werte, dick], ti) => (
                   <tr key={feld}>
-                    <td colSpan={2} style={{ ...tdLabel, ...(dick ? { borderTop: "2px solid #000" } : {}) }}>
+                    <td colSpan={2} style={{ ...tdLabel, ...(dick ? { borderTop: "2px solid #000" } : {}), background: fokus?.zeile === zeilen.length + 1 + ti ? KREUZ_FARBE : undefined }}>
                       {label}
                       <span style={{ fontWeight: 400, fontSize: 10, marginLeft: 6, color: "#666" }}>
                         (1 eintragen)
                       </span>
                     </td>
-                    {periode.tage.map((iso) => (
-                      <td key={iso} style={{ ...tdZahl, ...(dick ? { borderTop: "2px solid #000" } : {}), background: spalte(iso), padding: 0 }}>
+                    {periode.tage.map((iso, si) => (
+                      <td key={iso} style={{ ...tdZahl, ...(dick ? { borderTop: "2px solid #000" } : {}), background: fokus?.zeile === zeilen.length + 1 + ti ? KREUZ_FARBE : spalteK(iso), padding: 0 }}>
                         {kannBearbeiten ? (
                           <ZellEingabe
                             wert={werte[iso] ?? 0}
                             busy={busy === `tg-${feld}|${iso}`}
                             fmt={zGanz}
+                            zeile={zeilen.length + 1 + ti}
+                            spalte={si}
                             onCommit={(v) => speichereTaggeld(iso, feld, v)}
                           />
                         ) : (
@@ -1060,12 +1088,12 @@ export default function Taetigkeitsbericht() {
                     <td style={{ ...tdZahl, ...(dick ? { borderTop: "2px solid #000" } : {}), fontWeight: 700 }}>{zGanz(summeVon(werte))}</td>
                   </tr>
                 ))}
-                <SummenZeile label="gefahrene km" tage={periode.tage} werte={fahrtWerte.km} gesamt={summeVon(fahrtWerte.km)} spalte={spalte} />
+                <SummenZeile label="gefahrene km" tage={periode.tage} werte={fahrtWerte.km} gesamt={summeVon(fahrtWerte.km)} spalte={spalteK} />
                 {/* Kilometergeld bildet sich von selbst: km × 0,50 € je Tag */}
                 <tr>
                   <td colSpan={2} style={tdLabel}>{String(KM_SATZ).replace(".", ",")} € / km</td>
                   {periode.tage.map((iso) => (
-                    <td key={iso} style={{ ...tdZahl, background: spalte(iso) }}>
+                    <td key={iso} style={{ ...tdZahl, background: spalteK(iso) }}>
                       {z(r2((fahrtWerte.km[iso] ?? 0) * KM_SATZ))}
                     </td>
                   ))}
@@ -1134,6 +1162,9 @@ export default function Taetigkeitsbericht() {
 /** Kilometergeld-Satz wie in der Excel (Zelle A40). */
 const KM_SATZ = 0.5;
 
+/** Fokus-Kreuz: Hervorhebung der aktiven Zeile und Tagesspalte. */
+const KREUZ_FARBE = "#cfe3f7";
+
 /** Eine der Summen-/Abwesenheitszeilen unter der Matrix. */
 function SummenZeile({
   label,
@@ -1194,15 +1225,34 @@ function ZellEingabe({
   busy,
   onCommit,
   fmt = z,
+  zeile,
+  spalte,
 }: {
   wert: number;
   busy: boolean;
   onCommit: (v: number) => void;
   /** Anzeigeformat — Stunden „8,0", Taggeld-Zähler „1". */
   fmt?: (n: number) => string;
+  /** Koordinaten fürs Springen mit den Pfeiltasten und das Fokus-Kreuz. */
+  zeile?: number;
+  spalte?: number;
 }) {
   const [text, setText] = useState(fmt(wert));
+  const [hatFokus, setHatFokus] = useState(false);
   const letzterWert = useRef(wert);
+
+  /** Wie in Excel: Pfeiltasten (und Enter nach unten) springen zur
+   *  Nachbarzelle — der Blur der alten Zelle speichert automatisch. */
+  const springe = (dz: number, ds: number) => {
+    if (zeile == null || spalte == null) return false;
+    const ziel = document.querySelector<HTMLInputElement>(
+      `input[data-tb-zeile="${zeile + dz}"][data-tb-spalte="${spalte + ds}"]`,
+    );
+    if (!ziel) return false;
+    ziel.focus();
+    ziel.select();
+    return true;
+  };
 
   // Von außen geändert (Realtime, Perioden-Wechsel) → übernehmen, solange
   // hier nicht gerade getippt wird.
@@ -1237,12 +1287,29 @@ function ZellEingabe({
     <input
       value={text}
       onChange={(e) => setText(e.target.value)}
-      onBlur={commit}
+      onBlur={() => {
+        setHatFokus(false);
+        commit();
+      }}
       onKeyDown={(e) => {
-        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-        if (e.key === "Escape") setText(fmt(wert));
+        if (e.key === "Enter") {
+          if (!springe(1, 0)) (e.target as HTMLInputElement).blur();
+          e.preventDefault();
+        } else if (e.key === "Escape") {
+          setText(fmt(wert));
+        } else if (e.key === "ArrowUp") {
+          if (springe(-1, 0)) e.preventDefault();
+        } else if (e.key === "ArrowDown") {
+          if (springe(1, 0)) e.preventDefault();
+        } else if (e.key === "ArrowLeft") {
+          if (springe(0, -1)) e.preventDefault();
+        } else if (e.key === "ArrowRight") {
+          if (springe(0, 1)) e.preventDefault();
+        }
       }}
       inputMode="decimal"
+      data-tb-zeile={zeile}
+      data-tb-spalte={spalte}
       style={{
         width: "100%",
         border: "none",
@@ -1253,6 +1320,11 @@ function ZellEingabe({
         fontSize: 15,
         fontWeight: 600,
         padding: "1px 3px",
+        boxShadow: hatFokus ? "inset 0 0 0 2px #2e75b6" : undefined,
+      }}
+      onFocus={(e) => {
+        setHatFokus(true);
+        e.currentTarget.select();
       }}
     />
   );
