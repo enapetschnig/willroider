@@ -109,7 +109,15 @@ export function useStundenTageList(params: {
           (a, b) => a.position - b.position,
         ),
         zulagen: (row.stunden_zulagen ?? []) as StundenZulage[],
-        fahrt: (row.stunden_fahrt?.[0] ?? null) as StundenFahrt | null,
+        // stunden_fahrt ist 1:1 (PK = stunden_tag_id) — PostgREST liefert die
+        // Beziehung deshalb als OBJEKT, nicht als Array. Der frühere
+        // [0]-Zugriff ergab immer undefined: Taggeld/Fahrt wurden korrekt
+        // GESPEICHERT, aber nie wieder GELESEN (leer nach Reload, leer im
+        // Tätigkeitsbericht-PDF). Beide Formen abfangen, falls sich das
+        // Verhalten mit einem PostgREST-Update wieder ändert.
+        fahrt: ((Array.isArray(row.stunden_fahrt)
+          ? row.stunden_fahrt[0]
+          : row.stunden_fahrt) ?? null) as StundenFahrt | null,
       }));
     },
     enabled: params.enabled ?? true,
