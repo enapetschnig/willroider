@@ -253,7 +253,13 @@ export default function Taetigkeitsbericht() {
         .reduce((a, e) => a + Number(e.stunden), 0);
       if (urlaubStd > 0) out.urlaub[iso] = r2(urlaubStd);
       else if (st === "urlaub") out.urlaub[iso] = Number(t.tag.netto_stunden) || sollVon(iso);
-      if (st === "krank") out.krankheit[iso] = Number(t.tag.netto_stunden) || sollVon(iso);
+      // Krankheit: erst die stundenweisen Einträge (bearbeitbar, z. B.
+      // „1,5 Std. Zahnarzt"), dann der Ganztages-Marker aus der Krankmeldung.
+      const krankStd = t.taetigkeiten
+        .filter((e) => e.art === "krank")
+        .reduce((a, e) => a + Number(e.stunden), 0);
+      if (krankStd > 0) out.krankheit[iso] = r2(krankStd);
+      else if (st === "krank") out.krankheit[iso] = Number(t.tag.netto_stunden) || sollVon(iso);
       // Sonderurlaub-Einträge aus dem Stamm ergänzen die Feiertags-Ableitung.
       const sonderStd = t.taetigkeiten
         .filter((e) => e.taetigkeit_id && zeilenStamm.some(
@@ -415,18 +421,22 @@ export default function Taetigkeitsbericht() {
     }
   }
 
-  // ─── Urlaub direkt in der Tabelle ändern ─────────────────────────────
+  // ─── Urlaub/Krankheit direkt in der Tabelle ändern ───────────────────
   //
-  // „Es kann sein, dass man den eingetragenen Urlaub dann doch nicht
-  // konsumiert hat." Die Falle dabei: die Antrags-Genehmigung bucht das
-  // Urlaubskonto PAUSCHAL ab und legt 0-Stunden-Marker an. Schriebe man
-  // hier einfach Stunden hinein, würde der Auto-Buchungs-Trigger den Tag
-  // ein ZWEITES Mal abziehen. Deshalb wird ein Antrags-Tag beim ersten
+  // Urlaub: „Es kann sein, dass man den eingetragenen Urlaub dann doch
+  // nicht konsumiert hat." Die Falle dabei: die Antrags-Genehmigung bucht
+  // das Urlaubskonto PAUSCHAL ab und legt 0-Stunden-Marker an. Schriebe
+  // man hier einfach Stunden hinein, würde der Auto-Buchungs-Trigger den
+  // Tag ein ZWEITES Mal abziehen. Deshalb wird ein Antrags-Tag beim ersten
   // Bearbeiten einmalig mit +1 Tag neutralisiert — danach führt allein
   // der Stunden-Eintrag das Konto, und Ändern/Löschen stimmt automatisch.
-  async function speichereUrlaub(iso: string, wert: number) {
+  //
+  // Krankheit: gleiche Mechanik ohne Konto — „1,5 Std. Zahnarzt" wird als
+  // stundenweiser krank-Eintrag am Tag gespeichert, bestehende Arbeits-
+  // stunden bleiben stehen.
+  async function speichereAbwesenheit(iso: string, art: "urlaub" | "krank", wert: number) {
     if (!zielMa) return;
-    setBusy(`urlaub|${iso}`);
+    setBusy(`${art}|${iso}`);
     try {
       const vorhanden = tagByIso.get(iso);
       const status = vorhanden?.tag.status;
@@ -441,6 +451,7 @@ export default function Taetigkeitsbericht() {
 
       // Stammt der Tag aus einem genehmigten Antrag? Dann einmalig das
       // Konto neutralisieren (Guard über die Notiz-Markierung).
+      if (art === "urlaub") {
       const { data: antraege } = await supabase
         .from("urlaubsantraege")
         .select("id")
@@ -477,10 +488,11 @@ export default function Taetigkeitsbericht() {
           }
         }
       }
+      }
 
       const andere: SaveEintrag[] =
         vorhanden?.taetigkeiten
-          .filter((e) => e.art !== "urlaub")
+          .filter((e) => e.art !== art)
           .map((e) => ({
             position: 0,
             art: e.art,
@@ -495,7 +507,7 @@ export default function Taetigkeitsbericht() {
         wert > 0
           ? [{
               position: 0,
-              art: "urlaub" as TagStatus,
+              art: art as TagStatus,
               taetigkeit_id: null,
               taetigkeit_freitext: null,
               baustelle_id: null,
@@ -506,9 +518,9 @@ export default function Taetigkeitsbericht() {
       const taetigkeiten = [...andere, ...eigene].map((e, i) => ({ ...e, position: i + 1 }));
 
       if (taetigkeiten.length === 0 && vorhanden?.tag.id) {
-        // Ohne Urlaub und ohne andere Einträge bliebe der Tag als leerer
-        // „urlaub"-Torso stehen und würde weiter als Urlaubstag angezeigt —
-        // deshalb ganz löschen.
+        // Ohne Abwesenheit und ohne andere Einträge bliebe der Tag als
+        // leerer Torso stehen und würde weiter als Urlaubs-/Krankheitstag
+        // angezeigt — deshalb ganz löschen.
         await deleteMut.mutateAsync(vorhanden.tag.id);
       } else if (taetigkeiten.length > 0) {
         await saveMut.mutateAsync({
@@ -1031,7 +1043,7 @@ export default function Taetigkeitsbericht() {
                           busy={busy === `urlaub|${iso}`}
                           zeile={zeilen.length}
                           spalte={si}
-                          onCommit={(v) => speichereUrlaub(iso, v)}
+                          onCommit={(v) => speichereAbwesenheit(iso, "urlaub", v)}
                         />
                       ) : (
                         <span style={{ padding: "1px 3px", display: "block", textAlign: "right" }}>{z(sonder.urlaub[iso])}</span>
@@ -1042,7 +1054,32 @@ export default function Taetigkeitsbericht() {
                 </tr>
 
                 <SummenZeile label="Sonderurlaub" tage={periode.tage} werte={sonder.sonderurlaub} gesamt={summeVon(sonder.sonderurlaub)} spalte={spalteK} />
-                <SummenZeile label="Krankheit" tage={periode.tage} werte={sonder.krankheit} gesamt={summeVon(sonder.krankheit)} spalte={spalteK} />
+
+                {/* Krankheit ist BEARBEITBAR — „1,5 Std. Zahnarzt" */}
+                <tr>
+                  <td colSpan={2} style={{ ...tdLabel, background: fokus?.zeile === zeilen.length + 1 ? KREUZ_FARBE : undefined }}>
+                    Krankheit
+                    <span style={{ fontWeight: 400, fontSize: 10, marginLeft: 6, color: "#666" }}>
+                      (änderbar)
+                    </span>
+                  </td>
+                  {periode.tage.map((iso, si) => (
+                    <td key={iso} style={{ ...tdZahl, background: fokus?.zeile === zeilen.length + 1 ? KREUZ_FARBE : spalteK(iso), padding: 0 }}>
+                      {kannBearbeiten ? (
+                        <ZellEingabe
+                          wert={sonder.krankheit[iso] ?? 0}
+                          busy={busy === `krank|${iso}`}
+                          zeile={zeilen.length + 1}
+                          spalte={si}
+                          onCommit={(v) => speichereAbwesenheit(iso, "krank", v)}
+                        />
+                      ) : (
+                        <span style={{ padding: "1px 3px", display: "block", textAlign: "right" }}>{z(sonder.krankheit[iso])}</span>
+                      )}
+                    </td>
+                  ))}
+                  <td style={{ ...tdZahl, fontWeight: 700 }}>{z(summeVon(sonder.krankheit))}</td>
+                </tr>
                 <SummenZeile label="Feiertag" tage={periode.tage} werte={sonder.feiertag} gesamt={summeVon(sonder.feiertag)} spalte={spalteK} />
                 <SummenZeile label="Stundensumme/Tag" tage={periode.tage} werte={summen.stundensumme} gesamt={summen.stundensummeGesamt} fett farbe={TB_FARBEN.stundensumme} spalte={spalteK} dickOben />
                 <SummenZeile label="Sollstunden/Tag" tage={periode.tage} werte={summen.soll} gesamt={summen.sollGesamt} spalte={spalteK} />
@@ -1063,20 +1100,20 @@ export default function Taetigkeitsbericht() {
                   ["Taggeld > 11 Std.", "lang", fahrtWerte.tg11, false],
                 ] as const).map(([label, feld, werte, dick], ti) => (
                   <tr key={feld}>
-                    <td colSpan={2} style={{ ...tdLabel, ...(dick ? { borderTop: "2px solid #000" } : {}), background: fokus?.zeile === zeilen.length + 1 + ti ? KREUZ_FARBE : undefined }}>
+                    <td colSpan={2} style={{ ...tdLabel, ...(dick ? { borderTop: "2px solid #000" } : {}), background: fokus?.zeile === zeilen.length + 2 + ti ? KREUZ_FARBE : undefined }}>
                       {label}
                       <span style={{ fontWeight: 400, fontSize: 10, marginLeft: 6, color: "#666" }}>
                         (1 eintragen)
                       </span>
                     </td>
                     {periode.tage.map((iso, si) => (
-                      <td key={iso} style={{ ...tdZahl, ...(dick ? { borderTop: "2px solid #000" } : {}), background: fokus?.zeile === zeilen.length + 1 + ti ? KREUZ_FARBE : spalteK(iso), padding: 0 }}>
+                      <td key={iso} style={{ ...tdZahl, ...(dick ? { borderTop: "2px solid #000" } : {}), background: fokus?.zeile === zeilen.length + 2 + ti ? KREUZ_FARBE : spalteK(iso), padding: 0 }}>
                         {kannBearbeiten ? (
                           <ZellEingabe
                             wert={werte[iso] ?? 0}
                             busy={busy === `tg-${feld}|${iso}`}
                             fmt={zGanz}
-                            zeile={zeilen.length + 1 + ti}
+                            zeile={zeilen.length + 2 + ti}
                             spalte={si}
                             onCommit={(v) => speichereTaggeld(iso, feld, v)}
                           />
@@ -1142,10 +1179,10 @@ export default function Taetigkeitsbericht() {
 
       {tab === "bericht" && (
         <p className="text-xs text-muted-foreground mt-3">
-          Krankheit und Feiertag füllen sich selbst — Krankheit aus der
-          Krankmeldung, Feiertage aus dem österreichischen Kalender. Urlaub
-          lässt sich direkt in der Zeile ändern, falls er doch nicht konsumiert
-          wurde. Die gefahrenen Kilometer kommen aus dem Fahrtenbuch.
+          Feiertage füllen sich aus dem österreichischen Kalender, Krankheit
+          zusätzlich aus der Krankmeldung. Urlaub und Krankheit lassen sich
+          direkt in der Zeile ändern — auch stundenweise, z. B. 1,5 Std.
+          Zahnarzt. Die gefahrenen Kilometer kommen aus dem Fahrtenbuch.
         </p>
       )}
 

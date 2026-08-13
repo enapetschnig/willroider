@@ -12,7 +12,8 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Loader2, Plus, Trash2, Upload } from "lucide-react";
+import { parseFahrtenDatei } from "./fahrtenbuchImport";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -143,20 +144,35 @@ export function FahrtenbuchTab({
     }
   }
 
-  /** km-Stand Ankunft bildet sich selbst: Stand Abfahrt + gefahrene km.
-   *  Wer stattdessen den Ankunfts-Stand eintippt, bekommt die gefahrenen
-   *  km ausgerechnet — beide Richtungen funktionieren. */
+  /** Automatik zwischen den drei km-Feldern. Grundregel: was der Nutzer
+   *  getippt hat, wird NIE überschrieben — nur der fehlende dritte Wert
+   *  ergibt sich von selbst. Die alte Fassung setzte beim Eintippen des
+   *  Abfahrts-Stands den Ankunfts-Stand auf „Abfahrt + 0 km" und
+   *  radierte damit einen bereits eingetragenen Ankunfts-Stand aus. */
   function patchMitKm(f: FahrtRow, patch: Partial<FahrtRow>): Partial<FahrtRow> {
     const start = patch.km_start !== undefined ? patch.km_start : f.km_start;
-    if (patch.km !== undefined || patch.km_start !== undefined) {
-      const km = patch.km !== undefined ? patch.km : f.km;
-      if (start != null && km != null) {
-        return { ...patch, km_ende: r2(Number(start) + Number(km)) };
-      }
+    const ende = patch.km_ende !== undefined ? patch.km_ende : f.km_ende;
+    const km = patch.km !== undefined ? patch.km : Number(f.km) || null;
+
+    if (patch.km !== undefined) {
+      // Strecke getippt → der Ankunfts-Stand ergibt sich aus dem
+      // Abfahrts-Stand (bzw. umgekehrt, wenn nur die Ankunft bekannt ist).
+      if (km != null && start != null) return { ...patch, km_ende: r2(Number(start) + km) };
+      if (km != null && start == null && ende != null) return { ...patch, km_start: r2(Number(ende) - km) };
       return patch;
     }
-    if (patch.km_ende != null && start != null && patch.km_ende >= start) {
-      return { ...patch, km: r2(patch.km_ende - start) };
+    // Stand getippt → sind beide Stände da, ergibt sich die Strecke.
+    if (start != null && ende != null) {
+      return Number(ende) >= Number(start)
+        ? { ...patch, km: r2(Number(ende) - Number(start)) }
+        : patch;
+    }
+    // Nur ein Stand da: den fehlenden aus der Strecke ergänzen.
+    if (patch.km_start !== undefined && start != null && km) {
+      return { ...patch, km_ende: r2(Number(start) + km) };
+    }
+    if (patch.km_ende !== undefined && ende != null && km) {
+      return { ...patch, km_start: r2(Number(ende) - km) };
     }
     return patch;
   }
@@ -197,6 +213,76 @@ export function FahrtenbuchTab({
       fehler(e);
     } finally {
       setBusy(null);
+    }
+  }
+
+  // ── Import aus Fahrtenbuch-Apps (Driversnote & Co.) ──────────────────
+  const dateiRef = useRef<HTMLInputElement>(null);
+
+  async function importiereDatei(file: File) {
+    setBusy("import");
+    try {
+      const { fahrten: neu, fehler: parseFehler } = await parseFahrtenDatei(file);
+      if (parseFehler) {
+        toast({ variant: "destructive", title: "Import nicht möglich", description: parseFehler });
+        return;
+      }
+      if (neu.length === 0) {
+        toast({ variant: "destructive", title: "Keine Fahrten in der Datei gefunden" });
+        return;
+      }
+
+      // Doppelte überspringen — sowohl innerhalb der Datei (nochmal
+      // importiert) als auch gegen den Bestand des Zeitraums.
+      const von = neu.reduce((m, f) => (f.datum < m ? f.datum : m), neu[0].datum);
+      const bis = neu.reduce((m, f) => (f.datum > m ? f.datum : m), neu[0].datum);
+      const { data: bestand } = await supabase
+        .from("fahrtenbuch_eintraege" as any)
+        .select("datum, km_start, km_ende, km")
+        .eq("mitarbeiter_id", mitarbeiterId)
+        .gte("datum", von)
+        .lte("datum", bis);
+      const kennung = (f: { datum: string; km_start: number | null; km_ende: number | null; km: number }) =>
+        `${f.datum}|${f.km_start ?? ""}|${f.km_ende ?? ""}|${Number(f.km).toFixed(1)}`;
+      const schonDa = new Set(((bestand as any[]) ?? []).map(kennung));
+      const einfuegen: typeof neu = [];
+      let doppelt = 0;
+      for (const f of neu) {
+        const k = kennung(f);
+        if (schonDa.has(k)) {
+          doppelt++;
+          continue;
+        }
+        schonDa.add(k);
+        einfuegen.push(f);
+      }
+
+      if (einfuegen.length > 0) {
+        const { error } = await supabase.from("fahrtenbuch_eintraege" as any).insert(
+          einfuegen.map((f) => ({ ...f, mitarbeiter_id: mitarbeiterId })),
+        );
+        if (error) throw error;
+      }
+
+      const anderePeriode = einfuegen.filter(
+        (f) => f.datum < periode.von || f.datum > periode.bis,
+      ).length;
+      toast({
+        title: `${einfuegen.length} Fahrt${einfuegen.length === 1 ? "" : "en"} importiert`,
+        description:
+          [
+            doppelt > 0 ? `${doppelt} übersprungen (schon vorhanden)` : "",
+            anderePeriode > 0 ? `${anderePeriode} liegen in anderen Perioden und erscheinen dort` : "",
+          ]
+            .filter(Boolean)
+            .join(" · ") || undefined,
+      });
+      onReload();
+    } catch (e) {
+      fehler(e);
+    } finally {
+      setBusy(null);
+      if (dateiRef.current) dateiRef.current.value = "";
     }
   }
 
@@ -329,8 +415,13 @@ export function FahrtenbuchTab({
                       wert={zahl(f[feld])}
                       rechts
                       onCommit={(v) => {
-                        const n = v.trim() === "" ? null : Number(v.replace(",", "."));
-                        if (n !== null && !Number.isFinite(n)) return;
+                        const n = v.trim() === "" ? null : Number(v.replace(/\s/g, "").replace(",", "."));
+                        if (n !== null && !Number.isFinite(n)) {
+                          // Vorher wurde still verworfen — es sah aus, als
+                          // würde das Feld „nicht funktionieren".
+                          fehler(new Error(`„${v}" ist keine Zahl — bitte nur Ziffern, z. B. 247245`));
+                          return;
+                        }
                         aendern(f.id, patchMitKm(f, { [feld]: n }));
                       }}
                     />
@@ -345,8 +436,12 @@ export function FahrtenbuchTab({
                     wert={zahl(f.km)}
                     rechts
                     onCommit={(v) => {
-                      const n = Number(v.replace(",", ".").trim() || "0");
-                      if (Number.isFinite(n) && n >= 0) aendern(f.id, patchMitKm(f, { km: r2(n) }));
+                      const n = Number(v.replace(/\s/g, "").replace(",", ".") || "0");
+                      if (!Number.isFinite(n) || n < 0) {
+                        fehler(new Error(`„${v}" ist keine Zahl — bitte nur Ziffern, z. B. 62,5`));
+                        return;
+                      }
+                      aendern(f.id, patchMitKm(f, { km: r2(n) }));
                     }}
                   />
                 ) : (
@@ -394,19 +489,45 @@ export function FahrtenbuchTab({
           {kannBearbeiten && (
             <tr>
               <td colSpan={10} style={{ ...zelle, textAlign: "left" }}>
-                <button
-                  type="button"
-                  onClick={neu}
-                  disabled={busy === "neu"}
-                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50"
-                >
-                  {busy === "neu" ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Plus className="h-3 w-3" />
-                  )}{" "}
-                  Fahrt hinzufügen
-                </button>
+                <div className="flex items-center gap-4 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={neu}
+                    disabled={busy === "neu"}
+                    className="inline-flex items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50"
+                  >
+                    {busy === "neu" ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Plus className="h-3 w-3" />
+                    )}{" "}
+                    Fahrt hinzufügen
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => dateiRef.current?.click()}
+                    disabled={busy === "import"}
+                    className="inline-flex items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50"
+                    title="Excel- oder CSV-Export aus einer Fahrtenbuch-App (z. B. Driversnote) einlesen"
+                  >
+                    {busy === "import" ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Upload className="h-3 w-3" />
+                    )}{" "}
+                    Aus App importieren (Excel/CSV)
+                  </button>
+                  <input
+                    ref={dateiRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void importiereDatei(f);
+                    }}
+                  />
+                </div>
               </td>
             </tr>
           )}
