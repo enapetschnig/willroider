@@ -242,8 +242,12 @@ export function FahrtenbuchTab({
         .eq("mitarbeiter_id", mitarbeiterId)
         .gte("datum", von)
         .lte("datum", bis);
+      // Auf EINE Nachkommastelle vergröbert: Excel- und PDF-Export runden
+      // die km-Stände unterschiedlich (247245,84 vs. 247245,8) — dieselbe
+      // Fahrt aus beiden Formaten darf nicht doppelt landen.
+      const r1 = (n: number | null) => (n == null ? "" : (Math.round(n * 10) / 10).toFixed(1));
       const kennung = (f: { datum: string; km_start: number | null; km_ende: number | null; km: number }) =>
-        `${f.datum}|${f.km_start ?? ""}|${f.km_ende ?? ""}|${Number(f.km).toFixed(1)}`;
+        `${f.datum}|${r1(f.km_start === null ? null : Number(f.km_start))}|${r1(f.km_ende === null ? null : Number(f.km_ende))}|${r1(Number(f.km))}`;
       const schonDa = new Set(((bestand as any[]) ?? []).map(kennung));
       const einfuegen: typeof neu = [];
       let doppelt = 0;
@@ -508,19 +512,19 @@ export function FahrtenbuchTab({
                     onClick={() => dateiRef.current?.click()}
                     disabled={busy === "import"}
                     className="inline-flex items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50"
-                    title="Excel- oder CSV-Export aus einer Fahrtenbuch-App (z. B. Driversnote) einlesen"
+                    title="Export aus einer Fahrtenbuch-App (z. B. Driversnote) einlesen — Excel, CSV oder der PDF-Fahrtenbericht"
                   >
                     {busy === "import" ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
                     ) : (
                       <Upload className="h-3 w-3" />
                     )}{" "}
-                    Aus App importieren (Excel/CSV)
+                    Aus App importieren (Excel/CSV/PDF)
                   </button>
                   <input
                     ref={dateiRef}
                     type="file"
-                    accept=".xlsx,.xls,.csv"
+                    accept=".xlsx,.xls,.csv,.pdf"
                     className="hidden"
                     onChange={(e) => {
                       const f = e.target.files?.[0];
