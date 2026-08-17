@@ -1531,6 +1531,42 @@ export default function Arbeitsplanung() {
     }
   };
 
+  /** „Zeitraum ändern" im Balken-Fenster: die Abwesenheit auf einen neuen
+   *  Von–Bis-Bereich setzen. Löst das gemeldete „kann den eingetragenen
+   *  Urlaub nicht bearbeiten": das Bearbeiten-Fenster konnte bisher nur
+   *  die Art ändern oder alles löschen — verschieben/verlängern ging nur
+   *  über den 8px schmalen Zieh-Griff am Balkenrand. */
+  const verschiebeFehlzeit = async (
+    workerId: string,
+    typ: string,
+    alteCells: { workerId: string; iso: string }[],
+    vonIso: string,
+    bisIso: string,
+  ) => {
+    if (vonIso > bisIso) {
+      toast({ variant: "destructive", title: "Das Von-Datum liegt nach dem Bis-Datum" });
+      return;
+    }
+    // Alle Kalendertage des neuen Bereichs — setFehlzeit filtert
+    // Wochenenden/Feiertage selbst heraus.
+    const ziel: { workerId: string; iso: string }[] = [];
+    const d = new Date(vonIso + "T00:00:00");
+    const ende = new Date(bisIso + "T00:00:00");
+    while (d <= ende) {
+      ziel.push({ workerId, iso: localIso(d) });
+      d.setDate(d.getDate() + 1);
+    }
+    if (ziel.length === 0) return;
+    setBarInfo(null);
+    // Erst den neuen Bereich setzen (räumt seine Zellen selbst), dann die
+    // alten Tage außerhalb des neuen Bereichs entfernen.
+    const ok = await setFehlzeit(ziel, typ);
+    if (!ok) return;
+    const weg = alteCells.filter((c) => c.iso < vonIso || c.iso > bisIso);
+    if (weg.length > 0) await clearCells(weg);
+    else loadAssignments();
+  };
+
   const clearCells = async (cells: { workerId: string; iso: string }[]) => {
     if (!isAdmin || cells.length === 0) return;
     // Doppelklick-Schutz — ohne Lock konnten parallele Löschläufe kollidieren
@@ -2549,6 +2585,20 @@ export default function Arbeitsplanung() {
                     </Button>
                   </div>
                 )}
+              {/* Zeitraum ändern — verschieben/verlängern/verkürzen in einem
+                  Schritt, statt über den fummeligen Zieh-Griff am Balkenrand. */}
+              {isAdmin &&
+                !b.isReadOnly &&
+                b.source === "fehlzeit" &&
+                b.fehlzeitTyp !== "U?" && (
+                  <ZeitraumAendern
+                    cells={barInfo.cells}
+                    busy={cellActionBusy}
+                    onSubmit={(von, bis) =>
+                      verschiebeFehlzeit(b.workerId, b.fehlzeitTyp ?? "U", barInfo.cells, von, bis)
+                    }
+                  />
+                )}
               {isAdmin && !b.isReadOnly && (
                 <Button
                   size="sm"
@@ -2567,7 +2617,7 @@ export default function Arbeitsplanung() {
                     setBarInfo(null);
                   }}
                 >
-                  <Pencil className="h-3.5 w-3.5 mr-1.5" /> Bearbeiten
+                  <Pencil className="h-3.5 w-3.5 mr-1.5" /> Art ändern / löschen
                 </Button>
               )}
             </div>
@@ -3103,6 +3153,56 @@ function MemberPill({
 }
 
 // ─── Cell-Popover (Aktionen für ausgewählte Zellen) ───
+/** Von–Bis-Editor im Balken-Fenster einer Abwesenheit. */
+function ZeitraumAendern({
+  cells,
+  busy,
+  onSubmit,
+}: {
+  cells: { workerId: string; iso: string }[];
+  busy: boolean;
+  onSubmit: (vonIso: string, bisIso: string) => void;
+}) {
+  const sortiert = [...cells].sort((a, b) => a.iso.localeCompare(b.iso));
+  const [von, setVon] = useState(sortiert[0]?.iso ?? "");
+  const [bis, setBis] = useState(sortiert[sortiert.length - 1]?.iso ?? "");
+  const unveraendert =
+    von === (sortiert[0]?.iso ?? "") && bis === (sortiert[sortiert.length - 1]?.iso ?? "");
+  return (
+    <div className="mt-2 pt-2 border-t">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+        Zeitraum ändern
+      </div>
+      <div className="flex items-center gap-1.5">
+        <input
+          type="date"
+          value={von}
+          onChange={(e) => setVon(e.target.value)}
+          className="h-9 flex-1 min-w-0 rounded-md border bg-background px-1.5 text-xs"
+          aria-label="Von"
+        />
+        <span className="text-xs text-muted-foreground">–</span>
+        <input
+          type="date"
+          value={bis}
+          onChange={(e) => setBis(e.target.value)}
+          className="h-9 flex-1 min-w-0 rounded-md border bg-background px-1.5 text-xs"
+          aria-label="Bis"
+        />
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        className="w-full mt-1.5 h-8"
+        disabled={busy || unveraendert || !von || !bis}
+        onClick={() => onSubmit(von, bis)}
+      >
+        Zeitraum übernehmen
+      </Button>
+    </div>
+  );
+}
+
 function CellPopover({
   anchor,
   cells,
