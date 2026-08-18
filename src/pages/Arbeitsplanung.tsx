@@ -17,6 +17,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
 import { PoliereinsatzView } from "@/components/arbeitsplanung/PoliereinsatzView";
+import { PlanungsSuche, type SuchEintrag } from "@/components/arbeitsplanung/PlanungsSuche";
 import { genehmigeUrlaubsantrag, lehneUrlaubsantragAb } from "@/lib/urlaubsantrag";
 import { useToast } from "@/hooks/use-toast";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
@@ -435,6 +436,48 @@ export default function Arbeitsplanung() {
     () => baustellen.filter((b) => b.status === "aktiv" || b.status === "geplant"),
     [baustellen]
   );
+
+  // ── Suche: Mitarbeiter / Partie / BVH → Zeile markieren ──────────────
+  const suchEintraege = useMemo<SuchEintrag[]>(() => {
+    const out: SuchEintrag[] = [];
+    for (const g of workerGroups) {
+      for (const m of g.members) {
+        out.push({
+          label: `${m.nachname} ${m.vorname}`,
+          sub: g.partie?.name ?? "ohne Partie",
+          zielId: m.id,
+        });
+      }
+    }
+    // Baustellen: erste Zeile, in der die Baustelle im sichtbaren Bereich
+    // verplant ist — die Suche springt zum Mitarbeiter mit diesem Einsatz.
+    const ersteZeileJeBaustelle = new Map<string, string>();
+    for (const [key, cell] of assignments) {
+      const bId = (cell as any)?.baustelleId ?? (cell as any)?.baustelle_id;
+      if (!bId || ersteZeileJeBaustelle.has(bId)) continue;
+      ersteZeileJeBaustelle.set(bId, key.split(":")[0]);
+    }
+    for (const [bId, workerId] of ersteZeileJeBaustelle) {
+      const b = baustellen.find((x) => x.id === bId);
+      if (!b) continue;
+      out.push({
+        label: b.bvh_name,
+        sub: [b.kostenstelle, "Baustelle"].filter(Boolean).join(" · "),
+        zielId: workerId,
+      });
+    }
+    return out;
+  }, [workerGroups, assignments, baustellen]);
+
+  const springeZuZeile = (zielId: string) => {
+    setMarkierteZeile(zielId);
+    document
+      .querySelector(`[data-zeile="${zielId}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => {
+      setMarkierteZeile((cur) => (cur === zielId ? null : cur));
+    }, 4000);
+  };
 
   // Flache Mitarbeiter-Reihenfolge aus den workerGroups — nötig für Cross-Row-Selection
   const flatWorkerIds = useMemo(
@@ -1778,6 +1821,11 @@ export default function Arbeitsplanung() {
             {isoWeek(new Date(rangeEnd.getTime() - DAY_MS)).week}/
             {isoWeek(new Date(rangeEnd.getTime() - DAY_MS)).year}
           </div>
+          <PlanungsSuche
+            eintraege={suchEintraege}
+            onSpringen={springeZuZeile}
+            placeholder="Suche Mitarbeiter, BVH, Kostenstelle …"
+          />
           <div className="ml-auto flex items-center gap-2">
             <Filter className="h-4 w-4 text-muted-foreground" />
             <Select value={filterPartie} onValueChange={setFilterPartie}>

@@ -51,6 +51,7 @@ import { useNavigate } from "react-router-dom";
 import { makePoliereinsatzPdf } from "@/lib/poliereinsatzPdf";
 import { feiertagAt } from "@/lib/feiertage";
 import { vergleichePartien } from "@/lib/tagesplanung";
+import { PlanungsSuche, type SuchEintrag } from "@/components/arbeitsplanung/PlanungsSuche";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
@@ -571,6 +572,40 @@ export function PoliereinsatzView({
       // Gemeinsame Funktion — der Tagesplan sortiert mit derselben.
       .sort((a, b) => vergleichePartien(a.partie, b.partie));
   }, [partien, zeitraeume, profiles, profilesById]);
+
+  // ── Suche: BVH / Kostenstelle / Partie / Polier → Zeile markieren ────
+  const suchEintraege = useMemo<SuchEintrag[]>(() => {
+    const out: SuchEintrag[] = [];
+    for (const g of gruppen) {
+      for (const z of g.einsaetze) {
+        const b = baustellenById[z.baustelle_id];
+        if (!b) continue;
+        out.push({
+          label: b.bvh_name,
+          sub: [b.kostenstelle, g.partie.name].filter(Boolean).join(" · "),
+          zielId: z.id,
+        });
+      }
+      out.push({
+        label: g.partie.name,
+        sub: g.leiter ? `Partie · Polier ${g.leiter.nachname}` : "Partie",
+        // Ohne eigenen Zeilen-Anker: die erste Einsatz-Zeile der Partie.
+        zielId: g.einsaetze[0]?.id ?? "",
+      });
+    }
+    return out.filter((e) => e.zielId);
+  }, [gruppen, baustellenById]);
+
+  const springeZuZeile = (zielId: string) => {
+    setMarkierteZeile(zielId);
+    // Beide Spalten tragen data-zeile — die linke (Namen) ist das Sprungziel.
+    document
+      .querySelector(`[data-zeile="${zielId}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => {
+      setMarkierteZeile((cur) => (cur === zielId ? null : cur));
+    }, 4000);
+  };
 
   /**
    * Bauleiter = wer in der Verwaltung als Bauleiter markiert ist.
@@ -1113,6 +1148,11 @@ export function PoliereinsatzView({
           <Button variant="outline" size="sm" onClick={() => shiftWeeks(4)}>
             <ChevronRight className="h-4 w-4" />
           </Button>
+          <PlanungsSuche
+            eintraege={suchEintraege}
+            onSpringen={springeZuZeile}
+            placeholder="Suche BVH, Kostenstelle, Partie …"
+          />
           {canEdit && (
             <Button
               variant="outline"

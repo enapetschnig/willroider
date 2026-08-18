@@ -14,7 +14,8 @@ import {
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, Building2, Search } from "lucide-react";
+import { Plus, Building2, ListOrdered, Search } from "lucide-react";
+import { KostenstellenListe } from "@/components/baustellen/KostenstellenListe";
 import {
   Dialog,
   DialogContent,
@@ -44,6 +45,15 @@ export default function Baustellen() {
   // erhalten (und ist per Zurück-Taste/Teilen wiederherstellbar).
   const [params, setParams] = useSearchParams();
   const search = params.get("q") ?? "";
+  // Reiter Baustellen/Kostenstellen — in der URL, damit Zurück-Navigation
+  // aus einem Baustellenordner wieder auf der Kostenstellenliste landet.
+  const tab = params.get("tab") === "kostenstellen" ? "kostenstellen" : "baustellen";
+  const setTab = (t: "baustellen" | "kostenstellen") => {
+    const n = new URLSearchParams(params);
+    if (t === "kostenstellen") n.set("tab", t);
+    else n.delete("tab");
+    setParams(n, { replace: true });
+  };
   const statusFilter = params.get("status") ?? "alle";
   const setSearch = (v: string) => {
     const n = new URLSearchParams(params);
@@ -131,6 +141,29 @@ export default function Baustellen() {
         }
       />
 
+      {/* Umschalter wie Jahresplanung (Poliereinsatz/Mitarbeiter) und
+          Tätigkeitsbericht (Bericht/Fahrtenbuch) */}
+      <div className="flex items-center gap-2">
+        <Button
+          variant={tab === "baustellen" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setTab("baustellen")}
+        >
+          <Building2 className="h-4 w-4 mr-1.5" /> Baustellen
+        </Button>
+        <Button
+          variant={tab === "kostenstellen" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setTab("kostenstellen")}
+        >
+          <ListOrdered className="h-4 w-4 mr-1.5" /> Kostenstellen
+        </Button>
+      </div>
+
+      {tab === "kostenstellen" && <KostenstellenListe baustellen={data} />}
+
+      {tab === "baustellen" && (
+      <>
       <Card>
         <CardContent className="p-3 flex flex-col sm:flex-row gap-2 sm:gap-3 items-stretch sm:items-center">
           <div className="relative flex-1 sm:max-w-sm">
@@ -255,6 +288,8 @@ export default function Baustellen() {
           </Card>
         )}
       </div>
+      </>
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
