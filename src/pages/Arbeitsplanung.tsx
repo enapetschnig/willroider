@@ -1547,6 +1547,74 @@ export default function Arbeitsplanung() {
       toast({ variant: "destructive", title: "Das Von-Datum liegt nach dem Bis-Datum" });
       return;
     }
+
+    /** Werktage (Mo–Fr ohne Feiertag) zwischen zwei ISO-Daten, inklusive. */
+    const werktage = (a: string, b: string): number => {
+      let n = 0;
+      const d = new Date(a + "T00:00:00");
+      const e = new Date(b + "T00:00:00");
+      while (d <= e) {
+        if (isWerktag(localIso(d))) n++;
+        d.setDate(d.getDate() + 1);
+      }
+      return n;
+    };
+
+    // Stammt der Urlaub aus einem GENEHMIGTEN Antrag, wird der Antrag
+    // selbst umdatiert — sonst blockt clearCellsRaw die Antrags-Tage
+    // (zu Recht: an ihnen hängt die pauschale Konto-Abbuchung) und der
+    // Balken bleibt scheinbar grundlos unverändert stehen. Die Differenz
+    // der Werktage wird als Korrektur gebucht, damit das Urlaubskonto
+    // weiter stimmt.
+    if (typ === "U") {
+      const sortiertAlt = [...alteCells].sort((a, b) => a.iso.localeCompare(b.iso));
+      const altVon = sortiertAlt[0]?.iso ?? vonIso;
+      const altBis = sortiertAlt[sortiertAlt.length - 1]?.iso ?? bisIso;
+      const { data: antraege } = await supabase
+        .from("urlaubsantraege")
+        .select("id, von, bis")
+        .eq("mitarbeiter_id", workerId)
+        .eq("status", "genehmigt")
+        .lte("von", altBis)
+        .gte("bis", altVon);
+      const antrag = (antraege ?? [])[0] as { id: string; von: string; bis: string } | undefined;
+      if (antrag) {
+        const diff = werktage(antrag.von, antrag.bis) - werktage(vonIso, bisIso);
+        const { error: updErr } = await supabase
+          .from("urlaubsantraege")
+          .update({ von: vonIso, bis: bisIso })
+          .eq("id", antrag.id);
+        if (updErr) {
+          toast({ variant: "destructive", title: "Antrag konnte nicht angepasst werden", description: updErr.message });
+          return;
+        }
+        if (diff !== 0) {
+          const fmt = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString("de-AT");
+          const { error: bErr } = await supabase.from("urlaubs_buchungen").insert({
+            mitarbeiter_id: workerId,
+            art: "korrektur",
+            tage: diff,
+            wirksam_am: vonIso,
+            notiz: `Antrag angepasst: ${fmt(antrag.von)}–${fmt(antrag.bis)} → ${fmt(vonIso)}–${fmt(bisIso)}`,
+          } as any);
+          if (bErr) {
+            toast({
+              variant: "destructive",
+              title: "Urlaubskonto bitte prüfen",
+              description: `Der Antrag wurde umdatiert, aber die Konto-Korrektur (${diff > 0 ? "+" : ""}${diff} Tage) konnte nicht gebucht werden: ${bErr.message}`,
+            });
+          }
+        }
+        toast({
+          title: "Urlaubsantrag angepasst",
+          description:
+            diff !== 0
+              ? `Urlaubskonto ${diff > 0 ? "+" : ""}${diff} Tag${Math.abs(diff) === 1 ? "" : "e"} korrigiert.`
+              : undefined,
+        });
+      }
+    }
+
     // Alle Kalendertage des neuen Bereichs — setFehlzeit filtert
     // Wochenenden/Feiertage selbst heraus.
     const ziel: { workerId: string; iso: string }[] = [];
@@ -1559,7 +1627,8 @@ export default function Arbeitsplanung() {
     if (ziel.length === 0) return;
     setBarInfo(null);
     // Erst den neuen Bereich setzen (räumt seine Zellen selbst), dann die
-    // alten Tage außerhalb des neuen Bereichs entfernen.
+    // alten Tage außerhalb des neuen Bereichs entfernen — nach der
+    // Antrags-Umdatierung sind sie nicht mehr geschützt.
     const ok = await setFehlzeit(ziel, typ);
     if (!ok) return;
     const weg = alteCells.filter((c) => c.iso < vonIso || c.iso > bisIso);
