@@ -1622,10 +1622,17 @@ export default function Arbeitsplanung() {
         .gte("bis", altVon);
       const antrag = (antraege ?? [])[0] as { id: string; von: string; bis: string } | undefined;
       if (antrag) {
-        const diff = werktage(antrag.von, antrag.bis) - werktage(vonIso, bisIso);
+        const alteTage = werktage(antrag.von, antrag.bis);
+        const neueTage = werktage(vonIso, bisIso);
+        const diff = alteTage - neueTage;
+        // arbeitstage MUSS mitwandern: das Feld ist die Tageszahl, die der
+        // Antrag überall anzeigt (Dialog, Verwaltung). Blieb sie stehen,
+        // widersprach der Antrag sich selbst — 7 Tage angeschrieben, 6
+        // Werktage im Zeitraum — und genau darüber stolpert man beim
+        // Durchspielen der Freigabe.
         const { error: updErr } = await supabase
           .from("urlaubsantraege")
-          .update({ von: vonIso, bis: bisIso })
+          .update({ von: vonIso, bis: bisIso, arbeitstage: neueTage })
           .eq("id", antrag.id);
         if (updErr) {
           toast({ variant: "destructive", title: "Antrag konnte nicht angepasst werden", description: updErr.message });
