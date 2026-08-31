@@ -42,6 +42,68 @@ export async function genehmigeUrlaubsantrag(a: Urlaubsantrag): Promise<AntragRe
   if (err1) return { ok: false, message: err1.message };
   if (!claimed || claimed.length === 0) return { ok: false, alreadyDecided: true };
 
+  // 1b) STUNDEN-Antrag („2 Stunden Urlaub"): kein Pauschal-Abzug und kein
+  // Ganztages-Marker. Stattdessen eine urlaub-Zeile mit den Stunden am
+  // beantragten Tag — der TAG:-Auto-Buchungs-Trigger zieht das Konto
+  // anteilig ab (Stunden ÷ Tages-Soll), wie bei jeder Stunden-Erfassung.
+  const stundenAntrag = Number((a as any).stunden ?? 0);
+  if (stundenAntrag > 0) {
+    const { data: vorhanden } = await supabase
+      .from("stunden_tage")
+      .select("id, status")
+      .eq("mitarbeiter_id", a.mitarbeiter_id)
+      .eq("datum", a.von)
+      .maybeSingle();
+    if (vorhanden && vorhanden.status !== "erfasst" && vorhanden.status !== "ma_bestaetigt") {
+      return {
+        ok: true,
+        message:
+          "Antrag genehmigt, aber der Tag ist bereits freigegeben — die Urlaubsstunden bitte im Büro nachtragen.",
+      };
+    }
+    let tagId = vorhanden?.id as string | undefined;
+    if (!tagId) {
+      const { data: neuerTag, error: tagErr } = await supabase
+        .from("stunden_tage")
+        .insert({
+          mitarbeiter_id: a.mitarbeiter_id,
+          datum: a.von,
+          tag_status: "urlaub",
+          netto_stunden: 0,
+          status: "ma_bestaetigt",
+        })
+        .select("id")
+        .single();
+      if (tagErr || !neuerTag) {
+        return {
+          ok: true,
+          message: `Antrag genehmigt, aber der Urlaubs-Tag konnte nicht angelegt werden: ${tagErr?.message ?? "unbekannt"} — bitte in der Zeiterfassung nachtragen.`,
+        };
+      }
+      tagId = neuerTag.id;
+    }
+    const { data: posRows } = await supabase
+      .from("stunden_taetigkeiten")
+      .select("position")
+      .eq("stunden_tag_id", tagId)
+      .order("position", { ascending: false })
+      .limit(1);
+    const pos = ((posRows?.[0] as any)?.position ?? 0) + 1;
+    const { error: ttErr } = await supabase.from("stunden_taetigkeiten").insert({
+      stunden_tag_id: tagId,
+      position: pos,
+      stunden: stundenAntrag,
+      art: "urlaub",
+    });
+    if (ttErr) {
+      return {
+        ok: true,
+        message: `Antrag genehmigt, aber die Urlaubsstunden konnten nicht eingetragen werden: ${ttErr.message} — bitte in der Zeiterfassung nachtragen.`,
+      };
+    }
+    return { ok: true };
+  }
+
   // 2) Urlaubskonto abbuchen
   if (a.arbeitstage && Number(a.arbeitstage) > 0) {
     const { error: buchErr } = await supabase.from("urlaubs_buchungen").insert({

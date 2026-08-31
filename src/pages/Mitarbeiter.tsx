@@ -148,6 +148,9 @@ export default function Mitarbeiter() {
   /** user_id → rollen.id (Quelle der Wahrheit für Berechtigungen). */
   const [roles, setRoles] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<Profile | null>(null);
+  // Archiv: Deaktivierte verschwinden aus der Hauptliste und lassen sich
+  // dort mit einem Klick wiederherstellen.
+  const [zeigeArchiv, setZeigeArchiv] = useState(false);
   /** Schalter „Bauleiter" — steuert, ob das Farbfeld überhaupt erscheint. */
   const [istBauleiter, setIstBauleiter] = useState(false);
   const [editingSensitive, setEditingSensitive] = useState<
@@ -240,7 +243,16 @@ export default function Mitarbeiter() {
     if (error) {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
     } else {
-      toast({ title: !p.is_active ? "Mitarbeiter freigeschaltet" : "Mitarbeiter deaktiviert" });
+      toast({
+        title: !p.is_active
+          ? p.je_freigeschaltet
+            ? "Mitarbeiter wiederhergestellt"
+            : "Mitarbeiter freigeschaltet"
+          : "Mitarbeiter ins Archiv verschoben",
+        description: p.is_active
+          ? "Er erscheint in keiner Liste mehr und kann jederzeit wiederhergestellt werden."
+          : undefined,
+      });
       load();
     }
   };
@@ -403,6 +415,12 @@ export default function Mitarbeiter() {
       sonstige_pruefungen: str("sonstige_pruefungen"),
       bewerbung_als: str("bewerbung_als"),
     };
+    // E-Mail: leeres Feld lässt den Bestand unangetastet (kein stilles
+    // Löschen der Import-Platzhalter beim Speichern anderer Felder).
+    const neueMail = str("email")?.toLowerCase() ?? null;
+    const mailAuchLogin = fd.get("email_auch_login") === "on";
+    if (neueMail && !mailAuchLogin) profilePayload.email = neueMail;
+
     const { error: pErr } = await supabase
       .from("profiles")
       .update(profilePayload)
@@ -410,6 +428,30 @@ export default function Mitarbeiter() {
     if (pErr) {
       toast({ variant: "destructive", title: "Fehler", description: pErr.message });
       return;
+    }
+
+    // Anmelde-Adresse ändert die Edge-Function (Service-Role): auth.users
+    // UND profiles gemeinsam — sonst kann sich der Mann mit der neuen
+    // Adresse nicht anmelden.
+    if (neueMail && mailAuchLogin) {
+      const { data: fnData, error: fnErr } = await supabase.functions.invoke(
+        "admin-update-email",
+        { body: { profile_id: editing.id, email: neueMail, auch_login: true } },
+      );
+      const fnFehler =
+        fnErr?.message ?? (fnData && (fnData as any).error ? (fnData as any).error : null);
+      if (fnFehler) {
+        toast({
+          variant: "destructive",
+          title: "Anmelde-Adresse nicht geändert",
+          description: `${fnFehler} — die E-Mail wurde deshalb nicht übernommen.`,
+        });
+      } else {
+        toast({
+          title: "Anmelde-Adresse geändert",
+          description: `${editing.vorname} ${editing.nachname} meldet sich ab jetzt mit ${neueMail} an.`,
+        });
+      }
     }
 
     // 2) Sensitive Felder in profiles_sensitive (RLS: nur Admin)
@@ -558,12 +600,26 @@ export default function Mitarbeiter() {
         </TabsList>
 
         <TabsContent value="mitarbeiter">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-sm text-muted-foreground">
-              {profiles.length} Mitarbeiter
-              {profiles.filter((p) => !p.is_active).length > 0 && (
-                <span className="ml-2">
-                  · {profiles.filter((p) => !p.is_active).length} wartet auf Freischaltung
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Button
+                variant={!zeigeArchiv ? "default" : "outline"}
+                size="sm"
+                onClick={() => setZeigeArchiv(false)}
+              >
+                Aktive ({profiles.filter((p) => p.is_active).length})
+              </Button>
+              <Button
+                variant={zeigeArchiv ? "default" : "outline"}
+                size="sm"
+                onClick={() => setZeigeArchiv(true)}
+              >
+                Archiv ({profiles.filter((p) => !p.is_active).length})
+              </Button>
+              {profiles.filter((p) => !p.is_active && p.je_freigeschaltet === false).length > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  · {profiles.filter((p) => !p.is_active && p.je_freigeschaltet === false).length} neue
+                  Anmeldung wartet
                 </span>
               )}
             </div>
@@ -575,7 +631,7 @@ export default function Mitarbeiter() {
 
           {/* Mobile: cards */}
           <div className="md:hidden space-y-2">
-            {profiles.map((p) => {
+            {profiles.filter((p) => p.is_active !== zeigeArchiv).map((p) => {
               const partie = partien.find((x) => x.id === p.partie_id);
               return (
                 <Card key={p.id}>
@@ -598,7 +654,8 @@ export default function Mitarbeiter() {
                         </Badge>
                       ) : (
                         <Badge variant="outline" className="shrink-0">
-                          <XCircle className="h-3 w-3 mr-1" /> inaktiv
+                          <XCircle className="h-3 w-3 mr-1" />
+                          {p.je_freigeschaltet ? "archiviert" : "wartet auf Freischaltung"}
                         </Badge>
                       )}
                     </div>
@@ -630,7 +687,11 @@ export default function Mitarbeiter() {
                         className="flex-1 h-10"
                         onClick={() => toggleActive(p)}
                       >
-                        {p.is_active ? "Deaktivieren" : "Freischalten"}
+                        {p.is_active
+                          ? "Archivieren"
+                          : p.je_freigeschaltet
+                            ? "Wiederherstellen"
+                            : "Freischalten"}
                       </Button>
                       <Button
                         variant="outline"
@@ -658,10 +719,10 @@ export default function Mitarbeiter() {
                 </Card>
               );
             })}
-            {profiles.length === 0 && (
+            {profiles.filter((p) => p.is_active !== zeigeArchiv).length === 0 && (
               <Card>
                 <CardContent className="p-6 text-center text-sm text-muted-foreground">
-                  Noch keine Mitarbeiter.
+                  {zeigeArchiv ? "Archiv ist leer." : "Noch keine Mitarbeiter."}
                 </CardContent>
               </Card>
             )}
@@ -683,7 +744,7 @@ export default function Mitarbeiter() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {profiles.map((p) => {
+                  {profiles.filter((p) => p.is_active !== zeigeArchiv).map((p) => {
                     const partie = partien.find((x) => x.id === p.partie_id);
                     return (
                       <TableRow key={p.id}>
@@ -747,7 +808,11 @@ export default function Mitarbeiter() {
                             size="sm"
                             onClick={() => toggleActive(p)}
                           >
-                            {p.is_active ? "Deaktivieren" : "Freischalten"}
+                            {p.is_active
+                          ? "Archivieren"
+                          : p.je_freigeschaltet
+                            ? "Wiederherstellen"
+                            : "Freischalten"}
                           </Button>
                           <Button
                             variant="ghost"
@@ -994,6 +1059,26 @@ export default function Mitarbeiter() {
                   <div className="space-y-1.5">
                     <Label>Nachname *</Label>
                     <Input name="nachname" defaultValue={editing.nachname} required />
+                  </div>
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label>E-Mail</Label>
+                    <Input
+                      name="email"
+                      type="email"
+                      // Die Import-Platzhalter (…@willroider.invalid) sind
+                      // keine echten Adressen — Feld leer anbieten.
+                      defaultValue={
+                        editing.email && !editing.email.endsWith("@willroider.invalid")
+                          ? editing.email
+                          : ""
+                      }
+                      placeholder="name@firma.at"
+                    />
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                      <input type="checkbox" name="email_auch_login" className="h-3.5 w-3.5" />
+                      Auch als Anmelde-Adresse übernehmen — der Mitarbeiter meldet sich
+                      künftig mit dieser E-Mail an
+                    </label>
                   </div>
                   <div className="space-y-1.5">
                     <Label>Geburtsdatum</Label>

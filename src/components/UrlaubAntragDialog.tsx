@@ -144,11 +144,15 @@ export function UrlaubAntraegeCard({ userId }: { userId: string }) {
                     month: "2-digit",
                   })}
                 </span>
-                {a.arbeitstage && (
+                {(a as any).stunden ? (
+                  <span className="text-muted-foreground">
+                    ({String((a as any).stunden).replace(".", ",")} Std.)
+                  </span>
+                ) : a.arbeitstage ? (
                   <span className="text-muted-foreground">
                     ({a.arbeitstage}{" "}{Number(a.arbeitstage) === 1 ? "Tag" : "Tage"})
                   </span>
-                )}
+                ) : null}
                 <span className="flex-1" />
                 {a.status === "offen" && (
                   <button
@@ -186,21 +190,39 @@ export function UrlaubAntragDialog({
   const [bis, setBis] = useState(today);
   const [kommentar, setKommentar] = useState("");
   const [busy, setBusy] = useState(false);
+  // Stundenweiser Urlaub („2 Stunden") — nur anbieten, wenn die Spalte
+  // in der DB schon existiert (Migration 20260825200000).
+  const [stundenModus, setStundenModus] = useState(false);
+  const [stundenWert, setStundenWert] = useState("2");
+  const [stundenVerfuegbar, setStundenVerfuegbar] = useState(false);
 
   useEffect(() => {
     if (open) {
       setVon(today);
       setBis(today);
       setKommentar("");
+      setStundenModus(false);
+      setStundenWert("2");
+      supabase
+        .from("urlaubsantraege")
+        .select("stunden" as "*")
+        .limit(1)
+        .then(({ error }) => setStundenVerfuegbar(!error));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const tage = von && bis && bis >= von ? arbeitstageInRange(von, bis) : 0;
+  const stunden = Number(stundenWert.replace(",", ".")) || 0;
+  const istStunden = stundenModus && stundenVerfuegbar && von === bis;
 
   const submit = async () => {
     if (!von || !bis || bis < von) {
       toast({ variant: "destructive", title: "Ungültiges Datum" });
+      return;
+    }
+    if (istStunden && (stunden <= 0 || stunden > 24)) {
+      toast({ variant: "destructive", title: "Bitte eine Stundenzahl zwischen 0,5 und 24 angeben" });
       return;
     }
     setBusy(true);
@@ -208,9 +230,12 @@ export function UrlaubAntragDialog({
       mitarbeiter_id: userId,
       von,
       bis,
-      arbeitstage: tage,
+      // Stunden-Antrag: kein Pauschal-Tageswert — das Konto bucht später
+      // der Stunden-Eintrag (anteilig Stunden/Tages-Soll).
+      arbeitstage: istStunden ? null : tage,
+      ...(istStunden ? { stunden } : {}),
       kommentar: kommentar.trim() || null,
-    });
+    } as any);
     setBusy(false);
     if (error) {
       const msg = (error.message || "").toLowerCase();
@@ -261,11 +286,42 @@ export function UrlaubAntragDialog({
               />
             </div>
           </div>
-          {tage > 0 && (
-            <div className="text-xs text-muted-foreground">
-              = <span className="font-medium tabular-nums">{tage}</span> Arbeitstage
-              (Wochenende & Feiertage werden nicht gezählt)
+          {stundenVerfuegbar && von === bis && (
+            <label className="flex items-center gap-2 text-sm cursor-pointer rounded border px-3 py-2">
+              <input
+                type="checkbox"
+                checked={stundenModus}
+                onChange={(e) => setStundenModus(e.target.checked)}
+                className="h-4 w-4"
+              />
+              <span>
+                Nur stundenweise
+                <span className="block text-[11px] text-muted-foreground">
+                  z. B. 2 Stunden — der restliche Tag bleibt normale Arbeitszeit
+                </span>
+              </span>
+            </label>
+          )}
+          {istStunden ? (
+            <div>
+              <Label className="text-sm">Stunden</Label>
+              <Input
+                inputMode="decimal"
+                value={stundenWert}
+                onChange={(e) => setStundenWert(e.target.value)}
+                className="w-28"
+              />
+              <div className="text-xs text-muted-foreground mt-1">
+                Vom Urlaubskonto wird anteilig abgezogen (Stunden ÷ Tages-Soll).
+              </div>
             </div>
+          ) : (
+            tage > 0 && (
+              <div className="text-xs text-muted-foreground">
+                = <span className="font-medium tabular-nums">{tage}</span> Arbeitstage
+                (Wochenende & Feiertage werden nicht gezählt)
+              </div>
+            )
           )}
           <div>
             <Label className="text-sm">Kommentar (optional)</Label>
@@ -281,7 +337,7 @@ export function UrlaubAntragDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Abbrechen
           </Button>
-          <Button onClick={submit} disabled={busy || tage === 0}>
+          <Button onClick={submit} disabled={busy || (istStunden ? stunden <= 0 : tage === 0)}>
             {busy ? "Sende…" : "Einreichen"}
           </Button>
         </DialogFooter>

@@ -146,7 +146,7 @@ export function KrankmeldungenCard({ userId }: { userId: string }) {
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-1.5">
             <HeartPulse className="h-4 w-4 text-red-500" />
-            <span className="text-sm font-semibold">Krankmeldungen</span>
+            <span className="text-sm font-semibold">Krankmeldung / Arzttermin</span>
           </div>
           <KrankmeldungDialog
             userId={userId}
@@ -154,7 +154,7 @@ export function KrankmeldungenCard({ userId }: { userId: string }) {
             onOpenChange={setOpen}
             trigger={
               <Button size="sm" variant="outline">
-                <Plus className="h-3.5 w-3.5 mr-1" /> Krankmeldung einreichen
+                <Plus className="h-3.5 w-3.5 mr-1" /> Krankmeldung/Arzttermin
               </Button>
             }
           />
@@ -177,8 +177,9 @@ export function KrankmeldungenCard({ userId }: { userId: string }) {
                     {fmtDate(k.von)} – {fmtDate(k.bis)}
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    ({tageImRange(k.von, k.bis)}{" "}
-                    {tageImRange(k.von, k.bis) === 1 ? "Tag" : "Tage"})
+                    {(k as any).stunden
+                      ? `(${String((k as any).stunden).replace(".", ",")} Std.)`
+                      : `(${tageImRange(k.von, k.bis)} ${tageImRange(k.von, k.bis) === 1 ? "Tag" : "Tage"})`}
                   </span>
                   {k.notiz && (
                     <span className="text-xs italic text-muted-foreground truncate max-w-[120px]">
@@ -234,6 +235,11 @@ function KrankmeldungDialog({
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Stundenweise (Arzttermin) — nur anbieten, wenn die DB-Spalte existiert
+  // (Migration 20260825200000).
+  const [stundenModus, setStundenModus] = useState(false);
+  const [stundenWert, setStundenWert] = useState("2");
+  const [stundenVerfuegbar, setStundenVerfuegbar] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -241,13 +247,27 @@ function KrankmeldungDialog({
       setBis(today);
       setNotiz("");
       setFile(null);
+      setStundenModus(false);
+      setStundenWert("2");
+      supabase
+        .from("krankmeldungen")
+        .select("stunden" as "*")
+        .limit(1)
+        .then(({ error }) => setStundenVerfuegbar(!error));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  const stunden = Number(stundenWert.replace(",", ".")) || 0;
+  const istStunden = stundenModus && stundenVerfuegbar && von === bis;
+
   const submit = async () => {
     if (!von || !bis || bis < von) {
       toast({ variant: "destructive", title: "Ungültiges Datum" });
+      return;
+    }
+    if (istStunden && (stunden <= 0 || stunden > 24)) {
+      toast({ variant: "destructive", title: "Bitte eine Stundenzahl zwischen 0,5 und 24 angeben" });
       return;
     }
     setBusy(true);
@@ -269,9 +289,10 @@ function KrankmeldungDialog({
         mitarbeiter_id: userId,
         von,
         bis,
+        ...(istStunden ? { stunden } : {}),
         dokument_id: dokumentId,
         notiz: notiz.trim() || null,
-      });
+      } as any);
       if (error) {
         // Storage-Cleanup: hochgeladene Datei wieder entfernen
         if (dokumentId && storagePath) {
@@ -284,8 +305,10 @@ function KrankmeldungDialog({
         throw error;
       }
       toast({
-        title: "Krankmeldung eingereicht",
-        description: `${fmtDate(von)} – ${fmtDate(bis)}`,
+        title: istStunden ? "Arzttermin eingetragen" : "Krankmeldung eingereicht",
+        description: istStunden
+          ? `${fmtDate(von)} · ${String(stunden).replace(".", ",")} Stunden`
+          : `${fmtDate(von)} – ${fmtDate(bis)}`,
       });
       onOpenChange(false);
     } catch (e) {
@@ -306,7 +329,7 @@ function KrankmeldungDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <HeartPulse className="h-5 w-5 text-red-500" />
-            Krankmeldung einreichen
+            Krankmeldung / Arzttermin
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
@@ -329,6 +352,33 @@ function KrankmeldungDialog({
               />
             </div>
           </div>
+          {stundenVerfuegbar && von === bis && (
+            <label className="flex items-center gap-2 text-sm cursor-pointer rounded border px-3 py-2">
+              <input
+                type="checkbox"
+                checked={stundenModus}
+                onChange={(e) => setStundenModus(e.target.checked)}
+                className="h-4 w-4"
+              />
+              <span>
+                Nur stundenweise (z. B. Arzttermin)
+                <span className="block text-[11px] text-muted-foreground">
+                  Der restliche Tag bleibt normale Arbeitszeit
+                </span>
+              </span>
+            </label>
+          )}
+          {istStunden && (
+            <div>
+              <Label className="text-sm">Stunden</Label>
+              <Input
+                inputMode="decimal"
+                value={stundenWert}
+                onChange={(e) => setStundenWert(e.target.value)}
+                className="w-28"
+              />
+            </div>
+          )}
           <div>
             <Label className="text-sm">Krankenstandsbestätigung (optional)</Label>
             <div className="flex items-center gap-2">
@@ -367,8 +417,18 @@ function KrankmeldungDialog({
             />
           </div>
           <div className="text-xs text-muted-foreground bg-amber-50 border border-amber-200 rounded p-2">
-            ⓘ Die Werktage im Zeitraum werden automatisch als <strong>krank</strong>{" "}
-            in deiner Zeiterfassung markiert. Sa/So werden übersprungen.
+            {istStunden ? (
+              <>
+                ⓘ Es werden <strong>{String(stunden).replace(".", ",")} Stunden krank</strong>{" "}
+                in deiner Zeiterfassung eingetragen — bereits erfasste Arbeitsstunden
+                des Tages bleiben stehen.
+              </>
+            ) : (
+              <>
+                ⓘ Die Werktage im Zeitraum werden automatisch als <strong>krank</strong>{" "}
+                in deiner Zeiterfassung markiert. Sa/So werden übersprungen.
+              </>
+            )}
           </div>
         </div>
         <DialogFooter>

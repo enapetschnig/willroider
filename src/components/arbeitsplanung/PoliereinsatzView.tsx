@@ -733,11 +733,70 @@ export function PoliereinsatzView({
   ) => {
     if (!canEdit) return;
     e.stopPropagation();
+
+    // ── Tablet: erst HALTEN (400 ms), dann ziehen ────────────────────
+    // Mit sofortigem Drag war die Seite am Tablet kaum bedienbar: jedes
+    // Wischen über einen Balken verschob ihn, Scrollen ging nicht.
+    // Jetzt: kurzes Tippen = Info-Fenster, Wischen = normales Scrollen,
+    // Halten = Verschieben (Chip zeigt es an).
+    if (e.pointerType === "touch") {
+      const startX = e.clientX;
+      const startY = e.clientY;
+      let aktiviert = false;
+      const blockScroll = (te: TouchEvent) => {
+        if (aktiviert) te.preventDefault();
+      };
+      document.addEventListener("touchmove", blockScroll, { passive: false });
+      const aufraeumen = () => {
+        window.clearTimeout(timer);
+        document.removeEventListener("pointermove", vorMove);
+        document.removeEventListener("pointerup", vorUp);
+        document.removeEventListener("pointercancel", vorUp);
+      };
+      const timer = window.setTimeout(() => {
+        aktiviert = true;
+        aufraeumen();
+        setDragChip({ x: startX, y: startY, text: "Verschieben …" });
+        beginneDrag(z, mode, startX, () =>
+          document.removeEventListener("touchmove", blockScroll),
+        );
+      }, 400);
+      const vorMove = (ev: PointerEvent) => {
+        // Vor dem Halten bewegt → der Nutzer scrollt. Browser übernimmt.
+        if (Math.abs(ev.clientX - startX) > 8 || Math.abs(ev.clientY - startY) > 8) {
+          aufraeumen();
+          document.removeEventListener("touchmove", blockScroll);
+        }
+      };
+      const vorUp = (ev: PointerEvent) => {
+        aufraeumen();
+        document.removeEventListener("touchmove", blockScroll);
+        // Kurzes Tippen: Info-Fenster wie beim Maus-Klick.
+        if (ev.type === "pointerup") {
+          setBarInfo({ z, anchor: { x: ev.clientX, y: ev.clientY } });
+        }
+      };
+      document.addEventListener("pointermove", vorMove);
+      document.addEventListener("pointerup", vorUp);
+      document.addEventListener("pointercancel", vorUp);
+      return;
+    }
+
     e.preventDefault();
+    beginneDrag(z, mode, e.clientX);
+  };
+
+  /** Gemeinsamer Drag-Kern für Maus (sofort) und Touch (nach Halten). */
+  const beginneDrag = (
+    z: Zeitraum,
+    mode: "move" | "resize-l" | "resize-r",
+    startX: number,
+    extraCleanup?: () => void,
+  ) => {
     dragRef.current = {
       z,
       mode,
-      startX: e.clientX,
+      startX,
       moved: false,
       previewVon: z.von_datum,
       previewBis: z.bis_datum,
@@ -818,6 +877,7 @@ export function PoliereinsatzView({
     const onUp = async (ev: PointerEvent) => {
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
+      extraCleanup?.();
       const d = dragRef.current;
       dragRef.current = null;
       setDragPreview(null);
@@ -1157,7 +1217,10 @@ export function PoliereinsatzView({
                   : `repeating-linear-gradient(45deg, ${color}, ${color} 6px, ${color}55 6px, ${color}55 12px)`,
                 border: z.start_fix ? "none" : `1.5px dashed ${color}`,
                 cursor: canEdit ? "grab" : "pointer",
-                touchAction: "none",
+                // KEIN touch-action:none mehr — sonst kann man am Tablet
+                // nicht über die Balken scrollen. Der Drag startet dort
+                // erst nach langem Drücken (siehe onBarPointerDown).
+
               }}
               title={`${label} · ${von} – ${bis}${z.start_fix ? "" : " (Start nicht fix)"}`}
               onPointerDown={(e) => canEdit && onBarPointerDown(e, z, "move")}

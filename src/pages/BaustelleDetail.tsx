@@ -41,7 +41,19 @@ type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Termin = Database["public"]["Tables"]["baustellen_termine"]["Row"];
 type Dokument = Database["public"]["Tables"]["dokumente"]["Row"];
 type Kosten = Database["public"]["Tables"]["kostenbuchungen"]["Row"];
-type Stunden = Database["public"]["Tables"]["stundenbuchungen"]["Row"];
+/** Stundenzeile aus der ECHTEN Zeiterfassung (stunden_taetigkeiten).
+ *  Die Alt-Tabelle stundenbuchungen wird seit der neuen Erfassung nicht
+ *  mehr beschrieben — „Stunden gesamt" zeigte deshalb nicht die Stunden,
+ *  die tatsächlich auf die Baustelle gebucht wurden. */
+type StundenZeile = {
+  id: string;
+  datum: string;
+  stunden: number;
+  status: string;
+  wer: string;
+  taetigkeit: string | null;
+  ausWerk: boolean;
+};
 type Eval = Database["public"]["Tables"]["evaluierungen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
@@ -69,7 +81,7 @@ export default function BaustelleDetail() {
   const [termine, setTermine] = useState<Termin[]>([]);
   const [dokumente, setDokumente] = useState<Dokument[]>([]);
   const [kosten, setKosten] = useState<Kosten[]>([]);
-  const [stunden, setStunden] = useState<Stunden[]>([]);
+  const [stunden, setStunden] = useState<StundenZeile[]>([]);
   const [evals, setEvals] = useState<Eval[]>([]);
   const [partie, setPartie] = useState<Partie | null>(null);
   const [team, setTeam] = useState<Profile[]>([]);
@@ -91,7 +103,14 @@ export default function BaustelleDetail() {
       supabase.from("baustellen_termine").select("*").eq("baustelle_id", id).order("termin_datum"),
       supabase.from("dokumente").select("*").eq("baustelle_id", id).order("created_at", { ascending: false }),
       supabase.from("kostenbuchungen").select("*").eq("baustelle_id", id).order("datum", { ascending: false }),
-      supabase.from("stundenbuchungen").select("*").eq("baustelle_id", id).order("datum", { ascending: false }).limit(100),
+      // Zuordnung wie in der Stundenauswertung: ziel_baustelle_id gewinnt
+      // (Werk-Vorfertigung zählt zur Ziel-Baustelle), sonst baustelle_id.
+      supabase
+        .from("stunden_taetigkeiten")
+        .select(
+          "id, stunden, taetigkeit_freitext, baustelle_id, ziel_baustelle_id, taetigkeit:taetigkeiten_stamm(bezeichnung), tag:stunden_tage!inner(datum, status, mitarbeiter_id)",
+        )
+        .or(`ziel_baustelle_id.eq.${id},and(baustelle_id.eq.${id},ziel_baustelle_id.is.null)`),
       supabase.from("evaluierungen").select("*").eq("baustelle_id", id).order("datum", { ascending: false }),
     ]);
     const baustelle = (bs.data as Baustelle) ?? null;
@@ -99,7 +118,32 @@ export default function BaustelleDetail() {
     setTermine((t.data as Termin[]) ?? []);
     setDokumente((d.data as Dokument[]) ?? []);
     setKosten((k.data as Kosten[]) ?? []);
-    setStunden((s.data as Stunden[]) ?? []);
+    // Namen separat auflösen — der Doppel-FK auf profiles (mitarbeiter_id
+    // UND erfasst_von) macht den direkten Embed mehrdeutig.
+    const maIds = Array.from(
+      new Set((((s.data as any[]) ?? []).map((r) => r.tag?.mitarbeiter_id).filter(Boolean))),
+    );
+    const nameVon = new Map<string, string>();
+    if (maIds.length > 0) {
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, vorname, nachname")
+        .in("id", maIds);
+      ((profs as any[]) ?? []).forEach((p) => nameVon.set(p.id, `${p.nachname} ${p.vorname}`));
+    }
+    setStunden(
+      (((s.data as any[]) ?? [])
+        .map((r) => ({
+          id: r.id,
+          datum: r.tag?.datum ?? "",
+          stunden: Number(r.stunden) || 0,
+          status: r.tag?.status ?? "",
+          wer: nameVon.get(r.tag?.mitarbeiter_id) ?? "",
+          taetigkeit: r.taetigkeit?.bezeichnung ?? r.taetigkeit_freitext ?? null,
+          ausWerk: !!r.ziel_baustelle_id,
+        }))
+        .sort((a, b) => b.datum.localeCompare(a.datum)) as StundenZeile[]),
+    );
     setEvals((e.data as Eval[]) ?? []);
 
     const { data: allP } = await supabase.from("partien").select("*").order("name");
@@ -336,7 +380,7 @@ export default function BaustelleDetail() {
     );
   }
 
-  const sumStunden = stunden.reduce((s, r) => s + (r.arbeitsstunden ?? 0), 0);
+  const sumStunden = stunden.reduce((s, r) => s + r.stunden, 0);
   const sumKosten = kosten.reduce((s, k) => s + Number(k.betrag), 0);
 
   return (
@@ -831,24 +875,36 @@ export default function BaustelleDetail() {
                 <thead className="bg-muted/60">
                   <tr>
                     <th className="text-left p-2">Datum</th>
+                    <th className="text-left p-2">Mitarbeiter</th>
                     <th className="text-left p-2">Stunden</th>
                     <th className="text-left p-2">Status</th>
                     <th className="text-left p-2">Tätigkeit</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {stunden.map((s) => (
+                  {stunden.slice(0, 200).map((s) => (
                     <tr key={s.id} className="border-b">
-                      <td className="p-2">{new Date(s.datum).toLocaleDateString("de-AT")}</td>
-                      <td className="p-2">{Number(s.arbeitsstunden ?? 0).toFixed(1)} h</td>
+                      <td className="p-2 whitespace-nowrap">{s.datum ? new Date(s.datum + "T00:00:00").toLocaleDateString("de-AT") : "—"}</td>
+                      <td className="p-2">{s.wer}</td>
+                      <td className="p-2 tabular-nums">{s.stunden.toFixed(1)} h</td>
                       <td className="p-2"><Badge variant="outline">{s.status}</Badge></td>
-                      <td className="p-2">{s.taetigkeit}</td>
+                      <td className="p-2">
+                        {s.taetigkeit}
+                        {s.ausWerk && (
+                          <Badge variant="outline" className="ml-1.5 text-[10px]">Werk</Badge>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              {stunden.length > 200 && (
+                <div className="p-2 text-center text-xs text-muted-foreground">
+                  Die neuesten 200 von {stunden.length} Einträgen — die Summe oben zählt alle.
+                </div>
+              )}
               {stunden.length === 0 && (
-                <div className="p-6 text-center text-sm text-muted-foreground">Noch keine Stundenbuchungen.</div>
+                <div className="p-6 text-center text-sm text-muted-foreground">Noch keine Stunden gebucht.</div>
               )}
             </CardContent>
           </Card>
