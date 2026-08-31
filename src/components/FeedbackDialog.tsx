@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { BildMarkierenDialog } from "@/components/BildMarkierenDialog";
+import { datenUrlZuBlob } from "@/lib/bildschirmfoto";
 import { useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -95,9 +97,13 @@ const MAX_SEK = 180; // Sicherheitslimit: 3 Minuten
 export function FeedbackDialog({
   open,
   onOpenChange,
+  bildschirmfoto = null,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  /** Automatisches Bildschirmfoto (data-URL) — gemacht BEVOR der Dialog
+   *  aufging, sonst wäre nur das Meldefenster auf dem Bild. */
+  bildschirmfoto?: string | null;
 }) {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -112,6 +118,15 @@ export function FeedbackDialog({
   /** Optionaler Datei-/Screenshot-Anhang (max. 10 MB). */
   const [anhang, setAnhang] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  /** Das automatische Bildschirmfoto — im Dialog markier- und entfernbar. */
+  const [foto, setFoto] = useState<string | null>(null);
+  const [markierenOffen, setMarkierenOffen] = useState(false);
+
+  // Bei jedem Öffnen das frische Foto übernehmen.
+  useEffect(() => {
+    if (open) setFoto(bildschirmfoto ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // ── Audio-Aufnahme ────────────────────────────────────────────────
   const [aufnahme, setAufnahme] = useState<"idle" | "recording">("idle");
@@ -201,6 +216,7 @@ export function FeedbackDialog({
     setKategorie("idee");
     setDringlichkeit("normal");
     setAnhang(null);
+    setFoto(null);
   };
 
   // Wie viele eigene Wünsche warten auf eine Antwort? Zeigt den Punkt am
@@ -264,8 +280,27 @@ export function FeedbackDialog({
       audioTyp = audioBlob.type;
     }
 
-    // Datei-Anhang hochladen (eigener Ordner {uid}/… — RLS)
+    // Datei-Anhang hochladen (eigener Ordner {uid}/… — RLS).
+    // Ohne eigene Datei wandert das automatische Bildschirmfoto mit.
     let anhangPfad: string | null = null;
+    let anhangName: string | null = anhang?.name ?? null;
+    let anhangTyp: string | null = anhang?.type ?? null;
+    if (!anhang && foto) {
+      const blob = datenUrlZuBlob(foto);
+      const pfad = `${user.id}/${crypto.randomUUID()}.jpg`;
+      const { error: upErr } = await supabase.storage
+        .from("feedback-dateien")
+        .upload(pfad, blob, { contentType: "image/jpeg", upsert: false });
+      if (upErr) {
+        setBusy(false);
+        if (audioPfad) void supabase.storage.from("feedback-audio").remove([audioPfad]);
+        toast({ variant: "destructive", title: "Bildschirmfoto konnte nicht hochgeladen werden", description: upErr.message });
+        return;
+      }
+      anhangPfad = pfad;
+      anhangName = "bildschirmfoto.jpg";
+      anhangTyp = "image/jpeg";
+    }
     if (anhang) {
       const ext = anhang.name.split(".").pop() || "bin";
       const pfad = `${user.id}/${crypto.randomUUID()}.${ext}`;
@@ -295,8 +330,8 @@ export function FeedbackDialog({
         audio_typ: audioTyp,
         audio_sekunden: audioBlob ? dauer : null,
         anhang_pfad: anhangPfad,
-        anhang_name: anhang?.name ?? null,
-        anhang_typ: anhang?.type ?? null,
+        anhang_name: anhangName,
+        anhang_typ: anhangTyp,
       })
       .select("id")
       .single();
@@ -479,10 +514,46 @@ export function FeedbackDialog({
             )}
           </div>
 
+          {/* Automatisches Bildschirmfoto — markierbar */}
+          {foto && !anhang && (
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                Bildschirmfoto (wird mitgeschickt)
+              </Label>
+              <div className="rounded-md border overflow-hidden bg-muted/40">
+                <img
+                  src={foto}
+                  alt="Bildschirmfoto"
+                  className="w-full max-h-40 object-cover object-top cursor-pointer"
+                  onClick={() => setMarkierenOffen(true)}
+                />
+                <div className="flex items-center gap-2 px-2 py-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 flex-1"
+                    onClick={() => setMarkierenOffen(true)}
+                  >
+                    Einkreisen, worum es geht
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setFoto(null)}
+                    className="shrink-0 p-1.5 rounded hover:bg-muted text-muted-foreground"
+                    aria-label="Bildschirmfoto entfernen"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Datei-/Screenshot-Anhang */}
           <div className="space-y-1.5">
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-              Datei / Screenshot (optional)
+              {foto && !anhang ? "Andere Datei anhängen (ersetzt das Foto)" : "Datei / Screenshot (optional)"}
             </Label>
             <input
               ref={fileInputRef}
@@ -554,6 +625,18 @@ export function FeedbackDialog({
           </DialogFooter>
         )}
       </DialogContent>
+
+      {foto && (
+        <BildMarkierenDialog
+          open={markierenOffen}
+          bild={foto}
+          onAbbrechen={() => setMarkierenOffen(false)}
+          onFertig={(neuesBild) => {
+            setFoto(neuesBild);
+            setMarkierenOffen(false);
+          }}
+        />
+      )}
     </Dialog>
   );
 }

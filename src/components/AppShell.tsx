@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { InstallPromptDialog } from "./InstallPromptDialog";
 import { FeedbackDialog } from "./FeedbackDialog";
+import { bildschirmfotoMachen } from "@/lib/bildschirmfoto";
 import {
   getCachedInstallPrompt,
   subscribeInstallPrompt,
@@ -143,8 +144,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   };
 
-  const openFeedback = () => {
+  const [feedbackBild, setFeedbackBild] = useState<string | null>(null);
+  const openFeedback = async () => {
     dismissFeedbackHint();
+    // ERST das Foto, DANN der Dialog — sonst wäre nur das Meldefenster
+    // auf dem Bild. Ein fehlgeschlagenes Foto verhindert das Melden nicht.
+    setFeedbackBild(await bildschirmfotoMachen());
     setFeedbackOpen(true);
   };
 
@@ -448,7 +453,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       <InstallPromptDialog open={installOpen} onClose={closeInstallDialog} />
-      <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
+      <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} bildschirmfoto={feedbackBild} />
     </div>
   );
 }
