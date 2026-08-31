@@ -363,7 +363,11 @@ export function AdminUrlaubsantraegeCard() {
   const load = async () => {
     const { data, error } = await supabase
       .from("urlaubsantraege")
-      .select("*, mitarbeiter:profiles(vorname,nachname)")
+      // FK-Hinweis nötig: urlaubsantraege zeigt ZWEIMAL auf profiles
+      // (mitarbeiter_id + entschieden_von) — ohne Hinweis verweigert
+      // PostgREST den Join und die Genehmigen-Karte blieb leer mit
+      // „Could not embed …". Genau das war „Fehler bei der Freigabe".
+      .select("*, mitarbeiter:profiles!urlaubsantraege_mitarbeiter_id_fkey(vorname,nachname)")
       .eq("status", "offen")
       .order("eingereicht_am", { ascending: true });
     setLadeFehler(error ? error.message : null);
