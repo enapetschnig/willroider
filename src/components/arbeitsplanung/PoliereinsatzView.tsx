@@ -33,6 +33,7 @@ import {
   ChevronRight,
   ChevronDown,
   ChevronRight as ChevronRightSmall,
+  CopyPlus,
   Plus,
   Trash2,
   Pencil,
@@ -374,6 +375,40 @@ export function PoliereinsatzView({
     }));
   };
 
+  /** Arbeitstag im Sinne dieses Gantts: kein Wochenende, kein Feiertag,
+   *  nicht kalenderfrei (kurze Woche / Betriebsurlaub) — dieselbe Regel,
+   *  nach der auch die Balken-Stücke gezeichnet werden. */
+  const istArbeitstag = (iso: string): boolean => {
+    const wd = new Date(iso + "T00:00:00").getDay();
+    if (wd === 0 || wd === 6) return false;
+    if (feiertagAt(iso)) return false;
+    return !kalenderFrei.has(iso);
+  };
+
+  const zaehleArbeitstage = (von: string, bis: string): number => {
+    let n = 0;
+    let d = von;
+    let guard = 0;
+    while (d <= bis && guard++ < 400) {
+      if (istArbeitstag(d)) n++;
+      d = addDays(d, 1);
+    }
+    return n;
+  };
+
+  /** ISO-Kalenderwoche eines Datums — für die KW-Anzeige im Dialog. */
+  const kwVon = (iso: string): number => {
+    const t = new Date(iso + "T00:00:00");
+    t.setDate(t.getDate() + 3 - ((t.getDay() + 6) % 7));
+    const jan4 = new Date(t.getFullYear(), 0, 4);
+    return (
+      1 +
+      Math.round(
+        ((t.getTime() - jan4.getTime()) / 86400000 - 3 + ((jan4.getDay() + 6) % 7)) / 7,
+      )
+    );
+  };
+
   /** Abwesenheits-Segmente eines MA: zusammenhängende Tage GLEICHER Art.
    *  Ein Wechsel Krank→Urlaub bricht das Segment, damit die Farbe stimmt. */
   const urlaubSegmente = (
@@ -642,6 +677,54 @@ export function PoliereinsatzView({
     return bl?.planungsfarbe ?? "#6b7280";
   };
 
+  /** Einsatz kopieren: gleicher Umfang (Arbeitstage), direkt im Anschluss
+   *  an den bestehenden Balken — von dort zieht man ihn einfach an die
+   *  richtige Stelle oder in eine andere Partie. */
+  const kopiereEinsatz = async (z: Zeitraum) => {
+    let von = addDays(z.bis_datum, 1);
+    let g = 0;
+    while (!istArbeitstag(von) && g++ < 21) von = addDays(von, 1);
+    const soll = Math.max(1, zaehleArbeitstage(z.von_datum, z.bis_datum));
+    let bis = von;
+    let rest = soll - 1;
+    let g2 = 0;
+    while (rest > 0 && g2++ < 400) {
+      bis = addDays(bis, 1);
+      if (istArbeitstag(bis)) rest--;
+    }
+    const { data: neu, error } = await supabase
+      .from("poliereinsatz_zeitraeume")
+      .insert({
+        partie_id: z.partie_id,
+        baustelle_id: z.baustelle_id,
+        von_datum: von,
+        bis_datum: bis,
+        start_fix: z.start_fix,
+        erstellt_von: userId,
+      })
+      .select("id")
+      .single();
+    setBarInfo(null);
+    if (error || !neu) {
+      toast({
+        variant: "destructive",
+        title: "Kopieren fehlgeschlagen",
+        description: error?.message ?? "Keine Berechtigung.",
+      });
+      return;
+    }
+    pushUndo({ typ: "insert", id: neu.id });
+    toast({
+      title: "Einsatz kopiert",
+      description: "Die Kopie liegt direkt im Anschluss — einfach an die richtige Stelle ziehen.",
+    });
+    await load();
+    setMarkierteZeile(neu.id);
+    window.setTimeout(() => {
+      setMarkierteZeile((cur) => (cur === neu.id ? null : cur));
+    }, 4000);
+  };
+
   // ─── Drag ────────────────────────────────────────────────────────────
   const onBarPointerDown = (
     e: React.PointerEvent,
@@ -669,8 +752,33 @@ export function PoliereinsatzView({
       let von = d.z.von_datum;
       let bis = d.z.bis_datum;
       if (d.mode === "move") {
-        von = addDays(d.z.von_datum, deltaDays);
-        bis = addDays(d.z.bis_datum, deltaDays);
+        if (deltaDays === 0) {
+          von = d.z.von_datum;
+          bis = d.z.bis_datum;
+        } else {
+          // Beim Zug übers Wochenende KÜRZTE die reine Kalender-Addition den
+          // Einsatz: Mo–Fr (5 Arbeitstage) um 3 Tage gezogen wurde Do–Mo —
+          // nur noch 3 Arbeitstage. Deshalb: Start auf den nächsten
+          // Arbeitstag schnappen und dann so weit strecken, dass wieder
+          // GLEICH VIELE Arbeitstage im Zeitraum liegen.
+          von = addDays(d.z.von_datum, deltaDays);
+          let g = 0;
+          while (!istArbeitstag(von) && g++ < 21) von = addDays(von, 1);
+          const soll = zaehleArbeitstage(d.z.von_datum, d.z.bis_datum);
+          if (soll > 0) {
+            bis = von;
+            let rest = soll - 1;
+            let g2 = 0;
+            while (rest > 0 && g2++ < 400) {
+              bis = addDays(bis, 1);
+              if (istArbeitstag(bis)) rest--;
+            }
+          } else {
+            // Zeitraum ganz ohne Arbeitstage (liegt komplett im
+            // Betriebsurlaub) — dann wie bisher stur verschieben.
+            bis = addDays(d.z.bis_datum, deltaDays);
+          }
+        }
       } else if (d.mode === "resize-r") {
         bis = addDays(d.z.bis_datum, deltaDays);
         if (bis < von) bis = von;
@@ -1864,6 +1972,17 @@ export function PoliereinsatzView({
                 </Button>
               )}
               {canEdit && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full h-9 mt-2 justify-start gap-2"
+                  onClick={() => kopiereEinsatz(barInfo.z)}
+                  title="Legt denselben Einsatz gleich im Anschluss noch einmal an — danach einfach an die richtige Stelle ziehen"
+                >
+                  <CopyPlus className="h-3.5 w-3.5" /> Einsatz kopieren
+                </Button>
+              )}
+              {canEdit && (
                 <div className="flex gap-2 mt-2">
                   <Button
                     size="sm"
@@ -2020,18 +2139,42 @@ export function PoliereinsatzView({
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <Label className="text-xs">Von</Label>
+                  <Label className="text-xs">
+                    Von
+                    {editDialog.von && (
+                      <span className="ml-1.5 text-muted-foreground font-normal">
+                        · KW {kwVon(editDialog.von)}
+                      </span>
+                    )}
+                  </Label>
                   <Input
                     type="date"
                     value={editDialog.von}
-                    onChange={(e) => setEditDialog({ ...editDialog, von: e.target.value })}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      // Bis zieht mit, wenn es vor dem neuen Von läge — ein
+                      // Einsatz kann nicht rückwärts laufen.
+                      setEditDialog({
+                        ...editDialog,
+                        von: v,
+                        bis: editDialog.bis && editDialog.bis >= v ? editDialog.bis : v,
+                      });
+                    }}
                   />
                 </div>
                 <div>
-                  <Label className="text-xs">Bis</Label>
+                  <Label className="text-xs">
+                    Bis
+                    {editDialog.bis && (
+                      <span className="ml-1.5 text-muted-foreground font-normal">
+                        · KW {kwVon(editDialog.bis)}
+                      </span>
+                    )}
+                  </Label>
                   <Input
                     type="date"
                     value={editDialog.bis}
+                    min={editDialog.von || undefined}
                     onChange={(e) => setEditDialog({ ...editDialog, bis: e.target.value })}
                   />
                 </div>
