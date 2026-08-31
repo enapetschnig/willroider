@@ -23,7 +23,9 @@ import {
   FileText,
   Wrench,
   MessageSquarePlus,
+  X,
 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import type { Database } from "@/integrations/supabase/types";
 import { BerichteHintCard } from "@/components/dashboard/BerichteHintCard";
 import { NeuerLohnzettelHintCard } from "@/components/dashboard/NeuerLohnzettelHintCard";
@@ -96,6 +98,7 @@ type HeuteEintrag = {
 };
 
 export default function Dashboard() {
+  const { toast } = useToast();
   const { user, profile, isAdmin, hasPermission } = useAuth();
   const [aktiveBaustellen, setAktiveBaustellen] = useState<Baustelle[]>([]);
   const [pendingProfiles, setPendingProfiles] = useState<PendingProfile[]>([]);
@@ -257,6 +260,24 @@ export default function Dashboard() {
       supabase.removeChannel(ch);
     };
   }, [user]);
+
+  /** Anmeldung ausblenden: die Person bleibt im Archiv und kann dort
+   *  jederzeit freigeschaltet werden — nur das Banner mahnt nicht mehr.
+   *  Technisch: je_freigeschaltet=true nimmt sie aus dem Banner-Filter. */
+  const anmeldungAusblenden = async (id: string) => {
+    const { error } = await supabase
+      .from("profiles")
+      .update({ je_freigeschaltet: true } as any)
+      .eq("id", id);
+    if (error) {
+      toast({ variant: "destructive", title: "Ausblenden fehlgeschlagen", description: error.message });
+    } else {
+      toast({
+        title: "Anmeldung ausgeblendet",
+        description: "Die Person liegt weiter im Archiv (Verwaltung → Mitarbeiter) und kann dort jederzeit freigeschaltet werden.",
+      });
+    }
+  };
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -523,9 +544,18 @@ export default function Dashboard() {
                     >
                       <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
                       <strong>
-                        {p.vorname} {p.nachname}
+                        {`${p.vorname} ${p.nachname}`.trim() || "Ohne Namen"}
                       </strong>
                       <span className="text-muted-foreground">· {relTime(p.created_at)}</span>
+                      <button
+                        type="button"
+                        onClick={() => anmeldungAusblenden(p.id)}
+                        className="ml-0.5 -mr-1 p-0.5 rounded-full hover:bg-amber-100 text-muted-foreground"
+                        title="Ausblenden — bleibt im Archiv und kann dort jederzeit freigeschaltet werden"
+                        aria-label="Anmeldung ausblenden"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
                     </span>
                   ))}
                   {pendingCount > 5 && (
