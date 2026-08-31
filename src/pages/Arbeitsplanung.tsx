@@ -663,6 +663,83 @@ export default function Arbeitsplanung() {
     return res;
   };
 
+  /** Tablet-Geste: kurzes Tippen = beiTipp, Wischen = natives Scrollen,
+   *  HALTEN (400 ms) = beiHalten (Drag). Ohne diese Schleuse blockierte
+   *  touch-action:none jedes Wischen über das Raster — die Seite war am
+   *  Tablet kaum scrollbar, und jede Berührung wurde zum Ziehen. */
+  const langerDruck = (
+    e: React.PointerEvent,
+    opt: { beiHalten: () => void; beiTipp?: (x: number, y: number) => void },
+  ) => {
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let aktiv = false;
+    const blockScroll = (te: TouchEvent) => {
+      if (aktiv) te.preventDefault();
+    };
+    document.addEventListener("touchmove", blockScroll, { passive: false });
+    const ende = () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("pointermove", vorMove);
+      document.removeEventListener("pointerup", vorUp);
+      document.removeEventListener("pointercancel", vorAbbruch);
+    };
+    const timer = window.setTimeout(() => {
+      aktiv = true;
+      ende();
+      // Scroll-Sperre erst mit dem Loslassen lösen — der eigentliche
+      // Drag läuft über die bestehenden globalen Pointer-Effekte.
+      const loese = () => {
+        document.removeEventListener("touchmove", blockScroll);
+        document.removeEventListener("pointerup", loese);
+        document.removeEventListener("pointercancel", loese);
+      };
+      document.addEventListener("pointerup", loese);
+      document.addEventListener("pointercancel", loese);
+      opt.beiHalten();
+    }, 400);
+    const vorMove = (ev: PointerEvent) => {
+      // Vor dem Halten bewegt → der Nutzer scrollt. Browser übernimmt.
+      if (Math.abs(ev.clientX - startX) > 8 || Math.abs(ev.clientY - startY) > 8) {
+        ende();
+        document.removeEventListener("touchmove", blockScroll);
+      }
+    };
+    const vorUp = (ev: PointerEvent) => {
+      ende();
+      document.removeEventListener("touchmove", blockScroll);
+      opt.beiTipp?.(ev.clientX, ev.clientY);
+    };
+    const vorAbbruch = () => {
+      ende();
+      document.removeEventListener("touchmove", blockScroll);
+    };
+    document.addEventListener("pointermove", vorMove);
+    document.addEventListener("pointerup", vorUp);
+    document.addEventListener("pointercancel", vorAbbruch);
+  };
+
+  /** Info-Popup eines Balkens öffnen — gemeinsam für Maus-Klick und
+   *  Tablet-Tipp. */
+  const oeffneBarInfo = (bar: Bar, x: number, y: number) => {
+    const cells = [...bar.assignedIdx].map((i) => ({
+      workerId: bar.workerId,
+      iso: dayIsoByIdx[i],
+    }));
+    const idxs = [...bar.assignedIdx].sort((a, b) => a - b);
+    const s = dayHeaders[idxs[0]].date;
+    const en = dayHeaders[idxs[idxs.length - 1]].date;
+    setBarInfo({
+      bar,
+      dateRange:
+        idxs.length === 1
+          ? s.toLocaleDateString("de-AT")
+          : `${s.toLocaleDateString("de-AT")} – ${en.toLocaleDateString("de-AT")}`,
+      anchor: { x, y },
+      cells,
+    });
+  };
+
   const onBarPointerDown = (
     e: React.PointerEvent,
     bar: Bar,
@@ -670,6 +747,32 @@ export default function Arbeitsplanung() {
   ) => {
     if (!isAdmin || bar.isReadOnly) return;
     e.stopPropagation();
+    if (e.pointerType === "touch") {
+      const row = (e.currentTarget as HTMLElement).closest(
+        "[data-row='1']",
+      ) as HTMLElement | null;
+      let tIdx = bar.startIdx;
+      if (row) {
+        const rect = row.getBoundingClientRect();
+        tIdx = Math.max(
+          0,
+          Math.min(dayHeaders.length - 1, Math.floor((e.clientX - rect.left) / dayWidth)),
+        );
+      }
+      langerDruck(e, {
+        beiTipp: (x, y) => oeffneBarInfo(bar, x, y),
+        beiHalten: () =>
+          setBarDrag({
+            bar,
+            mode,
+            pointerStartIdx: tIdx,
+            pointerStart: { x: e.clientX, y: e.clientY },
+            active: false,
+            preview: null,
+          }),
+      });
+      return;
+    }
     e.preventDefault();
     const row = (e.currentTarget as HTMLElement).closest(
       "[data-row='1']",
@@ -814,22 +917,7 @@ export default function Arbeitsplanung() {
         // Reiner Klick (keine Bewegung) → Info-Popup mit vollem Namen.
         // Von dort führt „Bearbeiten" ins CellPopover — schmale Balken
         // sind sonst nicht lesbar (2 Buchstaben, kein Hover am Tablet).
-        const cells = [...bd.bar.assignedIdx].map((i) => ({
-          workerId: bd.bar.workerId,
-          iso: dayIsoByIdx[i],
-        }));
-        const idxs = [...bd.bar.assignedIdx].sort((a, b) => a - b);
-        const s = dayHeaders[idxs[0]].date;
-        const en = dayHeaders[idxs[idxs.length - 1]].date;
-        setBarInfo({
-          bar: bd.bar,
-          dateRange:
-            idxs.length === 1
-              ? s.toLocaleDateString("de-AT")
-              : `${s.toLocaleDateString("de-AT")} – ${en.toLocaleDateString("de-AT")}`,
-          anchor: { x: e.clientX, y: e.clientY },
-          cells,
-        });
+        oeffneBarInfo(bd.bar, e.clientX, e.clientY);
         return;
       }
       void applyBarDrag(bd);
@@ -865,6 +953,24 @@ export default function Arbeitsplanung() {
     fromPartieId: string | null,
   ) => {
     if (!isAdmin) return;
+    if (e.pointerType === "touch") {
+      // Tippen öffnet das Mitglieds-Menü über den normalen Click —
+      // nur das HALTEN startet das Verschieben zwischen Partien.
+      const startX = e.clientX;
+      const startY = e.clientY;
+      langerDruck(e, {
+        beiHalten: () =>
+          setNameDrag({
+            member,
+            fromPartieId,
+            pointerStart: { x: startX, y: startY },
+            active: true,
+            pos: { x: startX, y: startY },
+            overPartieId: undefined,
+          }),
+      });
+      return;
+    }
     setNameDrag({
       member,
       fromPartieId,
@@ -961,6 +1067,24 @@ export default function Arbeitsplanung() {
 
   const onCellPointerDown = (e: React.PointerEvent, workerId: string, iso: string) => {
     if (!isAdmin) return;
+    if (e.pointerType === "touch") {
+      langerDruck(e, {
+        // Tippen: die eine Zelle auswählen und gleich das Fenster öffnen.
+        beiTipp: (x, y) => {
+          setSelectionAnchor({ workerId, iso });
+          setSelection(new Set([cellKey(workerId, iso)]));
+          setPopover({ workerId, cells: [{ workerId, iso }], anchor: { x, y } });
+        },
+        // Halten: Bereichs-Auswahl wie mit der Maus.
+        beiHalten: () => {
+          setDragAnchor({ workerId, iso });
+          setDragHover({ workerId, iso });
+          setSelectionAnchor({ workerId, iso });
+          setSelection(new Set([cellKey(workerId, iso)]));
+        },
+      });
+      return;
+    }
     e.preventDefault();
 
     // Shift+Click → instant range from previous anchor (auch über mehrere Zeilen)
@@ -2008,7 +2132,7 @@ export default function Arbeitsplanung() {
                             ? "opacity-40"
                             : ""
                         } ${markierteZeile === m.id ? "bg-primary/10" : ""}`}
-                        style={{ height: 28, touchAction: isAdmin ? "none" : undefined }}
+                        style={{ height: 28 }}
                         title={
                           isAdmin
                             ? `${m.vorname} ${m.nachname} · ziehen zum Verschieben, klicken für Menü`
@@ -2171,7 +2295,6 @@ export default function Arbeitsplanung() {
                       data-partie={g.partie?.id}
                       onPointerDown={(e) => {
                         if (!partieAktiv || !g.partie) return;
-                        e.preventDefault();
                         const rect = (
                           e.currentTarget as HTMLDivElement
                         ).getBoundingClientRect();
@@ -2182,8 +2305,27 @@ export default function Arbeitsplanung() {
                             Math.floor((e.clientX - rect.left) / dayWidth),
                           ),
                         );
+                        const partieId = g.partie.id;
+                        if (e.pointerType === "touch") {
+                          langerDruck(e, {
+                            // Tippen: der eine Tag für die ganze Partie.
+                            beiTipp: (x, y) => {
+                              const gr = workerGroups.find((wg) => wg.partie?.id === partieId);
+                              if (!gr || gr.members.length === 0) return;
+                              const iso = isoDate(dayHeaders[idx].date);
+                              if (!isWerktag(iso)) return;
+                              const cells = gr.members.map((m) => ({ workerId: m.id, iso }));
+                              setSelection(new Set(cells.map((c) => cellKey(c.workerId, c.iso))));
+                              setPopover({ workerId: partieId, cells, anchor: { x, y } });
+                            },
+                            beiHalten: () =>
+                              setPartieDrag({ partieId, anchorIdx: idx, hoverIdx: idx }),
+                          });
+                          return;
+                        }
+                        e.preventDefault();
                         setPartieDrag({
-                          partieId: g.partie.id,
+                          partieId,
                           anchorIdx: idx,
                           hoverIdx: idx,
                         });
@@ -2195,7 +2337,6 @@ export default function Arbeitsplanung() {
                           ? `${g.partie.farbcode}25`
                           : "hsl(var(--muted))",
                         cursor: partieAktiv ? "pointer" : "default",
-                        touchAction: partieAktiv ? "none" : undefined,
                         userSelect: "none",
                       }}
                       title={
@@ -2333,7 +2474,6 @@ export default function Arbeitsplanung() {
                           style={{
                             height: 28,
                             cursor: isAdmin ? "pointer" : "default",
-                            touchAction: isAdmin ? "none" : undefined,
                             userSelect: "none",
                           }}
                         >
@@ -2585,7 +2725,7 @@ export default function Arbeitsplanung() {
         const py = Math.min(barInfo.anchor.y + 10, window.innerHeight - 220);
         return (
           <>
-            <div className="fixed inset-0 z-40" onClick={() => setBarInfo(null)} />
+            <div className="fixed inset-0 z-40" onPointerDown={() => setBarInfo(null)} />
             <div
               className="fixed z-50 bg-card border rounded-lg shadow-xl p-3"
               style={{ left: px, top: py, width: w }}
@@ -3517,7 +3657,10 @@ function CellPopover({
 
   return (
     <>
-      <div className="fixed inset-0 z-40" onClick={onClose} />
+      {/* onPointerDown statt onClick: der nachlaufende Klick des öffnenden
+          Fingertipps traf sonst die frisch gerenderte Fläche und schloss
+          das Fenster sofort wieder — am Tablet ging es dadurch „nicht auf". */}
+      <div className="fixed inset-0 z-40" onPointerDown={onClose} />
       <div
         className="fixed z-50 bg-card border-2 border-primary/30 rounded-lg shadow-xl p-3 overflow-y-auto overscroll-contain"
         style={{ left: x, top: y, width: w, maxHeight: maxH }}
@@ -3778,7 +3921,6 @@ function MobileWorkerPlan({
                           color: bg !== "transparent" ? "white" : undefined,
                           opacity: isFeiertag && !a ? 0.55 : a?.isReadOnly ? 0.65 : 1,
                           cursor: isAdmin ? "pointer" : "default",
-                          touchAction: isAdmin ? "none" : undefined,
                           userSelect: "none",
                           position: "relative",
                         }}

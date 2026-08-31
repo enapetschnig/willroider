@@ -1975,7 +1975,7 @@ export function PoliereinsatzView({
         const py = Math.min(barInfo.anchor.y + 10, window.innerHeight - 220);
         return (
           <>
-            <div className="fixed inset-0 z-40" onClick={() => setBarInfo(null)} />
+            <div className="fixed inset-0 z-40" onPointerDown={() => setBarInfo(null)} />
             <div
               className="fixed z-50 bg-card border rounded-lg shadow-xl p-3"
               style={{ left: px, top: py, width: w }}
