@@ -1,4 +1,5 @@
-// SMS-Zugang neu verschicken für manuell angelegte Mitarbeiter.
+// Zugang neu verschicken für manuell angelegte Mitarbeiter — per SMS,
+// E-Mail oder beidem (kanal-Parameter; Standard SMS wie bisher).
 //
 // Aufgerufen vom Admin-UI „Zugang senden" (AdminZugangVerschicken).
 // Tut atomar:
@@ -23,6 +24,7 @@ import {
   generateReadablePassword,
   composeInvitationSms,
 } from '../_shared/sms.ts';
+import { composeInvitationEmail, sendeEinladungsMail } from '../_shared/mail.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -38,6 +40,8 @@ interface InvitationRequest {
   /** Optional: neue/abweichende Telefonnummer. Format: AT (0664…) oder E.164.
    *  Wird normalisiert und in profiles.telefon + auth.users.phone übernommen. */
   telefon_override?: string;
+  /** Versandweg. Standard 'sms' — bestehende Aufrufer bleiben unverändert. */
+  kanal?: 'sms' | 'email' | 'beide';
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -107,10 +111,29 @@ Deno.serve(async (req) => {
       });
     }
 
+    const kanal = body.kanal === 'email' || body.kanal === 'beide' ? body.kanal : 'sms';
+    const willSms = kanal === 'sms' || kanal === 'beide';
+    const willMail = kanal === 'email' || kanal === 'beide';
+
+    // Echte E-Mail? Die Import-Platzhalter (…@willroider.invalid) taugen
+    // weder für Magic-Links noch für den Versand.
+    const hasRealEmail =
+      !!profile.email && !profile.email.endsWith('@willroider.invalid');
+    if (willMail && !hasRealEmail) {
+      return jsonResponse({
+        success: false,
+        error:
+          'Keine echte E-Mail-Adresse hinterlegt. Bitte zuerst im Mitarbeiter-Bearbeiten eine E-Mail eintragen.',
+      });
+    }
+
     // ─── Telefonnummer ermitteln (Override > Profil) ───────────────────
+    // Pflicht nur, wenn per SMS verschickt wird — eine reine E-Mail-
+    // Einladung braucht keine Nummer (vorher ließ sich niemand ohne
+    // Telefon einladen, auch mit hinterlegter E-Mail nicht).
     const telefonRaw = body.telefon_override ?? profile.telefon ?? '';
     const telefonE164 = normalizeAtPhone(telefonRaw);
-    if (!telefonE164) {
+    if (willSms && !telefonE164) {
       return jsonResponse({
         success: false,
         error: 'Ungültige Telefonnummer. Format z.B. 0664 1234567 oder +43 664 1234567.',
@@ -118,7 +141,7 @@ Deno.serve(async (req) => {
     }
 
     // Wenn Override angegeben oder Profil-Telefon abweicht: aktualisieren
-    if (telefonE164 !== profile.telefon) {
+    if (telefonE164 && telefonE164 !== profile.telefon) {
       const { error: updErr } = await supabase
         .from('profiles')
         .update({ telefon: telefonE164 })
@@ -142,7 +165,14 @@ Deno.serve(async (req) => {
     const { data: authUser } = await supabase.auth.admin.getUserById(profile.id);
     const nurZiffern = (s: unknown) => String(s ?? '').replace(/\D/g, '');
     const loginNrAktuell = authUser?.user?.phone ?? null;
-    const loginNrWeichtAb = nurZiffern(telefonE164) !== nurZiffern(loginNrAktuell);
+    const loginNrWeichtAb =
+      !!telefonE164 && nurZiffern(telefonE164) !== nurZiffern(loginNrAktuell);
+    // Für die E-Mail-Anmeldung muss auth.users.email zur Profil-Adresse
+    // passen — sonst funktioniert weder der Magic-Link noch E-Mail+Passwort.
+    const loginMailWeichtAb =
+      willMail &&
+      hasRealEmail &&
+      (authUser?.user?.email ?? '').toLowerCase() !== profile.email!.toLowerCase();
 
     // ─── Neues Initial-Passwort setzen ─────────────────────────────────
     const initialPassword = generateReadablePassword(10);
@@ -151,9 +181,13 @@ Deno.serve(async (req) => {
     };
     // auth.users.phone auf die SMS-Zielnummer setzen, wenn sie abweicht —
     // sonst passt das verschickte Passwort nicht zur Anmelde-Nummer.
-    if (loginNrWeichtAb) {
+    if (willSms && loginNrWeichtAb) {
       updatePayload.phone = telefonE164;
       updatePayload.phone_confirm = true;
+    }
+    if (loginMailWeichtAb) {
+      updatePayload.email = profile.email!.toLowerCase();
+      updatePayload.email_confirm = true;
     }
     const { error: pwErr } = await supabase.auth.admin.updateUserById(
       profile.id,
@@ -167,11 +201,11 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ─── Twilio-Credentials prüfen ─────────────────────────────────────
+    // ─── Twilio-Credentials prüfen (nur beim SMS-Versand nötig) ────────
     const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
     const twilioToken = Deno.env.get('TWILIO_AUTH_TOKEN');
     const twilioFrom = Deno.env.get('TWILIO_PHONE_NUMBER');
-    if (!twilioSid || !twilioToken || !twilioFrom) {
+    if (willSms && (!twilioSid || !twilioToken || !twilioFrom)) {
       return jsonResponse({
         success: false,
         error:
@@ -182,11 +216,6 @@ Deno.serve(async (req) => {
     const appUrl = Deno.env.get('APP_URL') || 'https://willroider.app';
 
     // ─── Magic-Link (nur wenn echte Email vorhanden) ───────────────────
-    // Beim Import wurden Fake-Adressen "pers-XXX@willroider.invalid" gesetzt
-    // als Platzhalter. Die sollen den MA in der SMS nicht verwirren und
-    // sollen auch nicht für Magic-Links missbraucht werden.
-    const hasRealEmail =
-      !!profile.email && !profile.email.endsWith('@willroider.invalid');
     let magicLink: string | null = null;
     if (hasRealEmail) {
       const { data: linkRes, error: linkErr } = await supabase.auth.admin.generateLink({
@@ -201,78 +230,111 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ─── SMS-Text bauen ────────────────────────────────────────────────
-    const smsText = composeInvitationSms({
-      vorname: profile.vorname || undefined,
-      telefon: telefonE164,
-      email: hasRealEmail ? profile.email : null,
-      magicLink,
-      initialPassword,
-      appUrl,
-    });
+    let smsStatus: 'sent' | 'skipped' | 'error' = 'skipped';
+    let smsError: string | null = null;
+    let twilioSidOut: string | null = null;
 
-    // Log-Version des SMS-Texts: Passwort maskieren, damit keine Klartext-
-    // Zugangsdaten dauerhaft in invitation_logs liegen.
-    const smsTextLog = smsText.replace(
-      /(Passwort[^:]*: ?)\S+/g,
-      '$1[redigiert]',
-    );
+    if (willSms) {
+      const smsText = composeInvitationSms({
+        vorname: profile.vorname || undefined,
+        telefon: telefonE164!,
+        email: hasRealEmail ? profile.email : null,
+        magicLink,
+        initialPassword,
+        appUrl,
+      });
 
-    // ─── Twilio-Aufruf ─────────────────────────────────────────────────
-    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
-    const twilioResponse = await fetch(twilioUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${btoa(`${twilioSid}:${twilioToken}`)}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        To: telefonE164,
-        From: twilioFrom,
-        Body: smsText,
-      }),
-    });
-    const twilioData = await twilioResponse.json();
+      const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
+      const twilioResponse = await fetch(twilioUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${btoa(`${twilioSid}:${twilioToken}`)}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          To: telefonE164!,
+          From: twilioFrom!,
+          Body: smsText,
+        }),
+      });
+      const twilioData = await twilioResponse.json();
 
-    if (!twilioResponse.ok) {
-      console.error('Twilio error:', twilioData);
+      if (!twilioResponse.ok) {
+        console.error('Twilio error:', twilioData);
+        smsStatus = 'error';
+        smsError = twilioData?.message ?? 'unbekannt';
+      } else {
+        smsStatus = 'sent';
+        twilioSidOut = twilioData.sid;
+      }
       await supabase.from('invitation_logs').insert({
         profile_id: profile.id,
         telefonnummer: telefonE164,
+        empfaenger: telefonE164,
+        kanal: 'sms',
         gesendet_von: user.id,
-        status: 'fehler',
-        fehler: twilioData?.message ?? JSON.stringify(twilioData).slice(0, 500),
+        status: smsStatus === 'sent' ? 'gesendet' : 'fehler',
+        twilio_sid: twilioSidOut,
+        fehler: smsError,
         sms_text: smsText,
-      });
-      return jsonResponse({
-        success: false,
-        error: `SMS-Versand fehlgeschlagen: ${twilioData?.message ?? 'unbekannt'}`,
-        initial_password: initialPassword, // Passwort wurde gesetzt — Admin kann es mündlich weitergeben
-        magic_link: magicLink,
-        sms_status: 'error',
-        sms_error: twilioData?.message ?? 'unbekannt',
       });
     }
 
-    // Erfolg loggen
-    await supabase.from('invitation_logs').insert({
-      profile_id: profile.id,
-      telefonnummer: telefonE164,
-      gesendet_von: user.id,
-      status: 'gesendet',
-      twilio_sid: twilioData.sid,
-      sms_text: smsText,
-    });
+    // ─── E-Mail-Versand ────────────────────────────────────────────────
+    let mailStatus: 'sent' | 'skipped' | 'error' = 'skipped';
+    let mailError: string | null = null;
+
+    if (willMail) {
+      const mail = composeInvitationEmail({
+        vorname: profile.vorname || undefined,
+        email: profile.email!,
+        telefon: telefonE164,
+        magicLink,
+        initialPassword,
+        appUrl,
+      });
+      const r = await sendeEinladungsMail({
+        to: profile.email!,
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html,
+      });
+      mailStatus = r.ok ? 'sent' : 'error';
+      mailError = r.error ?? null;
+      await supabase.from('invitation_logs').insert({
+        profile_id: profile.id,
+        telefonnummer: telefonE164,
+        empfaenger: profile.email,
+        kanal: 'email',
+        gesendet_von: user.id,
+        status: r.ok ? 'gesendet' : 'fehler',
+        fehler: mailError,
+        sms_text: mail.text,
+      });
+    }
+
+    const irgendwasRaus = smsStatus === 'sent' || mailStatus === 'sent';
+    const fehlerTexte = [
+      smsStatus === 'error' ? `SMS: ${smsError}` : '',
+      mailStatus === 'error' ? `E-Mail: ${mailError}` : '',
+    ].filter(Boolean);
 
     return jsonResponse({
-      success: true,
-      twilio_sid: twilioData.sid,
+      success: irgendwasRaus,
+      error: irgendwasRaus
+        ? fehlerTexte.length > 0
+          ? `Teilweise fehlgeschlagen — ${fehlerTexte.join(' · ')}`
+          : undefined
+        : `Versand fehlgeschlagen: ${fehlerTexte.join(' · ') || 'kein Kanal'}`,
+      twilio_sid: twilioSidOut,
       telefon: telefonE164,
       email: profile.email,
       initial_password: initialPassword,
       magic_link: magicLink,
-      sms_status: 'sent',
-      sms_error: null,
+      sms_status: smsStatus,
+      sms_error: smsError,
+      mail_status: mailStatus,
+      mail_error: mailError,
       vorname: profile.vorname,
       nachname: profile.nachname,
       user_id: profile.id,

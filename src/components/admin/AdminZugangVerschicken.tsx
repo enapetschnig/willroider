@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Send, Phone, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Send, Phone, Mail, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
 import { normalizeAtPhone, isValidAtPhone } from "@/lib/phone";
 import {
   CredentialsResultDialog,
@@ -24,6 +24,12 @@ type Row = {
   angelegt_manuell: boolean;
 };
 
+type Kanal = "sms" | "email" | "beide";
+
+/** Import-Platzhalter (…@willroider.invalid) sind keine echten Adressen. */
+const hatEchteMail = (email: string | null) =>
+  !!email && !email.endsWith("@willroider.invalid");
+
 export function AdminZugangVerschicken() {
   const { toast } = useToast();
   const { hasPermission } = useAuth();
@@ -34,6 +40,7 @@ export function AdminZugangVerschicken() {
   const [phoneEdits, setPhoneEdits] = useState<Record<string, string>>({});
   const [savingPhone, setSavingPhone] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null);
+  const [kanalWahl, setKanalWahl] = useState<Record<string, Kanal>>({});
   const [credentials, setCredentials] = useState<CredentialsResult | null>(null);
 
   const load = async () => {
@@ -135,24 +142,40 @@ export function AdminZugangVerschicken() {
     toast({ title: "Telefonnummer gespeichert", description: normalized });
   };
 
+  /** Welcher Kanal ist für die Zeile gewählt bzw. sinnvoll vorbelegt? */
+  const kanalFuer = (row: Row): Kanal => {
+    const gewaehlt = kanalWahl[row.id];
+    if (gewaehlt) return gewaehlt;
+    return row.telefon ? "sms" : "email";
+  };
+
   const sendZugang = async (row: Row) => {
-    if (!row.telefon) return;
+    const kanal = kanalFuer(row);
+    const perSms = kanal === "sms" || kanal === "beide";
+    const perMail = kanal === "email" || kanal === "beide";
+    if (perSms && !row.telefon) return;
+    if (perMail && !hatEchteMail(row.email)) return;
+
+    const ziel = [perSms ? `SMS an ${row.telefon}` : "", perMail ? `E-Mail an ${row.email}` : ""]
+      .filter(Boolean)
+      .join(" und ");
     // Selbst registrierte Mitarbeiter arbeiten bereits mit einem eigenen
     // Passwort — hier deutlich stärker warnen als beim Normalfall.
     const warnung = row.angelegt_manuell
-      ? `SMS an ${row.vorname} ${row.nachname} (${row.telefon}) verschicken?\n\n` +
+      ? `Zugang für ${row.vorname} ${row.nachname} verschicken (${ziel})?\n\n` +
         `Es wird ein NEUES Initial-Passwort generiert. Frühere Passwörter funktionieren danach nicht mehr.`
       : `ACHTUNG: ${row.vorname} ${row.nachname} hat sich SELBST registriert und ` +
         `arbeitet bereits mit einem eigenen Passwort.\n\n` +
         `Beim Verschicken wird dieses Passwort ZURÜCKGESETZT — die bisherige ` +
-        `Anmeldung funktioniert dann nicht mehr. Er meldet sich danach mit ` +
-        `${row.telefon} und dem neuen Passwort aus der SMS an.\n\n` +
+        `Anmeldung funktioniert dann nicht mehr. Danach gilt das neue Passwort ` +
+        `aus der Nachricht (${ziel}).\n\n` +
         `Wirklich zurücksetzen und senden?`;
     if (!window.confirm(warnung)) return;
     setSending(row.id);
     const { data, error } = await supabase.functions.invoke("send-invitation", {
       body: {
         profile_id: row.id,
+        kanal,
         // Nur nach ausdrücklicher Bestätigung — die Function blockt sonst.
         reset_bestaetigt: !row.angelegt_manuell,
       },
@@ -163,7 +186,7 @@ export function AdminZugangVerschicken() {
       const msg = data?.error ?? error?.message ?? "Unbekannter Fehler";
       toast({
         variant: "destructive",
-        title: "SMS-Versand fehlgeschlagen",
+        title: "Versand fehlgeschlagen",
         description: msg,
       });
       // Wenn das Passwort schon gesetzt wurde aber SMS scheiterte, zeigen wir
@@ -193,13 +216,20 @@ export function AdminZugangVerschicken() {
       magic_link: data.magic_link ?? null,
       sms_status: data.sms_status ?? "sent",
       sms_error: data.sms_error ?? null,
+      mail_status: data.mail_status ?? "skipped",
+      mail_error: data.mail_error ?? null,
       twilio_sid: data.twilio_sid ?? null,
       vorname: data.vorname ?? row.vorname,
       nachname: data.nachname ?? row.nachname,
     });
 
     toast({
-      title: "SMS verschickt",
+      title:
+        data.mail_status === "sent" && data.sms_status === "sent"
+          ? "SMS + E-Mail verschickt"
+          : data.mail_status === "sent"
+            ? "E-Mail verschickt"
+            : "SMS verschickt",
       description: `Zugang an ${row.vorname} ${row.nachname} gesendet.`,
     });
     void load();
@@ -221,11 +251,11 @@ export function AdminZugangVerschicken() {
         <CardContent className="p-3 flex items-start gap-3">
           <Send className="h-5 w-5 text-primary shrink-0 mt-0.5" />
           <div className="text-sm">
-            <div className="font-semibold">Zugang per SMS verschicken</div>
+            <div className="font-semibold">Zugang verschicken</div>
             <div className="text-muted-foreground">
-              Nur manuell angelegte Mitarbeiter. Pro Klick wird ein neues Initial-Passwort
-              gesetzt und per SMS verschickt. Bestehende Logins funktionieren danach nicht
-              mehr — selbst-registrierte Mitarbeiter werden absichtlich nicht angezeigt.
+              Per SMS, E-Mail oder beidem. Pro Klick wird ein neues Initial-Passwort
+              gesetzt und verschickt — frühere Passwörter funktionieren danach nicht mehr.
+              E-Mail geht nur, wenn beim Mitarbeiter eine echte Adresse hinterlegt ist.
             </div>
           </div>
         </CardContent>
@@ -250,6 +280,12 @@ export function AdminZugangVerschicken() {
 
       {sorted.map((row) => {
         const hasPhone = !!row.telefon;
+        const hasMail = hatEchteMail(row.email);
+        const kanal = kanalFuer(row);
+        const kanalMoeglich =
+          (kanal === "sms" && hasPhone) ||
+          (kanal === "email" && hasMail) ||
+          (kanal === "beide" && hasPhone && hasMail);
         const edit = phoneEdits[row.id];
         const editIsValid = edit ? isValidAtPhone(edit) : false;
         const sentBefore = !!row.letzte_einladung;
@@ -332,14 +368,52 @@ export function AdminZugangVerschicken() {
                 </div>
               )}
 
-              <div className="flex justify-end pt-1">
+              <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
+                {/* Versandweg — nur anbieten, was die Kontaktdaten hergeben. */}
+                <div className="flex rounded-md border overflow-hidden">
+                  {(
+                    [
+                      { wert: "sms" as Kanal, label: "SMS", moeglich: hasPhone },
+                      { wert: "email" as Kanal, label: "E-Mail", moeglich: hasMail },
+                      { wert: "beide" as Kanal, label: "Beide", moeglich: hasPhone && hasMail },
+                    ]
+                  ).map((k) => (
+                    <button
+                      key={k.wert}
+                      type="button"
+                      disabled={!k.moeglich}
+                      onClick={() =>
+                        setKanalWahl((prev) => ({ ...prev, [row.id]: k.wert }))
+                      }
+                      className={
+                        "px-3 h-9 text-xs font-medium transition-colors " +
+                        (kanal === k.wert
+                          ? "bg-primary text-primary-foreground"
+                          : k.moeglich
+                            ? "bg-background hover:bg-muted"
+                            : "bg-muted text-muted-foreground/40 cursor-not-allowed")
+                      }
+                      title={
+                        k.moeglich
+                          ? undefined
+                          : k.wert === "email"
+                            ? "Keine echte E-Mail-Adresse hinterlegt"
+                            : "Telefonnummer fehlt"
+                      }
+                    >
+                      {k.label}
+                    </button>
+                  ))}
+                </div>
                 <Button
                   onClick={() => sendZugang(row)}
-                  disabled={!hasPhone || sending === row.id}
+                  disabled={!kanalMoeglich || sending === row.id}
                   className="h-10"
                 >
                   {sending === row.id ? (
                     <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                  ) : kanal === "email" ? (
+                    <Mail className="h-4 w-4 mr-1.5" />
                   ) : (
                     <Send className="h-4 w-4 mr-1.5" />
                   )}

@@ -5,8 +5,9 @@
 // 4. profile_konten_settings
 // 5. optional initial urlaubs_buchungen / za_buchungen (Saldo zum Eintritt)
 // 6. Magic Link via supabase.auth.admin.generateLink() — nur wenn Email vorhanden
-// 7. SMS-Einladung via Twilio (inline): bei Email → Magic Link, sonst Telefon-OTP-
-//    Anleitung. Initial-Passwort als Backup immer mit drin.
+// 7. Einladung per SMS (Twilio) und/oder E-Mail (Resend) — invite_kanal.
+//    Initial-Passwort als Backup immer mit drin. Telefon ist nur noch Pflicht,
+//    wenn per SMS eingeladen wird; sonst reicht eine echte E-Mail-Adresse.
 //
 // Sicherheits-Gates: nur is_admin_role darf aufrufen. Bei jedem Fehler nach
 // createUser wird der angelegte User wieder gelöscht (Rollback).
@@ -20,6 +21,7 @@ import {
   generateReadablePassword as sharedGenerateReadablePassword,
   composeInvitationSms,
 } from '../_shared/sms.ts';
+import { composeInvitationEmail, sendeEinladungsMail } from '../_shared/mail.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -33,8 +35,8 @@ interface CreateEmployeeRequest {
   // Stammdaten
   vorname: string;
   nachname: string;
-  telefon: string;          // PFLICHT — wird normalisiert auf E.164
-  email?: string;           // optional, echte Mail
+  telefon?: string;         // Pflicht nur bei SMS-Einladung — normalisiert auf E.164
+  email?: string;           // optional, echte Mail (Pflicht bei E-Mail-Einladung)
   geburtsdatum?: string;
   // Rolle + Partie
   rolle: AppRole;
@@ -50,7 +52,8 @@ interface CreateEmployeeRequest {
   initial_urlaub_tage?: number;
   initial_za_stunden?: number;
   // Einladung
-  send_sms_invite?: boolean;
+  send_sms_invite?: boolean;                          // alt — entspricht invite_kanal 'sms'
+  invite_kanal?: 'sms' | 'email' | 'beide' | 'keine'; // hat Vorrang vor send_sms_invite
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -114,10 +117,37 @@ Deno.serve(async (req) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(eintrittsdatum)) return jsonResponse({ error: 'Eintrittsdatum ungültig (YYYY-MM-DD)' }, 400);
   if (!ALLOWED_ROLES.includes(rolle)) return jsonResponse({ error: 'Ungültige Rolle' }, 400);
 
-  const telefonE164 = normalizeAtPhone(body.telefon);
-  if (!telefonE164) {
+  const kanal: 'sms' | 'email' | 'beide' | 'keine' =
+    body.invite_kanal === 'sms' ||
+    body.invite_kanal === 'email' ||
+    body.invite_kanal === 'beide' ||
+    body.invite_kanal === 'keine'
+      ? body.invite_kanal
+      : body.send_sms_invite
+        ? 'sms'
+        : 'keine';
+  const willSms = kanal === 'sms' || kanal === 'beide';
+  const willMail = kanal === 'email' || kanal === 'beide';
+
+  const telefonInput = (body.telefon ?? '').trim();
+  const telefonE164 = telefonInput ? normalizeAtPhone(telefonInput) : null;
+  if (telefonInput && !telefonE164) {
     return jsonResponse({
-      error: 'Telefonnummer ist Pflicht und muss als 0664… oder +43… eingegeben sein.',
+      error: 'Ungültige Telefonnummer. Format z.B. 0664 1234567 oder +43 664 1234567.',
+    }, 400);
+  }
+  if (willSms && !telefonE164) {
+    return jsonResponse({
+      error: 'Für die SMS-Einladung ist eine Telefonnummer Pflicht (0664… oder +43…).',
+    }, 400);
+  }
+  if (willMail && !emailInput) {
+    return jsonResponse({ error: 'Für die E-Mail-Einladung ist eine E-Mail-Adresse Pflicht.' }, 400);
+  }
+  // Ohne beides gäbe es kein Konto, mit dem man sich anmelden kann.
+  if (!telefonE164 && !emailInput) {
+    return jsonResponse({
+      error: 'Mindestens Telefonnummer oder E-Mail-Adresse angeben — sonst gibt es keinen Anmeldeweg.',
     }, 400);
   }
 
@@ -130,11 +160,13 @@ Deno.serve(async (req) => {
   const initialPassword = generateReadablePassword(10);
 
   const createParams: any = {
-    phone: telefonE164,
-    phone_confirm: true,
     password: initialPassword,
     user_metadata: { vorname, nachname, admin_created: true },
   };
+  if (telefonE164) {
+    createParams.phone = telefonE164;
+    createParams.phone_confirm = true;
+  }
   if (emailInput) {
     createParams.email = emailInput;
     createParams.email_confirm = true;
@@ -166,7 +198,7 @@ Deno.serve(async (req) => {
 
   // ─── Profile-Felder ergänzen ────────────────────────────────────────────
   const profileUpdate: Record<string, unknown> = {
-    telefon: telefonE164,
+    telefon: telefonE164 ?? null,
     geburtsdatum: body.geburtsdatum || null,
     is_partieleiter: body.is_partieleiter ?? false,
     is_active: true,
@@ -256,7 +288,7 @@ Deno.serve(async (req) => {
   let smsError: string | null = null;
   let twilioSid: string | null = null;
 
-  if (body.send_sms_invite) {
+  if (willSms) {
     const twilioSid_env = Deno.env.get('TWILIO_ACCOUNT_SID');
     const twilioToken = Deno.env.get('TWILIO_AUTH_TOKEN');
     const twilioFrom = Deno.env.get('TWILIO_PHONE_NUMBER');
@@ -267,7 +299,7 @@ Deno.serve(async (req) => {
     } else {
       const smsText = composeInvitationSms({
         vorname,
-        telefon: telefonE164,
+        telefon: telefonE164!,
         email: emailInput || null,
         magicLink,
         initialPassword,
@@ -283,38 +315,66 @@ Deno.serve(async (req) => {
               Authorization: `Basic ${btoa(`${twilioSid_env}:${twilioToken}`)}`,
               'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: new URLSearchParams({ To: telefonE164, From: twilioFrom, Body: smsText }),
+            body: new URLSearchParams({ To: telefonE164!, From: twilioFrom, Body: smsText }),
           },
         );
         const twilioData = await twilioRes.json();
         if (twilioRes.ok) {
           smsStatus = 'sent';
           twilioSid = twilioData.sid ?? null;
-          await supabase.from('invitation_logs').insert({
-            profile_id: newUserId,
-            telefonnummer: telefonE164,
-            gesendet_von: user.id,
-            status: 'gesendet',
-            twilio_sid: twilioSid,
-            sms_text: smsText,
-          });
         } else {
           smsStatus = 'error';
-          smsError = twilioData?.message ?? JSON.stringify(twilioData);
-          await supabase.from('invitation_logs').insert({
-            profile_id: newUserId,
-            telefonnummer: telefonE164,
-            gesendet_von: user.id,
-            status: 'fehler',
-            fehler: smsError?.slice(0, 500),
-            sms_text: smsText,
-          });
+          smsError = (twilioData?.message ?? JSON.stringify(twilioData))?.slice(0, 500);
         }
+        await supabase.from('invitation_logs').insert({
+          profile_id: newUserId,
+          telefonnummer: telefonE164,
+          empfaenger: telefonE164,
+          kanal: 'sms',
+          gesendet_von: user.id,
+          status: smsStatus === 'sent' ? 'gesendet' : 'fehler',
+          twilio_sid: twilioSid,
+          fehler: smsError,
+          sms_text: smsText,
+        });
       } catch (e) {
         smsStatus = 'error';
         smsError = e instanceof Error ? e.message : 'Unbekannter Fehler';
       }
     }
+  }
+
+  // ─── E-Mail-Einladung senden ───────────────────────────────────────────
+  let mailStatus: 'sent' | 'skipped' | 'error' = 'skipped';
+  let mailError: string | null = null;
+
+  if (willMail) {
+    const mail = composeInvitationEmail({
+      vorname,
+      email: emailInput,
+      telefon: telefonE164,
+      magicLink,
+      initialPassword,
+      appUrl,
+    });
+    const r = await sendeEinladungsMail({
+      to: emailInput,
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html,
+    });
+    mailStatus = r.ok ? 'sent' : 'error';
+    mailError = r.error ?? null;
+    await supabase.from('invitation_logs').insert({
+      profile_id: newUserId,
+      telefonnummer: telefonE164,
+      empfaenger: emailInput,
+      kanal: 'email',
+      gesendet_von: user.id,
+      status: r.ok ? 'gesendet' : 'fehler',
+      fehler: mailError,
+      sms_text: mail.text,
+    });
   }
 
   return jsonResponse({
@@ -326,6 +386,8 @@ Deno.serve(async (req) => {
     magic_link: magicLink,
     sms_status: smsStatus,
     sms_error: smsError,
+    mail_status: mailStatus,
+    mail_error: mailError,
     twilio_sid: twilioSid,
   });
 });

@@ -47,16 +47,20 @@ const todayIso = () => {
 
 export interface CredentialsResult {
   user_id: string;
-  telefon: string;
+  telefon: string | null;
   email: string | null;
   initial_password: string;
   magic_link: string | null;
   sms_status: "sent" | "skipped" | "error";
   sms_error: string | null;
+  mail_status?: "sent" | "skipped" | "error";
+  mail_error?: string | null;
   twilio_sid: string | null;
   vorname: string;
   nachname: string;
 }
+
+export type InviteKanal = "sms" | "email" | "beide" | "keine";
 
 export function NewMitarbeiterDialog({
   open,
@@ -96,7 +100,7 @@ export function NewMitarbeiterDialog({
   const [initialZa, setInitialZa] = useState<number>(0);
 
   // Einladung
-  const [sendSms, setSendSms] = useState<boolean>(true);
+  const [inviteKanal, setInviteKanal] = useState<InviteKanal>("sms");
 
   const reset = () => {
     setVorname("");
@@ -114,7 +118,7 @@ export function NewMitarbeiterDialog({
     setUrlaubJahresanspruch(25);
     setInitialUrlaub(0);
     setInitialZa(0);
-    setSendSms(true);
+    setInviteKanal("sms");
   };
 
   useEffect(() => {
@@ -122,32 +126,32 @@ export function NewMitarbeiterDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  const willSms = inviteKanal === "sms" || inviteKanal === "beide";
+  const willMail = inviteKanal === "email" || inviteKanal === "beide";
+
   const telefonNorm = telefon.trim() ? normalizeAtPhone(telefon) : null;
-  const telefonValid = telefonNorm !== null;
+  // Pflicht nur für die SMS-Einladung; sonst reicht eine E-Mail als Anmeldeweg.
+  const telefonValid = telefon.trim() ? telefonNorm !== null : !willSms;
 
   const emailValid =
     !email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const emailOk = willMail ? !!email.trim() && emailValid : emailValid;
+
+  // Ohne Telefon UND ohne E-Mail gäbe es kein Konto zum Anmelden.
+  const hatAnmeldeweg = !!telefonNorm || !!email.trim();
 
   const canSubmit =
     !!vorname.trim() &&
     !!nachname.trim() &&
-    emailValid &&
+    emailOk &&
     !!eintrittsdatum &&
     telefonValid &&
+    hatAnmeldeweg &&
     !loading;
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
-
-    if (sendSms && !telefonNorm) {
-      toast({
-        variant: "destructive",
-        title: "Telefonnummer fehlt",
-        description: "Für die SMS-Einladung wird eine gültige Telefonnummer benötigt.",
-      });
-      return;
-    }
 
     setLoading(true);
     const { data, error } = await supabase.functions.invoke("admin-create-employee", {
@@ -167,7 +171,7 @@ export function NewMitarbeiterDialog({
         urlaub_jahresanspruch_tage: urlaubJahresanspruch,
         initial_urlaub_tage: initialUrlaub,
         initial_za_stunden: initialZa,
-        send_sms_invite: sendSms,
+        invite_kanal: inviteKanal,
       },
     });
     setLoading(false);
@@ -193,25 +197,34 @@ export function NewMitarbeiterDialog({
 
     const result: CredentialsResult = {
       user_id: data.user_id,
-      telefon: data.telefon ?? telefonNorm!,
+      telefon: data.telefon ?? telefonNorm,
       email: data.email ?? null,
       initial_password: data.initial_password,
       magic_link: data.magic_link ?? null,
       sms_status: data.sms_status ?? "skipped",
       sms_error: data.sms_error ?? null,
+      mail_status: data.mail_status ?? "skipped",
+      mail_error: data.mail_error ?? null,
       twilio_sid: data.twilio_sid ?? null,
       vorname: vorname.trim(),
       nachname: nachname.trim(),
     };
 
+    const versandTeile = [
+      result.sms_status === "sent"
+        ? "SMS-Einladung gesendet."
+        : result.sms_status === "error"
+          ? `SMS-Fehler: ${result.sms_error}`
+          : "",
+      result.mail_status === "sent"
+        ? "E-Mail-Einladung gesendet."
+        : result.mail_status === "error"
+          ? `E-Mail-Fehler: ${result.mail_error}`
+          : "",
+    ].filter(Boolean);
     toast({
       title: `${vorname} ${nachname} angelegt`,
-      description:
-        result.sms_status === "sent"
-          ? "SMS-Einladung gesendet."
-          : result.sms_status === "error"
-          ? `SMS-Fehler: ${result.sms_error}`
-          : "Keine SMS gesendet.",
+      description: versandTeile.join(" ") || "Keine Einladung verschickt.",
     });
 
     onCreated(result);
@@ -227,8 +240,8 @@ export function NewMitarbeiterDialog({
             Neuer Mitarbeiter
           </DialogTitle>
           <DialogDescription>
-            Legt ein Konto an + verschickt optional sofort eine SMS-Einladung mit
-            Login-Link + Initial-Passwort.
+            Legt ein Konto an + verschickt optional sofort eine Einladung (SMS
+            und/oder E-Mail) mit Login-Link + Initial-Passwort.
           </DialogDescription>
         </DialogHeader>
 
@@ -260,13 +273,13 @@ export function NewMitarbeiterDialog({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="nm-tel">Telefon *</Label>
+                <Label htmlFor="nm-tel">{willSms ? "Telefon *" : "Telefon (optional)"}</Label>
                 <Input
                   id="nm-tel"
                   type="tel"
                   value={telefon}
                   onChange={(e) => setTelefon(e.target.value)}
-                  required
+                  required={willSms}
                   placeholder="z.B. 0664 1234567"
                   autoComplete="tel"
                 />
@@ -282,23 +295,29 @@ export function NewMitarbeiterDialog({
                   </div>
                 ) : (
                   <div className="text-[11px] text-muted-foreground">
-                    Wird zum Anmelden verwendet — Mitarbeiter erhält 6-stelligen
-                    SMS-Code, kein E-Mail-Konto nötig.
+                    Anmeldung per 6-stelligem SMS-Code — Pflicht bei der
+                    SMS-Einladung.
                   </div>
                 )}
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="nm-email">E-Mail (optional)</Label>
+                <Label htmlFor="nm-email">{willMail ? "E-Mail *" : "E-Mail (optional)"}</Label>
                 <Input
                   id="nm-email"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  required={willMail}
                   autoComplete="email"
                   placeholder="Nur eingeben, falls echte E-Mail vorhanden"
                 />
                 {email.trim() && !emailValid && (
                   <div className="text-[11px] text-destructive">Ungültiges E-Mail-Format</div>
+                )}
+                {willMail && !email.trim() && (
+                  <div className="text-[11px] text-muted-foreground">
+                    Pflicht bei der E-Mail-Einladung.
+                  </div>
                 )}
               </div>
               <div className="space-y-1.5 sm:col-span-2">
@@ -472,19 +491,35 @@ export function NewMitarbeiterDialog({
             <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground border-b pb-1">
               Einladung
             </h3>
-            <div className="flex items-start gap-2">
-              <Switch
-                id="nm-sms"
-                checked={sendSms}
-                onCheckedChange={setSendSms}
-              />
-              <div className="flex-1">
-                <Label htmlFor="nm-sms" className="text-sm cursor-pointer">
-                  SMS-Einladung sofort senden
-                </Label>
-                <div className="text-[11px] text-muted-foreground">
-                  Enthält Login-Anleitung + Backup-Passwort + Install-Hinweis.
-                </div>
+            <div className="space-y-1.5">
+              <div className="flex rounded-md border overflow-hidden w-fit">
+                {(
+                  [
+                    { wert: "sms" as InviteKanal, label: "SMS" },
+                    { wert: "email" as InviteKanal, label: "E-Mail" },
+                    { wert: "beide" as InviteKanal, label: "Beide" },
+                    { wert: "keine" as InviteKanal, label: "Keine" },
+                  ]
+                ).map((k) => (
+                  <button
+                    key={k.wert}
+                    type="button"
+                    onClick={() => setInviteKanal(k.wert)}
+                    className={
+                      "px-3 h-9 text-xs font-medium transition-colors " +
+                      (inviteKanal === k.wert
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-background hover:bg-muted")
+                    }
+                  >
+                    {k.label}
+                  </button>
+                ))}
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                {inviteKanal === "keine"
+                  ? "Kein Versand — die Anmeldedaten werden nach dem Anlegen einmalig angezeigt."
+                  : "Enthält Login-Anleitung + Backup-Passwort + Install-Hinweis."}
               </div>
             </div>
           </section>

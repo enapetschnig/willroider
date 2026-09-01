@@ -56,13 +56,14 @@ export function CredentialsResultDialog({
           </DialogTitle>
           <DialogDescription>
             {result &&
-              `${result.vorname} ${result.nachname} wurde angelegt. Diese Daten werden nur jetzt einmalig angezeigt — sie sollten auch in der SMS angekommen sein.`}
+              `${result.vorname} ${result.nachname} wurde angelegt. Diese Daten werden nur jetzt einmalig angezeigt.`}
           </DialogDescription>
         </DialogHeader>
 
         {result && (
           <div className="space-y-3">
-            {/* SMS-Status */}
+            {/* SMS-Status — ausblenden, wenn stattdessen die E-Mail raus ist */}
+            {!(result.sms_status === "skipped" && result.mail_status === "sent") && (
             <div
               className={`rounded-md border p-2.5 text-xs flex items-start gap-2 ${
                 result.sms_status === "sent"
@@ -105,31 +106,80 @@ export function CredentialsResultDialog({
                 )}
               </div>
             </div>
+            )}
+
+            {/* E-Mail-Status (nur wenn eine Mail versucht wurde) */}
+            {result.mail_status && result.mail_status !== "skipped" && (
+              <div
+                className={`rounded-md border p-2.5 text-xs flex items-start gap-2 ${
+                  result.mail_status === "sent"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                    : "border-amber-300 bg-amber-50 text-amber-900"
+                }`}
+              >
+                {result.mail_status === "sent" ? (
+                  <Mail className="h-4 w-4 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                )}
+                <div className="flex-1">
+                  {result.mail_status === "sent" ? (
+                    <>
+                      <strong>E-Mail gesendet</strong>
+                      <div className="mt-0.5">
+                        Einladung mit Login-Link an {result.email} verschickt.
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <strong>E-Mail-Versand fehlgeschlagen</strong>
+                      <div className="mt-0.5">
+                        {result.mail_error ?? "Unbekannter Fehler"} — bitte die Daten
+                        unten manuell weitergeben.
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Login-Anleitung */}
             <div className="rounded-md border bg-muted/40 p-3 space-y-1.5 text-xs">
               <div className="font-semibold text-foreground">
                 So loggt sich der Mitarbeiter ein:
               </div>
-              <ol className="space-y-0.5 list-decimal list-inside text-muted-foreground">
-                <li>
-                  App öffnen → Tab <strong className="text-foreground">„Telefon"</strong>
-                </li>
-                <li>
-                  Nummer{" "}
-                  <strong className="text-foreground tabular-nums">{result.telefon}</strong>{" "}
-                  eingeben
-                </li>
-                <li>„Code per SMS anfordern"</li>
-                <li>6-stelligen Code aus zweiter SMS eingeben → eingeloggt</li>
-              </ol>
+              {result.telefon ? (
+                <ol className="space-y-0.5 list-decimal list-inside text-muted-foreground">
+                  <li>
+                    App öffnen → Tab <strong className="text-foreground">„Telefon"</strong>
+                  </li>
+                  <li>
+                    Nummer{" "}
+                    <strong className="text-foreground tabular-nums">{result.telefon}</strong>{" "}
+                    eingeben
+                  </li>
+                  <li>„Code per SMS anfordern"</li>
+                  <li>6-stelligen Code aus zweiter SMS eingeben → eingeloggt</li>
+                </ol>
+              ) : (
+                <ol className="space-y-0.5 list-decimal list-inside text-muted-foreground">
+                  <li>App öffnen</li>
+                  <li>
+                    E-Mail <strong className="text-foreground">{result.email}</strong>{" "}
+                    eingeben
+                  </li>
+                  <li>Initial-Passwort unten eingeben → eingeloggt</li>
+                </ol>
+              )}
               <div className="text-[11px] text-muted-foreground pt-1">
-                Falls SMS-Code nicht ankommt: „Mit Passwort anmelden" + Initial-Passwort
-                unten.
+                {result.telefon
+                  ? "Falls SMS-Code nicht ankommt: „Mit Passwort anmelden“ + Initial-Passwort unten."
+                  : "Am schnellsten geht der Sofort-Login-Link aus der E-Mail."}
               </div>
             </div>
 
             {/* Telefon */}
+            {result.telefon && (
             <div className="space-y-1">
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
                 <Phone className="h-3 w-3" />
@@ -143,7 +193,7 @@ export function CredentialsResultDialog({
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => copy("telefon", result.telefon)}
+                  onClick={() => copy("telefon", result.telefon!)}
                   className="h-9 w-9 p-0 shrink-0"
                   aria-label="Telefon kopieren"
                 >
@@ -155,6 +205,7 @@ export function CredentialsResultDialog({
                 </Button>
               </div>
             </div>
+            )}
 
             {/* Initial-Passwort */}
             <div className="space-y-1">
