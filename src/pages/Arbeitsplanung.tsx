@@ -1388,28 +1388,84 @@ export default function Arbeitsplanung() {
       toast({ variant: "destructive", title: "Fehler beim Entfernen", description: ftSelErr.message });
       return false;
     }
-    // Genehmigte Urlaubsanträge sind tabu: an ihnen hängt die Konto-Buchung.
-    // Würde der Tag hier gelöscht, bliebe die Abbuchung stehen und der
-    // Stundenbericht zeigte „Kein Eintrag" statt U. Die Tagesplanung hält
-    // sich an dieselbe Regel (hebeAbwesenheitAuf).
+    // Tage aus GENEHMIGTEN Urlaubsanträgen: an ihnen hängt die pauschale
+    // Konto-Abbuchung. Früher waren sie hier tabu — dadurch ließ sich ein
+    // genehmigter Urlaub gar nicht mehr löschen („auch nicht von mir").
+    // Jetzt wird das Konto beim Löschen je Werktag gutgeschrieben und der
+    // Antrag nachgeführt: bleiben keine Urlaubstage übrig → storniert,
+    // sonst von/bis auf die verbleibenden Tage gezogen.
     const { data: genehmigt } = await supabase
       .from("urlaubsantraege")
-      .select("mitarbeiter_id, von, bis")
+      .select("id, mitarbeiter_id, von, bis, arbeitstage, stunden")
       .in("mitarbeiter_id", workerIds)
       .eq("status", "genehmigt")
       .lte("von", dates[dates.length - 1])
       .gte("bis", dates[0]);
-    const ausAntrag = (r: { mitarbeiter_id: string; datum: string }) =>
-      (genehmigt ?? []).some(
-        (a: any) =>
-          a.mitarbeiter_id === r.mitarbeiter_id && a.von <= r.datum && a.bis >= r.datum,
-      );
-
     const passend = (ftRows ?? []).filter((r: any) =>
       cells.some((c) => c.workerId === r.mitarbeiter_id && c.iso === r.datum),
     );
-    const antragsTage = passend.filter(ausAntrag);
-    let ftIds = passend.filter((r: any) => !ausAntrag(r)).map((r: any) => r.id as string);
+    let antragsGutschrift = 0;
+    for (const a of (genehmigt ?? []) as any[]) {
+      // Stunden-Anträge buchen ihr Konto über die Stundenzeile — der
+      // Tag-Löscher unten nimmt die Zeile mit, der Trigger storniert die
+      // anteilige Buchung von selbst. Nur der Antrag wird nachgeführt.
+      const istStundenAntrag = Number(a.stunden ?? 0) > 0;
+      const geloescht = passend
+        .filter(
+          (r: any) =>
+            r.mitarbeiter_id === a.mitarbeiter_id && r.datum >= a.von && r.datum <= a.bis,
+        )
+        .map((r: any) => r.datum as string)
+        .sort();
+      if (geloescht.length === 0) continue;
+      const werktageWeg = istStundenAntrag
+        ? 0
+        : geloescht.filter((d) => isWerktag(d)).length;
+      // Verbleibende Urlaubs-Tage des Antragsbereichs (aus den geladenen
+      // Fehlzeit-Zeilen) — bestimmen, ob der Antrag schrumpft oder fällt.
+      const geloeschtSet = new Set(geloescht);
+      const uebrig = (ftRows ?? [])
+        .filter(
+          (r: any) =>
+            r.mitarbeiter_id === a.mitarbeiter_id &&
+            r.datum >= a.von &&
+            r.datum <= a.bis &&
+            !geloeschtSet.has(r.datum),
+        )
+        .map((r: any) => r.datum as string)
+        .sort();
+      if (uebrig.length === 0) {
+        await supabase
+          .from("urlaubsantraege")
+          .update({ status: "storniert" })
+          .eq("id", a.id);
+      } else {
+        await supabase
+          .from("urlaubsantraege")
+          .update({ von: uebrig[0], bis: uebrig[uebrig.length - 1] })
+          .eq("id", a.id);
+      }
+      if (werktageWeg > 0) {
+        const fmt = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString("de-AT");
+        const { error: bErr } = await supabase.from("urlaubs_buchungen").insert({
+          mitarbeiter_id: a.mitarbeiter_id,
+          art: "korrektur",
+          tage: werktageWeg,
+          wirksam_am: geloescht[0],
+          notiz: `Urlaub gelöscht (${geloescht.length === 1 ? fmt(geloescht[0]) : `${fmt(geloescht[0])}–${fmt(geloescht[geloescht.length - 1])}`}) — Antrag ${uebrig.length === 0 ? "storniert" : "angepasst"}`,
+        } as any);
+        if (bErr) {
+          toast({
+            variant: "destructive",
+            title: "Urlaubskonto bitte prüfen",
+            description: `Gutschrift von +${werktageWeg} Tag${werktageWeg === 1 ? "" : "en"} konnte nicht gebucht werden: ${bErr.message}`,
+          });
+        } else {
+          antragsGutschrift += werktageWeg;
+        }
+      }
+    }
+    let ftIds = passend.map((r: any) => r.id as string);
     const gesperrt: string[] = [];
     if (ftIds.length > 0) {
       // Tage mit ECHTEN Arbeitsstunden nicht löschen. Entscheidend ist die
@@ -1448,11 +1504,10 @@ export default function Arbeitsplanung() {
           "Dort sind bereits Arbeitsstunden erfasst. Diese Tage bitte in der Zeiterfassung korrigieren.",
       });
     }
-    if (antragsTage.length > 0) {
+    if (antragsGutschrift > 0) {
       toast({
-        variant: "destructive",
-        title: `${antragsTage.length} ${antragsTage.length === 1 ? "Tag" : "Tage"} aus genehmigtem Urlaub`,
-        description: `Diese Tage gehören zu einem genehmigten Urlaubsantrag — der Urlaub ist bereits vom Konto abgebucht. Bitte den Antrag in der Verwaltung unter „Urlaubs-Konten" anpassen.`,
+        title: `Urlaubskonto: +${antragsGutschrift} Tag${antragsGutschrift === 1 ? "" : "e"} gutgeschrieben`,
+        description: "Die gelöschten Tage stammten aus einem genehmigten Antrag — er wurde entsprechend angepasst.",
       });
     }
     return true;
@@ -2727,8 +2782,11 @@ export default function Arbeitsplanung() {
           <>
             <div className="fixed inset-0 z-40" onPointerDown={() => setBarInfo(null)} />
             <div
-              className="fixed z-50 bg-card border rounded-lg shadow-xl p-3"
-              style={{ left: px, top: py, width: w }}
+              className="fixed z-50 bg-card border rounded-lg shadow-xl p-3 overflow-y-auto"
+              // Höhe deckeln: mit „Wieder da ab" + Zeitraum-Editor wurde das
+              // Fenster höher als die Positions-Reserve — bei Balken weit
+              // rechts/unten lagen die Knöpfe sonst außerhalb des Bildschirms.
+              style={{ left: px, top: py, width: w, maxHeight: `calc(100vh - ${py}px - 10px)` }}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-start gap-2">
