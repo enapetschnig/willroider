@@ -25,6 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
+import { normalizeAtPhone } from "@/lib/phone";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { CheckCircle2, XCircle, Plus, Edit, Trash2, AlertTriangle, UserPlus, CalendarDays } from "lucide-react";
@@ -421,6 +422,25 @@ export default function Mitarbeiter() {
     const mailAuchLogin = fd.get("email_auch_login") === "on";
     if (neueMail && !mailAuchLogin) profilePayload.email = neueMail;
 
+    // Telefon: als Anmeldenummer nur über die Edge-Function (auth.users +
+    // profiles gemeinsam). Nur das Profil zu ändern ließ am 04.09. Leute
+    // mit einer Nummer stehen, die das Login-Konto nicht kannte.
+    const neuesTelefon = str("telefon");
+    const telefonAuchLogin = fd.get("telefon_auch_login") === "on";
+    if (telefonAuchLogin) {
+      if (!neuesTelefon || !normalizeAtPhone(neuesTelefon)) {
+        toast({
+          variant: "destructive",
+          title: "Telefonnummer ungültig",
+          description: "Für die Anmeldenummer bitte als 0664… oder +43… eingeben.",
+        });
+        return;
+      }
+      delete profilePayload.telefon;
+    } else if (neuesTelefon && normalizeAtPhone(neuesTelefon)) {
+      profilePayload.telefon = normalizeAtPhone(neuesTelefon);
+    }
+
     const { error: pErr } = await supabase
       .from("profiles")
       .update(profilePayload)
@@ -450,6 +470,27 @@ export default function Mitarbeiter() {
         toast({
           title: "Anmelde-Adresse geändert",
           description: `${editing.vorname} ${editing.nachname} meldet sich ab jetzt mit ${neueMail} an.`,
+        });
+      }
+    }
+
+    if (neuesTelefon && telefonAuchLogin) {
+      const { data: fnData, error: fnErr } = await supabase.functions.invoke(
+        "admin-update-email",
+        { body: { profile_id: editing.id, telefon: neuesTelefon, telefon_auch_login: true } },
+      );
+      const fnFehler =
+        fnErr?.message ?? (fnData && (fnData as any).error ? (fnData as any).error : null);
+      if (fnFehler) {
+        toast({
+          variant: "destructive",
+          title: "Anmeldenummer nicht geändert",
+          description: `${fnFehler} — die Telefonnummer wurde deshalb nicht übernommen.`,
+        });
+      } else {
+        toast({
+          title: "Anmeldenummer geändert",
+          description: `${editing.vorname} ${editing.nachname} kann sich ab jetzt mit ${(fnData as any)?.telefon ?? neuesTelefon} per SMS-Code anmelden.`,
         });
       }
     }
@@ -1162,7 +1203,13 @@ export default function Mitarbeiter() {
                       name="telefon"
                       type="tel"
                       defaultValue={editing.telefon ?? ""}
+                      placeholder="0664 1234567"
                     />
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                      <input type="checkbox" name="telefon_auch_login" className="h-3.5 w-3.5" />
+                      Auch als Anmeldenummer übernehmen — der Mitarbeiter kann sich
+                      künftig mit dieser Nummer per SMS-Code anmelden
+                    </label>
                   </div>
                 </div>
               </section>

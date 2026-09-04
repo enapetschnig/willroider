@@ -1,12 +1,15 @@
-// Ändert die E-Mail-Adresse eines Mitarbeiters — auf Wunsch AUCH als
-// Anmelde-Adresse. Die Adresse lebt an zwei Orten: profiles.email (Anzeige)
-// und auth.users.email (Login). Nur profiles zu ändern hieße, dass sich der
-// Mitarbeiter mit der neuen Adresse nicht anmelden kann — deshalb läuft
-// beides hier über die Service-Role, wie beim Anlegen (admin-create-employee).
+// Ändert E-Mail-Adresse und/oder Telefonnummer eines Mitarbeiters — auf
+// Wunsch AUCH als Anmeldedaten. Beides lebt an zwei Orten: profiles
+// (Anzeige) und auth.users (Login). Nur profiles zu ändern hieße, dass sich
+// der Mitarbeiter mit der neuen Adresse/Nummer nicht anmelden kann — genau
+// das war am 04.09. der Fall (Handynummer im Profil, Login-Konto kannte sie
+// nicht). Deshalb läuft beides hier über die Service-Role, wie beim Anlegen.
 //
+// Body: { profile_id, email?, auch_login?, telefon?, telefon_auch_login? }
 // Sicherheits-Gate: nur is_admin_role darf aufrufen.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { normalizeAtPhone } from '../_shared/sms.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -41,7 +44,13 @@ Deno.serve(async (req) => {
   });
   if (roleError || !isAdmin) return jsonResponse({ error: 'Forbidden: Admin only' }, 403);
 
-  let body: { profile_id?: string; email?: string; auch_login?: boolean };
+  let body: {
+    profile_id?: string;
+    email?: string;
+    auch_login?: boolean;
+    telefon?: string;
+    telefon_auch_login?: boolean;
+  };
   try {
     body = await req.json();
   } catch {
@@ -49,8 +58,51 @@ Deno.serve(async (req) => {
   }
   const profileId = (body.profile_id ?? '').trim();
   const email = (body.email ?? '').trim().toLowerCase();
+  const telefonRaw = (body.telefon ?? '').trim();
   if (!profileId) return jsonResponse({ error: 'profile_id fehlt' }, 400);
-  if (!EMAIL_RE.test(email)) return jsonResponse({ error: 'Keine gültige E-Mail-Adresse' }, 400);
+  if (!email && !telefonRaw) return jsonResponse({ error: 'email oder telefon fehlt' }, 400);
+  if (email && !EMAIL_RE.test(email)) return jsonResponse({ error: 'Keine gültige E-Mail-Adresse' }, 400);
+
+  // ─── Telefon ────────────────────────────────────────────────────────
+  if (telefonRaw) {
+    const telefonE164 = normalizeAtPhone(telefonRaw);
+    if (!telefonE164) {
+      return jsonResponse({ error: 'Ungültige Telefonnummer. Format z.B. 0664 1234567 oder +43 664 1234567.' }, 400);
+    }
+    // Nummer darf nicht schon bei einem anderen Mitarbeiter stehen —
+    // Profile sind nicht einheitlich formatiert, deshalb Ziffernvergleich.
+    const ziffern = (s: unknown) => String(s ?? '').replace(/\D/g, '');
+    const { data: andere } = await supabase
+      .from('profiles')
+      .select('id, vorname, nachname, telefon')
+      .neq('id', profileId)
+      .not('telefon', 'is', null);
+    const doppelt = (andere ?? []).find((p: any) => ziffern(p.telefon) === ziffern(telefonE164));
+    if (doppelt) {
+      return jsonResponse({
+        error: `Diese Nummer steht bereits bei ${doppelt.vorname} ${doppelt.nachname}.`,
+      }, 409);
+    }
+    if (body.telefon_auch_login) {
+      const { error: authErr } = await supabase.auth.admin.updateUserById(profileId, {
+        phone: telefonE164,
+        phone_confirm: true, // Admin-Änderung: kein Bestätigungs-Code nötig
+      });
+      if (authErr) {
+        return jsonResponse({ error: `Anmeldenummer nicht geändert: ${authErr.message}` }, 500);
+      }
+    }
+    const { error: profErr } = await supabase
+      .from('profiles')
+      .update({ telefon: telefonE164 })
+      .eq('id', profileId);
+    if (profErr) {
+      return jsonResponse({ error: `Profil nicht aktualisiert: ${profErr.message}` }, 500);
+    }
+    if (!email) {
+      return jsonResponse({ ok: true, telefon: telefonE164, telefon_auch_login: !!body.telefon_auch_login });
+    }
+  }
 
   // Adresse darf nicht schon von einem anderen Konto verwendet werden.
   const { data: kollision } = await supabase
@@ -83,5 +135,9 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: `Profil nicht aktualisiert: ${profErr.message}` }, 500);
   }
 
-  return jsonResponse({ ok: true, auch_login: !!body.auch_login });
+  return jsonResponse({
+    ok: true,
+    auch_login: !!body.auch_login,
+    telefon_auch_login: !!(telefonRaw && body.telefon_auch_login),
+  });
 });
