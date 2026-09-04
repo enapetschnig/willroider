@@ -174,17 +174,40 @@ Deno.serve(async (req) => {
       hasRealEmail &&
       (authUser?.user?.email ?? '').toLowerCase() !== profile.email!.toLowerCase();
 
+    // ─── Telefon als Anmeldenummer setzen — bei JEDEM Kanal ───────────
+    // Die Einladung (SMS wie Mail) verspricht „mit Telefon anmelden". Das
+    // gilt nur, wenn auth.users.phone gesetzt ist. Vorher wurde die Nummer
+    // nur beim SMS-Versand übernommen: Wer per Mail eingeladen wurde und
+    // dann seine Handynummer eintippte, bekam von Supabase ein leeres
+    // neues Konto (02./04.09.). Schlägt das Setzen fehl (Nummer schon
+    // von einem anderen Konto belegt), wird sie in der Mail nicht genannt.
+    let telefonLogin: string | null =
+      telefonE164 && !loginNrWeichtAb ? telefonE164 : null;
+    let hinweis: string | null = null;
+    if (telefonE164 && loginNrWeichtAb) {
+      const { error: telErr } = await supabase.auth.admin.updateUserById(profile.id, {
+        phone: telefonE164,
+        phone_confirm: true,
+      });
+      if (telErr) {
+        console.warn('phone sync failed:', telErr);
+        if (willSms) {
+          return jsonResponse({
+            success: false,
+            error: `Telefonnummer konnte nicht als Anmeldenummer gesetzt werden: ${telErr.message}`,
+          });
+        }
+        hinweis = `Telefonnummer ${telefonE164} konnte nicht als Anmeldenummer gesetzt werden (${telErr.message}). Anmeldung geht nur per E-Mail.`;
+      } else {
+        telefonLogin = telefonE164;
+      }
+    }
+
     // ─── Neues Initial-Passwort setzen ─────────────────────────────────
     const initialPassword = generateReadablePassword(10);
     const updatePayload: Record<string, unknown> = {
       password: initialPassword,
     };
-    // auth.users.phone auf die SMS-Zielnummer setzen, wenn sie abweicht —
-    // sonst passt das verschickte Passwort nicht zur Anmelde-Nummer.
-    if (willSms && loginNrWeichtAb) {
-      updatePayload.phone = telefonE164;
-      updatePayload.phone_confirm = true;
-    }
     if (loginMailWeichtAb) {
       updatePayload.email = profile.email!.toLowerCase();
       updatePayload.email_confirm = true;
@@ -288,7 +311,7 @@ Deno.serve(async (req) => {
       const mail = composeInvitationEmail({
         vorname: profile.vorname || undefined,
         email: profile.email!,
-        telefon: telefonE164,
+        telefon: telefonLogin,
         magicLink,
         initialPassword,
         appUrl,
@@ -335,6 +358,7 @@ Deno.serve(async (req) => {
       sms_error: smsError,
       mail_status: mailStatus,
       mail_error: mailError,
+      hinweis,
       vorname: profile.vorname,
       nachname: profile.nachname,
       user_id: profile.id,

@@ -114,13 +114,23 @@ export default function Auth() {
     }
     setLoading(true);
     setPhoneE164(norm);
-    const { error } = await supabase.auth.signInWithOtp({ phone: norm });
+    // shouldCreateUser: false — sonst legt Supabase für jede unbekannte
+    // Nummer ein leeres neues Konto an. Genau das ist am 02./04.09. passiert:
+    // Mitarbeiter mit E-Mail-Konto tippten ihre Handynummer und landeten in
+    // einem namenlosen Geisterkonto, das nie freigeschaltet werden konnte.
+    const { error } = await supabase.auth.signInWithOtp({
+      phone: norm,
+      options: { shouldCreateUser: false },
+    });
     setLoading(false);
     if (error) {
+      const unbekannt = /signups? not allowed/i.test(error.message);
       toast({
         variant: "destructive",
-        title: "Code konnte nicht gesendet werden",
-        description: error.message,
+        title: unbekannt ? "Nummer nicht hinterlegt" : "Code konnte nicht gesendet werden",
+        description: unbekannt
+          ? `${norm} ist in der App nicht als Anmeldenummer hinterlegt. Bitte im Büro melden — oder mit E-Mail und Passwort anmelden.`
+          : error.message,
       });
       return;
     }
@@ -383,6 +393,7 @@ export default function Auth() {
                     setLoading(true);
                     const { error } = await supabase.auth.signInWithOtp({
                       phone: phoneE164,
+                      options: { shouldCreateUser: false },
                     });
                     setLoading(false);
                     if (error) {
