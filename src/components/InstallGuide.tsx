@@ -54,8 +54,10 @@ export function InstallGuide({ onInstalled }: { onInstalled?: () => void }) {
   const { toast } = useToast();
   const [deferredPrompt, setDeferredPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
-  const [standalone, setStandalone] = useState(false);
-  const [platform, setPlatform] = useState<Platform>("desktop");
+  // Sofort beim ersten Rendern erkennen — <Tabs defaultValue> liest den
+  // Wert nur einmal. Vorher stand der Dialog am Handy auf „Desktop".
+  const [standalone, setStandalone] = useState<boolean>(() => isStandalone());
+  const [platform, setPlatform] = useState<Platform>(() => detectPlatform());
   /** App ist auf diesem Gerät schon installiert (getInstalledRelatedApps) —
    *  DER häufigste Grund, warum Chrome kein Install-Symbol mehr zeigt. */
   const [bereitsInstalliert, setBereitsInstalliert] = useState(false);

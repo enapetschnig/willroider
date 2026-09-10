@@ -27,6 +27,7 @@ import {
   NotebookPen,
 } from "lucide-react";
 import { InstallPromptDialog } from "./InstallPromptDialog";
+import { detectPlatform } from "./InstallGuide";
 import { FeedbackDialog } from "./FeedbackDialog";
 import { bildschirmfotoMachen } from "@/lib/bildschirmfoto";
 import {
@@ -129,9 +130,25 @@ export function AppShell({ children }: { children: ReactNode }) {
     } catch {
       /* ignore */
     }
+
+    // Am Handy im Browser: beim ersten Anmelden gleich die Install-
+    // Anleitung zeigen — passend zu Gerät und Browser, bei Android mit
+    // „Jetzt installieren"-Knopf. Einmalig; „Vielleicht später" merkt sich
+    // das Gerät. Am PC nur auf Klick (Büro will nicht gefragt werden).
+    let timer: number | undefined;
+    if (!standalone && detectPlatform() !== "desktop") {
+      let schonGefragt = false;
+      try {
+        schonGefragt = !!localStorage.getItem("willroider:install-dismissed");
+      } catch {
+        /* ignore */
+      }
+      if (!schonGefragt) timer = window.setTimeout(() => setInstallOpen(true), 800);
+    }
     return () => {
       unsub();
       window.removeEventListener("appinstalled", onInstalled);
+      if (timer) window.clearTimeout(timer);
     };
   }, []);
 

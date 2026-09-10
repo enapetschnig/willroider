@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { InstallPromptDialog } from "@/components/InstallPromptDialog";
-import { detectPlatform, isStandalone } from "@/components/InstallGuide";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,16 +43,6 @@ export default function Auth() {
 
   // Telefon-State
   const [phoneInput, setPhoneInput] = useState("");
-  // Am Handy im Browser (nicht installiert): zuerst auf den Startbildschirm,
-  // DANN anmelden. Sonst meldet man sich in Safari an, installiert, und die
-  // App am Startbildschirm kennt die Anmeldung nicht (getrennter Speicher)
-  // — man steht zweimal vor dem Login. Die Reihenfolge ist der ganze Trick.
-  const [installHinweis, setInstallHinweis] = useState(false);
-  const [installOffen, setInstallOffen] = useState(false);
-  useEffect(() => {
-    const plattform = detectPlatform();
-    setInstallHinweis(!isStandalone() && plattform !== "desktop");
-  }, []);
   const [phoneE164, setPhoneE164] = useState<string | null>(null);
   const [otp, setOtp] = useState("");
   const [phonePassword, setPhonePassword] = useState("");
@@ -295,27 +283,6 @@ export default function Auth() {
           <CardDescription className="text-xs">Baustellenmanagement</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          {installHinweis && (
-            <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-xs space-y-2">
-              <div className="font-semibold text-sm">Tipp: Zuerst auf den Startbildschirm</div>
-              <div className="text-muted-foreground">
-                Leg die App zuerst auf den Startbildschirm und melde dich{" "}
-                <strong>dort</strong> an — dann bleibst du dauerhaft angemeldet.
-                Meldest du dich hier im Browser an, fragt die installierte App
-                später noch einmal nach der Anmeldung.
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-full h-9"
-                onClick={() => setInstallOffen(true)}
-              >
-                So geht's — Schritt für Schritt
-              </Button>
-            </div>
-          )}
-
           {/* Tab-Auswahl */}
           <div className="flex bg-muted rounded-md p-1">
             <button
@@ -598,7 +565,6 @@ export default function Auth() {
           )}
         </CardContent>
       </Card>
-      <InstallPromptDialog open={installOffen} onClose={() => setInstallOffen(false)} />
     </div>
   );
 }
