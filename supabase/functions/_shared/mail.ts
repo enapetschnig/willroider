@@ -20,25 +20,22 @@ export function composeInvitationEmail(opts: ComposeMailOpts): {
   const greeting = opts.vorname ? `Hallo ${opts.vorname},` : 'Hallo,';
   const zeilen: string[] = [greeting, '', 'deine Holzbau-Willroider-App ist bereit.'];
 
+  // Gleiche Reihenfolge wie in der SMS: zuerst installieren, dann dort
+  // anmelden — sonst steht man am iPhone zweimal vor dem Login.
+  const anmeldung = opts.telefon
+    ? `Telefon ${opts.telefon} eingeben → „Code anfordern" → Code eintippen`
+    : `E-Mail ${opts.email}${opts.initialPassword ? ` + Passwort ${opts.initialPassword}` : ''}`;
+  zeilen.push('', 'So richtest du die App am Handy ein:');
+  zeilen.push(`1. ${opts.appUrl} am Handy öffnen`);
+  zeilen.push('2. Zum Startbildschirm hinzufügen (iPhone: Teilen → Zum Home-Bildschirm · Android: Menü → App installieren)');
+  zeilen.push('3. App vom Startbildschirm öffnen');
+  zeilen.push(`4. Anmelden: ${anmeldung}. Fertig!`);
   if (opts.magicLink) {
-    zeilen.push('', `Sofort-Login: ${opts.magicLink}`);
-    zeilen.push('', 'Falls der Link nicht klappt:');
-    if (opts.initialPassword) {
-      zeilen.push(`• Anmeldung mit E-Mail ${opts.email} + Passwort ${opts.initialPassword}`);
-    }
-    if (opts.telefon) {
-      zeilen.push(`• Oder mit Telefon ${opts.telefon} → Code anfordern`);
-    }
-  } else {
-    zeilen.push('', 'So loggst du dich ein:');
-    zeilen.push(`1. App öffnen: ${opts.appUrl}/auth`);
-    zeilen.push(`2. E-Mail ${opts.email} eingeben`);
-    if (opts.initialPassword) zeilen.push(`3. Passwort: ${opts.initialPassword}`);
+    zeilen.push('', `Am Computer oder nur schnell reinschauen: ${opts.magicLink}`);
   }
-
-  zeilen.push('', 'App aufs Handy bringen:');
-  zeilen.push('iPhone (Safari): Teilen → Zum Home-Bildschirm');
-  zeilen.push('Android (Chrome): Menü → App installieren');
+  if (opts.initialPassword && opts.telefon) {
+    zeilen.push('', `Backup: E-Mail ${opts.email} + Passwort ${opts.initialPassword}`);
+  }
 
   const text = zeilen.join('\n');
   const esc = (s: string) =>
@@ -48,24 +45,23 @@ export function composeInvitationEmail(opts: ComposeMailOpts): {
   const html = `<div style="font-family:system-ui,-apple-system,sans-serif;font-size:15px;line-height:1.6;color:#1a1a1a;max-width:560px">
   <p>${esc(greeting)}</p>
   <p>deine <strong>Holzbau-Willroider-App</strong> ist bereit.</p>
+  <p><strong>So richtest du die App am Handy ein:</strong></p>
+  <ol>
+    <li><a href="${opts.appUrl}">${esc(opts.appUrl)}</a> am Handy öffnen</li>
+    <li>Zum Startbildschirm hinzufügen<br><span style="font-size:13px;color:#555">iPhone: Teilen → „Zum Home-Bildschirm" · Android: Menü → „App installieren"</span></li>
+    <li>App vom Startbildschirm öffnen</li>
+    <li>Anmelden: ${esc(anmeldung)}. Fertig!</li>
+  </ol>
   ${
     opts.magicLink
-      ? `<p style="margin:20px 0"><a href="${opts.magicLink}" style="background:#a63d52;color:#fff;padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:600">Jetzt anmelden</a></p>
-  <p style="font-size:13px;color:#555">Falls der Knopf nicht klappt:</p>
-  <ul style="font-size:13px;color:#555">
-    ${opts.initialPassword ? `<li>Anmeldung mit E-Mail <strong>${esc(opts.email)}</strong> + Passwort <strong>${esc(opts.initialPassword)}</strong></li>` : ''}
-    ${opts.telefon ? `<li>Oder mit Telefon ${esc(opts.telefon)} → „Code anfordern"</li>` : ''}
-  </ul>`
-      : `<p>So loggst du dich ein:</p>
-  <ol>
-    <li>App öffnen: <a href="${opts.appUrl}/auth">${esc(opts.appUrl)}</a></li>
-    <li>E-Mail <strong>${esc(opts.email)}</strong> eingeben</li>
-    ${opts.initialPassword ? `<li>Passwort: <strong>${esc(opts.initialPassword)}</strong></li>` : ''}
-  </ol>`
+      ? `<p style="margin:20px 0;font-size:13px;color:#555">Am Computer oder nur schnell reinschauen: <a href="${opts.magicLink}" style="background:#a63d52;color:#fff;padding:8px 18px;border-radius:6px;text-decoration:none;font-weight:600">Jetzt anmelden</a></p>`
+      : ''
   }
-  <p style="font-size:13px;color:#555;margin-top:24px"><strong>App aufs Handy bringen:</strong><br>
-  iPhone (Safari): Teilen → Zum Home-Bildschirm<br>
-  Android (Chrome): Menü → App installieren</p>
+  ${
+    opts.initialPassword && opts.telefon
+      ? `<p style="font-size:13px;color:#555">Backup: E-Mail <strong>${esc(opts.email)}</strong> + Passwort <strong>${esc(opts.initialPassword)}</strong></p>`
+      : ''
+  }
 </div>`;
 
   return { subject: 'Dein Zugang zur Holzbau-Willroider-App', text, html };

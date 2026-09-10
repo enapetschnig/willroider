@@ -52,28 +52,24 @@ export function composeInvitationSms(opts: ComposeSmsOpts): string {
   const greeting = opts.vorname ? `Hallo ${opts.vorname},` : 'Hallo,';
   lines.push(greeting, '', 'deine Holzbau-Willroider-App ist bereit.');
 
+  // Reihenfolge ist Absicht: ZUERST auf den Startbildschirm, DANN dort
+  // anmelden. Wer sich im Browser anmeldet und danach installiert, steht am
+  // iPhone in der App erneut vor dem Login (getrennter Speicher).
+  lines.push('', 'So richtest du die App ein:');
+  lines.push(`1. Link öffnen: ${opts.appUrl}/auth?phone=${encodeURIComponent(opts.telefon)}`);
+  lines.push('2. Zum Startbildschirm hinzufügen (iPhone: Teilen → Zum Home-Bildschirm · Android: Menü → App installieren)');
+  lines.push('3. App vom Startbildschirm öffnen');
+  lines.push('4. Nummer eingeben → „Code anfordern" → Code eintippen. Fertig!');
   if (opts.magicLink) {
-    lines.push('', `Sofort-Login: ${opts.magicLink}`);
-    lines.push('', 'Falls Link nicht klappt:');
-    lines.push(`• App-Login mit Telefon ${opts.telefon} → Code anfordern`);
-    if (opts.email && opts.initialPassword) {
-      lines.push(`• Oder mit E-Mail ${opts.email} + Passwort ${opts.initialPassword}`);
-    } else if (opts.initialPassword) {
-      lines.push(`• Backup-Passwort (Telefon + Passwort): ${opts.initialPassword}`);
-    }
-  } else {
-    lines.push('', 'So loggst du dich ein:');
-    lines.push(`1. App öffnen: ${opts.appUrl}/auth?phone=${encodeURIComponent(opts.telefon)}`);
-    lines.push('2. „Code anfordern" tippen');
-    lines.push('3. Du bekommst einen 6-stelligen Code');
-    lines.push('4. Code eingeben → fertig');
-    if (opts.initialPassword) {
-      lines.push('', `Backup-Passwort (Telefon + Passwort): ${opts.initialPassword}`);
-    }
+    lines.push('', `Ohne Installation, nur schnell reinschauen: ${opts.magicLink}`);
   }
-
-  lines.push('', 'App aufs Handy bringen:');
-  lines.push('iPhone (Safari): Teilen → Zum Home-Bildschirm');
-  lines.push('Android (Chrome): Menü → App installieren');
+  if (opts.initialPassword) {
+    lines.push(
+      '',
+      opts.email
+        ? `Backup: E-Mail ${opts.email} oder Telefon + Passwort ${opts.initialPassword}`
+        : `Backup-Passwort (Telefon + Passwort): ${opts.initialPassword}`,
+    );
+  }
   return lines.join('\n');
 }

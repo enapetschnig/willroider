@@ -21,9 +21,9 @@ import {
   type BeforeInstallPromptEvent,
 } from "@/lib/pwaInstall";
 
-type Platform = "ios-safari" | "ios-chrome" | "android" | "desktop";
+export type Platform = "ios-safari" | "ios-chrome" | "android" | "desktop";
 
-function detectPlatform(): Platform {
+export function detectPlatform(): Platform {
   if (typeof navigator === "undefined") return "desktop";
   const ua = navigator.userAgent;
   const isIOS = /iPad|iPhone|iPod/.test(ua) && !(window as any).MSStream;
@@ -36,7 +36,7 @@ function detectPlatform(): Platform {
   return "desktop";
 }
 
-function isStandalone(): boolean {
+export function isStandalone(): boolean {
   if (typeof window === "undefined") return false;
   return (
     window.matchMedia("(display-mode: standalone)").matches ||
@@ -186,6 +186,12 @@ export function InstallGuide({ onInstalled }: { onInstalled?: () => void }) {
               title={'„Zum Home-Bildschirm"'}
               desc='Auf „Zum Home-Bildschirm" tippen → oben rechts auf „Hinzufügen" bestätigen.'
             />
+            <Step
+              n={5}
+              icon={Smartphone}
+              title="Vom Startbildschirm öffnen und anmelden"
+              desc="Safari schließen, die neue App am Startbildschirm antippen und dort anmelden: Nummer eingeben → Code anfordern. Die Anmeldung aus Safari gilt in der App nicht — das ist einmalig, danach bleibst du angemeldet."
+            />
           </ol>
         </TabsContent>
 
@@ -217,6 +223,12 @@ export function InstallGuide({ onInstalled }: { onInstalled?: () => void }) {
               icon={Plus}
               title={'„Zum Home-Bildschirm hinzufügen"'}
               desc='Auf „Zum Home-Bildschirm hinzufügen" tippen → bestätigen.'
+            />
+            <Step
+              n={4}
+              icon={Smartphone}
+              title="Vom Startbildschirm öffnen und anmelden"
+              desc="Chrome schließen, die neue App am Startbildschirm antippen und dort anmelden: Nummer eingeben → Code anfordern. Die Anmeldung aus dem Browser gilt in der App nicht — einmalig, danach bleibst du angemeldet."
             />
           </ol>
         </TabsContent>
@@ -262,7 +274,7 @@ export function InstallGuide({ onInstalled }: { onInstalled?: () => void }) {
               n={3}
               icon={Smartphone}
               title="Bestätigen"
-              desc="Die App erscheint auf deinem Startbildschirm wie eine normale App."
+              desc="Die App erscheint auf deinem Startbildschirm wie eine normale App. Fragt sie beim ersten Öffnen nach der Anmeldung: Nummer eingeben → Code anfordern — einmalig."
             />
           </ol>
         </TabsContent>
