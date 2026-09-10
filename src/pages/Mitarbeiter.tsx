@@ -490,7 +490,7 @@ export default function Mitarbeiter() {
       } else {
         toast({
           title: "Anmeldenummer geändert",
-          description: `${editing.vorname} ${editing.nachname} kann sich ab jetzt mit ${(fnData as any)?.telefon ?? neuesTelefon} per SMS-Code anmelden.`,
+          description: `${editing.vorname} ${editing.nachname} kann sich ab jetzt mit ${(fnData as any)?.telefon ?? neuesTelefon} anmelden.`,
         });
       }
     }
@@ -1208,7 +1208,7 @@ export default function Mitarbeiter() {
                     <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
                       <input type="checkbox" name="telefon_auch_login" className="h-3.5 w-3.5" />
                       Auch als Anmeldenummer übernehmen — der Mitarbeiter kann sich
-                      künftig mit dieser Nummer per SMS-Code anmelden
+                      künftig mit dieser Nummer anmelden
                     </label>
                   </div>
                 </div>

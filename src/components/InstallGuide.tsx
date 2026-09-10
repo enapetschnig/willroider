@@ -190,7 +190,7 @@ export function InstallGuide({ onInstalled }: { onInstalled?: () => void }) {
               n={5}
               icon={Smartphone}
               title="Vom Startbildschirm öffnen und anmelden"
-              desc="Safari schließen, die neue App am Startbildschirm antippen und dort anmelden: Nummer eingeben → Code anfordern. Die Anmeldung aus Safari gilt in der App nicht — das ist einmalig, danach bleibst du angemeldet."
+              desc="Safari schließen, die neue App am Startbildschirm antippen und dort anmelden: Nummer + Passwort aus der SMS. Die Anmeldung aus Safari gilt in der App nicht — das ist einmalig, danach bleibst du angemeldet."
             />
           </ol>
         </TabsContent>
@@ -228,7 +228,7 @@ export function InstallGuide({ onInstalled }: { onInstalled?: () => void }) {
               n={4}
               icon={Smartphone}
               title="Vom Startbildschirm öffnen und anmelden"
-              desc="Chrome schließen, die neue App am Startbildschirm antippen und dort anmelden: Nummer eingeben → Code anfordern. Die Anmeldung aus dem Browser gilt in der App nicht — einmalig, danach bleibst du angemeldet."
+              desc="Chrome schließen, die neue App am Startbildschirm antippen und dort anmelden: Nummer + Passwort aus der SMS. Die Anmeldung aus dem Browser gilt in der App nicht — einmalig, danach bleibst du angemeldet."
             />
           </ol>
         </TabsContent>
@@ -274,7 +274,7 @@ export function InstallGuide({ onInstalled }: { onInstalled?: () => void }) {
               n={3}
               icon={Smartphone}
               title="Bestätigen"
-              desc="Die App erscheint auf deinem Startbildschirm wie eine normale App. Fragt sie beim ersten Öffnen nach der Anmeldung: Nummer eingeben → Code anfordern — einmalig."
+              desc="Die App erscheint auf deinem Startbildschirm wie eine normale App. Fragt sie beim ersten Öffnen nach der Anmeldung: Nummer + Passwort aus der SMS — einmalig."
             />
           </ol>
         </TabsContent>

@@ -27,6 +27,15 @@ export function normalizeAtPhone(input: string | null | undefined): string | nul
 }
 
 /** Lesbares Initial-Passwort. Ausgeschlossen: l, o, I, O, 0, 1 — Verwechslungsgefahr in SMS. */
+/** Einfaches Passwort für die Einladung: „willroider" + vier Ziffern.
+ *  Bewusst simpel — die Leute tippen es von der SMS ab, am Bau, mit
+ *  Handschuhen. Wer will, ändert es in der App. */
+export function generateSimplePassword(): string {
+  const n = new Uint32Array(1);
+  crypto.getRandomValues(n);
+  return `willroider${1000 + (n[0] % 9000)}`;
+}
+
 export function generateReadablePassword(length = 10): string {
   const chars = 'abcdefghkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const arr = new Uint32Array(length);
@@ -52,24 +61,13 @@ export function composeInvitationSms(opts: ComposeSmsOpts): string {
   const greeting = opts.vorname ? `Hallo ${opts.vorname},` : 'Hallo,';
   lines.push(greeting, '', 'deine Holzbau-Willroider-App ist bereit.');
 
-  // Reihenfolge ist Absicht: ZUERST auf den Startbildschirm, DANN dort
-  // anmelden. Wer sich im Browser anmeldet und danach installiert, steht am
-  // iPhone in der App erneut vor dem Login (getrennter Speicher).
-  lines.push('', 'So richtest du die App ein:');
-  lines.push(`1. Link öffnen: ${opts.appUrl}/auth?phone=${encodeURIComponent(opts.telefon)}`);
-  lines.push('2. Zum Startbildschirm hinzufügen (iPhone: Teilen → Zum Home-Bildschirm · Android: Menü → App installieren)');
-  lines.push('3. App vom Startbildschirm öffnen');
-  lines.push('4. Nummer eingeben → „Code anfordern" → Code eintippen. Fertig!');
-  if (opts.magicLink) {
-    lines.push('', `Ohne Installation, nur schnell reinschauen: ${opts.magicLink}`);
-  }
-  if (opts.initialPassword) {
-    lines.push(
-      '',
-      opts.email
-        ? `Backup: E-Mail ${opts.email} oder Telefon + Passwort ${opts.initialPassword}`
-        : `Backup-Passwort (Telefon + Passwort): ${opts.initialPassword}`,
-    );
-  }
+  // Nummer + Passwort — das ist die Anmeldung. Kein Code, kein Link-Ritual.
+  // Die App zeigt beim Öffnen am Handy selbst, wie sie auf den Startbild-
+  // schirm kommt (Anleitung je nach Gerät).
+  lines.push('', 'Anmelden mit:');
+  lines.push(`Telefon: ${opts.telefon}`);
+  if (opts.initialPassword) lines.push(`Passwort: ${opts.initialPassword}`);
+  lines.push('', `App öffnen: ${opts.appUrl}/auth?phone=${encodeURIComponent(opts.telefon)}`);
+  lines.push('Die App zeigt dir, wie du sie auf den Startbildschirm legst.');
   return lines.join('\n');
 }

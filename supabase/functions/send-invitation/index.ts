@@ -21,7 +21,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.79.0';
 import {
   normalizeAtPhone,
-  generateReadablePassword,
+  generateSimplePassword,
   composeInvitationSms,
 } from '../_shared/sms.ts';
 import { composeInvitationEmail, sendeEinladungsMail } from '../_shared/mail.ts';
@@ -232,7 +232,7 @@ Deno.serve(async (req) => {
     }
 
     // ─── Neues Initial-Passwort setzen ─────────────────────────────────
-    const initialPassword = generateReadablePassword(10);
+    const initialPassword = generateSimplePassword();
     const updatePayload: Record<string, unknown> = {
       password: initialPassword,
     };

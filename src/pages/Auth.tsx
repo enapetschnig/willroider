@@ -39,7 +39,9 @@ export default function Auth() {
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<Tab>("telefon");
   const [emailMode, setEmailMode] = useState<EmailMode>("login");
-  const [phoneMode, setPhoneMode] = useState<PhoneMode>("request-code");
+  // Nummer + Passwort ist der Normalfall (steht so in der Einladungs-SMS);
+  // der SMS-Code bleibt als Reserve, falls jemand sein Passwort nicht hat.
+  const [phoneMode, setPhoneMode] = useState<PhoneMode>("password");
 
   // Telefon-State
   const [phoneInput, setPhoneInput] = useState("");
@@ -320,7 +322,7 @@ export default function Auth() {
               type="button"
               onClick={() => {
                 setTab("telefon");
-                setPhoneMode("request-code");
+                setPhoneMode("password");
               }}
               className={`flex-1 h-10 rounded text-sm font-medium transition flex items-center justify-center gap-1.5 ${
                 tab === "telefon"
@@ -483,7 +485,7 @@ export default function Auth() {
                 onClick={() => setPhoneMode("request-code")}
                 className="text-xs text-primary hover:underline mx-auto block"
               >
-                ← Mit SMS-Code anmelden
+                Kein Passwort? Code per SMS anfordern
               </button>
             </form>
           )}

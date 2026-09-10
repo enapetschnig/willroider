@@ -158,8 +158,7 @@ export function CredentialsResultDialog({
                     <strong className="text-foreground tabular-nums">{result.telefon}</strong>{" "}
                     eingeben
                   </li>
-                  <li>„Code per SMS anfordern"</li>
-                  <li>6-stelligen Code aus zweiter SMS eingeben → eingeloggt</li>
+                  <li>Passwort aus der SMS eingeben → eingeloggt</li>
                 </ol>
               ) : (
                 <ol className="space-y-0.5 list-decimal list-inside text-muted-foreground">
@@ -173,7 +172,7 @@ export function CredentialsResultDialog({
               )}
               <div className="text-[11px] text-muted-foreground pt-1">
                 {result.telefon
-                  ? "Falls SMS-Code nicht ankommt: „Mit Passwort anmelden“ + Initial-Passwort unten."
+                  ? "Ohne Passwort geht es auch: „Code per SMS anfordern“ auf der Anmeldeseite."
                   : "Am schnellsten geht der Sofort-Login-Link aus der E-Mail."}
               </div>
             </div>

@@ -18,7 +18,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.79.0';
 import {
   normalizeAtPhone as sharedNormalizeAtPhone,
-  generateReadablePassword as sharedGenerateReadablePassword,
+  generateSimplePassword,
   composeInvitationSms,
 } from '../_shared/sms.ts';
 import { composeInvitationEmail, sendeEinladungsMail } from '../_shared/mail.ts';
@@ -64,7 +64,6 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 const normalizeAtPhone = sharedNormalizeAtPhone;
-const generateReadablePassword = sharedGenerateReadablePassword;
 
 const ALLOWED_ROLES: AppRole[] = [
   'geschaeftsfuehrung',
@@ -185,7 +184,7 @@ Deno.serve(async (req) => {
   }
 
   // ─── Auth-User erstellen ───────────────────────────────────────────────
-  const initialPassword = generateReadablePassword(10);
+  const initialPassword = generateSimplePassword();
 
   const createParams: any = {
     password: initialPassword,

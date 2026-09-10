@@ -295,7 +295,7 @@ export function NewMitarbeiterDialog({
                   </div>
                 ) : (
                   <div className="text-[11px] text-muted-foreground">
-                    Anmeldung per 6-stelligem SMS-Code — Pflicht bei der
+                    Anmeldename des Mitarbeiters — Pflicht bei der
                     SMS-Einladung.
                   </div>
                 )}

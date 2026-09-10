@@ -186,7 +186,7 @@ export function AdminZugangVerschicken() {
     });
     toast({
       title: "Anmeldenummer gespeichert",
-      description: `${row.vorname} ${row.nachname} kann sich ab jetzt mit ${nummer} per SMS-Code anmelden.`,
+      description: `${row.vorname} ${row.nachname} kann sich ab jetzt mit ${nummer} anmelden (Passwort oder SMS-Code).`,
     });
   };
 
@@ -345,8 +345,8 @@ export function AdminZugangVerschicken() {
             <div className="font-semibold">Zugang verschicken</div>
             <div className="text-muted-foreground">
               Nummer eintippen, „Per SMS senden" — fertig. Der Mitarbeiter bekommt
-              eine SMS mit Anleitung und Passwort und meldet sich ab dann mit seiner
-              Nummer per SMS-Code an. Jeder Versand setzt ein neues Passwort.
+              eine SMS mit Nummer, Passwort und App-Link und meldet sich damit an.
+              Jeder Versand setzt ein neues Passwort (willroider + Zahl).
             </div>
           </div>
         </CardContent>
