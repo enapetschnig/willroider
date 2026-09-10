@@ -156,6 +156,34 @@ Deno.serve(async (req) => {
       ? (body.arbeitszeitmodell as Arbeitszeitmodell)
       : 'zimmerei_sommer';
 
+  // ─── Doppelte Kontaktdaten VOR dem Anlegen abfangen ────────────────────
+  // createUser sagt bei einer belegten Nummer nur „phone already registered".
+  // Das Büro braucht den Namen — und den Hinweis, dass für diese Person
+  // „Zugang senden" der richtige Weg ist, nicht „Neuer Mitarbeiter".
+  {
+    const ziffern = (s: unknown) => String(s ?? '').replace(/\D/g, '');
+    const { data: alle } = await supabase
+      .from('profiles')
+      .select('id, vorname, nachname, telefon, email, is_active');
+    const treffer = (alle ?? []).find(
+      (p: any) =>
+        (telefonE164 && ziffern(p.telefon) === ziffern(telefonE164)) ||
+        (emailInput && String(p.email ?? '').toLowerCase() === emailInput),
+    );
+    if (treffer) {
+      const was =
+        telefonE164 && ziffern(treffer.telefon) === ziffern(telefonE164)
+          ? `Die Nummer ${telefonE164}`
+          : `Die E-Mail ${emailInput}`;
+      return jsonResponse({
+        error:
+          `${was} gehört bereits zu ${treffer.vorname} ${treffer.nachname}` +
+          (treffer.is_active ? '' : ' (archiviert)') +
+          '. Diese Person gibt es schon — bitte unter „Zugang senden" einladen statt neu anzulegen.',
+      }, 409);
+    }
+  }
+
   // ─── Auth-User erstellen ───────────────────────────────────────────────
   const initialPassword = generateReadablePassword(10);
 
@@ -176,9 +204,9 @@ Deno.serve(async (req) => {
   if (createError || !authCreated?.user) {
     const msg = createError?.message ?? 'createUser fehlgeschlagen';
     const hint = msg.toLowerCase().includes('phone')
-      ? 'Telefonnummer schon vergeben oder Supabase Phone-Auth nicht aktiviert.'
+      ? `Die Nummer ${telefonE164} ist bereits an einem Anmeldekonto hinterlegt, das zu keinem aktiven Profil passt (altes oder archiviertes Konto). Bitte melden — das muss händisch bereinigt werden.`
       : msg.toLowerCase().includes('email')
-      ? 'E-Mail bereits vergeben'
+      ? `Die E-Mail ${emailInput} ist bereits an einem Anmeldekonto hinterlegt.`
       : msg;
     return jsonResponse({ error: hint }, 400);
   }

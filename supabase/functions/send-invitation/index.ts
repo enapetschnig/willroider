@@ -140,6 +140,30 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Gehört die Nummer schon einem anderen Mitarbeiter? Vor dem ersten
+    // Schreibzugriff prüfen — mit Namen. Vorher kam an dieser Stelle nur
+    // ein nackter Auth-Fehler („phone already registered") zurück.
+    if (telefonE164) {
+      const ziffern = (s: unknown) => String(s ?? '').replace(/\D/g, '');
+      const { data: andere } = await supabase
+        .from('profiles')
+        .select('id, vorname, nachname, telefon, is_active')
+        .neq('id', profile.id)
+        .not('telefon', 'is', null);
+      const doppelt = (andere ?? []).find(
+        (p: any) => ziffern(p.telefon) === ziffern(telefonE164),
+      );
+      if (doppelt) {
+        return jsonResponse({
+          success: false,
+          error:
+            `${telefonE164} gehört bereits zu ${doppelt.vorname} ${doppelt.nachname}` +
+            (doppelt.is_active ? '' : ' (archiviert)') +
+            '. Bitte dort „Erneut senden" verwenden oder die Nummer im Profil richtigstellen.',
+        });
+      }
+    }
+
     // Wenn Override angegeben oder Profil-Telefon abweicht: aktualisieren
     if (telefonE164 && telefonE164 !== profile.telefon) {
       const { error: updErr } = await supabase
@@ -191,10 +215,14 @@ Deno.serve(async (req) => {
       });
       if (telErr) {
         console.warn('phone sync failed:', telErr);
+        const belegt = /already|exist|registered|taken/i.test(telErr.message);
+        const grund = belegt
+          ? `${telefonE164} ist bereits bei einem anderen Anmeldekonto hinterlegt (vermutlich ein archivierter Mitarbeiter oder ein altes Konto).`
+          : telErr.message;
         if (willSms) {
           return jsonResponse({
             success: false,
-            error: `Telefonnummer konnte nicht als Anmeldenummer gesetzt werden: ${telErr.message}`,
+            error: `Telefonnummer konnte nicht als Anmeldenummer gesetzt werden: ${grund}`,
           });
         }
         hinweis = `Telefonnummer ${telefonE164} konnte nicht als Anmeldenummer gesetzt werden (${telErr.message}). Anmeldung geht nur per E-Mail.`;
