@@ -24,7 +24,7 @@ import {
   Mail,
   MessageSquarePlus,
   X,
-  NotebookPen,,
+  NotebookPen,
   BookOpen,
 } from "lucide-react";
 import { InstallPromptDialog } from "./InstallPromptDialog";

@@ -86,10 +86,10 @@ export default function Anleitung() {
         titel="Anmelden und App aufs Handy"
         wer="Für alle"
         schritte={[
-          "Anmelden mit deiner Handynummer und dem Passwort aus der SMS (willroider + Zahl). Kein Passwort? Auf der Anmeldeseite „Code per SMS anfordern".",
+          "Anmelden mit deiner Handynummer und dem Passwort aus der SMS (willroider + Zahl). Kein Passwort? Auf der Anmeldeseite „Code per SMS anfordern“.",
           "App auf den Startbildschirm legen — dann startet sie wie eine normale App und du bleibst angemeldet.",
           "Nach dem Installieren einmal in der neuen App anmelden. Das ist nur einmal nötig.",
-          "Passwort ändern: oben rechts auf deinen Namen → „Passwort ändern".",
+          "Passwort ändern: oben rechts auf deinen Namen → „Passwort ändern“.",
         ]}
         hinweis="Probleme beim Anmelden? Im Büro melden — dort kann dir ein neuer Zugang geschickt werden."
       >
@@ -105,9 +105,9 @@ export default function Anleitung() {
         titel="Mein Tag"
         wer="Für alle"
         schritte={[
-          "„Mein Tag" zeigt oben deine heutige Baustelle mit Treffpunkt und Abfahrt. Mit „Navigation" öffnet sich die Karte.",
+          "„Mein Tag“ zeigt oben deine heutige Baustelle mit Treffpunkt und Abfahrt. Mit „Navigation“ öffnet sich die Karte.",
           "Darunter siehst du, ob eine Unterweisung offen ist, und deine Stunden von heute.",
-          "Stunden trägst du unter „Stunden" ein — am besten gleich am Abend.",
+          "Stunden trägst du unter „Stunden“ ein — am besten gleich am Abend.",
         ]}
       />
 
@@ -116,8 +116,8 @@ export default function Anleitung() {
         titel="Unterweisung bestätigen"
         wer="Für alle — vor dem ersten Arbeitstag auf einer Baustelle"
         schritte={[
-          "Bist du für eine Baustelle eingeteilt, steht in „Mein Tag" die Unterweisung mit der Frist — meist am Einsatztag bis 08:00.",
-          "Antippen, ganz durchlesen (bis unten scrollen), dann „Verstanden – jetzt unterschreiben".",
+          "Bist du für eine Baustelle eingeteilt, steht in „Mein Tag“ die Unterweisung mit der Frist — meist am Einsatztag bis 08:00.",
+          "Antippen, ganz durchlesen (bis unten scrollen), dann „Verstanden – jetzt unterschreiben“.",
           "Mit dem Finger unterschreiben und speichern. Datum und Uhrzeit werden automatisch festgehalten.",
           "Alternativ unterschreibst du am Tablet des Poliers — er ruft deinen Namen auf, du liest und unterschreibst dort.",
         ]}
@@ -130,12 +130,12 @@ export default function Anleitung() {
           titel="Unterweisung am Tablet — alle nacheinander"
           wer="Für Poliere und Bauleiter"
           schritte={[
-            "Baustellen → deine Baustelle → Reiter „Unterweisung".",
-            "„Am Tablet unterschreiben lassen" antippen. Die Liste zeigt alle Zugeteilten, heute Eingeteilte zuerst, Offene oben.",
-            "Tablet dem Mitarbeiter geben: Er tippt seinen Namen, liest bis unten, tippt „Gelesen und verstanden" und unterschreibt.",
-            "Zurück in der Liste steht er als bestätigt — mit Uhrzeit und „Tablet (dein Name)". Dann der Nächste.",
+            "Baustellen → deine Baustelle → Reiter „Unterweisung“.",
+            "„Am Tablet unterschreiben lassen“ antippen. Die Liste zeigt alle Zugeteilten, heute Eingeteilte zuerst, Offene oben.",
+            "Tablet dem Mitarbeiter geben: Er tippt seinen Namen, liest bis unten, tippt „Gelesen und verstanden“ und unterschreibt.",
+            "Zurück in der Liste steht er als bestätigt — mit Uhrzeit und „Tablet (dein Name)“. Dann der Nächste.",
           ]}
-          hinweis="Wer am eigenen Handy schon bestätigt hat, steht bereits als erledigt. Ändert sich etwas auf der Baustelle (Kran, Gerüst, Gefahrenbereich): „Inhalt bearbeiten / Ergänzung anlegen" — dann müssen alle die Ergänzung bestätigen, Frist 30 Minuten."
+          hinweis="Wer am eigenen Handy schon bestätigt hat, steht bereits als erledigt. Ändert sich etwas auf der Baustelle (Kran, Gerüst, Gefahrenbereich): „Inhalt bearbeiten / Ergänzung anlegen“ — dann müssen alle die Ergänzung bestätigen, Frist 30 Minuten."
         />
       )}
 
@@ -145,11 +145,11 @@ export default function Anleitung() {
           titel="Unterweisung an der Baustelle hinterlegen"
           wer="Für Büro und Bauleitung — einmal je Baustelle"
           schritte={[
-            "Baustellen → Baustelle → Reiter „Unterweisung" → Art wählen (Baustelle, Fertigteilmontage, Werkstatt).",
-            "Besonderheiten ergänzen: „Inhalt bearbeiten" — Kran, Absturzsicherung, Strom, was auf dieser Baustelle gilt.",
+            "Baustellen → Baustelle → Reiter „Unterweisung“ → Art wählen (Baustelle, Fertigteilmontage, Werkstatt).",
+            "Besonderheiten ergänzen: „Inhalt bearbeiten“ — Kran, Absturzsicherung, Strom, was auf dieser Baustelle gilt.",
             "Fertig. Wer über den Tagesplan eingeteilt wird, bekommt sie automatisch — fällig am Einsatztag um 08:00.",
-            "Beim Freigeben des Tagesplans warnt die App, wenn eine Baustelle noch keine Unterweisung hat — „Standard anlegen" genügt dann.",
-            "Nachweis: im Reiter „Unterweisung" die Liste — wer, wann, am eigenen Handy oder am Tablet.",
+            "Beim Freigeben des Tagesplans warnt die App, wenn eine Baustelle noch keine Unterweisung hat — „Standard anlegen“ genügt dann.",
+            "Nachweis: im Reiter „Unterweisung“ die Liste — wer, wann, am eigenen Handy oder am Tablet.",
           ]}
         />
       )}
@@ -160,10 +160,10 @@ export default function Anleitung() {
           titel="Mitarbeiter einen Zugang geben"
           wer="Für das Büro"
           schritte={[
-            "Verwaltung → „Zugang senden" → Filter „Ohne Zugang".",
-            "Handynummer eintippen → „Per SMS senden". Fertig — die SMS enthält Nummer, Passwort und den Link zur App.",
-            "Neuer Mitarbeiter? Verwaltung → Mitarbeiter → „Neuer Mitarbeiter", Nummer eintragen, Einladung „SMS".",
-            "Nummer ändert sich? Mitarbeiter → Bearbeiten → neue Nummer → Häkchen „auch als Anmeldenummer".",
+            "Verwaltung → „Zugang senden“ → Filter „Ohne Zugang“.",
+            "Handynummer eintippen → „Per SMS senden“. Fertig — die SMS enthält Nummer, Passwort und den Link zur App.",
+            "Neuer Mitarbeiter? Verwaltung → Mitarbeiter → „Neuer Mitarbeiter“, Nummer eintragen, Einladung „SMS“.",
+            "Nummer ändert sich? Mitarbeiter → Bearbeiten → neue Nummer → Häkchen „auch als Anmeldenummer“.",
           ]}
           hinweis="Jeder Versand setzt ein neues Passwort. Steht eine Nummer schon bei jemand anderem, sagt die App, bei wem."
         />
