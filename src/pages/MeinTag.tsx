@@ -28,6 +28,7 @@ import { KrankmeldungenCard } from "@/components/MeinTag/KrankmeldungenCard";
 import { LohnzettelCard } from "@/components/MeinTag/LohnzettelCard";
 import { MeineStundenCard } from "@/components/MeinTag/MeineStundenCard";
 import { UnterweisungOffenCard } from "@/components/MeinTag/UnterweisungOffenCard";
+import { UnterlagenHeuteCard } from "@/components/MeinTag/UnterlagenHeuteCard";
 import { TagesplanPreview } from "@/components/TagesplanPreview";
 import {
   Dialog,
@@ -504,7 +505,8 @@ function VorschauCard({ userId }: { userId: string }) {
 }
 
 export default function MeinTag() {
-  const { user, profile } = useAuth();
+  const { user, profile, einfacheAnsicht } = useAuth();
+  const [mehrOffen, setMehrOffen] = useState(false);
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [partie, setPartie] = useState<Partie | null>(null);
   const [colleagues, setColleagues] = useState<{ id: string; vorname: string; nachname: string }[]>([]);
@@ -670,23 +672,50 @@ export default function MeinTag() {
       <HeuteEinteilungCard userId={user!.id} />
 
       {/* Offene Unterweisung zuerst — ohne sie darf man nicht auf die
-          Baustelle, und ab Ablauf der Karenz sperrt die App. */}
+          Baustelle, und ab der Fälligkeit sperrt die App. */}
       <UnterweisungOffenCard />
+
+      {/* Unterlagen der heutigen Baustelle: Pläne, LV, Berichte, Unterweisung */}
+      <UnterlagenHeuteCard userId={user!.id} />
 
       {/* Geschriebene Stunden — aufklappbar, mit Ist/Soll des Monats */}
       <MeineStundenCard />
 
-      {/* Nächste Tage */}
-      <VorschauCard userId={user!.id} />
+      {einfacheAnsicht ? (
+        // Einfache Ansicht: alles Weitere hinter einem Knopf, damit der
+        // Startbildschirm auf eine Handyseite passt.
+        <>
+          <button
+            type="button"
+            onClick={() => setMehrOffen((v) => !v)}
+            className="w-full h-11 rounded-md border bg-card text-sm font-medium flex items-center justify-center gap-2"
+          >
+            {mehrOffen ? "Weniger anzeigen" : "Mehr: Urlaub, Krankmeldung, Lohnzettel, nächste Tage"}
+          </button>
+          {mehrOffen && (
+            <>
+              <VorschauCard userId={user!.id} />
+              <UrlaubAntraegeCard userId={user!.id} />
+              <KrankmeldungenCard userId={user!.id} />
+              <LohnzettelCard userId={user!.id} />
+            </>
+          )}
+        </>
+      ) : (
+        <>
+          {/* Nächste Tage */}
+          <VorschauCard userId={user!.id} />
 
-      {/* Urlaubsanträge */}
-      <UrlaubAntraegeCard userId={user!.id} />
+          {/* Urlaubsanträge */}
+          <UrlaubAntraegeCard userId={user!.id} />
 
-      {/* Krankmeldungen */}
-      <KrankmeldungenCard userId={user!.id} />
+          {/* Krankmeldungen */}
+          <KrankmeldungenCard userId={user!.id} />
 
-      {/* Lohnzettel */}
-      <LohnzettelCard userId={user!.id} />
+          {/* Lohnzettel */}
+          <LohnzettelCard userId={user!.id} />
+        </>
+      )}
 
       {/* Partie-Banner */}
       {partie && (

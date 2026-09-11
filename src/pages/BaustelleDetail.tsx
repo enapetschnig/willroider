@@ -94,7 +94,10 @@ export default function BaustelleDetail() {
   const [terminDialog, setTerminDialog] = useState(false);
   const [kostenDialog, setKostenDialog] = useState(false);
   const [editDialog, setEditDialog] = useState(false);
-  const [activeTab, setActiveTab] = useState<string>("dokumente");
+  // ?tab=dokumente&ordner=91-plaene aus „Mein Tag" → direkt im richtigen Ordner
+  const [activeTab, setActiveTab] = useState<string>(
+    () => new URLSearchParams(window.location.search).get("tab") || "dokumente",
+  );
   const [unterschriftStats, setUnterschriftStats] = useState<{
     total: number;
     done: number;

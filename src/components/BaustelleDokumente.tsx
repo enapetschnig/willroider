@@ -120,7 +120,11 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const [folderMarkers, setFolderMarkers] = useState<OrdnerMarker[]>([]);
   const [loading, setLoading] = useState(true);
   // "root" = Top-Level-Übersicht (alle 14 Ordner). Sonst = im Ordner drin.
-  const [currentFolder, setCurrentFolder] = useState<"root" | FolderKey>("root");
+  // ?ordner=91-plaene (aus „Mein Tag") öffnet den Ordner direkt
+  const [currentFolder, setCurrentFolder] = useState<"root" | FolderKey>(() => {
+    const o = new URLSearchParams(window.location.search).get("ordner");
+    return o && BAUSTELLEN_ORDNER.some((f) => f.key === o) ? (o as FolderKey) : "root";
+  });
   const [currentSubpath, setCurrentSubpath] = useState<string>(""); // Unterordner-Pfad
   const [uploadFolder, setUploadFolder] = useState<FolderKey>("fotos");
   const [newFolderOpen, setNewFolderOpen] = useState(false);

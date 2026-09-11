@@ -32,6 +32,7 @@ type AuthContextValue = {
   /** Legacy-Flags — werden ab sofort aus Permissions berechnet. */
   isAdmin: boolean;
   isPolier: boolean;
+  einfacheAnsicht: boolean;
   canPlan: boolean;
   canReview: boolean;
   canCreateBaustelle: boolean;
@@ -92,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle(),
       supabase.from("user_roles").select("role").eq("user_id", userId).maybeSingle(),
     ]);
-    setProfile((prof as Profile) ?? null);
+    setProfile((prof as unknown as Profile) ?? null);
     setRole((roleData?.role as AppRole) ?? null);
     await loadPermissions();
   }, [loadPermissions]);
@@ -212,6 +213,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [permissionsLoaded, permissions, isAdmin, profile?.is_partieleiter]);
 
   const isPolier = !!profile?.is_partieleiter;
+  // Mitarbeiter ohne erweiterte Rechte bekommen die einfache Handyansicht:
+  // Start = Mein Tag, kurzes Menü. Polier, Büro, GF behalten alles.
+  const einfacheAnsicht = role === "mitarbeiter" && !isAdmin && !isPolier;
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -225,6 +229,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       hasPermission,
       isAdmin,
       isPolier,
+      einfacheAnsicht,
       canPlan,
       canReview,
       canCreateBaustelle,

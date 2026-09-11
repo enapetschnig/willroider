@@ -101,7 +101,7 @@ const NAV: NavItem[] = [
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { profile, role, isAdmin, canReview, hasPermission, signOut } = useAuth();
+  const { profile, role, isAdmin, canReview, hasPermission, signOut, einfacheAnsicht } = useAuth();
   const navigate = useNavigate();
   const [installOpen, setInstallOpen] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
@@ -205,7 +205,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const istAngestellter = (profile as any)?.zeiterfassung_typ === "angestellter";
 
+  // Einfache Ansicht: nur Mein Tag, Baustellen, Zeiterfassung/Halle, Anleitung.
+  const EINFACH = new Set(["/mein-tag", "/baustellen", "/stunden", "/halle", "/taetigkeitsbericht", "/anleitung"]);
   const visibleNav = NAV.filter((n) => {
+    if (einfacheAnsicht && !EINFACH.has(n.to)) return false;
     // Zusatzbedingung am Profil (z.B. Angestellter/Bauarbeiter) gilt immer.
     if (n.show && !n.show({ istAngestellter, hasPermission })) return false;
     // Wenn perm gesetzt: das ist die einzige Quelle der Wahrheit.

@@ -37,6 +37,20 @@ import Kalkulator from "@/pages/Kalkulator";
 import KalkulatorAnfragen from "@/pages/KalkulatorAnfragen";
 import MeinTag from "@/pages/MeinTag";
 import Anleitung from "@/pages/Anleitung";
+import { Navigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
+
+/** Mitarbeiter ohne erweiterte Rechte starten in „Mein Tag" — das ist
+ *  ihre ganze App. Alle anderen auf dem Dashboard. */
+function Startseite() {
+  const { einfacheAnsicht } = useAuth();
+  if (einfacheAnsicht) return <Navigate to="/mein-tag" replace />;
+  return (
+    <RequirePermission perm="dashboard.view">
+      <Dashboard />
+    </RequirePermission>
+  );
+}
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { RequirePermission } from "@/components/RequirePermission";
 
@@ -86,7 +100,7 @@ const App = () => (
             <Route path="/auth" element={<Auth />} />
             <Route path="/registriert" element={<RegistrierungBestaetigung />} />
             <Route element={<ProtectedRoute />}>
-              <Route path="/" element={<RequirePermission perm="dashboard.view"><Dashboard /></RequirePermission>} />
+              <Route path="/" element={<Startseite />} />
               <Route path="/arbeitsplanung" element={<RequirePermission perm="arbeitsplanung.view"><Arbeitsplanung /></RequirePermission>} />
               <Route path="/tagesplanung" element={<RequirePermission perm="tagesplanung.edit"><Tagesplanung /></RequirePermission>} />
               <Route path="/baustellen" element={<RequirePermission perm="baustellen.view"><Baustellen /></RequirePermission>} />
