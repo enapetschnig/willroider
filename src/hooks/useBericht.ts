@@ -8,6 +8,8 @@ import type {
 import {
   ladeVorausfuellung,
   uebernehmeVorausfuellung,
+  ladeEinteilungVorausfuellung,
+  uebernehmeEinteilungVorausfuellung,
 } from "@/hooks/useBerichtVorausfuellung";
 
 type Bericht = Database["public"]["Tables"]["berichte"]["Row"];
@@ -257,19 +259,25 @@ export async function findeOderErstelleBerichtMitVorausfuellung(
   baustelleId: string,
   datum: string,
   typ: BerichtTyp,
-): Promise<{ id: string; created: boolean; importiert: number }> {
+): Promise<{ id: string; created: boolean; importiert: number; ausPlan: number }> {
   const r = await findeOderErstelleBericht(baustelleId, datum, typ);
   let importiert = 0;
+  let ausPlan = 0;
   if (r.created) {
     try {
       const vf = await ladeVorausfuellung(baustelleId, datum);
       if (vf.mitarbeiter.length > 0 || vf.taetigkeiten.length > 0) {
         await uebernehmeVorausfuellung(r.id, vf);
         importiert = vf.mitarbeiter.length;
+      } else if (typ === "bautagesbericht") {
+        // Noch keine Stunden gebucht (Bericht wird in der Früh angelegt):
+        // grob aus dem Tagesplan vorbelegen — Leute und geplante Tätigkeit.
+        const plan = await ladeEinteilungVorausfuellung(baustelleId, datum);
+        ausPlan = await uebernehmeEinteilungVorausfuellung(r.id, plan);
       }
     } catch {
       /* Vorausfüllung optional — Bericht ist trotzdem angelegt. */
     }
   }
-  return { ...r, importiert };
+  return { ...r, importiert, ausPlan };
 }

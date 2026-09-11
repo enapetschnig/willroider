@@ -71,6 +71,8 @@ import {
 import {
   ladeVorausfuellung,
   uebernehmeVorausfuellung,
+  ladeEinteilungVorausfuellung,
+  uebernehmeEinteilungVorausfuellung,
   pruefeZeiterfassungNeuer,
 } from "@/hooks/useBerichtVorausfuellung";
 import { fetchWetterFuerTag, geocodeAdresse } from "@/lib/wetter";
@@ -159,11 +161,18 @@ export default function BerichtDetail() {
       try {
         const r = await ladeVorausfuellung(b0.baustelle_id, b0.datum);
         await uebernehmeVorausfuellung(b0.id, r);
+        let ausPlan = 0;
+        if (r.mitarbeiter.length === 0 && b0.typ === "bautagesbericht") {
+          const plan = await ladeEinteilungVorausfuellung(b0.baustelle_id, b0.datum);
+          ausPlan = await uebernehmeEinteilungVorausfuellung(b0.id, plan);
+        }
         toast({
           title:
             r.mitarbeiter.length > 0
               ? `${r.mitarbeiter.length} Mitarbeiter aus Zeiterfassung übernommen`
-              : "Keine Zeiterfassung gefunden — manuell ergänzen",
+              : ausPlan > 0
+                ? `${ausPlan} Mitarbeiter aus dem Tagesplan vorbelegt — Stunden folgen aus der Zeiterfassung`
+                : "Keine Zeiterfassung und kein Tagesplan gefunden — manuell ergänzen",
         });
         refetch();
       } catch (e) {
@@ -474,10 +483,22 @@ function WetterCard({
    * Nominatim die Adresse geocoded und die Koord. zur Baustelle persistiert.
    * `silent=true` unterdrückt Toasts (für Auto-Fetch).
    */
+  /** Gerätestandort (einmalige Abfrage, 10 s). null, wenn abgelehnt/nicht verfügbar. */
+  const standortErmitteln = () =>
+    new Promise<{ lat: number; lng: number } | null>((resolve) => {
+      if (typeof navigator === "undefined" || !navigator.geolocation) return resolve(null);
+      navigator.geolocation.getCurrentPosition(
+        (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+        () => resolve(null),
+        { timeout: 10000, maximumAge: 5 * 60 * 1000 },
+      );
+    });
+
   const fetchWetter = async (silent = false) => {
     if (!baustelle) return;
     let lat = baustelle.koordinaten_lat;
     let lng = baustelle.koordinaten_lng;
+    let standortVerwendet = false;
     setLoading(true);
     try {
       if (lat == null || lng == null) {
@@ -486,23 +507,35 @@ function WetterCard({
           baustelle.plz,
           baustelle.ort,
         );
-        if (!geo) {
-          if (!silent) {
-            toast({
-              variant: "destructive",
-              title: "Adresse konnte nicht geocoded werden",
-              description: "Bitte Adresse oder GPS-Koordinaten an der Baustelle pflegen.",
-            });
+        if (geo) {
+          lat = geo.lat;
+          lng = geo.lng;
+          // Cache die Koordinaten in der Baustelle für die nächste Anfrage.
+          await supabase
+            .from("baustellen")
+            .update({ koordinaten_lat: lat, koordinaten_lng: lng })
+            .eq("id", baustelle.id);
+        } else {
+          // Adresse fehlt oder ist nicht auffindbar (25 von 56 Baustellen
+          // haben keine): Standort des Geräts nehmen — der Polier steht ja
+          // meist auf der Baustelle, wenn er den Bericht anlegt. Wird NICHT
+          // an der Baustelle gespeichert, nur für diesen Bericht verwendet.
+          const pos = await standortErmitteln();
+          if (!pos) {
+            if (!silent) {
+              toast({
+                variant: "destructive",
+                title: "Kein Ort für das Wetter",
+                description:
+                  "Adresse der Baustelle nicht auffindbar und kein Standort vom Gerät. Bitte Adresse an der Baustelle pflegen oder Standort erlauben.",
+              });
+            }
+            return;
           }
-          return;
+          lat = pos.lat;
+          lng = pos.lng;
+          standortVerwendet = true;
         }
-        lat = geo.lat;
-        lng = geo.lng;
-        // Cache die Koordinaten in der Baustelle für die nächste Anfrage.
-        await supabase
-          .from("baustellen")
-          .update({ koordinaten_lat: lat, koordinaten_lng: lng })
-          .eq("id", baustelle.id);
       }
       const w = await fetchWetterFuerTag(lat, lng, bericht.datum);
       if (!w) {
@@ -519,9 +552,9 @@ function WetterCard({
         temperatur_min: w.temp_min,
         temperatur_max: w.temp_max,
         niederschlag_mm: w.niederschlag_mm,
-        wetter_quelle: w.quelle,
+        wetter_quelle: standortVerwendet ? `${w.quelle} (Gerätestandort)` : w.quelle,
       });
-      if (!silent) toast({ title: "Wetter geladen" });
+      if (!silent) toast({ title: standortVerwendet ? "Wetter vom Gerätestandort geladen" : "Wetter geladen" });
     } finally {
       setLoading(false);
     }
@@ -529,15 +562,8 @@ function WetterCard({
 
   // Beim ersten Öffnen + wenn noch kein Wetter: auto-fetch (silent, best effort)
   useEffect(() => {
-    if (
-      kannEditieren &&
-      !bericht.wetter_beschreibung &&
-      baustelle &&
-      // mindestens GPS oder Adresse muss vorhanden sein
-      (baustelle.koordinaten_lat != null ||
-        baustelle.baustellen_adresse ||
-        baustelle.ort)
-    ) {
+    // Immer versuchen: Koordinaten → Adresse → Gerätestandort.
+    if (kannEditieren && !bericht.wetter_beschreibung && baustelle) {
       fetchWetter(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -770,6 +796,11 @@ function MitarbeiterEditor({
                       ZE
                     </Badge>
                   )}
+                  {(m as any).aus_einteilung && (
+                    <Badge variant="outline" className="text-[9px] ml-1.5" title="Aus dem Tagesplan vorbelegt — Stunden folgen aus der Zeiterfassung">
+                      Plan
+                    </Badge>
+                  )}
                 </div>
                 <div className="flex items-center gap-1 mt-1">
                   <Input
@@ -909,6 +940,11 @@ function TaetigkeitenEditor({
             {t.aus_zeiterfassung && (
               <Badge variant="outline" className="text-[9px]">
                 ZE
+              </Badge>
+            )}
+            {(t as any).aus_einteilung && (
+              <Badge variant="outline" className="text-[9px]" title="Aus dem Tagesplan vorbelegt">
+                Plan
               </Badge>
             )}
             {kannEditieren && (

@@ -96,25 +96,104 @@ export async function ladeVorausfuellung(
 }
 
 /**
+ * Vorbelegung aus dem TAGESPLAN (Einteilung): die eingeteilten Leute und die
+ * geplante Tätigkeit — grob, ohne Stunden. Das ist der Stand in der Früh,
+ * bevor jemand Stunden gebucht hat. Die Zeiterfassung ersetzt diese Zeilen
+ * später (aus_einteilung=true), manuelle Zeilen bleiben.
+ */
+export interface EinteilungVorausfuellung {
+  mitarbeiter: string[];
+  taetigkeit: string | null;
+}
+
+export async function ladeEinteilungVorausfuellung(
+  baustelleId: string,
+  datum: string,
+): Promise<EinteilungVorausfuellung> {
+  const { data } = await supabase
+    .from("einteilungen")
+    .select("taetigkeit, einteilung_mitarbeiter(mitarbeiter_id, abwesend)")
+    .eq("baustelle_id", baustelleId)
+    .eq("datum", datum);
+  const ids = new Set<string>();
+  const taetigkeiten: string[] = [];
+  for (const e of (data as any[]) ?? []) {
+    for (const em of e.einteilung_mitarbeiter ?? []) {
+      if (!em.abwesend && em.mitarbeiter_id) ids.add(em.mitarbeiter_id);
+    }
+    const t = (e.taetigkeit ?? "").trim();
+    if (t && !taetigkeiten.includes(t)) taetigkeiten.push(t);
+  }
+  return { mitarbeiter: [...ids], taetigkeit: taetigkeiten.join(" · ") || null };
+}
+
+export async function uebernehmeEinteilungVorausfuellung(
+  berichtId: string,
+  r: EinteilungVorausfuellung,
+): Promise<number> {
+  if (r.mitarbeiter.length === 0 && !r.taetigkeit) return 0;
+  await supabase.from("bericht_mitarbeiter").delete().eq("bericht_id", berichtId).eq("aus_einteilung", true);
+  await supabase.from("bericht_taetigkeiten").delete().eq("bericht_id", berichtId).eq("aus_einteilung", true);
+  if (r.mitarbeiter.length > 0) {
+    await supabase.from("bericht_mitarbeiter").insert(
+      r.mitarbeiter.map((mitarbeiter_id, idx) => ({
+        bericht_id: berichtId,
+        mitarbeiter_id,
+        position: idx + 1,
+        stunden_netto: 0,
+        aus_zeiterfassung: false,
+        aus_einteilung: true,
+      })) as any,
+    );
+  }
+  if (r.taetigkeit) {
+    await supabase.from("bericht_taetigkeiten").insert({
+      bericht_id: berichtId,
+      position: 1,
+      taetigkeit_id: null,
+      bezeichnung: r.taetigkeit,
+      summe_stunden: 0,
+      aus_zeiterfassung: false,
+      aus_einteilung: true,
+    } as any);
+  }
+  await supabase
+    .from("berichte")
+    .update({ einteilung_quelle_am: new Date().toISOString() } as any)
+    .eq("id", berichtId);
+  const { data: { user } } = await supabase.auth.getUser();
+  await supabase.from("bericht_aenderungen").insert({
+    bericht_id: berichtId,
+    autor_id: user?.id ?? null,
+    art: "vorausfuellung",
+    details: `${r.mitarbeiter.length} MA${r.taetigkeit ? " + Tätigkeit" : ""} aus dem Tagesplan vorbelegt`,
+  });
+  return r.mitarbeiter.length;
+}
+
+/**
  * Schreibt die Vorausfüllung als bericht_mitarbeiter/bericht_taetigkeiten in die DB.
- * Ersetzt nur Zeilen mit aus_zeiterfassung=true; manuelle Zeilen bleiben unangetastet.
- * Setzt berichte.zeiterfassung_quelle_am.
+ * Ersetzt Zeilen mit aus_zeiterfassung=true — und, sobald die Zeiterfassung
+ * Daten liefert, auch die Platzhalter aus dem Tagesplan (aus_einteilung).
+ * Manuelle Zeilen bleiben unangetastet. Setzt berichte.zeiterfassung_quelle_am.
  */
 export async function uebernehmeVorausfuellung(
   berichtId: string,
   result: VorausfuellungResult,
 ): Promise<void> {
-  // Alte aus_zeiterfassung=true löschen
+  const hatDaten = result.mitarbeiter.length > 0 || result.taetigkeiten.length > 0;
+  // Alte aus_zeiterfassung=true löschen; Plan-Platzhalter nur, wenn es
+  // jetzt echte Stunden gibt — sonst stünde der Bericht in der Früh leer da.
   await supabase
     .from("bericht_mitarbeiter")
     .delete()
     .eq("bericht_id", berichtId)
-    .eq("aus_zeiterfassung", true);
+    .or(hatDaten ? "aus_zeiterfassung.eq.true,aus_einteilung.eq.true" : "aus_zeiterfassung.eq.true");
   await supabase
     .from("bericht_taetigkeiten")
     .delete()
     .eq("bericht_id", berichtId)
-    .eq("aus_zeiterfassung", true);
+    .or(hatDaten ? "aus_zeiterfassung.eq.true,aus_einteilung.eq.true" : "aus_zeiterfassung.eq.true");
 
   // Neue MAs
   if (result.mitarbeiter.length > 0) {

@@ -406,7 +406,7 @@ function NeuerBerichtDialog({
     if (!baustelleId) return;
     setLoading(true);
     try {
-      const { id, created, importiert } = await findeOderErstelleBerichtMitVorausfuellung(
+      const { id, created, importiert, ausPlan } = await findeOderErstelleBerichtMitVorausfuellung(
         baustelleId,
         datum,
         typ,
@@ -415,7 +415,9 @@ function NeuerBerichtDialog({
         title: created
           ? importiert > 0
             ? `Bericht angelegt · ${importiert} MA aus Zeiterfassung übernommen`
-            : "Bericht angelegt"
+            : ausPlan > 0
+              ? `Bericht angelegt · ${ausPlan} MA aus dem Tagesplan vorbelegt`
+              : "Bericht angelegt"
           : "Bericht existiert bereits — geöffnet",
       });
       onClose();
