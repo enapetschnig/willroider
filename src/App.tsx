@@ -37,8 +37,6 @@ import Kalkulator from "@/pages/Kalkulator";
 import KalkulatorAnfragen from "@/pages/KalkulatorAnfragen";
 import MeinTag from "@/pages/MeinTag";
 import Anleitung from "@/pages/Anleitung";
-import { Navigate } from "react-router-dom";
-import { useAuth } from "@/contexts/AuthContext";
 
 /** Mitarbeiter ohne erweiterte Rechte starten in „Mein Tag" — das ist
  *  ihre ganze App. Alle anderen auf dem Dashboard. */
