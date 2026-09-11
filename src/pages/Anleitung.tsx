@@ -106,8 +106,9 @@ export default function Anleitung() {
         wer="Für alle"
         schritte={[
           "„Mein Tag“ zeigt oben deine heutige Baustelle mit Treffpunkt und Abfahrt. Mit „Navigation“ öffnet sich die Karte.",
-          "Darunter siehst du, ob eine Unterweisung offen ist, und deine Stunden von heute.",
-          "Stunden trägst du unter „Stunden“ ein — am besten gleich am Abend.",
+          "Darunter: ob eine Unterweisung offen ist, und die Unterlagen der Baustelle — Pläne, Leistungsverzeichnis, Berichte, Unterweisung. Ein Tipp öffnet den Ordner.",
+          "Dann deine Stunden von heute. Urlaub, Krankmeldung und Lohnzettel findest du unter „Mehr“.",
+          "Stunden trägst du unter „Zeiterfassung“ ein — am besten gleich am Abend.",
         ]}
       />
 
@@ -123,6 +124,20 @@ export default function Anleitung() {
         ]}
         hinweis="Ist die Frist vorbei, zeigt die App nur noch die Unterweisung, bis du unterschrieben hast. Der Bauleiter bekommt eine SMS, wer noch fehlt."
       />
+
+      {istPolier && (
+        <Abschnitt
+          icon={PenLine}
+          titel="Bautagesbericht und Unterschriften"
+          wer="Für Poliere und Bauleiter"
+          schritte={[
+            "Berichte → „Neuer Bericht“: Baustelle und Tag wählen. Die eingeteilten Leute und die geplante Tätigkeit sind schon drin (Markierung „Plan“), die Stunden kommen aus der Zeiterfassung nach.",
+            "Wetter holt sich der Bericht selbst — aus der Adresse der Baustelle, sonst vom Standort deines Handys (Nachfrage einmal erlauben).",
+            "Aufmaß und Tätigkeiten kannst du diktieren: Mikrofon neben dem Feld antippen, sprechen, fertig. Korrigieren geht mit der Tastatur.",
+            "Unterschrift am Computer: einmal „als meine Unterschrift merken“ (zeichnen oder Bild hochladen), danach überall mit einem Klick einfügen. Der Kunde unterschreibt weiterhin selbst am Gerät.",
+          ]}
+        />
+      )}
 
       {istPolier && (
         <Abschnitt
@@ -166,6 +181,21 @@ export default function Anleitung() {
             "Nummer ändert sich? Mitarbeiter → Bearbeiten → neue Nummer → Häkchen „auch als Anmeldenummer“.",
           ]}
           hinweis="Jeder Versand setzt ein neues Passwort. Steht eine Nummer schon bei jemand anderem, sagt die App, bei wem."
+        />
+      )}
+
+      {hasPermission("system.manage_permissions") && (
+        <Abschnitt
+          icon={ShieldCheck}
+          titel="Rechte und Ordner je Person"
+          wer="Für die Geschäftsführung"
+          schritte={[
+            "Verwaltung → Mitarbeiter → Schild-Symbol in der Zeile.",
+            "Oben die Baustellen-Ordner: „Standard der Rolle“ abhaken und einzeln wählen, was diese Person sehen soll.",
+            "Darunter jedes Recht: „wie Rolle“, „erlauben“ oder „verbieten“. Die Rolle bleibt die Grundlage, hier stehen nur Ausnahmen.",
+            "Speichern — gilt beim nächsten Laden der App, auch für Unterlagen und Ordner.",
+          ]}
+          hinweis="Mitarbeiter sehen als „Berichte“ nur die Berichts-PDFs, nicht den übrigen Schriftverkehr. Die Datenbank prüft das, nicht nur die Anzeige."
         />
       )}
 
