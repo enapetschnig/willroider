@@ -1,6 +1,12 @@
 /**
- * Schlanker Unterschrift-Dialog — Finger/Maus zeichnen auf einem Canvas,
- * Ergebnis wird als Base64-PNG zurückgegeben.
+ * Unterschrift-Dialog — drei Wege, ein Ergebnis (Base64-PNG):
+ *   1. gespeicherte Unterschrift mit einem Klick einfügen (am Rechner!)
+ *   2. mit Finger oder Maus zeichnen — und auf Wunsch als „meine" merken
+ *   3. ein Bild der Unterschrift hochladen
+ *
+ * Die gespeicherte Unterschrift gehört dem Angemeldeten. Wo jemand ANDERER
+ * unterschreibt (Kunde am Bericht, Mitarbeiter am Tablet des Poliers),
+ * schaltet der Aufrufer sie mit `gespeicherteErlauben={false}` ab.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -12,7 +18,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Eraser, Check, Loader2 } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { Eraser, Check, Loader2, PenLine, Upload, Star } from "lucide-react";
+
+const isDesktop = () =>
+  typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches;
 
 export function UnterschriftDialog({
   open,
@@ -20,19 +31,52 @@ export function UnterschriftDialog({
   onSave,
   titel = "Unterschrift",
   busy = false,
+  gespeicherteErlauben = true,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onSave: (dataUrl: string) => void;
   titel?: string;
   busy?: boolean;
+  /** false, wenn jemand anderer als der Angemeldete unterschreibt. */
+  gespeicherteErlauben?: boolean;
 }) {
+  const { user } = useAuth();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const drawingRef = useRef(false);
   const [hasDrawn, setHasDrawn] = useState(false);
+  const [gespeichert, setGespeichert] = useState<string | null>(null);
+  const [modus, setModus] = useState<"wahl" | "zeichnen">("zeichnen");
+  const [merken, setMerken] = useState(false);
 
+  // Gespeicherte Unterschrift laden; wenn vorhanden, zuerst anbieten.
   useEffect(() => {
     if (!open) return;
+    setHasDrawn(false);
+    if (!gespeicherteErlauben || !user?.id) {
+      setGespeichert(null);
+      setModus("zeichnen");
+      setMerken(false);
+      return;
+    }
+    (async () => {
+      const { data } = await supabase
+        .from("unterschrift_vorlagen" as any)
+        .select("data")
+        .eq("profile_id", user.id)
+        .maybeSingle();
+      const d = (data as any)?.data ?? null;
+      setGespeichert(d);
+      setModus(d ? "wahl" : "zeichnen");
+      // Ohne gespeicherte Unterschrift: Merken vorschlagen — am Rechner
+      // ist das genau der Punkt, um es nicht ständig mit der Maus zu tun.
+      setMerken(!d && isDesktop());
+    })();
+  }, [open, user?.id, gespeicherteErlauben]);
+
+  useEffect(() => {
+    if (!open || modus !== "zeichnen") return;
     let raf = 0;
     let cleanup: (() => void) | undefined;
 
@@ -114,7 +158,7 @@ export function UnterschriftDialog({
       cancelAnimationFrame(raf);
       cleanup?.();
     };
-  }, [open]);
+  }, [open, modus]);
 
   const clear = () => {
     const canvas = canvasRef.current;
@@ -125,10 +169,47 @@ export function UnterschriftDialog({
     setHasDrawn(false);
   };
 
-  const save = () => {
+  /** Bild-Datei (Foto/Scan der Unterschrift) eingepasst auf den Canvas. */
+  const bildLaden = (file: File) => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const img = new Image();
+    img.onload = () => {
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, w, h);
+      const scale = Math.min((w - 16) / img.width, (h - 16) / img.height, 1.5);
+      const dw = img.width * scale;
+      const dh = img.height * scale;
+      ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+      setHasDrawn(true);
+      URL.revokeObjectURL(img.src);
+    };
+    img.src = URL.createObjectURL(file);
+  };
+
+  const merkenSpeichern = async (dataUrl: string) => {
+    if (!user?.id) return;
+    await supabase
+      .from("unterschrift_vorlagen" as any)
+      .upsert({ profile_id: user.id, data: dataUrl, updated_at: new Date().toISOString() });
+  };
+
+  const save = async () => {
     const canvas = canvasRef.current;
     if (!canvas || !hasDrawn) return;
-    onSave(canvas.toDataURL("image/png"));
+    const dataUrl = canvas.toDataURL("image/png");
+    if (merken && gespeicherteErlauben) await merkenSpeichern(dataUrl);
+    onSave(dataUrl);
+  };
+
+  const vergessen = async () => {
+    if (!user?.id) return;
+    await supabase.from("unterschrift_vorlagen" as any).delete().eq("profile_id", user.id);
+    setGespeichert(null);
+    setModus("zeichnen");
   };
 
   return (
@@ -137,31 +218,101 @@ export function UnterschriftDialog({
         <DialogHeader>
           <DialogTitle>{titel}</DialogTitle>
         </DialogHeader>
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">
-            Mit dem Finger im Feld unterschreiben.
-          </p>
-          <canvas
-            ref={canvasRef}
-            className="w-full h-44 rounded-md border-2 border-dashed bg-white touch-none"
-          />
-          <Button variant="outline" size="sm" onClick={clear} className="w-full">
-            <Eraser className="h-3.5 w-3.5 mr-1.5" />
-            Löschen
-          </Button>
-        </div>
+
+        {modus === "wahl" && gespeichert ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Deine gespeicherte Unterschrift:</p>
+            <div className="rounded-md border bg-white p-2">
+              <img src={gespeichert} alt="Gespeicherte Unterschrift" className="h-28 w-full object-contain" />
+            </div>
+            <Button className="w-full h-11" onClick={() => onSave(gespeichert)} disabled={busy}>
+              {busy ? (
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              ) : (
+                <Check className="h-4 w-4 mr-1.5" />
+              )}
+              Diese Unterschrift verwenden
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="flex-1" onClick={() => setModus("zeichnen")}>
+                <PenLine className="h-3.5 w-3.5 mr-1.5" />
+                Neu zeichnen
+              </Button>
+              <Button variant="ghost" size="sm" className="flex-1 text-muted-foreground" onClick={vergessen}>
+                Gespeicherte löschen
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              {isDesktop()
+                ? "Mit der Maus zeichnen — oder ein Bild deiner Unterschrift hochladen."
+                : "Mit dem Finger im Feld unterschreiben."}
+            </p>
+            <canvas
+              ref={canvasRef}
+              className="w-full h-44 rounded-md border-2 border-dashed bg-white touch-none"
+            />
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={clear} className="flex-1">
+                <Eraser className="h-3.5 w-3.5 mr-1.5" />
+                Löschen
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()} className="flex-1">
+                <Upload className="h-3.5 w-3.5 mr-1.5" />
+                Bild hochladen
+              </Button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) bildLaden(f);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+            {gespeicherteErlauben && (
+              <label className="flex items-center gap-2 text-xs cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={merken}
+                  onChange={(e) => setMerken(e.target.checked)}
+                />
+                <Star className="h-3.5 w-3.5 text-primary" />
+                Als meine Unterschrift merken — danach mit einem Klick einfügen
+              </label>
+            )}
+            {gespeichert && (
+              <button
+                type="button"
+                className="text-xs text-primary hover:underline"
+                onClick={() => setModus("wahl")}
+              >
+                ← Gespeicherte Unterschrift verwenden
+              </button>
+            )}
+          </div>
+        )}
+
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Abbrechen
           </Button>
-          <Button onClick={save} disabled={!hasDrawn || busy}>
-            {busy ? (
-              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-            ) : (
-              <Check className="h-4 w-4 mr-1.5" />
-            )}
-            Unterschreiben
-          </Button>
+          {modus === "zeichnen" && (
+            <Button onClick={save} disabled={!hasDrawn || busy}>
+              {busy ? (
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              ) : (
+                <Check className="h-4 w-4 mr-1.5" />
+              )}
+              Unterschreiben
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

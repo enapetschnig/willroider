@@ -771,16 +771,27 @@ function MitarbeiterEditor({
                     </Badge>
                   )}
                 </div>
-                <Input
-                  placeholder="Notiz (optional)"
-                  defaultValue={m.taetigkeit_notiz ?? ""}
-                  onBlur={(e) => {
-                    if ((e.target.value ?? "") !== (m.taetigkeit_notiz ?? ""))
-                      updateNotiz(m.id, e.target.value);
-                  }}
-                  disabled={!kannEditieren}
-                  className="h-7 text-xs mt-1"
-                />
+                <div className="flex items-center gap-1 mt-1">
+                  <Input
+                    placeholder="Notiz (optional)"
+                    defaultValue={m.taetigkeit_notiz ?? ""}
+                    onBlur={(e) => {
+                      if ((e.target.value ?? "") !== (m.taetigkeit_notiz ?? ""))
+                        updateNotiz(m.id, e.target.value);
+                    }}
+                    disabled={!kannEditieren}
+                    className="h-7 text-xs flex-1"
+                  />
+                  {kannEditieren && (
+                    <MicButton
+                      title="Notiz diktieren"
+                      className="h-7 w-7"
+                      onText={(text) =>
+                        updateNotiz(m.id, m.taetigkeit_notiz ? `${m.taetigkeit_notiz} ${text}` : text)
+                      }
+                    />
+                  )}
+                </div>
               </div>
               <StundenInput
                 value={Number(m.stunden_netto) || 0}
@@ -875,6 +886,15 @@ function TaetigkeitenEditor({
               disabled={!kannEditieren}
               className="h-9 flex-1"
             />
+            {kannEditieren && (
+              <MicButton
+                title="Tätigkeit diktieren"
+                className="h-9 w-9"
+                onText={(text) =>
+                  update(t.id, { bezeichnung: t.bezeichnung ? `${t.bezeichnung} ${text}` : text })
+                }
+              />
+            )}
             <StundenInput
               value={Number(t.summe_stunden) || 0}
               onChange={(v) =>
@@ -911,6 +931,11 @@ function TaetigkeitenEditor({
               onChange={(e) => setNeuBezeichnung(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && add()}
               className="h-9 flex-1"
+            />
+            <MicButton
+              title="Tätigkeit diktieren"
+              className="h-9 w-9"
+              onText={(text) => setNeuBezeichnung((v) => (v ? `${v} ${text}` : text))}
             />
             <StundenInput
               value={neuStd}
@@ -1093,6 +1118,7 @@ function UnterschriftenEditor({
           onSave={(dataUrl) => offen && speichern(offen, dataUrl)}
           titel={offen === "kunde" ? "Unterschrift Kunde" : "Unterschrift Polier"}
           busy={busy}
+          gespeicherteErlauben={offen !== "kunde"}
         />
       </CardContent>
     </Card>
@@ -1175,6 +1201,15 @@ function AufmassEditor({
                 className="h-9 flex-1"
               />
               {kannEditieren && (
+                <MicButton
+                  title="Beschreibung diktieren"
+                  className="h-9 w-9"
+                  onText={(text) =>
+                    update(a.id, { beschreibung: a.beschreibung ? `${a.beschreibung} ${text}` : text })
+                  }
+                />
+              )}
+              {kannEditieren && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -1228,6 +1263,13 @@ function AufmassEditor({
               value={neu.beschreibung}
               onChange={(e) => setNeu({ ...neu, beschreibung: e.target.value })}
               className="h-9 flex-1"
+            />
+            <MicButton
+              title="Position diktieren"
+              className="h-9 w-9"
+              onText={(text) =>
+                setNeu((n) => ({ ...n, beschreibung: n.beschreibung ? `${n.beschreibung} ${text}` : text }))
+              }
             />
             <Input
               type="number"

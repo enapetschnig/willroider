@@ -325,6 +325,7 @@ export function UnterweisungTablet({
             onOpenChange={(v) => !v && setSignatur(false)}
             onSave={speichern}
             busy={speichert}
+            gespeicherteErlauben={false}
             titel={`Unterschrift ${aktiv.vorname} ${aktiv.nachname}`}
           />
         </>
