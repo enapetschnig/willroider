@@ -261,6 +261,22 @@ export default function Evaluierung() {
         return;
       }
       evalId = data!.id;
+      // Neu angelegt = die jetzt gültige Unterweisung der Baustelle (auch
+      // eine Ergänzung untertags, Regel C). Der Trigger an der Baustelle
+      // teilt sie allen Eingeteilten zu — fällig 30 Minuten bzw. 08:00.
+      if (baustelleId) {
+        const { error: pflichtErr } = await supabase
+          .from("baustellen")
+          .update({ pflicht_evaluierung_id: evalId })
+          .eq("id", baustelleId);
+        if (pflichtErr) {
+          toast({
+            variant: "destructive",
+            title: "Als gültige Unterweisung nicht gesetzt",
+            description: pflichtErr.message,
+          });
+        }
+      }
     }
 
     // Verteilung an Partie-Mitglieder — bewusst AUCH beim Bearbeiten:
@@ -283,7 +299,7 @@ export default function Evaluierung() {
     }
 
     toast({
-      title: editing.id ? "Aktualisiert" : "Evaluierung angelegt",
+      title: editing.id ? "Aktualisiert" : "Unterweisung angelegt — gilt ab jetzt für die Baustelle",
       description,
     });
 

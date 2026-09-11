@@ -19,10 +19,11 @@ import { Button } from "@/components/ui/button";
 import { ShieldAlert } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { werktageSeit } from "@/lib/dateFmt";
 import {
   EvaluierungSignaturePrompt,
   ladeOffeneUnterschriften,
+  istUeberfaellig,
+  faelligText,
   type OpenSignature,
 } from "@/components/EvaluierungSignatureGate";
 
@@ -59,11 +60,12 @@ export function UnterweisungOffenCard() {
 
   if (offen.length === 0) return null;
 
-  // Wie viele Werktage bleiben, bis die App gesperrt wird?
-  const restTage = Math.min(
-    ...offen.map((o) => o.karenzWerktage - werktageSeit(o.datum)),
-  );
-  const dringend = restTage <= 1;
+  // Dringend = fällig oder innerhalb der nächsten Stunde fällig.
+  const naechste = offen[0];
+  const dringend =
+    offen.some(istUeberfaellig) ||
+    (!!naechste.faelligAm &&
+      new Date(naechste.faelligAm).getTime() - Date.now() < 60 * 60 * 1000);
 
   return (
     <>
@@ -97,11 +99,9 @@ export function UnterweisungOffenCard() {
                 {offen.length > 4 && <li>… und {offen.length - 4} weitere</li>}
               </ul>
               <p className="mt-1.5 text-[11px] text-muted-foreground">
-                {restTage <= 0
-                  ? "Ohne Unterschrift lässt sich die App nicht mehr benutzen."
-                  : `Bitte vor dem ersten Arbeitstag auf der Baustelle unterschreiben — noch ${restTage} ${
-                      restTage === 1 ? "Werktag" : "Werktage"
-                    }.`}
+                {offen.some(istUeberfaellig)
+                  ? "Überfällig — ohne Unterschrift lässt sich die App nicht weiter benutzen."
+                  : `Bitte bis dahin lesen und unterschreiben: ${faelligText(naechste)}.`}
               </p>
             </div>
           </div>

@@ -36,6 +36,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
 import type { Database, BaustellenStatus } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
+import { UnterweisungTablet } from "@/components/UnterweisungTablet";
+import { UnterweisungNachweis } from "@/components/UnterweisungNachweis";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Termin = Database["public"]["Tables"]["baustellen_termine"]["Row"];
@@ -83,6 +85,8 @@ export default function BaustelleDetail() {
   const [kosten, setKosten] = useState<Kosten[]>([]);
   const [stunden, setStunden] = useState<StundenZeile[]>([]);
   const [evals, setEvals] = useState<Eval[]>([]);
+  const [tabletOffen, setTabletOffen] = useState(false);
+  const [nachweisKey, setNachweisKey] = useState(0);
   const [partie, setPartie] = useState<Partie | null>(null);
   const [team, setTeam] = useState<Profile[]>([]);
   const [allPartien, setAllPartien] = useState<Partie[]>([]);
@@ -167,10 +171,10 @@ export default function BaustelleDetail() {
     if (baustelle?.pflicht_evaluierung_id) {
       const { data: unterschriften } = await supabase
         .from("evaluierung_unterschriften")
-        .select("id, mitarbeiter_id, unterschrift_data")
+        .select("id, mitarbeiter_id, status")
         .eq("evaluierung_id", baustelle.pflicht_evaluierung_id);
       const list = (unterschriften as any[]) ?? [];
-      const offen = list.filter((u) => !u.unterschrift_data);
+      const offen = list.filter((u) => u.status === "offen");
       const offenIds = offen.map((u) => u.mitarbeiter_id);
       let offenWithNames: any[] = [];
       if (offenIds.length > 0) {
@@ -214,29 +218,18 @@ export default function BaustelleDetail() {
 
   const setPflichtUnterweisung = async (typ: "" | "werkstatt" | "baustelle" | "fertigteilmontage") => {
     if (!b) return;
-    if (!b.partie_id) {
-      toast({
-        variant: "destructive",
-        title: "Erst Partie zuordnen",
-        description: "Die Pflicht-Unterweisung gilt für die Mitarbeiter der zugeordneten Partie.",
-      });
-      return;
-    }
     if (!typ) {
       toast({ title: "Pflicht-Unterweisung wird nur entfernt, wenn keine angelegt ist." });
       return;
     }
-    const { data: members } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("partie_id", b.partie_id)
-      .eq("is_active", true);
-
+    // Die Unterweisung hängt an der Baustelle; wer sie bekommt, entscheidet
+    // der Tagesplan (Trigger pflicht_unterweisung_zuteilen/nachholen). Eine
+    // Partie ist dafür nicht nötig — 55 von 56 Baustellen haben keine.
     const { data: evalData, error: evalErr } = await supabase
       .from("evaluierungen")
       .insert({
         baustelle_id: b.id,
-        datum: b.start_datum ?? localIso(),
+        datum: localIso(),
         typ,
         checkliste: {},
         abgeschlossen: false,
@@ -247,25 +240,6 @@ export default function BaustelleDetail() {
       toast({ variant: "destructive", title: "Fehler", description: evalErr.message });
       return;
     }
-    if (members && members.length > 0) {
-      const rows = members.map((m: any) => ({
-        evaluierung_id: evalData.id,
-        mitarbeiter_id: m.id,
-      }));
-      // Fehler prüfen — sonst existiert die Unterweisung ohne Unterschriften-Liste
-      const { error: sigErr } = await supabase
-        .from("evaluierung_unterschriften")
-        .insert(rows as any);
-      if (sigErr) {
-        toast({
-          variant: "destructive",
-          title: "Unterschriften konnten nicht angelegt werden",
-          description: sigErr.message,
-        });
-        return;
-      }
-    }
-    // Verknüpfung zur Baustelle ebenfalls prüfen — sonst ist die Unterweisung halb angelegt
     const { error: updErr } = await supabase
       .from("baustellen")
       .update({ pflicht_evaluierung_id: evalData.id })
@@ -279,8 +253,9 @@ export default function BaustelleDetail() {
       return;
     }
     toast({
-      title: "Pflicht-Unterweisung angelegt",
-      description: `${members?.length ?? 0} Mitarbeiter müssen unterschreiben.`,
+      title: "Unterweisung hinterlegt",
+      description:
+        "Wer auf diese Baustelle eingeteilt wird, bekommt sie automatisch — fällig am Einsatztag um 08:00.",
     });
     load();
   };
@@ -618,91 +593,6 @@ export default function BaustelleDetail() {
               </Card>
             )}
 
-            {/* Pflicht-Unterweisung (Admin-only) */}
-            {isAdmin && b.partie_id && (
-              <Card>
-                <CardContent className="p-3 space-y-2">
-                  <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
-                    Pflicht-Unterweisung für die zugeordneten Mitarbeiter
-                  </div>
-                  {b.pflicht_evaluierung_id ? (
-                    <div className="space-y-2">
-                      <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-2">
-                        Pflicht-Unterweisung aktiv. Neue Mitarbeiter, die zur
-                        Baustelle eingeteilt werden, bekommen automatisch eine
-                        Unterschrift-Aufforderung.
-                      </div>
-                      {unterschriftStats.total > 0 && (
-                        <>
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="font-semibold">
-                              {unterschriftStats.done} von {unterschriftStats.total}
-                              {" "}haben unterschrieben
-                            </span>
-                            <span className="tabular-nums text-muted-foreground">
-                              {Math.round(
-                                (unterschriftStats.done / unterschriftStats.total) * 100
-                              )}{" "}%
-                            </span>
-                          </div>
-                          <div className="h-2 rounded-full bg-muted overflow-hidden">
-                            <div
-                              className="h-full bg-emerald-500 transition-all"
-                              style={{
-                                width: `${
-                                  unterschriftStats.total > 0
-                                    ? (unterschriftStats.done / unterschriftStats.total) * 100
-                                    : 0
-                                }%`,
-                              }}
-                            />
-                          </div>
-                          {unterschriftStats.offen.length > 0 && (
-                            <div className="text-xs space-y-0.5 pt-1">
-                              <div className="font-semibold text-amber-700">
-                                Noch offen:
-                              </div>
-                              <ul className="flex flex-wrap gap-1">
-                                {unterschriftStats.offen.map((o) => (
-                                  <li
-                                    key={o.id}
-                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-900 text-[11px]"
-                                  >
-                                    {o.vorname} {o.nachname}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      <button
-                        onClick={() => setPflichtUnterweisung("werkstatt")}
-                        className="px-2.5 py-1.5 rounded-full text-xs font-medium border bg-background hover:bg-muted"
-                      >
-                        Werkstatt
-                      </button>
-                      <button
-                        onClick={() => setPflichtUnterweisung("baustelle")}
-                        className="px-2.5 py-1.5 rounded-full text-xs font-medium border bg-background hover:bg-muted"
-                      >
-                        Baustelle
-                      </button>
-                      <button
-                        onClick={() => setPflichtUnterweisung("fertigteilmontage")}
-                        className="px-2.5 py-1.5 rounded-full text-xs font-medium border bg-background hover:bg-muted"
-                      >
-                        Fertigteilmontage
-                      </button>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
             {!partie ? (
               <Card>
                 <CardContent className="p-6 text-center space-y-2">
@@ -910,10 +800,68 @@ export default function BaustelleDetail() {
           </Card>
         </TabsContent>}
 
-        <TabsContent value="eval">
+        <TabsContent value="eval" className="space-y-3">
+          {/* Pflicht-Unterweisung: hängt an der Baustelle, Zuteilung folgt dem Tagesplan */}
+          {(isAdmin || hasPermission("evaluierungen.edit")) && (
+            <Card className={b.pflicht_evaluierung_id ? "" : "border-amber-300"}>
+              <CardContent className="p-3 space-y-2">
+                <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
+                  Unterweisung dieser Baustelle
+                </div>
+                {b.pflicht_evaluierung_id ? (
+                  <div className="space-y-3">
+                    <div className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded p-2">
+                      Hinterlegt. Wer über den Tagesplan hierher eingeteilt wird, bekommt sie
+                      automatisch — fällig am Einsatztag um 08:00, Nachzügler 30 Minuten nach
+                      Zuteilung. Ab dann sperrt die App, und Bauleiter und Polier bekommen eine SMS.
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" className="h-10" onClick={() => setTabletOffen(true)}>
+                        Am Tablet unterschreiben lassen
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-10"
+                        onClick={() => navigate("/evaluierung?baustelle=" + b.id)}
+                      >
+                        Inhalt bearbeiten / Ergänzung anlegen
+                      </Button>
+                    </div>
+                    <UnterweisungNachweis evaluierungId={b.pflicht_evaluierung_id} refreshKey={nachweisKey} />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">
+                      Noch keine Unterweisung hinterlegt. Ohne sie bekommt niemand eine
+                      Aufforderung, und die Tagesplanung warnt beim Freigeben.
+                    </div>
+                    <div className="text-xs text-muted-foreground">Art der Baustelle wählen:</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(
+                        [
+                          ["baustelle", "Baustelle"],
+                          ["fertigteilmontage", "Fertigteilmontage"],
+                          ["werkstatt", "Werkstatt"],
+                        ] as const
+                      ).map(([typ, label]) => (
+                        <button
+                          key={typ}
+                          onClick={() => setPflichtUnterweisung(typ)}
+                          className="px-3 h-10 rounded-full text-sm font-medium border bg-background hover:bg-muted"
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
           <Card>
             <CardContent className="p-3 space-y-2">
-              <Button onClick={() => navigate("/evaluierung?baustelle=" + b.id)} size="sm">
+              <Button onClick={() => navigate("/evaluierung?baustelle=" + b.id)} size="sm" variant="outline">
                 <Plus className="h-4 w-4 mr-2" /> Neue Evaluierung
               </Button>
               {evals.map((e) => (
@@ -934,6 +882,21 @@ export default function BaustelleDetail() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {b.pflicht_evaluierung_id && (
+        <UnterweisungTablet
+          open={tabletOffen}
+          onClose={() => {
+            setTabletOffen(false);
+            setNachweisKey((k) => k + 1);
+            load();
+          }}
+          baustelleId={b.id}
+          baustelleName={b.bvh_name}
+          kostenstelle={b.kostenstelle}
+          evaluierungId={b.pflicht_evaluierung_id}
+        />
+      )}
 
       {/* Termin Dialog */}
       <Dialog open={terminDialog} onOpenChange={setTerminDialog}>

@@ -35,6 +35,7 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -1236,7 +1237,46 @@ export default function Tagesplanung() {
     }
   }
 
-  async function freigeben() {
+  /** Baustellen des Tages ohne hinterlegte Unterweisung — dort bekäme
+   *  niemand eine Aufforderung. Vor dem Freigeben sichtbar machen. */
+  const [ohneUnterweisung, setOhneUnterweisung] = useState<
+    { id: string; name: string }[] | null
+  >(null);
+  const [legeAn, setLegeAn] = useState<string | null>(null);
+
+  async function standardUnterweisungAnlegen(baustelleId: string) {
+    setLegeAn(baustelleId);
+    const { data: ev, error } = await supabase
+      .from("evaluierungen")
+      .insert({ baustelle_id: baustelleId, datum: todayIso(), typ: "baustelle", checkliste: {}, abgeschlossen: false } as any)
+      .select("id")
+      .single();
+    if (!error && ev) {
+      await supabase.from("baustellen").update({ pflicht_evaluierung_id: ev.id }).eq("id", baustelleId);
+    }
+    setLegeAn(null);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    setOhneUnterweisung((prev) => (prev ?? []).filter((x) => x.id !== baustelleId));
+    refresh();
+  }
+
+  async function freigeben(trotzdem = false) {
+    if (!trotzdem) {
+      const fehlend = new Map<string, string>();
+      for (const e of plan?.einteilungen ?? []) {
+        if (e.baustelle && !e.baustelle.pflicht_evaluierung_id) {
+          fehlend.set(e.baustelle.id, e.baustelle.bvh_name);
+        }
+      }
+      if (fehlend.size > 0) {
+        setOhneUnterweisung([...fehlend].map(([id, name]) => ({ id, name })));
+        return;
+      }
+    }
+    setOhneUnterweisung(null);
     const { error } = await supabase.from("tagesplanung_freigaben").upsert(
       {
         datum,
@@ -1330,6 +1370,47 @@ export default function Tagesplanung() {
     <div className="space-y-4">
       <PageHeader title="Tagesplanung" />
 
+      {ohneUnterweisung && (
+        <Dialog open onOpenChange={(o) => !o && setOhneUnterweisung(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Unterweisung fehlt</DialogTitle>
+              <DialogDescription>
+                Für diese Baustellen ist keine Unterweisung hinterlegt. Die eingeteilten
+                Mitarbeiter bekämen keine Aufforderung. Mit einem Klick die Standard-
+                Unterweisung „Baustelle" anlegen — Besonderheiten kann der Bauleiter danach
+                ergänzen.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              {ohneUnterweisung.map((bst) => (
+                <div key={bst.id} className="flex items-center justify-between gap-2 border rounded-md p-2 text-sm">
+                  <span className="font-medium truncate">{bst.name}</span>
+                  <Button
+                    size="sm"
+                    className="h-9 shrink-0"
+                    disabled={legeAn === bst.id}
+                    onClick={() => standardUnterweisungAnlegen(bst.id)}
+                  >
+                    {legeAn === bst.id ? "…" : "Standard anlegen"}
+                  </Button>
+                </div>
+              ))}
+              {ohneUnterweisung.length === 0 && (
+                <div className="text-sm text-emerald-700">Alle Baustellen haben jetzt eine Unterweisung.</div>
+              )}
+            </div>
+            <div className="flex gap-2 justify-end pt-2">
+              <Button variant="ghost" onClick={() => freigeben(true)}>
+                Ohne Unterweisung freigeben
+              </Button>
+              <Button disabled={ohneUnterweisung.length > 0} onClick={() => freigeben(true)}>
+                Jetzt freigeben
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
       {/* Setup-Banner: Tabelle tagesplanung_freigaben fehlt in der Cloud-DB */}
       {setupFehler && (
         <div className="print:hidden rounded-md border border-amber-300 bg-amber-50 p-3 flex items-start gap-3">
@@ -1465,7 +1546,7 @@ export default function Tagesplanung() {
               )}
             </>
           ) : darfFreigeben ? (
-            <Button size="sm" onClick={freigeben}>
+            <Button size="sm" onClick={() => freigeben()}>
               <Send className="h-4 w-4 mr-1.5" /> Plan freigeben
             </Button>
           ) : (

@@ -1,23 +1,25 @@
-// Tägliche Reminder-Function für offene Unterweisungs-Unterschriften.
+// Erinnerung bei überfälligen Unterweisungen — SMS an Bauleiter und Polier.
 //
-// Logik:
-//  • aus v_offene_unterschriften_mit_alter alle Rows mit tage_offen ≥ 3 holen
-//  • über v_offene_unterschriften den/die Verantwortlichen ermitteln
-//    (Polier + Bauleiter pro Baustelle)
-//  • pro Verantwortlichem: zugehörige Unterschriften nur reminderfähig
-//    wenn `reminder_geschickt_am` NULL ODER älter als 24h ist
-//  • optional Twilio-SMS oder Push (falls Env-Vars gesetzt sind), sonst
-//    nur DB-Flag setzen → das Frontend nutzt das Flag für die rote
-//    Banner-Variante als minimaler Fallback
+// Läuft alle 5 Minuten per pg_cron (net.http_post mit x-reminder-secret aus
+// dem Vault). Die Function entscheidet selbst, ob gerade etwas zu tun ist:
 //
-// Aufruf via pg_cron — die Function selbst läuft idempotent.
+//   • fällig = status 'offen' und faellig_am <= jetzt (v_unterweisung_faellig)
+//   • erste SMS sofort nach Fälligkeit (Regel A: 08:00 → SMS 08:00–08:05;
+//     Regel B/C: 30 Minuten nach Zuteilung), nur Mo–Sa 06:00–18:00 Wien
+//   • Wiederholung um 10:00 und 12:00, solange offen — danach Ruhe bis
+//     zum nächsten Tag. Max. drei SMS je Fall und Tag.
+//   • eine SMS je Empfänger und Baustelle, mit den Namen der Säumigen
+//   • Empfänger: Bauleiter der Baustelle, Polier der Baustelle, dazu jeder
+//     Partieleiter, der heute dort eingeteilt ist — nur mit Handynummer
+//
+// Antwort: { ok, faellig, sms, empfaenger_ohne_nummer, uebersprungen }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.79.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-reminder-secret",
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -27,112 +29,165 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-const KARENZ_TAGE = 3;
-const REMINDER_COOLDOWN_H = 24;
+/** Wiederholungs-Fenster (Wien): Beginn-Minute des Tages, 10 Minuten breit. */
+const WIEDERHOLUNG_MIN = [10 * 60, 12 * 60];
+const FENSTER_BREITE_MIN = 10;
 
-interface OffeneRow {
+interface FaelligRow {
   unterschrift_id: string;
-  evaluierung_id: string;
   mitarbeiter_id: string;
-  baustelle_id: string;
-  tage_offen: number;
+  faellig_am: string;
   reminder_geschickt_am: string | null;
+  baustelle_id: string;
+  bvh_name: string | null;
+  bauleiter_id: string | null;
+  polier_id: string | null;
+  vorname: string | null;
+  nachname: string | null;
 }
 
-interface VerantwortlichRow {
-  unterschrift_id: string;
-  verantwortlich_id: string;
-  bvh_name: string;
-  rolle: string;
+/** Wiener Uhrzeit als Minuten seit Mitternacht + Wochentag + Datum. */
+function wien(now: Date) {
+  const parts = new Intl.DateTimeFormat("de-AT", {
+    timeZone: "Europe/Vienna",
+    hour: "2-digit",
+    minute: "2-digit",
+    weekday: "short",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  const minuten = Number(get("hour")) * 60 + Number(get("minute"));
+  return {
+    minuten,
+    wochentag: get("weekday"), // "Mo." … "So."
+    datum: `${get("year")}-${get("month")}-${get("day")}`,
+  };
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  // Nur der Cron (oder ein Admin mit dem Secret) darf auslösen — sonst
+  // könnte jeder mit dem öffentlichen Key SMS auf Firmenkosten anstoßen.
+  const secret = Deno.env.get("REMINDER_SECRET");
+  if (!secret || req.headers.get("x-reminder-secret") !== secret) {
+    return jsonResponse({ ok: false, error: "Nicht erlaubt" }, 401);
   }
 
-  const url = Deno.env.get("SUPABASE_URL")!;
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const admin = createClient(url, serviceKey);
+  const admin = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
 
-  // 1) Überfällige offene Unterschriften
-  const { data: offene, error: e1 } = await admin
-    .from("v_offene_unterschriften_mit_alter")
+  const now = new Date();
+  const w = wien(now);
+  if (w.wochentag.startsWith("So") || w.minuten < 6 * 60 || w.minuten >= 18 * 60) {
+    return jsonResponse({ ok: true, faellig: 0, sms: 0, uebersprungen: "außerhalb 06–18 Uhr / Sonntag" });
+  }
+  const imWiederholungsfenster = WIEDERHOLUNG_MIN.some(
+    (start) => w.minuten >= start && w.minuten < start + FENSTER_BREITE_MIN,
+  );
+  const fensterStart = WIEDERHOLUNG_MIN.find(
+    (start) => w.minuten >= start && w.minuten < start + FENSTER_BREITE_MIN,
+  );
+
+  // 1) Alles, was fällig ist
+  const { data, error } = await admin
+    .from("v_unterweisung_faellig")
     .select(
-      "unterschrift_id, evaluierung_id, mitarbeiter_id, baustelle_id, tage_offen, reminder_geschickt_am",
+      "unterschrift_id, mitarbeiter_id, faellig_am, reminder_geschickt_am, baustelle_id, bvh_name, bauleiter_id, polier_id, vorname, nachname",
     )
-    .gte("tage_offen", KARENZ_TAGE);
-  if (e1) return jsonResponse({ ok: false, error: e1.message }, 500);
-  const rows = (offene ?? []) as OffeneRow[];
-  if (rows.length === 0) {
-    return jsonResponse({ ok: true, reminders: 0, message: "Keine überfälligen Fälle." });
-  }
+    .lte("faellig_am", now.toISOString());
+  if (error) return jsonResponse({ ok: false, error: error.message }, 500);
+  const faellig = (data ?? []) as FaelligRow[];
+  if (faellig.length === 0) return jsonResponse({ ok: true, faellig: 0, sms: 0 });
 
-  // 2) Filtern: nur reminderfähig (noch nie oder Cooldown abgelaufen)
-  const cooldownMs = REMINDER_COOLDOWN_H * 60 * 60 * 1000;
-  const now = Date.now();
-  const reminderfaehig = rows.filter((r) => {
+  // 2) Reminderfähig: noch nie erinnert — oder im Wiederholungsfenster und
+  //    die letzte Erinnerung liegt vor diesem Fenster.
+  const fensterBeginn = (startMin: number) => {
+    // Zeitpunkt „heute (Wien) um startMin" als UTC-Date
+    const [y, m, d] = w.datum.split("-").map(Number);
+    const hh = String(Math.floor(startMin / 60)).padStart(2, "0");
+    const mm = String(startMin % 60).padStart(2, "0");
+    // Offset von Wien zu UTC über einen Rundweg bestimmen
+    const probe = new Date(Date.UTC(y, m - 1, d, Number(hh), Number(mm)));
+    const wienStr = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Vienna", hour: "2-digit", minute: "2-digit", hour12: false,
+    }).format(probe);
+    const [wh, wm] = wienStr.split(":").map(Number);
+    const diffMin = (wh * 60 + wm) - startMin;
+    return new Date(probe.getTime() - diffMin * 60_000);
+  };
+  const reminderfaehig = faellig.filter((r) => {
     if (!r.reminder_geschickt_am) return true;
-    return now - new Date(r.reminder_geschickt_am).getTime() > cooldownMs;
+    if (!imWiederholungsfenster || fensterStart === undefined) return false;
+    return new Date(r.reminder_geschickt_am) < fensterBeginn(fensterStart);
   });
   if (reminderfaehig.length === 0) {
-    return jsonResponse({
-      ok: true,
-      reminders: 0,
-      message: "Alle überfälligen Fälle sind im Cooldown.",
-    });
+    return jsonResponse({ ok: true, faellig: faellig.length, sms: 0, uebersprungen: "alle bereits erinnert" });
   }
 
-  // 3) Verantwortliche pro unterschrift_id ermitteln
-  const ids = reminderfaehig.map((r) => r.unterschrift_id);
-  const { data: vrows, error: e2 } = await admin
-    .from("v_offene_unterschriften")
-    .select("unterschrift_id, verantwortlich_id, bvh_name, rolle")
-    .in("unterschrift_id", ids);
-  if (e2) return jsonResponse({ ok: false, error: e2.message }, 500);
-  const verantwortliche = (vrows ?? []) as VerantwortlichRow[];
+  // 3) Empfänger je Baustelle: Bauleiter, Polier, heute eingeteilte Partieleiter
+  const baustellen = [...new Set(reminderfaehig.map((r) => r.baustelle_id))];
+  const { data: heuteLeiter } = await admin
+    .from("einteilungen")
+    .select("baustelle_id, einteilung_mitarbeiter(mitarbeiter_id, profiles!einteilung_mitarbeiter_mitarbeiter_id_fkey(is_partieleiter))")
+    .eq("datum", w.datum)
+    .in("baustelle_id", baustellen);
 
-  // 4) Gruppieren pro verantwortlich_id
-  type Gruppe = { name: string; faelle: { bvh_name: string; rolle: string }[] };
-  const proVerantw = new Map<string, Gruppe>();
-  for (const v of verantwortliche) {
-    const g = proVerantw.get(v.verantwortlich_id) ?? {
-      name: "",
-      faelle: [],
-    };
-    g.faelle.push({ bvh_name: v.bvh_name, rolle: v.rolle });
-    proVerantw.set(v.verantwortlich_id, g);
+  const empfaengerJeBaustelle = new Map<string, Set<string>>();
+  for (const r of reminderfaehig) {
+    const set = empfaengerJeBaustelle.get(r.baustelle_id) ?? new Set<string>();
+    if (r.bauleiter_id) set.add(r.bauleiter_id);
+    if (r.polier_id) set.add(r.polier_id);
+    empfaengerJeBaustelle.set(r.baustelle_id, set);
   }
-  // Namen der Verantwortlichen nachladen
-  if (proVerantw.size > 0) {
-    const { data: profiles } = await admin
-      .from("profiles")
-      .select("id, vorname, nachname, telefon")
-      .in("id", Array.from(proVerantw.keys()));
-    for (const p of (profiles ?? []) as any[]) {
-      const g = proVerantw.get(p.id);
-      if (g) g.name = `${p.vorname} ${p.nachname}`.trim();
+  for (const e of (heuteLeiter ?? []) as any[]) {
+    const set = empfaengerJeBaustelle.get(e.baustelle_id);
+    if (!set) continue;
+    for (const em of e.einteilung_mitarbeiter ?? []) {
+      if (em.profiles?.is_partieleiter) set.add(em.mitarbeiter_id);
     }
   }
 
-  // 5) Optional SMS via Twilio — nur wenn alle Twilio-ENV-Vars gesetzt sind
+  const alleEmpfaenger = [...new Set([...empfaengerJeBaustelle.values()].flatMap((s) => [...s]))];
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("id, vorname, telefon")
+    .in("id", alleEmpfaenger);
+  const telefonVon = new Map((profile ?? []).map((p: any) => [p.id, p.telefon as string | null]));
+
+  // 4) SMS je Empfänger und Baustelle
   const twilioSid = Deno.env.get("TWILIO_ACCOUNT_SID");
   const twilioToken = Deno.env.get("TWILIO_AUTH_TOKEN");
   const twilioFrom = Deno.env.get("TWILIO_PHONE_NUMBER");
   const smsAktiv = !!twilioSid && !!twilioToken && !!twilioFrom;
-  let smsSent = 0;
-  if (smsAktiv) {
-    const { data: profiles } = await admin
-      .from("profiles")
-      .select("id, telefon")
-      .in("id", Array.from(proVerantw.keys()));
-    for (const p of (profiles ?? []) as any[]) {
-      const g = proVerantw.get(p.id);
-      if (!g || !p.telefon) continue;
-      const baustellen = Array.from(new Set(g.faelle.map((f) => f.bvh_name))).slice(0, 4);
-      const msg = `Holzbau Willroider: ${g.faelle.length} offene Unterweisung(en) auf ${baustellen.join(", ")}. Bitte im Dashboard prüfen.`;
+
+  let gesendet = 0;
+  const ohneNummer: string[] = [];
+  const fehler: string[] = [];
+  for (const [baustelleId, empfaenger] of empfaengerJeBaustelle) {
+    const faelle = reminderfaehig.filter((r) => r.baustelle_id === baustelleId);
+    const namen = faelle
+      .map((r) => `${r.vorname ?? ""} ${r.nachname ?? ""}`.trim() || "Unbekannt")
+      .sort((a, b) => a.localeCompare(b, "de"));
+    const bvh = faelle[0]?.bvh_name ?? "Baustelle";
+    const seit = new Date(faelle[0].faellig_am).toLocaleTimeString("de-AT", {
+      timeZone: "Europe/Vienna", hour: "2-digit", minute: "2-digit",
+    });
+    const text =
+      `Willroider-App: Baustelle ${bvh} — ${namen.length === 1 ? "1 Unterweisung offen" : `${namen.length} Unterweisungen offen`} ` +
+      `(fällig seit ${seit}): ${namen.join(", ")}. Bitte am Tablet nachholen lassen.`;
+
+    for (const uid of empfaenger) {
+      const tel = telefonVon.get(uid);
+      if (!tel) { ohneNummer.push(uid); continue; }
+      if (!smsAktiv) continue;
       try {
-        const r = await fetch(
+        const res = await fetch(
           `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`,
           {
             method: "POST",
@@ -140,32 +195,30 @@ Deno.serve(async (req) => {
               Authorization: `Basic ${btoa(`${twilioSid}:${twilioToken}`)}`,
               "Content-Type": "application/x-www-form-urlencoded",
             },
-            body: new URLSearchParams({
-              From: twilioFrom!,
-              To: p.telefon,
-              Body: msg,
-            }),
+            body: new URLSearchParams({ To: tel, From: twilioFrom!, Body: text }),
           },
         );
-        if (r.ok) smsSent++;
-      } catch (err) {
-        console.error("twilio fehler", err);
+        if (res.ok) gesendet++;
+        else fehler.push(`${uid}: ${(await res.json())?.message ?? res.status}`);
+      } catch (e) {
+        fehler.push(`${uid}: ${e instanceof Error ? e.message : "Fehler"}`);
       }
     }
   }
 
-  // 6) reminder_geschickt_am für alle reminderfähigen Rows hochsetzen
-  const { error: e3 } = await admin
+  // 5) Erinnert markieren — auch wenn niemand eine Nummer hat, sonst
+  //    versucht es der Cron alle 5 Minuten aufs Neue.
+  await admin
     .from("evaluierung_unterschriften")
-    .update({ reminder_geschickt_am: new Date().toISOString() })
-    .in("id", ids);
-  if (e3) return jsonResponse({ ok: false, error: e3.message }, 500);
+    .update({ reminder_geschickt_am: now.toISOString() })
+    .in("id", reminderfaehig.map((r) => r.unterschrift_id));
 
   return jsonResponse({
     ok: true,
-    reminders: ids.length,
-    verantwortliche: proVerantw.size,
-    smsSent,
-    smsAktiv,
+    faellig: faellig.length,
+    erinnert: reminderfaehig.length,
+    sms: gesendet,
+    empfaenger_ohne_nummer: [...new Set(ohneNummer)].length,
+    fehler,
   });
 });

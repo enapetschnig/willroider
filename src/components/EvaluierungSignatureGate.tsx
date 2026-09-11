@@ -29,17 +29,44 @@ export type OpenSignature = {
   datum: string;
   /** Werktage Karenz, bis die App gesperrt wird. 0 = ab dem ersten Tag. */
   karenzWerktage: number;
+  /** Bis wann bestätigt sein muss (Server-Zeit). null = derzeit nicht fällig. */
+  faelligAm: string | null;
 };
+
+/** Gesperrt, sobald die Fälligkeit erreicht ist. Ohne Fälligkeit (alte
+ *  Zuteilungen, kein Einsatz geplant) gilt die Karenz in Werktagen. */
+export function istUeberfaellig(o: OpenSignature): boolean {
+  // Ohne Fälligkeit (kein Einsatz geplant) wird nicht gesperrt — sonst
+  // träfe es Leute, die nur über die Partie zugeteilt, aber nie eingeteilt sind.
+  return !!o.faelligAm && new Date(o.faelligAm).getTime() <= Date.now();
+}
+
+/** „fällig heute 08:00" / „fällig morgen 08:00" / „überfällig seit 08:00" */
+export function faelligText(o: OpenSignature): string {
+  if (!o.faelligAm) return "noch nicht fällig";
+  const f = new Date(o.faelligAm);
+  const zeit = f.toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" });
+  const heute = new Date(); heute.setHours(0, 0, 0, 0);
+  const morgen = new Date(heute); morgen.setDate(morgen.getDate() + 1);
+  const tag =
+    f >= heute && f < morgen
+      ? "heute"
+      : f >= morgen && f < new Date(morgen.getTime() + 86400000)
+        ? "morgen"
+        : f.toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit" });
+  return f.getTime() <= Date.now() ? `überfällig seit ${tag} ${zeit}` : `fällig ${tag} ${zeit}`;
+}
 
 /** Lädt offene Unterschriften (status='offen') des angemeldeten MA. */
 export async function ladeOffeneUnterschriften(userId: string): Promise<OpenSignature[]> {
   const { data } = await supabase
     .from("evaluierung_unterschriften")
     .select(
-      "id, evaluierung_id, evaluierungen(id, typ, checkliste, notizen, datum, karenz_werktage, baustelle_id, baustellen(bvh_name, kostenstelle))",
+      "id, evaluierung_id, faellig_am, evaluierungen(id, typ, checkliste, notizen, datum, karenz_werktage, baustelle_id, baustellen(bvh_name, kostenstelle))",
     )
     .eq("mitarbeiter_id", userId)
-    .eq("status", "offen");
+    .eq("status", "offen")
+    .order("faellig_am", { ascending: true, nullsFirst: false });
   return (data ?? []).map((r: any) => ({
     unterschriftId: r.id,
     evaluierungId: r.evaluierung_id,
@@ -51,6 +78,7 @@ export async function ladeOffeneUnterschriften(userId: string): Promise<OpenSign
     datum: r.evaluierungen?.datum ?? localIso(),
     karenzWerktage:
       r.evaluierungen?.karenz_werktage ?? SIGNATURE_KARENZ_WERKTAGE,
+    faelligAm: r.faellig_am ?? null,
   }));
 }
 
@@ -93,11 +121,9 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
     load();
   }, [load]);
 
-  // Jede Unterweisung bringt ihre eigene Karenz mit; gesperrt wird, sobald
-  // die erste davon abgelaufen ist.
-  const ueberfaellig = pending.some(
-    (p) => werktageSeit(p.datum) >= p.karenzWerktage,
-  );
+  // Gesperrt, sobald eine Unterweisung fällig ist (08:00 am Einsatztag bzw.
+  // 30 Minuten nach Zuteilung) — siehe istUeberfaellig.
+  const ueberfaellig = pending.some(istUeberfaellig);
 
   if (!user || pending.length === 0 || !ueberfaellig) {
     return <>{children}</>;
@@ -111,6 +137,163 @@ export function EvaluierungSignatureGate({ children }: { children: ReactNode }) 
       onAllDone={load}
       dismissable={false}
     />
+  );
+}
+
+
+/** Der Inhalt einer Unterweisung — Kopf, Abschnitte, Checkliste, Notizen,
+ *  Bestätigungstext. Wird vom Vollbild-Gate (eigenes Handy) und vom
+ *  Tablet-Modus (Polier lässt nacheinander unterschreiben) gleich gerendert. */
+export function UnterweisungInhalt({
+  typ,
+  checkliste: checklisteRaw,
+  notizen,
+  baustelleName,
+  kostenstelle,
+  datum,
+}: {
+  typ: EvaluierungTyp;
+  checkliste: Json;
+  notizen: string | null;
+  baustelleName: string;
+  kostenstelle: string | null;
+  datum: string;
+}) {
+  const u = getUnterweisung(typ);
+  const checkliste = (checklisteRaw as Record<string, string>) || {};
+  return (
+    <>
+        <Card className="border-primary/30">
+          <CardContent className="p-3">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              {u?.subtitle ?? "Sicherheitsunterweisung"}
+            </div>
+            <div className="font-bold text-base">{u?.title}</div>
+            <div className="text-[11px] text-muted-foreground mt-1">
+              {u?.rechtsgrundlage}
+            </div>
+            <div className="text-xs mt-2 pt-2 border-t">
+              Baustelle: <strong>{baustelleName}</strong>
+              {kostenstelle && ` · ${kostenstelle}`} · Datum{" "}
+              {new Date(datum).toLocaleDateString("de-AT")}
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="text-sm text-muted-foreground">
+          Bitte lies die Unterweisung sorgfältig durch. Erst danach kannst du unterschreiben
+          und die App weiter nutzen.
+        </div>
+
+        {(u?.sections ?? []).map((sec, i) => {
+          if (sec.kind === "text") {
+            return (
+              <Card key={i}>
+                <CardContent className="p-3 space-y-1.5">
+                  {sec.heading && (
+                    <div className="text-xs font-bold uppercase tracking-wide text-primary">
+                      {sec.heading}
+                    </div>
+                  )}
+                  <ul className="space-y-1 text-sm leading-relaxed">
+                    {sec.lines.map((l, j) => (
+                      <li key={j} className="flex gap-2">
+                        <span className="text-primary shrink-0">•</span>
+                        <span>{l}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            );
+          }
+          if (sec.kind === "checklist") {
+            return (
+              <Card key={i}>
+                <CardContent className="p-3 space-y-1.5">
+                  <div className="text-xs font-bold uppercase tracking-wide text-primary mb-1">
+                    {sec.heading}
+                  </div>
+                  <ul className="space-y-1.5 text-sm">
+                    {sec.items.map((it) => {
+                      const v = checkliste[it.key];
+                      return (
+                        <li key={it.key} className="flex items-start gap-2 border-b pb-1.5 last:border-0">
+                          <span
+                            className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 mt-0.5 font-semibold ${
+                              v === "i.O."
+                                ? "bg-emerald-600 text-white"
+                                : v === "nicht i.O."
+                                ? "bg-destructive text-white"
+                                : "bg-muted text-muted-foreground"
+                            }`}
+                          >
+                            {v ?? "–"}
+                          </span>
+                          <span className="flex-1">{it.label}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </CardContent>
+              </Card>
+            );
+          }
+          if (sec.kind === "arbeitsmittel") {
+            return (
+              <Card key={i}>
+                <CardContent className="p-3 space-y-1.5">
+                  <div className="text-xs font-bold uppercase tracking-wide text-primary mb-1">
+                    {sec.heading}
+                  </div>
+                  <ul className="space-y-1 text-sm">
+                    {sec.items.map((it) => {
+                      const v = checkliste[it.key];
+                      return (
+                        <li key={it.key} className="flex items-center gap-2 border-b pb-1 last:border-0">
+                          <span className="flex-1">{it.label}</span>
+                          <span
+                            className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 font-semibold ${
+                              v === "i.O."
+                                ? "bg-emerald-600 text-white"
+                                : v === "nicht i.O."
+                                ? "bg-destructive text-white"
+                                : "bg-muted text-muted-foreground"
+                            }`}
+                          >
+                            {v ?? "n.v."}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </CardContent>
+              </Card>
+            );
+          }
+          return null;
+        })}
+
+        {notizen && (
+          <Card>
+            <CardContent className="p-3 text-sm">
+              <div className="text-xs font-bold uppercase tracking-wide text-primary mb-1">
+                Hinweise / Notizen vom Bauleiter
+              </div>
+              {notizen}
+            </CardContent>
+          </Card>
+        )}
+
+        <Card className="border-2 border-primary/30 bg-primary/5">
+          <CardContent className="p-3 text-sm">
+            <div className="text-xs font-bold uppercase tracking-wide text-primary mb-1">
+              Bestätigung
+            </div>
+            {u?.bestätigung}
+          </CardContent>
+        </Card>
+    </>
   );
 }
 
@@ -220,7 +403,6 @@ function SignatureOverlay({
   if (!current) return null;
 
   const u = getUnterweisung(current.typ);
-  const checkliste = (current.checkliste as Record<string, string>) || {};
 
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
@@ -245,14 +427,13 @@ function SignatureOverlay({
     if (!canvas) return;
     setSubmitting(true);
     const dataUrl = canvas.toDataURL("image/png");
-    const { error } = await supabase
-      .from("evaluierung_unterschriften")
-      .update({
-        unterschrift_data: dataUrl,
-        unterschrieben_am: new Date().toISOString(),
-        status: "unterschrieben",
-      })
-      .eq("id", current.unterschriftId);
+    // Über die Datenbank-Funktion: Zeitstempel und Berechtigung setzt der
+    // Server, nicht das Handy — das ist der belastbare Nachweis.
+    const { error } = await (supabase as any).rpc("unterweisung_bestaetigen", {
+      p_unterschrift_id: current.unterschriftId,
+      p_unterschrift_data: dataUrl,
+      p_ueber: "eigenes_geraet",
+    });
     if (error) {
       alert("Fehler: " + error.message);
       setSubmitting(false);
@@ -309,136 +490,14 @@ function SignatureOverlay({
             onScroll={onScroll}
             style={{ WebkitOverflowScrolling: "touch" }}
           >
-            <Card className="border-primary/30">
-              <CardContent className="p-3">
-                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  {u?.subtitle ?? "Sicherheitsunterweisung"}
-                </div>
-                <div className="font-bold text-base">{u?.title}</div>
-                <div className="text-[11px] text-muted-foreground mt-1">
-                  {u?.rechtsgrundlage}
-                </div>
-                <div className="text-xs mt-2 pt-2 border-t">
-                  Baustelle: <strong>{current.baustelleName}</strong>
-                  {current.kostenstelle && ` · ${current.kostenstelle}`} · Datum{" "}
-                  {new Date(current.datum).toLocaleDateString("de-AT")}
-                </div>
-              </CardContent>
-            </Card>
-
-            <div className="text-sm text-muted-foreground">
-              Bitte lies die Unterweisung sorgfältig durch. Erst danach kannst du unterschreiben
-              und die App weiter nutzen.
-            </div>
-
-            {(u?.sections ?? []).map((sec, i) => {
-              if (sec.kind === "text") {
-                return (
-                  <Card key={i}>
-                    <CardContent className="p-3 space-y-1.5">
-                      {sec.heading && (
-                        <div className="text-xs font-bold uppercase tracking-wide text-primary">
-                          {sec.heading}
-                        </div>
-                      )}
-                      <ul className="space-y-1 text-sm leading-relaxed">
-                        {sec.lines.map((l, j) => (
-                          <li key={j} className="flex gap-2">
-                            <span className="text-primary shrink-0">•</span>
-                            <span>{l}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </CardContent>
-                  </Card>
-                );
-              }
-              if (sec.kind === "checklist") {
-                return (
-                  <Card key={i}>
-                    <CardContent className="p-3 space-y-1.5">
-                      <div className="text-xs font-bold uppercase tracking-wide text-primary mb-1">
-                        {sec.heading}
-                      </div>
-                      <ul className="space-y-1.5 text-sm">
-                        {sec.items.map((it) => {
-                          const v = checkliste[it.key];
-                          return (
-                            <li key={it.key} className="flex items-start gap-2 border-b pb-1.5 last:border-0">
-                              <span
-                                className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 mt-0.5 font-semibold ${
-                                  v === "i.O."
-                                    ? "bg-emerald-600 text-white"
-                                    : v === "nicht i.O."
-                                    ? "bg-destructive text-white"
-                                    : "bg-muted text-muted-foreground"
-                                }`}
-                              >
-                                {v ?? "–"}
-                              </span>
-                              <span className="flex-1">{it.label}</span>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </CardContent>
-                  </Card>
-                );
-              }
-              if (sec.kind === "arbeitsmittel") {
-                return (
-                  <Card key={i}>
-                    <CardContent className="p-3 space-y-1.5">
-                      <div className="text-xs font-bold uppercase tracking-wide text-primary mb-1">
-                        {sec.heading}
-                      </div>
-                      <ul className="space-y-1 text-sm">
-                        {sec.items.map((it) => {
-                          const v = checkliste[it.key];
-                          return (
-                            <li key={it.key} className="flex items-center gap-2 border-b pb-1 last:border-0">
-                              <span className="flex-1">{it.label}</span>
-                              <span
-                                className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 font-semibold ${
-                                  v === "i.O."
-                                    ? "bg-emerald-600 text-white"
-                                    : v === "nicht i.O."
-                                    ? "bg-destructive text-white"
-                                    : "bg-muted text-muted-foreground"
-                                }`}
-                              >
-                                {v ?? "n.v."}
-                              </span>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </CardContent>
-                  </Card>
-                );
-              }
-              return null;
-            })}
-
-            {current.notizen && (
-              <Card>
-                <CardContent className="p-3 text-sm">
-                  <div className="text-xs font-bold uppercase tracking-wide text-primary mb-1">
-                    Hinweise / Notizen vom Bauleiter
-                  </div>
-                  {current.notizen}
-                </CardContent>
-              </Card>
-            )}
-
-            <Card className="border-2 border-primary/30 bg-primary/5">
-              <CardContent className="p-3 text-sm">
-                <div className="text-xs font-bold uppercase tracking-wide text-primary mb-1">
-                  Bestätigung
-                </div>
-                {u?.bestätigung}
-              </CardContent>
-            </Card>
+            <UnterweisungInhalt
+              typ={current.typ}
+              checkliste={current.checkliste}
+              notizen={current.notizen}
+              baustelleName={current.baustelleName}
+              kostenstelle={current.kostenstelle}
+              datum={current.datum}
+            />
 
             {!scrolledToBottom && (
               <div className="text-center text-[11px] text-muted-foreground italic pb-2">
