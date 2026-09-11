@@ -36,6 +36,7 @@ import Fahrzeuge from "@/pages/Fahrzeuge";
 import Kalkulator from "@/pages/Kalkulator";
 import KalkulatorAnfragen from "@/pages/KalkulatorAnfragen";
 import MeinTag from "@/pages/MeinTag";
+import Anleitung from "@/pages/Anleitung";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { RequirePermission } from "@/components/RequirePermission";
 
@@ -115,6 +116,7 @@ const App = () => (
               <Route path="/notizen" element={<RequirePermission perm="admin.view"><Notizen /></RequirePermission>} />
               <Route path="/berichte/:id" element={<RequirePermission perm="berichte.view"><BerichtDetail /></RequirePermission>} />
               <Route path="/mein-tag" element={<RequirePermission perm="meintag.view"><MeinTag /></RequirePermission>} />
+              <Route path="/anleitung" element={<Anleitung />} />
               <Route path="/kalkulator" element={<RequirePermission perm="kalkulator.view"><Kalkulator /></RequirePermission>} />
               <Route path="/kalkulator/anfragen" element={<RequirePermission perm="kalkulator.anfragen_verwalten"><KalkulatorAnfragen /></RequirePermission>} />
             </Route>

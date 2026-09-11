@@ -24,7 +24,8 @@ import {
   Mail,
   MessageSquarePlus,
   X,
-  NotebookPen,
+  NotebookPen,,
+  BookOpen,
 } from "lucide-react";
 import { InstallPromptDialog } from "./InstallPromptDialog";
 import { detectPlatform } from "./InstallGuide";
@@ -93,6 +94,7 @@ const NAV: NavItem[] = [
   { to: "/berichte", label: "Berichte", icon: FileText, perm: "berichte.view", end: false },
   { to: "/aenderungswuensche", label: "Änderungswünsche", icon: MessageSquarePlus, perm: "feedback.view_alle", end: true },
   { to: "/notizen", label: "Notizen", icon: NotebookPen, perm: "admin.view", end: true },
+  { to: "/anleitung", label: "Anleitung", icon: BookOpen, roles: ["all"], end: true },
   { to: "/kalkulator", label: "Kalkulator", icon: Calculator, perm: "kalkulator.view", end: true },
   { to: "/kalkulator/anfragen", label: "Anfragen", icon: Mail, perm: "kalkulator.anfragen_verwalten", end: true },
   { to: "/admin", label: "Verwaltung", icon: Settings, perm: "admin.view", end: false },
