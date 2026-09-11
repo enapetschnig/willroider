@@ -28,7 +28,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { normalizeAtPhone } from "@/lib/phone";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { CheckCircle2, XCircle, Plus, Edit, Trash2, AlertTriangle, UserPlus, CalendarDays } from "lucide-react";
+import { CheckCircle2, XCircle, Plus, Edit, Trash2, AlertTriangle, UserPlus, CalendarDays, ShieldCheck } from "lucide-react";
+import { MitarbeiterRechteDialog } from "@/components/admin/MitarbeiterRechteDialog";
 import type { Database, AppRole } from "@/integrations/supabase/types";
 import {
   BAUSTELLEN_ORDNER,
@@ -125,6 +126,8 @@ type RolleRow = {
 export default function Mitarbeiter() {
   const { toast } = useToast();
   const { hasPermission, user: currentUser } = useAuth();
+  const canManageRights = hasPermission("system.manage_permissions");
+  const [rechteFuer, setRechteFuer] = useState<Profile | null>(null);
   const canDeleteMa = hasPermission("mitarbeiter.delete");
   const [params, setParams] = useSearchParams();
   // WICHTIG: eigener Parameter "sub" — NICHT "tab", der gehört der äußeren
@@ -743,6 +746,18 @@ export default function Mitarbeiter() {
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
+                      {canManageRights && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-10"
+                          onClick={() => setRechteFuer(p)}
+                          aria-label="Rechte"
+                          title="Rechte und Ordner — Ausnahmen zur Rolle"
+                        >
+                          <ShieldCheck className="h-4 w-4" />
+                        </Button>
+                      )}
                       {canDeleteMa && (
                         <Button
                           variant="outline"
@@ -863,6 +878,17 @@ export default function Mitarbeiter() {
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
+                          {canManageRights && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setRechteFuer(p)}
+                              aria-label="Rechte"
+                              title="Rechte und Ordner — Ausnahmen zur Rolle"
+                            >
+                              <ShieldCheck className="h-4 w-4" />
+                            </Button>
+                          )}
                           {canDeleteMa && (
                             <Button
                               variant="ghost"
@@ -1063,6 +1089,16 @@ export default function Mitarbeiter() {
       </Tabs>
 
       {/* Neuer Mitarbeiter — Anlage durch Admin */}
+      <MitarbeiterRechteDialog
+        open={!!rechteFuer}
+        onClose={() => {
+          setRechteFuer(null);
+          load();
+        }}
+        profil={rechteFuer as any}
+        rolleId={rechteFuer ? roles[rechteFuer.id] ?? null : null}
+        rolleSchluessel={rechteFuer ? rollenListe.find((r) => r.id === roles[rechteFuer.id])?.schluessel ?? null : null}
+      />
       <NewMitarbeiterDialog
         open={newOpen}
         onClose={() => setNewOpen(false)}

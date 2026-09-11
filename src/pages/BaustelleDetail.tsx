@@ -22,6 +22,7 @@ import {
   Users,
   Pencil,
   AlertTriangle,
+  ExternalLink,
 } from "lucide-react";
 import {
   Dialog,
@@ -407,6 +408,13 @@ export default function BaustelleDetail() {
               </div>
             )}
             <div className="grid sm:flex gap-2 sm:ml-auto">
+              {(b as any).onedrive_url && (
+                <Button asChild variant="outline" className="h-11 sm:h-10">
+                  <a href={(b as any).onedrive_url} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="h-4 w-4 mr-1.5" /> OneDrive-Ordner
+                  </a>
+                </Button>
+              )}
               {canEdit && (
                 <Button
                   variant="outline"
@@ -553,6 +561,44 @@ export default function BaustelleDetail() {
 
         <TabsContent value="team">
           <div className="space-y-3">
+            {/* OneDrive-Ordner der Baustelle — Link, kein Abgleich (Phase 2) */}
+            {(canEdit || (b as any).onedrive_url) && (
+              <Card>
+                <CardContent className="p-3 space-y-2">
+                  <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
+                    OneDrive-Ordner
+                  </div>
+                  {canEdit ? (
+                    <div className="flex gap-2">
+                      <Input
+                        key={(b as any).onedrive_url ?? ""}
+                        defaultValue={(b as any).onedrive_url ?? ""}
+                        placeholder="https://… (Link zum Baustellenordner in OneDrive)"
+                        className="h-10 text-sm"
+                        onBlur={async (e) => {
+                          const v = e.target.value.trim() || null;
+                          if (v === ((b as any).onedrive_url ?? null)) return;
+                          if (v && !/^https?:\/\//i.test(v)) {
+                            toast({ variant: "destructive", title: "Kein gültiger Link", description: "Der Link muss mit https:// beginnen." });
+                            return;
+                          }
+                          const { error } = await supabase.from("baustellen").update({ onedrive_url: v } as any).eq("id", b.id);
+                          if (error) toast({ variant: "destructive", title: "Nicht gespeichert", description: error.message });
+                          else { toast({ title: v ? "OneDrive-Link gespeichert" : "OneDrive-Link entfernt" }); load(); }
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <a href={(b as any).onedrive_url} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline break-all">
+                      {(b as any).onedrive_url}
+                    </a>
+                  )}
+                  <p className="text-[11px] text-muted-foreground">
+                    Öffnet den Ordner in OneDrive. Die Unterlagen in der App (Pläne, Berichte, Unterweisung, LV) bleiben davon getrennt.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
             {/* Partie-Zuordnung */}
             {canEditPartie && (
               <Card>

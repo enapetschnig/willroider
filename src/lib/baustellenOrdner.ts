@@ -14,6 +14,7 @@ export type OrdnerKey =
   | "92-sonstiges"
   | "93-dhp"
   | "94-statik"
+  | "95-leistungsverzeichnis"
   | "fotos"
   | "evaluierung";
 
@@ -37,6 +38,7 @@ export const BAUSTELLEN_ORDNER: OrdnerDef[] = [
   { key: "92-sonstiges", label: "92-Sonstiges", color: "#6b7280" },
   { key: "93-dhp", label: "93-DHP", color: "#ec4899" },
   { key: "94-statik", label: "94-Statik", color: "#14b8a6" },
+  { key: "95-leistungsverzeichnis", label: "95-Leistungsverzeichnis", color: "#b45309" },
   { key: "fotos", label: "Fotos", color: "#3b82f6" },
   { key: "evaluierung", label: "Evaluierung / Unterweisung", color: "#65a30d" },
 ];
@@ -80,7 +82,9 @@ export const DEFAULT_VISIBILITY: Record<string, OrdnerKey[]> = {
     "fotos",
     "evaluierung",
   ],
-  mitarbeiter: ["fotos", "91-plaene", "92-sonstiges", "evaluierung"],
+  // Rollout-Vorgabe: Pläne, Berichte (= Berichts-PDFs im Schriftverkehr,
+  // serverseitig auf die Unterordner begrenzt), Unterweisung, LV, Fotos.
+  mitarbeiter: ["91-plaene", "2-schriftverkehr", "evaluierung", "95-leistungsverzeichnis", "fotos"],
 };
 
 export type Visibility = Record<string, OrdnerKey[]>;

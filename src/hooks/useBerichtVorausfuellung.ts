@@ -132,8 +132,9 @@ export async function uebernehmeEinteilungVorausfuellung(
   r: EinteilungVorausfuellung,
 ): Promise<number> {
   if (r.mitarbeiter.length === 0 && !r.taetigkeit) return 0;
-  await supabase.from("bericht_mitarbeiter").delete().eq("bericht_id", berichtId).eq("aus_einteilung", true);
-  await supabase.from("bericht_taetigkeiten").delete().eq("bericht_id", berichtId).eq("aus_einteilung", true);
+  // aus_einteilung ist in den generierten Typen noch unbekannt → any
+  await (supabase.from("bericht_mitarbeiter") as any).delete().eq("bericht_id", berichtId).eq("aus_einteilung", true);
+  await (supabase.from("bericht_taetigkeiten") as any).delete().eq("bericht_id", berichtId).eq("aus_einteilung", true);
   if (r.mitarbeiter.length > 0) {
     await supabase.from("bericht_mitarbeiter").insert(
       r.mitarbeiter.map((mitarbeiter_id, idx) => ({

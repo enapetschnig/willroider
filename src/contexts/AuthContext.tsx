@@ -13,6 +13,7 @@ type Profile = {
   is_partieleiter: boolean | null;
   partie_id: string | null;
   pers_nr: string | null;
+  ordner_sichtbar?: string[] | null;
 };
 
 type AuthContextValue = {
@@ -85,7 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // ALLE false war. Aufgefallen erst, als das Büro das Fremdzugriffs-
         // Recht verlor und die zweite Hälfte der Bedingung allein trug.
         .select(
-          "id, vorname, nachname, email, is_active, is_partieleiter, partie_id, pers_nr, zeiterfassung_typ, fahrtenbuch_kennzeichen",
+          "id, vorname, nachname, email, is_active, is_partieleiter, partie_id, pers_nr, zeiterfassung_typ, fahrtenbuch_kennzeichen, ordner_sichtbar",
         )
         .eq("id", userId)
         .maybeSingle(),

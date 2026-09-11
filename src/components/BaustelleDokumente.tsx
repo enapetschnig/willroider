@@ -113,7 +113,7 @@ function folderMeta(key: string | null | undefined) {
 
 export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const { toast } = useToast();
-  const { role } = useAuth();
+  const { role, profile } = useAuth();
   const [docs, setDocs] = useState<Dokument[]>([]);
   /** dokument_id → letzter Versand (für „schon verschickt?"). */
   const [versand, setVersand] = useState<Map<string, VersandInfo>>(new Map());
@@ -167,13 +167,20 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const cameraRef = useRef<HTMLInputElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
-  // Sichtbare Ordner anhand Rolle + DB-Settings filtern
+  // Sichtbare Ordner: Ausnahme je Person (profiles.ordner_sichtbar) schlägt
+  // den Rollenstandard. Die Datenbank prüft dasselbe (darf_ordner_sehen) —
+  // hier geht es nur um die Anzeige.
   const visibleFolders = useMemo(() => {
     const r = role ?? "mitarbeiter";
-    const allowed = visibility[r] ?? DEFAULT_VISIBILITY[r] ?? DEFAULT_VISIBILITY.mitarbeiter;
+    const eigene = (profile as any)?.ordner_sichtbar as string[] | null | undefined;
+    const allowed = eigene ?? visibility[r] ?? DEFAULT_VISIBILITY[r] ?? DEFAULT_VISIBILITY.mitarbeiter;
     const allowedSet = new Set(allowed);
-    return FOLDERS.filter((f) => allowedSet.has(f.key));
-  }, [role, visibility]);
+    const istPruefer = r === "geschaeftsfuehrung" || r === "buero";
+    return FOLDERS.filter((f) => allowedSet.has(f.key)).map((f) =>
+      // Für alle außer Büro/GF ist „2-Schriftverkehr" nur der Berichtsordner
+      f.key === "2-schriftverkehr" && !istPruefer ? { ...f, label: "Berichte" } : f,
+    );
+  }, [role, visibility, profile]);
 
   const load = async () => {
     setLoading(true);
