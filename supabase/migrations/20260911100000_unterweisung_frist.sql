@@ -281,3 +281,8 @@ SELECT u.id AS unterschrift_id,
   JOIN public.profiles p ON p.id = u.mitarbeiter_id
  WHERE u.status = 'offen'
    AND u.faellig_am IS NOT NULL;
+
+-- Alte Sichten laufen mit Rechten des Eigentümers (RLS umgangen) —
+-- auf Aufrufer-Rechte umstellen; Nachfolger ist v_unterweisung_faellig.
+ALTER VIEW public.v_offene_unterschriften SET (security_invoker = true);
+ALTER VIEW public.v_offene_unterschriften_mit_alter SET (security_invoker = true);

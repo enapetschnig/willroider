@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { feiertagAt } from "@/lib/feiertage";
-import { localIso, werktageSeit } from "@/lib/dateFmt";
+import { localIso } from "@/lib/dateFmt";
 import {
   Building2,
   CalendarDays,
@@ -31,7 +31,6 @@ import { BerichteHintCard } from "@/components/dashboard/BerichteHintCard";
 import { NeuerLohnzettelHintCard } from "@/components/dashboard/NeuerLohnzettelHintCard";
 import { StundenBerichtHintCard } from "@/components/dashboard/StundenBerichtHintCard";
 import { UnterschriftenCard } from "@/components/dashboard/UnterschriftenCard";
-import { SIGNATURE_KARENZ_WERKTAGE } from "@/components/EvaluierungSignatureGate";
 import { TagesplanPreview } from "@/components/TagesplanPreview";
 import {
   Dialog,
@@ -391,20 +390,16 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user) return;
     const loadUnterschriften = async () => {
+      // Nur was FÄLLIG ist (08:00 am Einsatztag bzw. 30 Min nach Zuteilung) —
+      // wer bloß zugeteilt, aber noch nicht dran ist, taucht hier nicht auf.
       const { data } = await supabase
-        .from("v_offene_unterschriften" as any)
-        .select(
-          "evaluierung_id, bvh_name, mitarbeiter_id, evaluierung_titel, evaluierung_datum",
-        )
-        .eq("verantwortlich_id", user.id);
-      // Pro evaluierung + ma deduplizieren (User kann gleichzeitig Polier+Bauleiter sein)
-      const seen = new Set<string>();
-      const unique = ((data as any[]) ?? []).filter((r) => {
-        const k = `${r.evaluierung_id}_${r.mitarbeiter_id}`;
-        if (seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      });
+        .from("v_unterweisung_faellig" as any)
+        .select("evaluierung_id, bvh_name, mitarbeiter_id, evaluierung_titel, faellig_am")
+        .or(`bauleiter_id.eq.${user.id},polier_id.eq.${user.id}`);
+      const unique = ((data as any[]) ?? []).map((r) => ({
+        ...r,
+        evaluierung_datum: r.faellig_am,
+      }));
       setOffeneUnterschriften(unique);
     };
     loadUnterschriften();
@@ -707,12 +702,11 @@ export default function Dashboard() {
 
       {/* Offene Unterschriften — Polier/Bauleiter */}
       {offeneUnterschriften.length > 0 && (() => {
-        const aelteste = offeneUnterschriften.reduce((max, u) => {
-          if (!u.evaluierung_datum) return max;
-          const wt = werktageSeit(u.evaluierung_datum);
-          return wt > max ? wt : max;
-        }, 0);
-        const eskaliert = aelteste >= SIGNATURE_KARENZ_WERKTAGE;
+        // evaluierung_datum trägt hier die Fälligkeit (siehe Laden oben)
+        const jetzt = Date.now();
+        const eskaliert = offeneUnterschriften.some(
+          (u) => u.evaluierung_datum && new Date(u.evaluierung_datum).getTime() <= jetzt,
+        );
         return (
         <Card
           className={
@@ -757,7 +751,7 @@ export default function Dashboard() {
                   }`}
                 >
                   {eskaliert
-                    ? `Eskalation: ältester Fall seit ${aelteste} Werktagen offen.`
+                    ? "Überfällig — bitte am Tablet nachholen lassen. Bauleiter und Polier wurden per SMS informiert."
                     : "Mitarbeiter auf deinen Baustellen haben die Pflicht-Unterweisung noch nicht bestätigt."}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5">

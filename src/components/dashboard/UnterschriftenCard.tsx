@@ -15,19 +15,15 @@ import { Button } from "@/components/ui/button";
 import { ShieldAlert, FileSignature, ChevronRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { werktageSeit } from "@/lib/dateFmt";
 import {
   EvaluierungSignaturePrompt,
-  SIGNATURE_KARENZ_WERKTAGE,
+  ladeOffeneUnterschriften,
+  istUeberfaellig,
+  faelligText,
+  type OpenSignature,
 } from "@/components/EvaluierungSignatureGate";
 
-type OffeneRow = {
-  unterschrift_id: string;
-  evaluierung_id: string;
-  evaluierung_datum: string;
-  evaluierung_titel: string | null;
-  tage_offen: number;
-};
+type OffeneRow = OpenSignature;
 
 export function UnterschriftenCard() {
   const { user } = useAuth();
@@ -36,13 +32,7 @@ export function UnterschriftenCard() {
 
   const load = useCallback(async () => {
     if (!user) return;
-    const { data } = await supabase
-      .from("v_offene_unterschriften_mit_alter" as any)
-      .select(
-        "unterschrift_id, evaluierung_id, evaluierung_datum, evaluierung_titel, tage_offen",
-      )
-      .eq("mitarbeiter_id", user.id);
-    setOffene((data as OffeneRow[]) ?? []);
+    setOffene(await ladeOffeneUnterschriften(user.id));
   }, [user]);
 
   useEffect(() => {
@@ -68,14 +58,9 @@ export function UnterschriftenCard() {
 
   if (offene.length === 0) return null;
 
-  // Höchste Werktage-Zahl bestimmen — nimm Maximum aus DB-tage_offen
-  // (kalendrisch) vs. clientseitiger Werktag-Logik. Karenz greift erst
-  // bei Werktagen.
-  const alteste = offene.reduce((max, r) => {
-    const wt = werktageSeit(r.evaluierung_datum);
-    return wt > max ? wt : max;
-  }, 0);
-  const ueberfaellig = alteste >= SIGNATURE_KARENZ_WERKTAGE;
+  // Fällig = 08:00 am Einsatztag bzw. 30 Minuten nach Zuteilung (Server).
+  const ueberfaellig = offene.some(istUeberfaellig);
+  const naechste = offene[0];
 
   return (
     <>
@@ -111,8 +96,8 @@ export function UnterschriftenCard() {
                 }`}
               >
                 {ueberfaellig
-                  ? `Pflicht — älteste Aufforderung seit ${alteste} Werktagen offen.`
-                  : `Bitte zeitnah unterschreiben (Frist: ${SIGNATURE_KARENZ_WERKTAGE} Werktage).`}
+                  ? "Überfällig — die App bleibt gesperrt, bis du unterschrieben hast."
+                  : `Bitte lesen und unterschreiben: ${faelligText(naechste)}.`}
               </div>
             </div>
             <Button
