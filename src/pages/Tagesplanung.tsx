@@ -70,6 +70,7 @@ import {
   Download,
   Share2,
   CalendarRange,
+  GraduationCap,
 } from "lucide-react";
 import { makeTagesplanungPdf } from "@/lib/tagesplanungPdf";
 import { getPoliereinsatzPaareFuerTag, vergleichePartien } from "@/lib/tagesplanung";
@@ -2357,9 +2358,11 @@ function MitarbeiterSicht({
                     {a.status === "urlaub" && <Sun className="h-3.5 w-3.5" />}
                     {a.status === "krank" && <HeartPulse className="h-3.5 w-3.5" />}
                     {a.status === "schlechtwetter" && <CloudRain className="h-3.5 w-3.5" />}
+                    {a.status === "berufsschule" && <GraduationCap className="h-3.5 w-3.5" />}
                     {a.status === "urlaub" && "Urlaub"}
                     {a.status === "krank" && "Krank"}
                     {a.status === "schlechtwetter" && "Schlechtwetter"}
+                    {a.status === "berufsschule" && "Berufsschule"}
                     {a.bis && ` bis ${new Date(a.bis).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit" })}`}
                   </span>
                 </div>
@@ -2936,6 +2939,7 @@ function SonderfaelleBlock({
   const urlaub = abwesende.filter((a) => a.status === "urlaub");
   const krank = abwesende.filter((a) => a.status === "krank");
   const sw = abwesende.filter((a) => a.status === "schlechtwetter");
+  const schule = abwesende.filter((a) => a.status === "berufsschule");
 
   const [notizVal, setNotizVal] = useState(notiz);
   const [notizTimer, setNotizTimer] = useState<any>(null);
@@ -3000,6 +3004,10 @@ function SonderfaelleBlock({
         <div className="flex gap-2">
           <span style={{ fontWeight: "bold", minWidth: 110 }}>Schlechtwetter:</span>
           <span>{renderListe(sw)}</span>
+        </div>
+        <div className="flex gap-2">
+          <span style={{ fontWeight: "bold", minWidth: 110 }}>Berufsschule:</span>
+          <span>{renderListe(schule)}</span>
         </div>
         <div className="pt-2 border-t border-black/20 mt-2">
           <div

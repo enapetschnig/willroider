@@ -163,6 +163,7 @@ export function makeTagesplanungPdf(plan: TagesPlanData): jsPDF {
   const urlaub = plan.abwesende.filter((a) => a.status === "urlaub");
   const krank = plan.abwesende.filter((a) => a.status === "krank");
   const sw = plan.abwesende.filter((a) => a.status === "schlechtwetter");
+  const schule = plan.abwesende.filter((a) => a.status === "berufsschule");
 
   const renderListe = (
     list: typeof plan.abwesende,
@@ -196,6 +197,7 @@ export function makeTagesplanungPdf(plan: TagesPlanData): jsPDF {
     ["Urlaub / ZA:", renderListe(urlaub)],
     ["Krank:", renderListe(krank)],
     ["Schlechtwetter:", renderListe(sw)],
+    ["Berufsschule:", renderListe(schule)],
   ];
   if (plan.freigabe?.notiz?.trim()) {
     sonderRows.push(["Sonstige Hinweise:", plan.freigabe.notiz.trim()]);

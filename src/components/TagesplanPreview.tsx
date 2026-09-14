@@ -55,6 +55,7 @@ export function TagesplanPreview({ datum }: { datum: string }) {
   const urlaub = abwesende.filter((a) => a.status === "urlaub");
   const krank = abwesende.filter((a) => a.status === "krank");
   const sw = abwesende.filter((a) => a.status === "schlechtwetter");
+  const schule = abwesende.filter((a) => a.status === "berufsschule");
   const notiz = plan?.freigabe?.notiz ?? "";
 
   const renderAbw = (list: typeof abwesende) => {
@@ -226,6 +227,10 @@ export function TagesplanPreview({ datum }: { datum: string }) {
           <div className="flex gap-2">
             <span style={{ fontWeight: "bold", minWidth: 110 }}>Schlechtwetter:</span>
             <span>{renderAbw(sw)}</span>
+          </div>
+          <div className="flex gap-2">
+            <span style={{ fontWeight: "bold", minWidth: 110 }}>Berufsschule:</span>
+            <span>{renderAbw(schule)}</span>
           </div>
           {notiz.trim() && (
             <div className="pt-2 border-t border-black/20 mt-2">
