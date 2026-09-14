@@ -38,6 +38,8 @@ export interface DocViewerItem {
   storage_path: string;
   dateiname: string;
   mimetype?: string | null;
+  /** Fertige Adresse statt Storage — für Dateien, die in SharePoint liegen. */
+  direkt_url?: string | null;
 }
 
 interface DocViewerDialogProps {
@@ -103,9 +105,10 @@ export function DocViewerDialog({
       // sie serverseitig). 10 min sollten reichen, der User schließt
       // den Dialog sowieso vorher.
       const ttl = kind === "office" ? 600 : 300;
-      const { data, error } = await supabase.storage
-        .from(item.bucket)
-        .createSignedUrl(item.storage_path, ttl);
+      // Liegt die Datei in SharePoint, ist die Adresse schon da.
+      const { data, error } = item.direkt_url
+        ? { data: { signedUrl: item.direkt_url }, error: null }
+        : await supabase.storage.from(item.bucket).createSignedUrl(item.storage_path, ttl);
       if (!active) return;
       if (error || !data) {
         toast({
@@ -137,6 +140,10 @@ export function DocViewerDialog({
 
   const handleDownload = async () => {
     if (!item) return;
+    if (item.direkt_url) {
+      window.open(item.direkt_url, "_blank");
+      return;
+    }
     const { data, error } = await supabase.storage
       .from(item.bucket)
       .createSignedUrl(item.storage_path, 60, { download: item.dateiname });

@@ -259,6 +259,12 @@ export function Thumbnail({
       setLoading(false);
       return;
     }
+    // Dateien aus SharePoint liegen nicht im Storage — für sie gibt es
+    // keine Vorschau, nur das Symbol nach Dateiart.
+    if (!storagePath) {
+      setLoading(false);
+      return;
+    }
     // .doc (alt) lässt sich nicht mit mammoth lesen — nur .docx.
     const ext = (dateiname.split(".").pop() ?? "").toLowerCase();
     if (kind === "docx" && ext !== "docx") {

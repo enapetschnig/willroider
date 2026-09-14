@@ -39,6 +39,7 @@ import type { Database, BaustellenStatus } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
 import { UnterweisungTablet } from "@/components/UnterweisungTablet";
 import { UnterweisungNachweis } from "@/components/UnterweisungNachweis";
+import { SharePointOrdnerCard } from "@/components/baustelle/SharePointOrdnerCard";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Termin = Database["public"]["Tables"]["baustellen_termine"]["Row"];
@@ -564,8 +565,15 @@ export default function BaustelleDetail() {
 
         <TabsContent value="team">
           <div className="space-y-3">
-            {/* OneDrive-Ordner der Baustelle — Link, kein Abgleich (Phase 2) */}
-            {(canEdit || (b as any).onedrive_url) && (
+            {/* SharePoint: Ordner der Baustelle, Abgleich nur lesend */}
+            <SharePointOrdnerCard
+              baustelleId={b.id}
+              kostenstelle={b.kostenstelle}
+              bvhName={b.bvh_name}
+              darfAendern={canEdit}
+            />
+            {/* Zusätzlicher Link von Hand — bleibt für Sonderfälle */}
+            {(b as any).onedrive_url && (
               <Card>
                 <CardContent className="p-3 space-y-2">
                   <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">

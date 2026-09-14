@@ -37,6 +37,7 @@ import {
   ArrowDown,
   MailCheck,
   MailWarning,
+  Cloud,
 } from "lucide-react";
 import { DocViewerDialog, type DocViewerItem } from "@/components/dokumente/DocViewerDialog";
 import { DocSendDialog, type DocSendItem } from "@/components/dokumente/DocSendDialog";
@@ -76,6 +77,12 @@ import {
   getDirectSubfolders,
   readDropFiles,
 } from "@/lib/uploadHelpers";
+import {
+  SP_PREFIX,
+  istSharePointId,
+  ladeSharePointDateien,
+  sharePointDateiUrl,
+} from "@/lib/sharepoint";
 
 // Einheitliche, dezente Folder-Farbe (Windows-Yellow)
 const FOLDER_COLOR = "#eab308";
@@ -188,7 +195,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
 
   const load = async () => {
     setLoading(true);
-    const [d, m] = await Promise.all([
+    const [d, m, sp] = await Promise.all([
       supabase
         .from("dokumente")
         .select("*")
@@ -198,20 +205,40 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         .from("dokument_ordner")
         .select("*")
         .eq("baustelle_id", baustelleId),
+      ladeSharePointDateien(baustelleId),
     ]);
-    const liste = (d.data as Dokument[]) ?? [];
+    const eigene = (d.data as Dokument[]) ?? [];
+    // Dateien aus SharePoint kommen in dieselbe Liste, damit Ordner,
+    // Zählung und Suche unverändert funktionieren. Sie sind am Präfix
+    // erkennbar und bleiben schreibgeschützt.
+    const gespiegelt: Dokument[] = sp.map((s) => ({
+      id: SP_PREFIX + s.id,
+      baustelle_id: s.baustelle_id,
+      mitarbeiter_id: null,
+      ordner: s.ordner,
+      typ: null,
+      dateiname: s.dateiname,
+      storage_path: "",
+      groesse: s.groesse,
+      mimetype: s.mimetype,
+      hochgeladen_von: null,
+      notizen: s.geaendert_von ? `SharePoint · zuletzt ${s.geaendert_von}` : "SharePoint",
+      created_at: s.geaendert_am ?? new Date(0).toISOString(),
+      subpath: s.subpath,
+    })) as Dokument[];
+    const liste = [...eigene, ...gespiegelt];
     setDocs(liste);
     setFolderMarkers((m.data as OrdnerMarker[]) ?? []);
 
     // Versand-Nachweis je Dokument: letzter Versand + Anzahl. Separat
     // geladen, weil die Protokoll-Tabelle nicht an dokumente hängt.
-    if (liste.length > 0) {
+    if (eigene.length > 0) {
       const { data: vs } = await supabase
         .from("dokument_versand" as any)
         .select("dokument_id, empfaenger, versendet_am")
         .in(
           "dokument_id",
-          liste.map((x) => x.id),
+          eigene.map((x) => x.id),
         )
         .order("versendet_am", { ascending: false });
       const map = new Map<string, VersandInfo>();
@@ -415,7 +442,27 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     return uploadItems(items, folder);
   };
 
-  const open = (d: Dokument) => {
+  const open = async (d: Dokument) => {
+    if (istSharePointId(d.id)) {
+      // Inhalt liegt in SharePoint — Adresse wird kurzfristig geholt.
+      const ziel = await sharePointDateiUrl(d.id);
+      if (!ziel) {
+        toast({
+          variant: "destructive",
+          title: "Datei nicht erreichbar",
+          description: "Die Datei liegt in SharePoint und konnte nicht geöffnet werden.",
+        });
+        return;
+      }
+      setViewerItem({
+        bucket: "baustellen",
+        storage_path: "",
+        dateiname: ziel.dateiname,
+        mimetype: ziel.mimetype,
+        direkt_url: ziel.url,
+      });
+      return;
+    }
     setViewerItem({
       bucket: "baustellen",
       storage_path: d.storage_path,
@@ -424,8 +471,20 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     });
   };
 
+  /** Hinweis, wenn jemand eine gespiegelte Datei bearbeiten will. */
+  const nurLesenHinweis = () =>
+    toast({
+      title: "Datei aus SharePoint",
+      description:
+        "Diese Datei liegt in SharePoint und wird hier nur angezeigt. Geändert oder gelöscht wird sie dort.",
+    });
+
   const sendOne = (d: Dokument, e?: React.MouseEvent) => {
     e?.stopPropagation();
+    if (istSharePointId(d.id)) {
+      nurLesenHinweis();
+      return;
+    }
     setSendItems([
       {
         id: d.id,
@@ -475,11 +534,13 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     [filtered, selected],
   );
 
-  /** Mehrere Dateien per Mail senden (Bulk). */
+  /** Mehrere Dateien per Mail senden (Bulk). Gespiegelte bleiben außen vor. */
   const sendSelected = () => {
-    if (selectedDocs.length === 0) return;
+    const eigeneAuswahl = selectedDocs.filter((d) => !istSharePointId(d.id));
+    if (eigeneAuswahl.length < selectedDocs.length) nurLesenHinweis();
+    if (eigeneAuswahl.length === 0) return;
     setSendItems(
-      selectedDocs.map((d) => ({
+      eigeneAuswahl.map((d) => ({
         id: d.id,
         bucket: "baustellen",
         storage_path: d.storage_path,
@@ -497,14 +558,17 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
    *  RLS den DB-Delete dann still blockte (0 rows, kein error), blieb
    *  eine Geisterzeile mit unwiederbringlich zerstörter Datei zurück. */
   const deleteSelected = async () => {
-    if (selectedDocs.length === 0) return;
+    // Dateien aus SharePoint werden hier nie gelöscht — weder dort noch hier.
+    const loeschbar = selectedDocs.filter((d) => !istSharePointId(d.id));
+    if (loeschbar.length < selectedDocs.length) nurLesenHinweis();
+    if (loeschbar.length === 0) return;
     const ok = window.confirm(
-      selectedDocs.length === 1
-        ? `Datei "${selectedDocs[0].dateiname}" löschen?`
-        : `${selectedDocs.length} Dateien löschen?`,
+      loeschbar.length === 1
+        ? `Datei "${loeschbar[0].dateiname}" löschen?`
+        : `${loeschbar.length} Dateien löschen?`,
     );
     if (!ok) return;
-    const ids = selectedDocs.map((d) => d.id);
+    const ids = loeschbar.map((d) => d.id);
     const { data: deleted, error } = await supabase
       .from("dokumente")
       .delete()
@@ -550,6 +614,10 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
 
   /** Inline-Umbenennen einer einzelnen Datei. */
   const startRename = (d: Dokument) => {
+    if (istSharePointId(d.id)) {
+      nurLesenHinweis();
+      return;
+    }
     setRenamingId(d.id);
     setRenameValue(d.dateiname);
   };
@@ -592,8 +660,10 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   /** Dateien in einen anderen Ordner verschieben — DB-only (Storage-Pfad
    *  bleibt; Frontend liest nur ordner+subpath). */
   const moveSelected = () => {
-    if (selectedDocs.length === 0) return;
-    setMoveItems(selectedDocs);
+    const beweglich = selectedDocs.filter((d) => !istSharePointId(d.id));
+    if (beweglich.length < selectedDocs.length) nurLesenHinweis();
+    if (beweglich.length === 0) return;
+    setMoveItems(beweglich);
   };
   const performMove = async (targetOrdner: FolderKey, targetSubpath: string) => {
     if (!moveItems) return;
@@ -603,10 +673,12 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   /** Direkter Move per IDs — wird sowohl vom Verschieben-Dialog als auch
    *  von Drag&Drop verwendet. */
   const moveByIds = async (
-    ids: string[],
+    roheIds: string[],
     targetOrdner: FolderKey,
     targetSubpath: string,
   ) => {
+    const ids = roheIds.filter((id) => !istSharePointId(id));
+    if (ids.length < roheIds.length) nurLesenHinweis();
     if (ids.length === 0) return;
     const { data, error } = await supabase
       .from("dokumente")
@@ -702,6 +774,10 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
 
   const remove = async (d: Dokument, e?: React.MouseEvent) => {
     e?.stopPropagation();
+    if (istSharePointId(d.id)) {
+      nurLesenHinweis();
+      return;
+    }
     if (!confirm(`Datei "${d.dateiname}" löschen?`)) return;
     // Erst DB (mit RLS-Count-Check), dann Storage — siehe deleteSelected.
     const { data: deleted, error } = await supabase
@@ -1687,8 +1763,16 @@ function FileCard({
               {new Date(d.created_at).toLocaleDateString("de-AT")}
               {d.groesse ? ` · ${(d.groesse / 1024).toFixed(0)} KB` : ""}
             </div>
-            {/* Versand-Status: beantwortet „ist die Mail schon raus?" */}
-            {versandInfo ? (
+            {/* Aus SharePoint gespiegelt — hier nur zum Ansehen. */}
+            {istSharePointId(d.id) ? (
+              <div
+                className="mt-1 inline-flex items-center gap-1 rounded-full bg-sky-50 border border-sky-200 px-1.5 py-0.5 text-[9px] font-medium text-sky-800 max-w-full"
+                title={d.notizen ?? "Liegt in SharePoint"}
+              >
+                <Cloud className="h-2.5 w-2.5 shrink-0" />
+                <span className="truncate">SharePoint</span>
+              </div>
+            ) : versandInfo ? (
               <div
                 className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-medium text-emerald-800 max-w-full"
                 title={`Versendet am ${new Date(versandInfo.am).toLocaleString("de-AT")} an ${versandInfo.an}${versandInfo.anzahl > 1 ? ` · insgesamt ${versandInfo.anzahl}×` : ""}`}
@@ -1731,22 +1815,26 @@ function FileCard({
               >
                 <Eye className="h-4 w-4" />
               </button>
-              <button
-                onClick={onSend}
-                className="bg-background/90 hover:bg-primary hover:text-primary-foreground rounded p-1.5 shadow"
-                aria-label="Per Mail senden"
-                title="Per Mail senden"
-              >
-                <Mail className="h-4 w-4" />
-              </button>
-              <button
-                onClick={onDelete}
-                className="bg-background/90 hover:bg-destructive hover:text-white rounded p-1.5 shadow"
-                aria-label="Löschen"
-                title="Löschen"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+              {!istSharePointId(d.id) && (
+                <>
+                  <button
+                    onClick={onSend}
+                    className="bg-background/90 hover:bg-primary hover:text-primary-foreground rounded p-1.5 shadow"
+                    aria-label="Per Mail senden"
+                    title="Per Mail senden"
+                  >
+                    <Mail className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={onDelete}
+                    className="bg-background/90 hover:bg-destructive hover:text-white rounded p-1.5 shadow"
+                    aria-label="Löschen"
+                    title="Löschen"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -1755,23 +1843,31 @@ function FileCard({
         <ContextMenuItem onSelect={onOpen}>
           <Eye className="h-3.5 w-3.5 mr-2" /> Öffnen
         </ContextMenuItem>
-        <ContextMenuItem onSelect={onSend as any}>
-          <Mail className="h-3.5 w-3.5 mr-2" /> Per Mail senden
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem onSelect={onStartRename}>
-          <Pencil className="h-3.5 w-3.5 mr-2" /> Umbenennen
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={onMove}>
-          <FolderInput className="h-3.5 w-3.5 mr-2" /> Verschieben …
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          onSelect={onDelete as any}
-          className="text-destructive focus:text-destructive"
-        >
-          <Trash2 className="h-3.5 w-3.5 mr-2" /> Löschen
-        </ContextMenuItem>
+        {istSharePointId(d.id) ? (
+          <ContextMenuItem disabled className="text-[11px]">
+            <Cloud className="h-3.5 w-3.5 mr-2" /> Liegt in SharePoint
+          </ContextMenuItem>
+        ) : (
+          <>
+            <ContextMenuItem onSelect={onSend as any}>
+              <Mail className="h-3.5 w-3.5 mr-2" /> Per Mail senden
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={onStartRename}>
+              <Pencil className="h-3.5 w-3.5 mr-2" /> Umbenennen
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={onMove}>
+              <FolderInput className="h-3.5 w-3.5 mr-2" /> Verschieben …
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              onSelect={onDelete as any}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-2" /> Löschen
+            </ContextMenuItem>
+          </>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -1934,7 +2030,15 @@ function FileListView({
                           {d.dateiname}
                           {/* Versand-Status auch hier — sonst zeigt die
                               Listen-Ansicht weniger als die Kachel-Ansicht. */}
-                          {versand?.get(d.id) ? (
+                          {istSharePointId(d.id) ? (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-sky-50 border border-sky-200 px-1.5 py-0.5 text-[9px] font-medium text-sky-800"
+                              title={d.notizen ?? "Liegt in SharePoint"}
+                            >
+                              <Cloud className="h-2.5 w-2.5" />
+                              SharePoint
+                            </span>
+                          ) : versand?.get(d.id) ? (
                             <span
                               className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-medium text-emerald-800"
                               title={`Versendet am ${new Date(versand.get(d.id)!.am).toLocaleString("de-AT")} an ${versand.get(d.id)!.an}`}
@@ -1981,23 +2085,31 @@ function FileListView({
                           <DropdownMenuItem onSelect={() => onOpen(d)}>
                             <Eye className="h-3.5 w-3.5 mr-2" /> Öffnen
                           </DropdownMenuItem>
-                          <DropdownMenuItem onSelect={() => onSend(d)}>
-                            <Mail className="h-3.5 w-3.5 mr-2" /> Per Mail
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onSelect={() => onStartRename(d)}>
-                            <Pencil className="h-3.5 w-3.5 mr-2" /> Umbenennen
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onSelect={() => onMove(d)}>
-                            <FolderInput className="h-3.5 w-3.5 mr-2" /> Verschieben …
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onSelect={() => onDelete(d)}
-                            className="text-destructive"
-                          >
-                            <Trash2 className="h-3.5 w-3.5 mr-2" /> Löschen
-                          </DropdownMenuItem>
+                          {istSharePointId(d.id) ? (
+                            <DropdownMenuItem disabled className="text-[11px]">
+                              <Cloud className="h-3.5 w-3.5 mr-2" /> Liegt in SharePoint
+                            </DropdownMenuItem>
+                          ) : (
+                            <>
+                              <DropdownMenuItem onSelect={() => onSend(d)}>
+                                <Mail className="h-3.5 w-3.5 mr-2" /> Per Mail
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onSelect={() => onStartRename(d)}>
+                                <Pencil className="h-3.5 w-3.5 mr-2" /> Umbenennen
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => onMove(d)}>
+                                <FolderInput className="h-3.5 w-3.5 mr-2" /> Verschieben …
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onSelect={() => onDelete(d)}
+                                className="text-destructive"
+                              >
+                                <Trash2 className="h-3.5 w-3.5 mr-2" /> Löschen
+                              </DropdownMenuItem>
+                            </>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </td>
@@ -2007,23 +2119,31 @@ function FileListView({
                   <ContextMenuItem onSelect={() => onOpen(d)}>
                     <Eye className="h-3.5 w-3.5 mr-2" /> Öffnen
                   </ContextMenuItem>
-                  <ContextMenuItem onSelect={() => onSend(d)}>
-                    <Mail className="h-3.5 w-3.5 mr-2" /> Per Mail senden
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem onSelect={() => onStartRename(d)}>
-                    <Pencil className="h-3.5 w-3.5 mr-2" /> Umbenennen
-                  </ContextMenuItem>
-                  <ContextMenuItem onSelect={() => onMove(d)}>
-                    <FolderInput className="h-3.5 w-3.5 mr-2" /> Verschieben …
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem
-                    onSelect={() => onDelete(d)}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <Trash2 className="h-3.5 w-3.5 mr-2" /> Löschen
-                  </ContextMenuItem>
+                  {istSharePointId(d.id) ? (
+                    <ContextMenuItem disabled className="text-[11px]">
+                      <Cloud className="h-3.5 w-3.5 mr-2" /> Liegt in SharePoint
+                    </ContextMenuItem>
+                  ) : (
+                    <>
+                      <ContextMenuItem onSelect={() => onSend(d)}>
+                        <Mail className="h-3.5 w-3.5 mr-2" /> Per Mail senden
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onSelect={() => onStartRename(d)}>
+                        <Pencil className="h-3.5 w-3.5 mr-2" /> Umbenennen
+                      </ContextMenuItem>
+                      <ContextMenuItem onSelect={() => onMove(d)}>
+                        <FolderInput className="h-3.5 w-3.5 mr-2" /> Verschieben …
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem
+                        onSelect={() => onDelete(d)}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-2" /> Löschen
+                      </ContextMenuItem>
+                    </>
+                  )}
                 </ContextMenuContent>
               </ContextMenu>
             );

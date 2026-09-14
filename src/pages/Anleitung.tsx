@@ -17,6 +17,7 @@ import {
   PenLine,
   Building2,
   Send,
+  Cloud,
   type LucideIcon,
 } from "lucide-react";
 
@@ -181,6 +182,21 @@ export default function Anleitung() {
             "Nummer ändert sich? Mitarbeiter → Bearbeiten → neue Nummer → Häkchen „auch als Anmeldenummer“.",
           ]}
           hinweis="Jeder Versand setzt ein neues Passwort. Steht eine Nummer schon bei jemand anderem, sagt die App, bei wem."
+        />
+      )}
+
+      {istVerwaltung && (
+        <Abschnitt
+          icon={Cloud}
+          titel="Unterlagen aus SharePoint"
+          wer="Für Büro und Bauleitung"
+          schritte={[
+            "Die Baustellenordner aus den Teams der Bauleiter erscheinen in der App unter „Dokumente“ — erkennbar am blauen Zeichen „SharePoint“.",
+            "Antippen öffnet die Datei. Pläne, Fotos und Berichte stehen damit auch am Handy zur Verfügung.",
+            "Neu abgeglichen wird alle zehn Minuten. Sofort geht es im Reiter „Team“ der Baustelle mit „Jetzt abgleichen“.",
+            "Fehlt der Ordner? Im Reiter „Team“ mit „Ordner auswählen“ suchen und verknüpfen.",
+          ]}
+          hinweis="Die App ändert in SharePoint nichts: Sie legt dort nichts an und löscht dort nie etwas. Was in der App gelöscht wird, bleibt in SharePoint bestehen."
         />
       )}
 
