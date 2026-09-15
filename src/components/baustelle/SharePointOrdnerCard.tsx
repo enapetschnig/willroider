@@ -92,6 +92,54 @@ export function SharePointOrdnerCard({
     void laden_();
   }, [laden_]);
 
+  /** Jetzt nachsehen, was in SharePoint neu ist. */
+  const abgleichen = async (still = false) => {
+    setArbeitet(true);
+    const { data, error } = await supabase.functions.invoke("sharepoint-sync", {
+      body: { modus: "spiegeln", baustelle_id: baustelleId },
+    });
+    setArbeitet(false);
+    if (error) {
+      toast({ variant: "destructive", title: "Abgleich fehlgeschlagen", description: error.message });
+    } else if (!still) {
+      toast({
+        title: "Abgeglichen",
+        description: `${data?.neu ?? 0} neu, ${data?.geaendert ?? 0} geändert.`,
+      });
+    }
+    void laden_();
+  };
+
+  /** Den vorgeschlagenen Ordner übernehmen. */
+  const setzen = async (o: {
+    site_id: string;
+    site_name: string;
+    drive_id: string;
+    item_id: string;
+    pfad: string;
+    web_url: string | null;
+    variante: string | null;
+  }) => {
+    setArbeitet(true);
+    const { error } = await (supabase as any).rpc("sharepoint_zuordnung_setzen", {
+      p_baustelle: baustelleId,
+      p_site_id: o.site_id,
+      p_site_name: o.site_name,
+      p_drive_id: o.drive_id,
+      p_item_id: o.item_id,
+      p_pfad: o.pfad,
+      p_web_url: o.web_url,
+      p_variante: o.variante,
+    });
+    if (error) {
+      setArbeitet(false);
+      toast({ variant: "destructive", title: "Nicht gespeichert", description: error.message });
+      return;
+    }
+    toast({ title: "Ordner verknüpft", description: o.pfad });
+    await abgleichen(true);
+  };
+
   const loesen = async () => {
     if (
       !window.confirm(
