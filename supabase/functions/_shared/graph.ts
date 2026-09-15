@@ -98,11 +98,15 @@ export async function itemNachPfad(driveId: string, pfad: string): Promise<Graph
   return r.status === 200 ? r : null;
 }
 
-/** Kurzlebige Download-Adresse einer Datei (gültig ca. eine Stunde). */
+/**
+ * Kurzlebige Download-Adresse einer Datei (gültig ca. eine Stunde).
+ *
+ * Bewusst ohne $select: Microsoft liefert die Adresse nur mit, wenn man
+ * die Felder nicht einschränkt. Mit $select kam sie nie zurück, und die
+ * App meldete „Datei liegt nicht mehr in SharePoint", obwohl sie da war.
+ */
 export async function downloadUrl(driveId: string, itemId: string): Promise<string | null> {
-  const r = await graphGet<GraphItem>(
-    `/drives/${driveId}/items/${itemId}?$select=id,name,@microsoft.graph.downloadUrl`,
-  );
+  const r = await graphGet<GraphItem>(`/drives/${driveId}/items/${itemId}`);
   if (r.status !== 200) return null;
   return r["@microsoft.graph.downloadUrl"] ?? null;
 }
