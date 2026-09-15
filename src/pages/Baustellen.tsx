@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, Building2, ListOrdered, Search } from "lucide-react";
+import { Plus, Building2, ListOrdered, Search, Cloud, CloudOff } from "lucide-react";
 import { KostenstellenListe } from "@/components/baustellen/KostenstellenListe";
 import {
   Dialog,
@@ -23,6 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
+import { SharePointVerknuepfenDialog } from "@/components/baustelle/SharePointVerknuepfenDialog";
 import type { Database, BaustellenStatus } from "@/integrations/supabase/types";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -36,7 +37,9 @@ const STATUS_LABEL: Record<BaustellenStatus, string> = {
 };
 
 export default function Baustellen() {
-  const { canCreateBaustelle, user } = useAuth();
+  const { canCreateBaustelle, user, isAdmin, canReview } = useAuth();
+  /** Baustelle, für die gerade ein SharePoint-Ordner gesucht wird. */
+  const [verknuepfen, setVerknuepfen] = useState<Baustelle | null>(null);
   const [data, setData] = useState<Baustelle[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
   // Suche + Statusfilter liegen in der URL, nicht in lokalem State: Beim
@@ -189,6 +192,9 @@ export default function Baustellen() {
           </Select>
           <div className="text-xs text-muted-foreground">
             {filtered.length} / {data.length} Baustellen
+            <span className="ml-2">
+              · {data.filter((x) => (x as any).sharepoint_item_id).length} mit OneDrive
+            </span>
           </div>
         </CardContent>
       </Card>
@@ -212,6 +218,36 @@ export default function Baustellen() {
                     </div>
                     <Badge variant="outline">{STATUS_LABEL[b.status]}</Badge>
                   </div>
+                  {(b as any).sharepoint_item_id ? (
+                    <div
+                      className="inline-flex items-center gap-1 rounded-full bg-sky-50 border border-sky-200 px-2 py-0.5 text-[10px] font-medium text-sky-800"
+                      title={(b as any).sharepoint_pfad ?? ""}
+                    >
+                      <Cloud className="h-3 w-3" />
+                      OneDrive verknüpft
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-muted border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        <CloudOff className="h-3 w-3" />
+                        Nicht verknüpft
+                      </span>
+                      {(isAdmin || canReview) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            // Die Karte ist ein Link — der Knopf darf nicht mitnavigieren.
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setVerknuepfen(b);
+                          }}
+                          className="text-[10px] font-medium text-primary hover:underline"
+                        >
+                          Mit OneDrive verknüpfen
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <div className="text-xs space-y-0.5">
                     {b.bauherr && (
                       <div>
@@ -290,6 +326,15 @@ export default function Baustellen() {
       </div>
       </>
       )}
+
+      <SharePointVerknuepfenDialog
+        open={!!verknuepfen}
+        onClose={() => setVerknuepfen(null)}
+        baustelleId={verknuepfen?.id ?? ""}
+        kostenstelle={verknuepfen?.kostenstelle ?? null}
+        bvhName={verknuepfen?.bvh_name ?? ""}
+        onVerknuepft={load}
+      />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">

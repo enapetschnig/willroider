@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { SharePointVerknuepfenDialog } from "@/components/baustelle/SharePointVerknuepfenDialog";
 import {
   Cloud,
   CloudOff,
@@ -49,18 +50,6 @@ type Status = {
   vorschlag_grund: string | null;
 };
 
-type OrdnerTreffer = {
-  item_id: string;
-  site_id: string;
-  site_name: string;
-  drive_id: string;
-  name: string;
-  pfad: string;
-  web_url: string | null;
-  variante: string | null;
-  archiv: boolean;
-};
-
 const zeit = (iso: string | null) =>
   iso
     ? new Date(iso).toLocaleString("de-AT", {
@@ -87,8 +76,6 @@ export function SharePointOrdnerCard({
   const [laden, setLaden] = useState(true);
   const [arbeitet, setArbeitet] = useState(false);
   const [sucheOffen, setSucheOffen] = useState(false);
-  const [suche, setSuche] = useState("");
-  const [treffer, setTreffer] = useState<OrdnerTreffer[]>([]);
 
   const laden_ = useCallback(async () => {
     setLaden(true);
@@ -104,82 +91,6 @@ export function SharePointOrdnerCard({
   useEffect(() => {
     void laden_();
   }, [laden_]);
-
-  // Vorschlag für die Suche: Kostenstelle, sonst der Name der Baustelle.
-  useEffect(() => {
-    if (sucheOffen && !suche) setSuche((kostenstelle ?? bvhName).slice(0, 20));
-  }, [sucheOffen, suche, kostenstelle, bvhName]);
-
-  useEffect(() => {
-    if (!sucheOffen) return;
-    const begriff = suche.trim();
-    if (begriff.length < 3) {
-      setTreffer([]);
-      return;
-    }
-    let aktiv = true;
-    const t = setTimeout(async () => {
-      const { data } = await (supabase as any)
-        .from("sharepoint_ordner")
-        .select("item_id, site_id, site_name, drive_id, name, pfad, web_url, variante, archiv")
-        .ilike("name", `%${begriff}%`)
-        .order("archiv")
-        .limit(25);
-      if (aktiv) setTreffer((data as OrdnerTreffer[]) ?? []);
-    }, 250);
-    return () => {
-      aktiv = false;
-      clearTimeout(t);
-    };
-  }, [suche, sucheOffen]);
-
-  const setzen = async (o: {
-    site_id: string;
-    site_name: string;
-    drive_id: string;
-    item_id: string;
-    pfad: string;
-    web_url: string | null;
-    variante: string | null;
-  }) => {
-    setArbeitet(true);
-    const { error } = await (supabase as any).rpc("sharepoint_zuordnung_setzen", {
-      p_baustelle: baustelleId,
-      p_site_id: o.site_id,
-      p_site_name: o.site_name,
-      p_drive_id: o.drive_id,
-      p_item_id: o.item_id,
-      p_pfad: o.pfad,
-      p_web_url: o.web_url,
-      p_variante: o.variante,
-    });
-    if (error) {
-      toast({ variant: "destructive", title: "Nicht gespeichert", description: error.message });
-      setArbeitet(false);
-      return;
-    }
-    setSucheOffen(false);
-    setSuche("");
-    toast({ title: "Ordner verknüpft", description: o.pfad });
-    await abgleichen(true);
-  };
-
-  const abgleichen = async (still = false) => {
-    setArbeitet(true);
-    const { data, error } = await supabase.functions.invoke("sharepoint-sync", {
-      body: { modus: "spiegeln", baustelle_id: baustelleId },
-    });
-    setArbeitet(false);
-    if (error) {
-      toast({ variant: "destructive", title: "Abgleich fehlgeschlagen", description: error.message });
-    } else if (!still) {
-      toast({
-        title: "Abgeglichen",
-        description: `${data?.neu ?? 0} neu, ${data?.geaendert ?? 0} geändert.`,
-      });
-    }
-    void laden_();
-  };
 
   const loesen = async () => {
     if (
@@ -329,53 +240,21 @@ export function SharePointOrdnerCard({
         )}
 
         {darfAendern && !status.verknuepft && (
-          <div className="pt-1 space-y-2">
-            {!sucheOffen ? (
-              <Button size="sm" className="h-8" onClick={() => setSucheOffen(true)}>
-                <Link2 className="h-3.5 w-3.5 mr-1.5" /> Ordner verknüpfen
-              </Button>
-            ) : (
-              <div className="space-y-2">
-                <div className="relative">
-                  <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    autoFocus
-                    value={suche}
-                    onChange={(e) => setSuche(e.target.value)}
-                    placeholder="Ordner suchen — Kostenstelle oder Name"
-                    className="h-9 text-sm pl-8"
-                  />
-                </div>
-                <div className="max-h-56 overflow-y-auto rounded-md border divide-y">
-                  {treffer.length === 0 ? (
-                    <div className="p-3 text-xs text-muted-foreground">
-                      {suche.trim().length < 3 ? "Mindestens drei Zeichen." : "Nichts gefunden."}
-                    </div>
-                  ) : (
-                    treffer.map((o) => (
-                      <button
-                        key={o.item_id}
-                        type="button"
-                        disabled={arbeitet}
-                        onClick={() => setzen(o)}
-                        className="w-full text-left p-2 hover:bg-muted/60 disabled:opacity-50"
-                      >
-                        <div className="text-sm font-medium truncate">{o.name}</div>
-                        <div className="text-[10px] text-muted-foreground truncate">
-                          {o.site_name} · {o.pfad}
-                          {o.archiv ? " · abgerechnet" : ""}
-                        </div>
-                      </button>
-                    ))
-                  )}
-                </div>
-                <Button variant="ghost" size="sm" className="h-7" onClick={() => setSucheOffen(false)}>
-                  Abbrechen
-                </Button>
-              </div>
-            )}
+          <div className="pt-1">
+            <Button size="sm" className="h-8" onClick={() => setSucheOffen(true)}>
+              <Link2 className="h-3.5 w-3.5 mr-1.5" /> Mit OneDrive verknüpfen
+            </Button>
           </div>
         )}
+
+        <SharePointVerknuepfenDialog
+          open={sucheOffen}
+          onClose={() => setSucheOffen(false)}
+          baustelleId={baustelleId}
+          kostenstelle={kostenstelle}
+          bvhName={bvhName}
+          onVerknuepft={laden_}
+        />
 
         <p className="text-[11px] text-muted-foreground border-t pt-2">
           Die Dateien aus diesem Ordner erscheinen in den Unterlagen der Baustelle, und was in der
