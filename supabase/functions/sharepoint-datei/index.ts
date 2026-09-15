@@ -12,7 +12,10 @@
 // Gelesen wird ausschließlich. In SharePoint verändert diese Funktion nichts.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.79.0";
-import { downloadUrl, graphKonfiguriert } from "../_shared/graph.ts";
+import { downloadUrl, graphKonfiguriert, pdfAnsichtUrl } from "../_shared/graph.ts";
+
+/** Dateiarten, die sich nur als PDF ansehen lassen. */
+const OFFICE = /\.(docx?|xlsx?|pptx?|odt|ods|odp|rtf)$/i;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -54,14 +57,29 @@ Deno.serve(async (req) => {
   if (error) return json({ ok: false, fehler: error.message }, 500);
   if (!data) return json({ ok: false, fehler: "Datei nicht gefunden oder nicht freigegeben" }, 404);
 
-  const url = await downloadUrl(data.drive_id as string, data.item_id as string);
-  if (!url) return json({ ok: false, fehler: "Datei liegt nicht mehr in SharePoint" }, 404);
+  const original = await downloadUrl(data.drive_id as string, data.item_id as string);
+  if (!original) return json({ ok: false, fehler: "Datei liegt nicht mehr in SharePoint" }, 404);
+
+  // Word und Excel kann der Browser nicht anzeigen — dafür rechnet
+  // Microsoft die Datei in ein PDF um. Das Original bleibt unberührt,
+  // es entsteht nur eine Ansicht.
+  let ansicht = original;
+  let alsPdf = false;
+  if (OFFICE.test(String(data.dateiname))) {
+    const pdf = await pdfAnsichtUrl(data.drive_id as string, data.item_id as string);
+    if (pdf) {
+      ansicht = pdf;
+      alsPdf = true;
+    }
+  }
 
   return json({
     ok: true,
-    url,
+    url: ansicht,
+    download_url: original,
+    als_pdf: alsPdf,
     dateiname: data.dateiname,
-    mimetype: data.mimetype,
+    mimetype: alsPdf ? "application/pdf" : data.mimetype,
     groesse: data.groesse,
   });
 });

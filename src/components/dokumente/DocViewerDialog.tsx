@@ -16,7 +16,7 @@
  * Tab geöffnet werden.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -40,6 +40,8 @@ export interface DocViewerItem {
   mimetype?: string | null;
   /** Fertige Adresse statt Storage — für Dateien, die in SharePoint liegen. */
   direkt_url?: string | null;
+  /** Adresse für „Download" — bei Office das unveränderte Original. */
+  download_url?: string | null;
 }
 
 interface DocViewerDialogProps {
@@ -53,6 +55,9 @@ type ViewKind = "image" | "pdf" | "office" | "text" | "other";
 function detectKind(item: DocViewerItem): ViewKind {
   const mt = (item.mimetype ?? "").toLowerCase();
   const ext = (item.dateiname.split(".").pop() ?? "").toLowerCase();
+  // Word und Excel aus SharePoint kommen bereits als PDF zum Ansehen —
+  // dann zählt die Art des Inhalts, nicht die Endung des Namens.
+  if (item.direkt_url && mt === "application/pdf") return "pdf";
   if (mt.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"].includes(ext))
     return "image";
   if (mt === "application/pdf" || ext === "pdf") return "pdf";
@@ -87,6 +92,8 @@ export function DocViewerDialog({
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  /** Adresse des zwischengespeicherten Inhalts — muss wieder freigegeben werden. */
+  const blobUrl = useRef<string | null>(null);
   const kind = item ? detectKind(item) : "other";
 
   useEffect(() => {
@@ -105,10 +112,34 @@ export function DocViewerDialog({
       // sie serverseitig). 10 min sollten reichen, der User schließt
       // den Dialog sowieso vorher.
       const ttl = kind === "office" ? 600 : 300;
-      // Liegt die Datei in SharePoint, ist die Adresse schon da.
-      const { data, error } = item.direkt_url
-        ? { data: { signedUrl: item.direkt_url }, error: null }
-        : await supabase.storage.from(item.bucket).createSignedUrl(item.storage_path, ttl);
+      // Dateien aus SharePoint kommen mit „als Anhang herunterladen" —
+      // damit zeigt ein iframe nichts an. Deshalb den Inhalt einmal holen
+      // und aus dem Speicher anzeigen.
+      if (item.direkt_url) {
+        try {
+          const antwort = await fetch(item.direkt_url);
+          if (!antwort.ok) throw new Error(`Status ${antwort.status}`);
+          const blob = await antwort.blob();
+          if (!active) return;
+          const objektUrl = URL.createObjectURL(blob);
+          blobUrl.current = objektUrl;
+          setSignedUrl(objektUrl);
+          if (kind === "text") setTextContent(await blob.text());
+          setLoading(false);
+        } catch (e) {
+          if (!active) return;
+          toast({
+            variant: "destructive",
+            title: "Vorschau-Fehler",
+            description: (e as Error).message,
+          });
+          setLoading(false);
+        }
+        return;
+      }
+      const { data, error } = await supabase.storage
+        .from(item.bucket)
+        .createSignedUrl(item.storage_path, ttl);
       if (!active) return;
       if (error || !data) {
         toast({
@@ -135,13 +166,24 @@ export function DocViewerDialog({
 
     return () => {
       active = false;
+      if (blobUrl.current) {
+        URL.revokeObjectURL(blobUrl.current);
+        blobUrl.current = null;
+      }
     };
   }, [open, item, kind, toast]);
 
   const handleDownload = async () => {
     if (!item) return;
-    if (item.direkt_url) {
-      window.open(item.direkt_url, "_blank");
+    if (item.direkt_url || item.download_url) {
+      const a = document.createElement("a");
+      a.href = item.download_url ?? item.direkt_url!;
+      a.download = item.dateiname;
+      a.rel = "noopener";
+      a.target = "_blank";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
       return;
     }
     const { data, error } = await supabase.storage

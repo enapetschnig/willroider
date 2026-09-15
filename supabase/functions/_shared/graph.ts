@@ -111,6 +111,20 @@ export async function downloadUrl(driveId: string, itemId: string): Promise<stri
   return r["@microsoft.graph.downloadUrl"] ?? null;
 }
 
+/**
+ * Word, Excel und PowerPoint als PDF — dafür rechnet Microsoft die Datei
+ * um. Nur so lassen sich diese Dateien in der App ansehen, ohne Office.
+ * Liefert null, wenn die Art nicht umgewandelt werden kann.
+ */
+export async function pdfAnsichtUrl(driveId: string, itemId: string): Promise<string | null> {
+  const r = await fetch(
+    `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/content?format=pdf`,
+    { headers: { Authorization: `Bearer ${await graphToken()}` }, redirect: "manual" },
+  );
+  if (r.status === 302) return r.headers.get("location");
+  return null;
+}
+
 // ───────────────────────── Schreiben ─────────────────────────
 // Alles hier drunter legt an. Nichts davon löscht, ersetzt oder benennt um.
 

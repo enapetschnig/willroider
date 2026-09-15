@@ -38,6 +38,7 @@ import {
   MailCheck,
   MailWarning,
   Cloud,
+  Download,
 } from "lucide-react";
 import { DocViewerDialog, type DocViewerItem } from "@/components/dokumente/DocViewerDialog";
 import { DocSendDialog, type DocSendItem } from "@/components/dokumente/DocSendDialog";
@@ -83,6 +84,7 @@ import {
   ladeSharePointDateien,
   sharePointDateiUrl,
   sharePointHochladenAnstossen,
+  dateiHerunterladen,
 } from "@/lib/sharepoint";
 
 // Einheitliche, dezente Folder-Farbe (Windows-Yellow)
@@ -463,6 +465,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         dateiname: ziel.dateiname,
         mimetype: ziel.mimetype,
         direkt_url: ziel.url,
+        download_url: ziel.download_url,
       });
       return;
     }
@@ -472,6 +475,32 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       dateiname: d.dateiname,
       mimetype: d.mimetype,
     });
+  };
+
+  /** Datei auf das Gerät laden — für eigene wie für SharePoint-Dateien. */
+  const herunterladen = async (d: Dokument, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (istSharePointId(d.id)) {
+      const ziel = await sharePointDateiUrl(d.id);
+      if (!ziel) {
+        toast({
+          variant: "destructive",
+          title: "Download nicht möglich",
+          description: "Die Datei liegt in SharePoint und war nicht erreichbar.",
+        });
+        return;
+      }
+      dateiHerunterladen(ziel.download_url, ziel.dateiname);
+      return;
+    }
+    const { data, error } = await supabase.storage
+      .from("baustellen")
+      .createSignedUrl(d.storage_path, 120, { download: d.dateiname });
+    if (error || !data) {
+      toast({ variant: "destructive", title: "Download fehlgeschlagen", description: error?.message });
+      return;
+    }
+    dateiHerunterladen(data.signedUrl, d.dateiname);
   };
 
   /** Hinweis, wenn jemand eine gespiegelte Datei bearbeiten will. */
@@ -1390,6 +1419,16 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
                     <Button size="sm" variant="outline" className="h-8" onClick={moveSelected}>
                       <FolderInput className="h-3.5 w-3.5 mr-1.5" /> Verschieben
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      onClick={async () => {
+                        for (const d of selectedDocs) await herunterladen(d);
+                      }}
+                    >
+                      <Download className="h-3.5 w-3.5 mr-1.5" /> Herunterladen
+                    </Button>
                     <Button size="sm" variant="outline" className="h-8" onClick={sendSelected}>
                       <Mail className="h-3.5 w-3.5 mr-1.5" /> Per Mail
                     </Button>
@@ -1431,6 +1470,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
                       onDoubleClick={() => open(d)}
                       onDelete={(e) => remove(d, e)}
                       onSend={(e) => sendOne(d, e)}
+                      onDownload={(e) => herunterladen(d, e)}
                       onStartRename={() => startRename(d)}
                       onMove={() => {
                         if (!selected.has(d.id)) {
@@ -1461,6 +1501,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
                   onStartRename={(d) => startRename(d)}
                   onDelete={(d) => remove(d)}
                   onSend={(d) => sendOne(d)}
+                  onDownload={(d) => herunterladen(d)}
                   onMove={(d) => {
                     if (!selected.has(d.id)) setSelected(new Set([d.id]));
                     setMoveItems(
@@ -1673,6 +1714,7 @@ interface FileCardProps {
   onDoubleClick: () => void;
   onDelete: (e: React.MouseEvent) => void;
   onSend: (e: React.MouseEvent) => void;
+  onDownload: (e: React.MouseEvent) => void;
   onStartRename: () => void;
   onMove: () => void;
   onDragStart: (e: React.DragEvent) => void;
@@ -1693,6 +1735,7 @@ function FileCard({
   onDoubleClick,
   onDelete,
   onSend,
+  onDownload,
   onStartRename,
   onMove,
   onDragStart,
@@ -1818,6 +1861,14 @@ function FileCard({
               >
                 <Eye className="h-4 w-4" />
               </button>
+              <button
+                onClick={onDownload}
+                className="bg-background/90 hover:bg-primary hover:text-primary-foreground rounded p-1.5 shadow"
+                aria-label="Herunterladen"
+                title="Herunterladen"
+              >
+                <Download className="h-4 w-4" />
+              </button>
               {!istSharePointId(d.id) && (
                 <>
                   <button
@@ -1845,6 +1896,9 @@ function FileCard({
       <ContextMenuContent className="w-48">
         <ContextMenuItem onSelect={onOpen}>
           <Eye className="h-3.5 w-3.5 mr-2" /> Öffnen
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={onDownload as any}>
+          <Download className="h-3.5 w-3.5 mr-2" /> Herunterladen
         </ContextMenuItem>
         {istSharePointId(d.id) ? (
           <ContextMenuItem disabled className="text-[11px]">
@@ -1893,6 +1947,7 @@ function FileListView({
   onStartRename,
   onDelete,
   onSend,
+  onDownload,
   onMove,
   onOpen,
   onDragStart,
@@ -1915,6 +1970,7 @@ function FileListView({
   onStartRename: (d: Dokument) => void;
   onDelete: (d: Dokument) => void;
   onSend: (d: Dokument) => void;
+  onDownload: (d: Dokument) => void;
   onMove: (d: Dokument) => void;
   onOpen: (d: Dokument) => void;
   onDragStart: (d: Dokument, e: React.DragEvent) => void;
@@ -2088,6 +2144,9 @@ function FileListView({
                           <DropdownMenuItem onSelect={() => onOpen(d)}>
                             <Eye className="h-3.5 w-3.5 mr-2" /> Öffnen
                           </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => onDownload(d)}>
+                            <Download className="h-3.5 w-3.5 mr-2" /> Herunterladen
+                          </DropdownMenuItem>
                           {istSharePointId(d.id) ? (
                             <DropdownMenuItem disabled className="text-[11px]">
                               <Cloud className="h-3.5 w-3.5 mr-2" /> Liegt in SharePoint
@@ -2121,6 +2180,9 @@ function FileListView({
                 <ContextMenuContent className="w-48">
                   <ContextMenuItem onSelect={() => onOpen(d)}>
                     <Eye className="h-3.5 w-3.5 mr-2" /> Öffnen
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={() => onDownload(d)}>
+                    <Download className="h-3.5 w-3.5 mr-2" /> Herunterladen
                   </ContextMenuItem>
                   {istSharePointId(d.id) ? (
                     <ContextMenuItem disabled className="text-[11px]">

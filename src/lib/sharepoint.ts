@@ -91,14 +91,41 @@ export async function ladeSharePointTeams(): Promise<
   return data ?? [];
 }
 
-/** Kurzlebige Adresse zum Ansehen oder Herunterladen. */
-export async function sharePointDateiUrl(
-  dateiId: string,
-): Promise<{ url: string; dateiname: string; mimetype: string | null } | null> {
+/**
+ * Kurzlebige Adressen zu einer Datei: eine zum Ansehen und eine zum
+ * Herunterladen. Word- und Excel-Dateien kommen als PDF zum Ansehen
+ * zurück, weil der Browser sie sonst nicht darstellen kann; zum
+ * Herunterladen gibt es weiterhin das Original.
+ */
+export async function sharePointDateiUrl(dateiId: string): Promise<{
+  url: string;
+  download_url: string;
+  als_pdf: boolean;
+  dateiname: string;
+  mimetype: string | null;
+} | null> {
   const roh = dateiId.startsWith(SP_PREFIX) ? dateiId.slice(SP_PREFIX.length) : dateiId;
   const { data, error } = await supabase.functions.invoke("sharepoint-datei", {
     body: { datei_id: roh },
   });
   if (error || !data?.ok) return null;
-  return { url: data.url, dateiname: data.dateiname, mimetype: data.mimetype ?? null };
+  return {
+    url: data.url,
+    download_url: data.download_url ?? data.url,
+    als_pdf: !!data.als_pdf,
+    dateiname: data.dateiname,
+    mimetype: data.mimetype ?? null,
+  };
+}
+
+/** Eine Adresse zum Herunterladen anbieten, ohne Pop-up-Blocker zu wecken. */
+export function dateiHerunterladen(url: string, dateiname: string): void {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = dateiname;
+  a.rel = "noopener";
+  a.target = "_blank";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
