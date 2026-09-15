@@ -230,31 +230,18 @@ export default function BaustelleDetail() {
     // Die Unterweisung hängt an der Baustelle; wer sie bekommt, entscheidet
     // der Tagesplan (Trigger pflicht_unterweisung_zuteilen/nachholen). Eine
     // Partie ist dafür nicht nötig — 55 von 56 Baustellen haben keine.
-    const { data: evalData, error: evalErr } = await supabase
-      .from("evaluierungen")
-      .insert({
-        baustelle_id: b.id,
-        datum: localIso(),
-        typ,
-        checkliste: {},
-        abgeschlossen: false,
-      } as any)
-      .select()
-      .single();
+    //
+    // Angelegt wird über die Datenbank-Funktion, damit nicht zweimal
+    // dieselbe Unterweisung entsteht: Ist die gewählte Art schon
+    // hinterlegt, bleibt es bei der vorhandenen. Wird auf eine andere Art
+    // gewechselt, werden die offenen Bestätigungen der alten stillgelegt,
+    // damit niemand zweimal unterschreiben muss.
+    const { error: evalErr } = await (supabase as any).rpc("unterweisung_setzen", {
+      p_baustelle: b.id,
+      p_typ: typ,
+    });
     if (evalErr) {
       toast({ variant: "destructive", title: "Fehler", description: evalErr.message });
-      return;
-    }
-    const { error: updErr } = await supabase
-      .from("baustellen")
-      .update({ pflicht_evaluierung_id: evalData.id })
-      .eq("id", b.id);
-    if (updErr) {
-      toast({
-        variant: "destructive",
-        title: "Baustelle konnte nicht verknüpft werden",
-        description: updErr.message,
-      });
       return;
     }
     toast({
