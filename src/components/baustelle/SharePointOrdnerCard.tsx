@@ -6,9 +6,10 @@
  * zuletzt abgeglichen wurde. Vorschläge lassen sich bestätigen, fehlende
  * Zuordnungen von Hand setzen.
  *
- * In SharePoint wird von hier aus nichts angelegt, nichts geändert und
- * nichts gelöscht. „Verknüpfung lösen" trennt nur die Verbindung in der
- * App; der Ordner in SharePoint bleibt unberührt.
+ * Angelegt wird in SharePoint nur ein neuer Baustellenordner, und auch
+ * das erst, wenn sicher keiner da ist. Gelöscht, überschrieben oder
+ * umbenannt wird dort nie. „Verknüpfung lösen" trennt nur die Verbindung
+ * in der App; der Ordner in SharePoint bleibt unberührt.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,9 +17,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { sharePointOrdnerAnlegen } from "@/lib/sharepoint";
 import {
   Cloud,
   CloudOff,
+  FolderPlus,
   ExternalLink,
   Link2,
   Link2Off,
@@ -197,6 +200,38 @@ export function SharePointOrdnerCard({
     void laden_();
   };
 
+  /**
+   * Ordner suchen und, wenn wirklich keiner da ist, anlegen.
+   * Findet die Funktion etwas Ähnliches, legt sie nichts an und fragt
+   * zurück — ein zweiter Ordner neben einem bestehenden wäre schlimmer
+   * als ein fehlender.
+   */
+  const anlegen = async (trotzdem: boolean) => {
+    setArbeitet(true);
+    const r = await sharePointOrdnerAnlegen(baustelleId, trotzdem);
+    setArbeitet(false);
+    if (!r.ok) {
+      toast({ variant: "destructive", title: "Nicht angelegt", description: r.fehler });
+    } else if (r.unklar) {
+      const weiter = window.confirm(
+        `${r.hinweis}\n\nTrotzdem einen neuen Ordner anlegen?`,
+      );
+      if (weiter) {
+        void laden_();
+        return anlegen(true);
+      }
+      toast({ title: "Kein Ordner angelegt", description: "Der Vorschlag wartet auf deine Antwort." });
+    } else if (r.angelegt) {
+      toast({
+        title: "Ordner angelegt",
+        description: `${r.pfad}${r.dateien?.hochgeladen ? ` · ${r.dateien.hochgeladen} Dateien übertragen` : ""}`,
+      });
+    } else {
+      toast({ title: "Ordner war schon da", description: r.pfad });
+    }
+    void laden_();
+  };
+
   const vorschlagAblehnen = async () => {
     await (supabase as any).from("sharepoint_vorschlaege").delete().eq("baustelle_id", baustelleId);
     toast({ title: "Vorschlag verworfen" });
@@ -327,10 +362,20 @@ export function SharePointOrdnerCard({
         )}
 
         {darfAendern && !status.verknuepft && (
-          <div className="pt-1">
+          <div className="pt-1 space-y-2">
+            {!sucheOffen && (
+              <Button size="sm" className="h-8 mr-2" disabled={arbeitet} onClick={() => anlegen(false)}>
+                {arbeitet ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <FolderPlus className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                Ordner in SharePoint anlegen
+              </Button>
+            )}
             {!sucheOffen ? (
               <Button variant="outline" size="sm" className="h-8" onClick={() => setSucheOffen(true)}>
-                <Link2 className="h-3.5 w-3.5 mr-1.5" /> Ordner auswählen
+                <Link2 className="h-3.5 w-3.5 mr-1.5" /> Vorhandenen Ordner auswählen
               </Button>
             ) : (
               <div className="space-y-2">
@@ -376,8 +421,9 @@ export function SharePointOrdnerCard({
         )}
 
         <p className="text-[11px] text-muted-foreground border-t pt-2">
-          Die Dateien aus diesem Ordner erscheinen in den Unterlagen der Baustelle. In SharePoint
-          ändert die App nichts — dort wird weder etwas angelegt noch gelöscht.
+          Die Dateien aus diesem Ordner erscheinen in den Unterlagen der Baustelle, und was in der
+          App hochgeladen wird, wandert dorthin. Gelöscht wird in SharePoint nie: Was du in der App
+          löschst, bleibt dort bestehen.
         </p>
       </CardContent>
     </Card>

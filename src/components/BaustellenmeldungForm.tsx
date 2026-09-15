@@ -10,6 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { pruefeEdgeAntwort } from "@/lib/edgeError";
 import { useAuth } from "@/contexts/AuthContext";
 import { generateBaustellenanlageDocx, DOCX_MIME } from "@/lib/baustellenanlageDocx";
+import { sharePointOrdnerAnlegen } from "@/lib/sharepoint";
 import { Save, Mail, X } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
@@ -95,6 +96,9 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
     setNeueMail("");
   };
 
+  /** Beim Anlegen gleich den Ordner in SharePoint mit erstellen.
+   *  Bei einer bestehenden Baustelle steht das im Reiter „Team". */
+  const [ordnerAnlegen, setOrdnerAnlegen] = useState(!initial?.id);
   const [bvhName, setBvhName] = useState(initial?.bvh_name ?? "");
   const [bauherr, setBauherr] = useState(initial?.bauherr ?? "");
   const [adresse, setAdresse] = useState(initial?.baustellen_adresse ?? "");
@@ -326,6 +330,35 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
         ? "Baustellenmeldung als DOCX im Ordner Baustellenanlage abgelegt."
         : "Gespeichert.",
     });
+
+    // Ordner in SharePoint: erst vormerken, damit es auch dann passiert,
+    // wenn das Fenster gleich geschlossen wird, und dann gleich anstoßen.
+    // Die Funktion sucht zuerst nach einem vorhandenen Ordner und legt
+    // nur an, wenn wirklich keiner da ist.
+    if (ordnerAnlegen && id) {
+      try {
+        await (supabase as any).rpc("sharepoint_ordner_anfordern", { p_baustelle: id });
+        const r = await sharePointOrdnerAnlegen(id);
+        if (r.ok && r.angelegt) {
+          toast({ title: "Ordner in SharePoint angelegt", description: r.pfad });
+        } else if (r.ok && r.unklar) {
+          toast({
+            title: "Ordner nicht angelegt",
+            description: `${r.hinweis} Im Reiter „Team" der Baustelle entscheiden.`,
+          });
+        } else if (r.ok && r.schon_da) {
+          toast({ title: "Ordner in SharePoint war schon da", description: r.pfad });
+        } else if (!r.ok) {
+          toast({
+            variant: "destructive",
+            title: "Ordner nicht angelegt",
+            description: `${r.fehler ?? ""} — wird gleich noch einmal versucht.`,
+          });
+        }
+      } catch {
+        /* Der Zeitplan holt es nach. */
+      }
+    }
 
     // Versand direkt im Anschluss — die Empfänger stehen schon im Formular,
     // es braucht keinen zweiten Dialog. Ein Fehler beim Versand darf das
@@ -639,6 +672,27 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
           )}
         </div>
       </div>
+
+      {/* Ordner in SharePoint */}
+      <Card>
+        <CardContent className="p-3 sm:p-4 space-y-2">
+          <div className="flex items-center gap-3">
+            <Switch
+              id="sp-ordner"
+              checked={ordnerAnlegen}
+              onCheckedChange={setOrdnerAnlegen}
+            />
+            <Label htmlFor="sp-ordner" className="cursor-pointer text-sm font-medium">
+              Ordner in SharePoint gleich mit anlegen
+            </Label>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Legt den Baustellenordner im Team des Bauleiters an, als Kopie der dortigen Vorlage,
+            und legt die Baustellenmeldung hinein. Gibt es den Ordner schon oder etwas Ähnliches,
+            wird keiner angelegt — dann fragt die App nach.
+          </p>
+        </CardContent>
+      </Card>
 
       <div
         className="flex flex-col sm:flex-row gap-2 sticky bottom-0 bg-background pt-2 -mx-1 px-1"

@@ -82,6 +82,7 @@ import {
   istSharePointId,
   ladeSharePointDateien,
   sharePointDateiUrl,
+  sharePointHochladenAnstossen,
 } from "@/lib/sharepoint";
 
 // Einheitliche, dezente Folder-Farbe (Windows-Yellow)
@@ -430,6 +431,8 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         }`,
       });
       setCurrentFolder(folder);
+      // Gleich weiter nach SharePoint — sonst wartet es bis zum Zeitplan.
+      sharePointHochladenAnstossen(baustelleId);
     }
     load();
   };

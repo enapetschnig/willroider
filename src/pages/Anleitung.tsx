@@ -193,10 +193,11 @@ export default function Anleitung() {
           schritte={[
             "Die Baustellenordner aus den Teams der Bauleiter erscheinen in der App unter „Dokumente“ — erkennbar am blauen Zeichen „SharePoint“.",
             "Antippen öffnet die Datei. Pläne, Fotos und Berichte stehen damit auch am Handy zur Verfügung.",
-            "Neu abgeglichen wird alle zehn Minuten. Sofort geht es im Reiter „Team“ der Baustelle mit „Jetzt abgleichen“.",
-            "Fehlt der Ordner? Im Reiter „Team“ mit „Ordner auswählen“ suchen und verknüpfen.",
+            "Was du in der App hochlädst, wandert von selbst in den richtigen Unterordner in SharePoint. Umgekehrt holt die App alle zehn Minuten, was dort neu ist.",
+            "Neue Baustelle: Beim Anlegen den Schalter „Ordner in SharePoint gleich mit anlegen“ stehen lassen. Es entsteht eine Kopie der Vorlage deines Teams, die Baustellenmeldung liegt gleich drin.",
+            "Fehlt oder stimmt der Ordner nicht? Im Reiter „Team“ der Baustelle anlegen, auswählen oder sofort abgleichen.",
           ]}
-          hinweis="Die App ändert in SharePoint nichts: Sie legt dort nichts an und löscht dort nie etwas. Was in der App gelöscht wird, bleibt in SharePoint bestehen."
+          hinweis="Gelöscht wird in SharePoint nie. Was du in der App löschst, bleibt dort bestehen, und eine gleichnamige Datei wird nie überschrieben. Gibt es einen ähnlichen Ordner schon, legt die App keinen zweiten an, sondern fragt."
         />
       )}
 

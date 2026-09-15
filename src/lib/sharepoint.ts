@@ -34,9 +34,43 @@ export async function ladeSharePointDateien(baustelleId: string): Promise<ShareP
     .from("sharepoint_dateien")
     .select("id, baustelle_id, ordner, subpath, sp_pfad, dateiname, groesse, mimetype, web_url, geaendert_am, geaendert_von")
     .eq("baustelle_id", baustelleId)
-    .is("verschwunden_am", null);
+    .is("verschwunden_am", null)
+    // Dateien, die aus der App stammen, stehen dort schon — sonst doppelt.
+    .is("dokument_id", null);
   if (error) return [];
   return (data as SharePointDatei[]) ?? [];
+}
+
+/**
+ * Stößt an, dass neue App-Dateien dieser Baustelle nach SharePoint
+ * wandern. Läuft im Hintergrund; ein Fehlschlag ist unkritisch, weil der
+ * Zeitplan es ohnehin alle zehn Minuten nachholt.
+ */
+export function sharePointHochladenAnstossen(baustelleId: string): void {
+  void supabase.functions
+    .invoke("sharepoint-schreiben", { body: { modus: "hochladen", baustelle_id: baustelleId } })
+    .catch(() => undefined);
+}
+
+/** Ordner für eine Baustelle suchen und, wenn es keinen gibt, anlegen. */
+export async function sharePointOrdnerAnlegen(
+  baustelleId: string,
+  trotzdemAnlegen = false,
+): Promise<{
+  ok: boolean;
+  angelegt?: boolean;
+  schon_da?: boolean;
+  unklar?: boolean;
+  pfad?: string;
+  hinweis?: string;
+  fehler?: string;
+  dateien?: { hochgeladen: number; verknuepft: number };
+}> {
+  const { data, error } = await supabase.functions.invoke("sharepoint-schreiben", {
+    body: { modus: "ordner", baustelle_id: baustelleId, trotzdem_anlegen: trotzdemAnlegen },
+  });
+  if (error) return { ok: false, fehler: error.message };
+  return data;
 }
 
 /** Kurzlebige Adresse zum Ansehen oder Herunterladen. */
