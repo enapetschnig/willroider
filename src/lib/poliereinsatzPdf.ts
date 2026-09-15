@@ -63,6 +63,8 @@ export type PoliereinsatzPdfInput = {
   von: string;
   bis: string;
   partien: PdfPartie[];
+  /** Papierformat, immer Querformat. Vorgabe a4. */
+  format?: "a4" | "a3" | "a2";
   zeitraeume: PdfZeitraum[];
   baustellen: Record<string, PdfBaustelle>;
   abwesenheiten: PdfAbwesenheit[];
@@ -141,7 +143,14 @@ const kurz = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.`;
 const lang = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
 
 export function makePoliereinsatzPdf(input: PoliereinsatzPdfInput): jsPDF {
-  const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
+  // Papierformat wählbar: Auf A3 und A2 passen mehr Tage und mehr Zeilen auf
+  // ein Blatt, weil Zeilenhöhe und Spaltenbreiten in Millimetern gleich
+  // bleiben. Genau darum ging es Eckart — A4 ergibt zu viele Zettel.
+  const doc = new jsPDF({
+    unit: "mm",
+    format: input.format ?? "a4",
+    orientation: "landscape",
+  });
   const PAGE_W = doc.internal.pageSize.getWidth();
   const PAGE_H = doc.internal.pageSize.getHeight();
   const M = 7;

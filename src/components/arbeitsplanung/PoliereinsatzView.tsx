@@ -451,6 +451,8 @@ export function PoliereinsatzView({
   const [pdfVon, setPdfVon] = useState("");
   const [pdfBis, setPdfBis] = useState("");
   const [pdfBusy, setPdfBusy] = useState(false);
+  /** Papierformat des Ausdrucks — A4 ergibt bei langen Zeiträumen viele Zettel. */
+  const [pdfFormat, setPdfFormat] = useState<"a4" | "a3" | "a2">("a4");
 
   /**
    * Erzeugt das PDF für den gewählten Zeitraum. Lädt die Daten BEWUSST
@@ -531,10 +533,22 @@ export function PoliereinsatzView({
       gruppen.forEach((g) => g.member.forEach((m) => inGruppe.add(m.id)));
       const bauleiterIds = new Set(bauleiter.map((b) => b.id));
 
+      // Reihenfolge und Auswahl wie am Bildschirm: nach sort_order, und nur
+      // Partien mit Partieleiter oder mit Einsatz im gewählten Zeitraum.
+      // Vorher ging die rohe Liste ins PDF — alphabetisch sortiert, und mit
+      // Partien wie „Büro", die in der Einteilung gar nicht vorkommen.
+      const partienMitEinsatz = new Set(
+        ((zRaw as any[]) ?? []).map((z) => z.partie_id as string),
+      );
+      const pdfPartien = [...partien]
+        .filter((p) => p.partieleiter_id || partienMitEinsatz.has(p.id))
+        .sort((a, b) => vergleichePartien(a, b));
+
       const doc = makePoliereinsatzPdf({
         von: pdfVon,
         bis: pdfBis,
-        partien: partien.map((p) => ({
+        format: pdfFormat,
+        partien: pdfPartien.map((p) => ({
           id: p.id,
           name: p.name,
           farbcode: p.farbcode,
@@ -2130,10 +2144,31 @@ export function PoliereinsatzView({
                 </Button>
               ))}
             </div>
+            <div>
+              <Label className="text-xs">Papierformat</Label>
+              <div className="flex gap-1.5 mt-1">
+                {([
+                  { wert: "a4", text: "A4" },
+                  { wert: "a3", text: "A3" },
+                  { wert: "a2", text: "A2" },
+                ] as const).map((f) => (
+                  <Button
+                    key={f.wert}
+                    size="sm"
+                    variant={pdfFormat === f.wert ? "default" : "outline"}
+                    onClick={() => setPdfFormat(f.wert)}
+                    className="flex-1"
+                  >
+                    {f.text}
+                  </Button>
+                ))}
+              </div>
+            </div>
             <div className="text-[11px] text-muted-foreground">
-              Querformat, eine Zeile je Baustelle, Abwesenheiten farbig. Bei
-              längeren Zeiträumen werden die Balken schmäler — für den Aushang
-              sind 4 Wochen am besten lesbar.
+              Querformat, eine Zeile je Baustelle, Abwesenheiten farbig. Die
+              Reihenfolge ist dieselbe wie auf dem Bildschirm. Auf A3 und A2
+              passen mehr Tage und mehr Zeilen auf ein Blatt — bei langen
+              Zeiträumen sind das deutlich weniger Seiten.
             </div>
           </div>
           <DialogFooter className="flex-row gap-2">
