@@ -20,12 +20,10 @@ import {
   Smartphone,
   User as UserIcon,
   FileText,
-  Calculator,
   Mail,
   MessageSquarePlus,
   X,
   NotebookPen,
-  BookOpen,
 } from "lucide-react";
 import { InstallPromptDialog } from "./InstallPromptDialog";
 import { detectPlatform } from "./InstallGuide";
@@ -94,8 +92,9 @@ const NAV: NavItem[] = [
   { to: "/berichte", label: "Berichte", icon: FileText, perm: "berichte.view", end: false },
   { to: "/aenderungswuensche", label: "Änderungswünsche", icon: MessageSquarePlus, perm: "feedback.view_alle", end: true },
   { to: "/notizen", label: "Notizen", icon: NotebookPen, perm: "admin.view", end: true },
-  { to: "/anleitung", label: "Anleitung", icon: BookOpen, roles: ["all"], end: true },
-  { to: "/kalkulator", label: "Kalkulator", icon: Calculator, perm: "kalkulator.view", end: true },
+  // Anleitung und Kalkulator stehen bewusst nicht mehr im Menü. Die Seiten
+  // gibt es weiterhin unter /anleitung und /kalkulator, sie werden nur nicht
+  // mehr angeboten.
   { to: "/kalkulator/anfragen", label: "Anfragen", icon: Mail, perm: "kalkulator.anfragen_verwalten", end: true },
   { to: "/admin", label: "Verwaltung", icon: Settings, perm: "admin.view", end: false },
 ];
@@ -205,8 +204,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const istAngestellter = (profile as any)?.zeiterfassung_typ === "angestellter";
 
-  // Einfache Ansicht: nur Mein Tag, Baustellen, Zeiterfassung/Halle, Anleitung.
-  const EINFACH = new Set(["/mein-tag", "/baustellen", "/stunden", "/halle", "/taetigkeitsbericht", "/anleitung"]);
+  // Einfache Ansicht: nur Mein Tag, Baustellen, Zeiterfassung/Halle.
+  const EINFACH = new Set(["/mein-tag", "/baustellen", "/stunden", "/halle", "/taetigkeitsbericht"]);
   const visibleNav = NAV.filter((n) => {
     if (einfacheAnsicht && !EINFACH.has(n.to)) return false;
     // Zusatzbedingung am Profil (z.B. Angestellter/Bauarbeiter) gilt immer.

@@ -6,8 +6,8 @@
  * zuletzt abgeglichen wurde. Vorschläge lassen sich bestätigen, fehlende
  * Zuordnungen von Hand setzen.
  *
- * Angelegt wird in SharePoint nur ein neuer Baustellenordner, und auch
- * das erst, wenn sicher keiner da ist. Gelöscht, überschrieben oder
+ * Ordner werden in SharePoint nicht angelegt — die Verknüpfung mit einem
+ * vorhandenen Ordner passiert hier von Hand. Gelöscht, überschrieben oder
  * umbenannt wird dort nie. „Verknüpfung lösen" trennt nur die Verbindung
  * in der App; der Ordner in SharePoint bleibt unberührt.
  */
@@ -17,11 +17,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { ladeSharePointTeams, sharePointOrdnerAnlegen } from "@/lib/sharepoint";
 import {
   Cloud,
   CloudOff,
-  FolderPlus,
   ExternalLink,
   Link2,
   Link2Off,
@@ -91,9 +89,6 @@ export function SharePointOrdnerCard({
   const [sucheOffen, setSucheOffen] = useState(false);
   const [suche, setSuche] = useState("");
   const [treffer, setTreffer] = useState<OrdnerTreffer[]>([]);
-  /** Team für das Anlegen — nötig, wenn kein Bauleiter hinterlegt ist. */
-  const [teams, setTeams] = useState<{ site_id: string; site_name: string }[]>([]);
-  const [team, setTeam] = useState<string>("");
 
   const laden_ = useCallback(async () => {
     setLaden(true);
@@ -109,10 +104,6 @@ export function SharePointOrdnerCard({
   useEffect(() => {
     void laden_();
   }, [laden_]);
-
-  useEffect(() => {
-    if (darfAendern) void ladeSharePointTeams().then(setTeams);
-  }, [darfAendern]);
 
   // Vorschlag für die Suche: Kostenstelle, sonst der Name der Baustelle.
   useEffect(() => {
@@ -204,38 +195,6 @@ export function SharePointOrdnerCard({
     setArbeitet(false);
     if (error) toast({ variant: "destructive", title: "Nicht gelöst", description: error.message });
     else toast({ title: "Verknüpfung gelöst" });
-    void laden_();
-  };
-
-  /**
-   * Ordner suchen und, wenn wirklich keiner da ist, anlegen.
-   * Findet die Funktion etwas Ähnliches, legt sie nichts an und fragt
-   * zurück — ein zweiter Ordner neben einem bestehenden wäre schlimmer
-   * als ein fehlender.
-   */
-  const anlegen = async (trotzdem: boolean) => {
-    setArbeitet(true);
-    const r = await sharePointOrdnerAnlegen(baustelleId, trotzdem, team || null);
-    setArbeitet(false);
-    if (!r.ok) {
-      toast({ variant: "destructive", title: "Nicht angelegt", description: r.fehler });
-    } else if (r.unklar) {
-      const weiter = window.confirm(
-        `${r.hinweis}\n\nTrotzdem einen neuen Ordner anlegen?`,
-      );
-      if (weiter) {
-        void laden_();
-        return anlegen(true);
-      }
-      toast({ title: "Kein Ordner angelegt", description: "Der Vorschlag wartet auf deine Antwort." });
-    } else if (r.angelegt) {
-      toast({
-        title: "Ordner angelegt",
-        description: `${r.pfad}${r.dateien?.hochgeladen ? ` · ${r.dateien.hochgeladen} Dateien übertragen` : ""}`,
-      });
-    } else {
-      toast({ title: "Ordner war schon da", description: r.pfad });
-    }
     void laden_();
   };
 
@@ -364,42 +323,16 @@ export function SharePointOrdnerCard({
         ) : (
           <div className="text-sm text-muted-foreground flex items-center gap-2">
             <CloudOff className="h-4 w-4 shrink-0" />
-            Noch kein Ordner zugeordnet.
+            Noch kein Ordner verknüpft. Der Ordner wird wie gewohnt in SharePoint angelegt und
+            hier ausgewählt.
           </div>
         )}
 
         {darfAendern && !status.verknuepft && (
           <div className="pt-1 space-y-2">
-            {!sucheOffen && teams.length > 0 && (
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-muted-foreground">Team:</span>
-                <select
-                  value={team}
-                  onChange={(e) => setTeam(e.target.value)}
-                  className="h-8 rounded border bg-background px-2 text-xs flex-1 min-w-0"
-                >
-                  <option value="">Team des Bauleiters</option>
-                  {teams.map((t) => (
-                    <option key={t.site_id} value={t.site_id}>
-                      {t.site_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            {!sucheOffen && (
-              <Button size="sm" className="h-8 mr-2" disabled={arbeitet} onClick={() => anlegen(false)}>
-                {arbeitet ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                ) : (
-                  <FolderPlus className="h-3.5 w-3.5 mr-1.5" />
-                )}
-                Ordner in SharePoint anlegen
-              </Button>
-            )}
             {!sucheOffen ? (
-              <Button variant="outline" size="sm" className="h-8" onClick={() => setSucheOffen(true)}>
-                <Link2 className="h-3.5 w-3.5 mr-1.5" /> Vorhandenen Ordner auswählen
+              <Button size="sm" className="h-8" onClick={() => setSucheOffen(true)}>
+                <Link2 className="h-3.5 w-3.5 mr-1.5" /> Ordner verknüpfen
               </Button>
             ) : (
               <div className="space-y-2">
