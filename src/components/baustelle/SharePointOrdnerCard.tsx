@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { sharePointOrdnerAnlegen } from "@/lib/sharepoint";
+import { ladeSharePointTeams, sharePointOrdnerAnlegen } from "@/lib/sharepoint";
 import {
   Cloud,
   CloudOff,
@@ -91,6 +91,9 @@ export function SharePointOrdnerCard({
   const [sucheOffen, setSucheOffen] = useState(false);
   const [suche, setSuche] = useState("");
   const [treffer, setTreffer] = useState<OrdnerTreffer[]>([]);
+  /** Team für das Anlegen — nötig, wenn kein Bauleiter hinterlegt ist. */
+  const [teams, setTeams] = useState<{ site_id: string; site_name: string }[]>([]);
+  const [team, setTeam] = useState<string>("");
 
   const laden_ = useCallback(async () => {
     setLaden(true);
@@ -106,6 +109,10 @@ export function SharePointOrdnerCard({
   useEffect(() => {
     void laden_();
   }, [laden_]);
+
+  useEffect(() => {
+    if (darfAendern) void ladeSharePointTeams().then(setTeams);
+  }, [darfAendern]);
 
   // Vorschlag für die Suche: Kostenstelle, sonst der Name der Baustelle.
   useEffect(() => {
@@ -208,7 +215,7 @@ export function SharePointOrdnerCard({
    */
   const anlegen = async (trotzdem: boolean) => {
     setArbeitet(true);
-    const r = await sharePointOrdnerAnlegen(baustelleId, trotzdem);
+    const r = await sharePointOrdnerAnlegen(baustelleId, trotzdem, team || null);
     setArbeitet(false);
     if (!r.ok) {
       toast({ variant: "destructive", title: "Nicht angelegt", description: r.fehler });
@@ -363,6 +370,23 @@ export function SharePointOrdnerCard({
 
         {darfAendern && !status.verknuepft && (
           <div className="pt-1 space-y-2">
+            {!sucheOffen && teams.length > 0 && (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">Team:</span>
+                <select
+                  value={team}
+                  onChange={(e) => setTeam(e.target.value)}
+                  className="h-8 rounded border bg-background px-2 text-xs flex-1 min-w-0"
+                >
+                  <option value="">Team des Bauleiters</option>
+                  {teams.map((t) => (
+                    <option key={t.site_id} value={t.site_id}>
+                      {t.site_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             {!sucheOffen && (
               <Button size="sm" className="h-8 mr-2" disabled={arbeitet} onClick={() => anlegen(false)}>
                 {arbeitet ? (

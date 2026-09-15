@@ -56,6 +56,7 @@ export function sharePointHochladenAnstossen(baustelleId: string): void {
 export async function sharePointOrdnerAnlegen(
   baustelleId: string,
   trotzdemAnlegen = false,
+  siteId?: string | null,
 ): Promise<{
   ok: boolean;
   angelegt?: boolean;
@@ -67,10 +68,27 @@ export async function sharePointOrdnerAnlegen(
   dateien?: { hochgeladen: number; verknuepft: number };
 }> {
   const { data, error } = await supabase.functions.invoke("sharepoint-schreiben", {
-    body: { modus: "ordner", baustelle_id: baustelleId, trotzdem_anlegen: trotzdemAnlegen },
+    body: {
+      modus: "ordner",
+      baustelle_id: baustelleId,
+      trotzdem_anlegen: trotzdemAnlegen,
+      ...(siteId ? { site_id: siteId } : {}),
+    },
   });
   if (error) return { ok: false, fehler: error.message };
   return data;
+}
+
+/** Die Teams, in denen Baustellenordner liegen (für die Auswahl von Hand). */
+export async function ladeSharePointTeams(): Promise<
+  { site_id: string; site_name: string; bauleiter_id: string | null }[]
+> {
+  const { data } = await (supabase as any)
+    .from("sharepoint_teams")
+    .select("site_id, site_name, bauleiter_id")
+    .eq("aktiv", true)
+    .order("site_name");
+  return data ?? [];
 }
 
 /** Kurzlebige Adresse zum Ansehen oder Herunterladen. */
