@@ -152,6 +152,17 @@ export default function Mitarbeiter() {
   /** user_id → rollen.id (Quelle der Wahrheit für Berechtigungen). */
   const [roles, setRoles] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<Profile | null>(null);
+  /**
+   * Womit sich die Person derzeit anmeldet (aus auth.users). Der Dialog
+   * zeigte das bisher nicht — die Häkchen „auch als Anmeldenummer/-Adresse"
+   * waren nach jedem Öffnen leer, obwohl die Nummer längst die Anmeldenummer
+   * war. Johannes hielt sie am 16.09. für verschwunden.
+   */
+  const [anmeldung, setAnmeldung] = useState<{ telefon: string | null; email: string | null } | null>(null);
+  const [telefonLoginHaken, setTelefonLoginHaken] = useState(false);
+  const [emailLoginHaken, setEmailLoginHaken] = useState(false);
+  /** Nummern nur über ihre Ziffern vergleichen — Profile sind unterschiedlich formatiert. */
+  const ziffern = (s: unknown) => String(s ?? "").replace(/\D/g, "");
   // Archiv: Deaktivierte verschwinden aus der Hauptliste und lassen sich
   // dort mit einem Klick wiederherstellen.
   const [zeigeArchiv, setZeigeArchiv] = useState(false);
@@ -221,18 +232,33 @@ export default function Mitarbeiter() {
     setEditing(p);
     setIstBauleiter(!!p.ist_bauleiter);
     setEditingSensitive(null);
-    // Sensitive-Daten parallel laden — RLS lässt nur Admin oder eigene Daten durch
-    const { data } = await supabase
-      .from("profiles_sensitive")
-      .select("*")
-      .eq("profile_id", p.id)
-      .maybeSingle();
+    setAnmeldung(null);
+    setTelefonLoginHaken(false);
+    setEmailLoginHaken(false);
+    // Sensitive-Daten und Anmeldedaten parallel laden — RLS bzw. die
+    // Funktion lassen nur Verwaltung/Bauleitung durch.
+    const [{ data }, { data: anm }] = await Promise.all([
+      supabase.from("profiles_sensitive").select("*").eq("profile_id", p.id).maybeSingle(),
+      (supabase as any).rpc("anmeldedaten", { p_profile: p.id }),
+    ]);
     setEditingSensitive(data ?? null);
+    const zeile = Array.isArray(anm) ? anm[0] : anm;
+    const login = {
+      telefon: (zeile?.login_telefon as string | null) ?? null,
+      email: (zeile?.login_email as string | null) ?? null,
+    };
+    setAnmeldung(login);
+    // Häkchen so vorbelegen, wie es tatsächlich ist.
+    setTelefonLoginHaken(!!login.telefon && !!p.telefon && ziffern(login.telefon) === ziffern(p.telefon));
+    setEmailLoginHaken(
+      !!login.email && !!p.email && login.email.toLowerCase() === p.email.toLowerCase(),
+    );
   };
 
   const closeEdit = () => {
     setEditing(null);
     setEditingSensitive(null);
+    setAnmeldung(null);
   };
 
   const toggleActive = async (p: Profile) => {
@@ -425,24 +451,29 @@ export default function Mitarbeiter() {
     const mailAuchLogin = fd.get("email_auch_login") === "on";
     if (neueMail && !mailAuchLogin) profilePayload.email = neueMail;
 
-    // Telefon: als Anmeldenummer nur über die Edge-Function (auth.users +
-    // profiles gemeinsam). Nur das Profil zu ändern ließ am 04.09. Leute
-    // mit einer Nummer stehen, die das Login-Konto nicht kannte.
+    // Telefon: Die Nummer wird IMMER im Profil gesichert. Als Anmeldenummer
+    // setzt sie zusätzlich die Edge-Function (auth.users + profiles).
+    // Vorher wurde die Nummer bei gesetztem Häkchen aus dem Profil-Update
+    // gestrichen und nur von der Edge-Function geschrieben — schlug die
+    // fehl (etwa wegen einer doppelten Nummer), war die eingetippte Nummer
+    // weg. Genau das ist Johannes am 16.09. passiert.
+    // Ein leeres Feld lässt die gespeicherte Nummer unangetastet, wie bei
+    // der E-Mail — Löschen ist eine bewusste Handlung, kein Nebeneffekt.
     const neuesTelefon = str("telefon");
+    const telefonE164 = neuesTelefon ? normalizeAtPhone(neuesTelefon) : null;
     const telefonAuchLogin = fd.get("telefon_auch_login") === "on";
-    if (telefonAuchLogin) {
-      if (!neuesTelefon || !normalizeAtPhone(neuesTelefon)) {
-        toast({
-          variant: "destructive",
-          title: "Telefonnummer ungültig",
-          description: "Für die Anmeldenummer bitte als 0664… oder +43… eingeben.",
-        });
-        return;
-      }
-      delete profilePayload.telefon;
-    } else if (neuesTelefon && normalizeAtPhone(neuesTelefon)) {
-      profilePayload.telefon = normalizeAtPhone(neuesTelefon);
+    const istSchonAnmeldenummer =
+      !!telefonE164 && !!anmeldung?.telefon && ziffern(anmeldung.telefon) === ziffern(telefonE164);
+    if (telefonAuchLogin && !telefonE164) {
+      toast({
+        variant: "destructive",
+        title: "Telefonnummer ungültig",
+        description: "Für die Anmeldenummer bitte als 0664… oder +43… eingeben.",
+      });
+      return;
     }
+    if (!neuesTelefon) delete profilePayload.telefon;
+    else profilePayload.telefon = telefonE164 ?? neuesTelefon;
 
     const { error: pErr } = await supabase
       .from("profiles")
@@ -456,7 +487,9 @@ export default function Mitarbeiter() {
     // Anmelde-Adresse ändert die Edge-Function (Service-Role): auth.users
     // UND profiles gemeinsam — sonst kann sich der Mann mit der neuen
     // Adresse nicht anmelden.
-    if (neueMail && mailAuchLogin) {
+    const istSchonAnmeldeAdresse =
+      !!neueMail && !!anmeldung?.email && anmeldung.email.toLowerCase() === neueMail;
+    if (neueMail && mailAuchLogin && !istSchonAnmeldeAdresse) {
       const { data: fnData, error: fnErr } = await supabase.functions.invoke(
         "admin-update-email",
         { body: { profile_id: editing.id, email: neueMail, auch_login: true } },
@@ -477,10 +510,12 @@ export default function Mitarbeiter() {
       }
     }
 
-    if (neuesTelefon && telefonAuchLogin) {
+    // Nur anstoßen, wenn sich dadurch etwas ändert — ist die Nummer schon
+    // die Anmeldenummer, gibt es nichts zu tun.
+    if (telefonE164 && telefonAuchLogin && !istSchonAnmeldenummer) {
       const { data: fnData, error: fnErr } = await supabase.functions.invoke(
         "admin-update-email",
-        { body: { profile_id: editing.id, telefon: neuesTelefon, telefon_auch_login: true } },
+        { body: { profile_id: editing.id, telefon: telefonE164, telefon_auch_login: true } },
       );
       const fnFehler =
         fnErr?.message ?? (fnData && (fnData as any).error ? (fnData as any).error : null);
@@ -1152,7 +1187,13 @@ export default function Mitarbeiter() {
                       placeholder="name@firma.at"
                     />
                     <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-                      <input type="checkbox" name="email_auch_login" className="h-3.5 w-3.5" />
+                      <input
+                        type="checkbox"
+                        name="email_auch_login"
+                        className="h-3.5 w-3.5"
+                        checked={emailLoginHaken}
+                        onChange={(e) => setEmailLoginHaken(e.target.checked)}
+                      />
                       Auch als Anmelde-Adresse übernehmen — der Mitarbeiter meldet sich
                       künftig mit dieser E-Mail an
                     </label>
@@ -1238,14 +1279,33 @@ export default function Mitarbeiter() {
                     <Input
                       name="telefon"
                       type="tel"
-                      defaultValue={editing.telefon ?? ""}
+                      // Steht im Profil nichts, aber am Login schon: die
+                      // Anmeldenummer anzeigen, damit sie nicht „verschwunden" wirkt.
+                      defaultValue={
+                        editing.telefon ?? (anmeldung?.telefon ? `+${ziffern(anmeldung.telefon)}` : "")
+                      }
                       placeholder="0664 1234567"
                     />
                     <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-                      <input type="checkbox" name="telefon_auch_login" className="h-3.5 w-3.5" />
+                      <input
+                        type="checkbox"
+                        name="telefon_auch_login"
+                        className="h-3.5 w-3.5"
+                        checked={telefonLoginHaken}
+                        onChange={(e) => setTelefonLoginHaken(e.target.checked)}
+                      />
                       Auch als Anmeldenummer übernehmen — der Mitarbeiter kann sich
                       künftig mit dieser Nummer anmelden
                     </label>
+                    <div className="text-[11px] text-muted-foreground">
+                      {anmeldung === null
+                        ? "Anmeldung wird geprüft …"
+                        : anmeldung.telefon
+                          ? `Anmeldenummer derzeit: +${ziffern(anmeldung.telefon)}`
+                          : anmeldung.email && !anmeldung.email.endsWith("@willroider.invalid")
+                            ? `Anmeldung derzeit per E-Mail (${anmeldung.email}), keine Anmeldenummer`
+                            : "Noch keine Anmeldenummer hinterlegt"}
+                    </div>
                   </div>
                 </div>
               </section>

@@ -89,7 +89,15 @@ Deno.serve(async (req) => {
         phone_confirm: true, // Admin-Änderung: kein Bestätigungs-Code nötig
       });
       if (authErr) {
-        return jsonResponse({ error: `Anmeldenummer nicht geändert: ${authErr.message}` }, 500);
+        // Die Prüfung oben sieht nur profiles.telefon. Steht die Nummer nur am
+        // Login-Konto eines anderen (Profil abweichend formatiert oder leer),
+        // meldet erst Supabase den Konflikt — dann bitte verständlich.
+        const doppeltAmLogin = /already|exists|registered/i.test(authErr.message);
+        return jsonResponse({
+          error: doppeltAmLogin
+            ? 'Diese Nummer ist bereits die Anmeldenummer eines anderen Kontos. Die Nummer wurde im Profil gespeichert, als Anmeldenummer aber nicht übernommen.'
+            : `Anmeldenummer nicht geändert: ${authErr.message}`,
+        }, doppeltAmLogin ? 409 : 500);
       }
     }
     const { error: profErr } = await supabase
