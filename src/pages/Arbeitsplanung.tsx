@@ -138,8 +138,14 @@ export default function Arbeitsplanung() {
    *  Poliereinsatz ist die Standard-Ansicht — dort wird geplant; der
    *  Mitarbeiter-Reiter zeigt nur noch Abwesenheiten.
    *  Deep-Link: /arbeitsplanung?ansicht=ma öffnet direkt die MA-Ansicht. */
+  /** Urlaub und Krankenstand der anderen sehen — nur mit eigenem Recht.
+   *  Ohne das Recht gibt es den Reiter „Mitarbeiter" nicht, auch nicht
+   *  über den Direktlink, und der Block „Urlaube" im Poliereinsatz entfällt.
+   *  Die Datenbank liefert die Daten ohne das Recht ohnehin nicht mehr. */
+  const darfAbwesenheiten = isAdmin || hasPermission("arbeitsplanung.abwesenheiten");
   const [ansicht, setAnsicht] = useState<"ma" | "polier">(() =>
-    new URLSearchParams(window.location.search).get("ansicht") === "ma"
+    new URLSearchParams(window.location.search).get("ansicht") === "ma" &&
+    (isAdmin || hasPermission("arbeitsplanung.abwesenheiten"))
       ? "ma"
       : "polier",
   );
@@ -1943,7 +1949,7 @@ export default function Arbeitsplanung() {
         {(
           [
             { key: "polier", label: "Poliereinsatz" },
-            { key: "ma", label: "Mitarbeiter" },
+            ...(darfAbwesenheiten ? [{ key: "ma", label: "Mitarbeiter" }] : []),
           ] as const
         ).map((t) => (
           <button
@@ -1967,6 +1973,7 @@ export default function Arbeitsplanung() {
           profiles={profiles}
           fahrzeuge={fahrzeuge}
           canEdit={hasPermission("arbeitsplanung.edit")}
+          zeigeAbwesenheiten={darfAbwesenheiten}
           userId={user?.id ?? null}
           onReload={load}
           onNeueBaustelle={
@@ -1980,7 +1987,7 @@ export default function Arbeitsplanung() {
         />
       )}
 
-      {ansicht === "ma" && (
+      {ansicht === "ma" && darfAbwesenheiten && (
       <>
 
       <Card>

@@ -109,6 +109,7 @@ export function PoliereinsatzView({
   profiles,
   fahrzeuge,
   canEdit,
+  zeigeAbwesenheiten = true,
   userId,
   onReload,
   onNeueBaustelle,
@@ -119,6 +120,11 @@ export function PoliereinsatzView({
   fahrzeuge: Fahrzeug[];
   /** arbeitsplanung.edit — darf Einsätze anlegen/ändern/verschieben */
   canEdit: boolean;
+  /** arbeitsplanung.abwesenheiten — Block „Urlaube / Abwesenheiten" unten
+   *  (Bauleiter, Büro, sonstige Urlauber). Die Zeile „Abwesend" je Partie
+   *  bleibt: Der Polier sieht seine eigene Partie, mehr gibt die Datenbank
+   *  ihm ohnehin nicht. */
+  zeigeAbwesenheiten?: boolean;
   userId: string | null;
   /** Lädt die Stammdaten (u.a. profiles) im Parent neu — nach Umzügen. */
   onReload?: () => void;
@@ -666,16 +672,19 @@ export function PoliereinsatzView({
    */
   const bauleiter = useMemo(
     () =>
-      profiles
-        .filter((p) => (p as any).ist_bauleiter === true && p.is_active !== false)
-        .sort((a, b) => a.nachname.localeCompare(b.nachname)),
-    [profiles],
+      zeigeAbwesenheiten
+        ? profiles
+            .filter((p) => (p as any).ist_bauleiter === true && p.is_active !== false)
+            .sort((a, b) => a.nachname.localeCompare(b.nachname))
+        : [],
+    [profiles, zeigeAbwesenheiten],
   );
 
   /** Urlauber, die sonst nirgends sichtbar wären: weder Mitglied einer
    *  angezeigten Polier-Gruppe noch Bauleiter (z.B. Werkvorfertigung/Büro)
    *  — wie die „Urlaube:"-Liste unten im MS-Project-Ausdruck. */
   const sonstigeUrlauber = useMemo(() => {
+    if (!zeigeAbwesenheiten) return [] as Profile[];
     const abgedeckt = new Set<string>();
     gruppen.forEach((g) => g.member.forEach((m) => abgedeckt.add(m.id)));
     bauleiter.forEach((b) => abgedeckt.add(b.id));
@@ -683,7 +692,7 @@ export function PoliereinsatzView({
       .filter((p) => p.is_active !== false && !abgedeckt.has(p.id))
       .filter((p) => (urlaubByMa.get(p.id)?.size ?? 0) > 0)
       .sort((a, b) => a.nachname.localeCompare(b.nachname));
-  }, [profiles, gruppen, bauleiter, urlaubByMa]);
+  }, [profiles, gruppen, bauleiter, urlaubByMa, zeigeAbwesenheiten]);
 
   const barColor = (z: Zeitraum): string => {
     const b = baustellenById[z.baustelle_id];
@@ -1631,12 +1640,14 @@ export function PoliereinsatzView({
                 </div>
               ))}
               {/* Urlaubs-Block: Bauleiter/Büro + alle sonst nicht sichtbaren Urlauber */}
-              <div
-                className="border-b bg-muted/60 flex items-center px-2 text-[12px] font-bold"
-                style={{ height: ROW_H }}
-              >
-                Urlaube / Abwesenheiten
-              </div>
+              {zeigeAbwesenheiten && (
+                <div
+                  className="border-b bg-muted/60 flex items-center px-2 text-[12px] font-bold"
+                  style={{ height: ROW_H }}
+                >
+                  Urlaube / Abwesenheiten
+                </div>
+              )}
               {bauleiter.map((b) => (
                 <div
                   key={b.id}
@@ -1821,7 +1832,9 @@ export function PoliereinsatzView({
                   </div>
                 ))}
                 {/* Urlaube: Bauleiter/Büro + sonst nicht sichtbare Urlauber */}
-                <GridRow days={days} height={ROW_H} shade="hsl(var(--muted))" />
+                {zeigeAbwesenheiten && (
+                  <GridRow days={days} height={ROW_H} shade="hsl(var(--muted))" />
+                )}
                 {bauleiter.map((b) => (
                   <div key={b.id} className="relative border-b" style={{ height: ROW_H }}>
                     <GridBg days={days} />

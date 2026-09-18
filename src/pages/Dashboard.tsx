@@ -119,6 +119,14 @@ export default function Dashboard() {
   const [heuteEinteilungen, setHeuteEinteilungen] = useState<HeuteEintrag[]>([]);
   const [heuteFehlzeit, setHeuteFehlzeit] = useState<string | null>(null);
   const [planOpen, setPlanOpen] = useState(false);
+  /** Welcher Tag im Tagesplan-Dialog steht — heute oder der nächste freigegebene. */
+  const [planDatum, setPlanDatum] = useState<string>(localIso());
+  /**
+   * Nächster vom Büro freigegebener Tag nach heute, samt eigener Einteilung.
+   * Wunsch von Bua Sirnitzer (18.09.): Das Büro gab den Montag frei, seine
+   * Startseite zeigte nur „Heute" — den Montag fand er nirgends.
+   */
+  const [naechster, setNaechster] = useState<{ datum: string; eintraege: HeuteEintrag[] } | null>(null);
 
   useEffect(() => {
     supabase
@@ -135,7 +143,9 @@ export default function Dashboard() {
     if (!user) return;
     const today = localIso();
 
-    const loadHeute = async () => {
+    /** Eigene Einteilungen eines Tages — mit Fahrzeugen, Kollegen und
+     *  schon gebuchten Stunden. Für heute und für den nächsten Plan. */
+    const ladeEinteilungen = async (datum: string): Promise<HeuteEintrag[]> => {
       // 1) Tagesgenaue Einteilung über einteilung_mitarbeiter
       const { data: emRows } = await supabase
         .from("einteilung_mitarbeiter")
@@ -143,7 +153,7 @@ export default function Dashboard() {
           "id, einteilungen!inner(id, datum, baustelle_id, taetigkeit, baustellen(id, bvh_name, kostenstelle, ort, partie_id, partien(farbcode)))"
         )
         .eq("mitarbeiter_id", user.id)
-        .eq("einteilungen.datum", today);
+        .eq("einteilungen.datum", datum);
 
       const eintraege: HeuteEintrag[] = (emRows ?? [])
         .filter((r: any) => r.einteilungen?.baustellen)
@@ -203,7 +213,7 @@ export default function Dashboard() {
             "baustelle_id, stunden, stunden_tag:stunden_tage!inner(mitarbeiter_id, datum)"
           )
           .eq("stunden_tag.mitarbeiter_id", user.id)
-          .eq("stunden_tag.datum", today);
+          .eq("stunden_tag.datum", datum);
         if (stunden) {
           for (const e of eintraege) {
             e.bereitsGebucht = stunden
@@ -213,7 +223,13 @@ export default function Dashboard() {
         }
       }
 
-      // 3) Falls heute eine Fehlzeit erfasst ist (Urlaub/Krank/SW/Feiertag)
+      return eintraege;
+    };
+
+    const loadHeute = async () => {
+      const eintraege = await ladeEinteilungen(today);
+
+      // Falls heute eine Fehlzeit erfasst ist (Urlaub/Krank/SW/Feiertag)
       const { data: tag } = await supabase
         .from("stunden_tage")
         .select("tag_status")
@@ -224,6 +240,22 @@ export default function Dashboard() {
 
       setHeuteEinteilungen(eintraege);
       setHeuteFehlzeit(status ? (FEHLZEIT_LABEL[status] ?? null) : null);
+
+      // Nächster freigegebener Tag nach heute — sobald das Büro freigibt,
+      // steht er hier, egal ob morgen oder nach dem Wochenende.
+      const { data: frei } = await supabase
+        .from("tagesplanung_freigaben")
+        .select("datum")
+        .gt("datum", today)
+        .not("freigegeben_am", "is", null)
+        .order("datum")
+        .limit(1);
+      const naechstesDatum = (frei?.[0] as { datum: string } | undefined)?.datum ?? null;
+      setNaechster(
+        naechstesDatum
+          ? { datum: naechstesDatum, eintraege: await ladeEinteilungen(naechstesDatum) }
+          : null,
+      );
     };
     loadHeute();
 
@@ -252,6 +284,11 @@ export default function Dashboard() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "stunden_taetigkeiten" },
+        loadHeute
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tagesplanung_freigaben" },
         loadHeute
       )
       .subscribe();
@@ -851,7 +888,10 @@ export default function Dashboard() {
               variant="outline"
               size="sm"
               className="w-full"
-              onClick={() => setPlanOpen(true)}
+              onClick={() => {
+                setPlanDatum(localIso());
+                setPlanOpen(true);
+              }}
             >
               <FileText className="h-4 w-4 mr-1.5" /> Tagesplan ansehen
             </Button>
@@ -948,13 +988,105 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {/* Tagesplan-Vorschau im Dialog */}
+      {/* Nächster Einsatz: der nächste vom Büro freigegebene Tag nach heute.
+          Steht da, sobald die Freigabe kommt — auch am Freitag für Montag. */}
+      {naechster && (
+        <Card className="border-2 border-sky-300/60 bg-sky-50/40 shadow-sm">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-sky-800 font-semibold">
+              <CalendarDays className="h-4 w-4" />
+              Nächster Einsatz
+              <span className="text-muted-foreground font-normal normal-case ml-auto">
+                {new Date(`${naechster.datum}T00:00:00`).toLocaleDateString("de-AT", {
+                  weekday: "long",
+                  day: "2-digit",
+                  month: "long",
+                })}
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={() => {
+                setPlanDatum(naechster.datum);
+                setPlanOpen(true);
+              }}
+            >
+              <FileText className="h-4 w-4 mr-1.5" /> Tagesplan ansehen
+            </Button>
+            {naechster.eintraege.length === 0 ? (
+              <div className="text-sm text-muted-foreground">
+                An diesem Tag bist du nicht auf einer Baustelle eingeteilt.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {naechster.eintraege.map((e) => (
+                  <div key={e.einteilungId} className="rounded-md border bg-card p-3 space-y-2">
+                    <div className="flex items-start gap-3">
+                      <div
+                        className="h-10 w-10 rounded-md flex items-center justify-center shrink-0"
+                        style={{
+                          background: e.partieFarbe ? `${e.partieFarbe}25` : "hsl(var(--primary)/0.1)",
+                          color: e.partieFarbe ?? "hsl(var(--primary))",
+                        }}
+                      >
+                        <Building2 className="h-5 w-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm sm:text-base leading-tight">{e.bvhName}</div>
+                        <div className="text-[11px] text-muted-foreground truncate">
+                          {[e.kostenstelle, e.ort].filter(Boolean).join(" · ")}
+                        </div>
+                        {e.taetigkeit && (
+                          <div className="text-xs italic text-foreground mt-0.5">→ {e.taetigkeit}</div>
+                        )}
+                      </div>
+                    </div>
+                    {(e.fahrzeuge.length > 0 || e.kollegen.length > 0) && (
+                      <div className="grid sm:grid-cols-2 gap-2 pt-2 border-t text-xs">
+                        {e.fahrzeuge.length > 0 && (
+                          <div className="flex items-start gap-1.5">
+                            <Truck className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                            <div className="min-w-0">
+                              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Fahrzeug</div>
+                              <div className="font-medium tabular-nums">{e.fahrzeuge.join(" · ")}</div>
+                            </div>
+                          </div>
+                        )}
+                        {e.kollegen.length > 0 && (
+                          <div className="flex items-start gap-1.5">
+                            <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                            <div className="min-w-0">
+                              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Mit dir dabei</div>
+                              <div className="font-medium">{e.kollegen.join(", ")}</div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Tagesplan-Vorschau im Dialog — heute oder der nächste freigegebene Tag */}
       <Dialog open={planOpen} onOpenChange={setPlanOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Tagesplan</DialogTitle>
+            <DialogTitle>
+              Tagesplan{" "}
+              {new Date(`${planDatum}T00:00:00`).toLocaleDateString("de-AT", {
+                weekday: "long",
+                day: "2-digit",
+                month: "2-digit",
+              })}
+            </DialogTitle>
           </DialogHeader>
-          <TagesplanPreview datum={localIso()} />
+          <TagesplanPreview datum={planDatum} />
         </DialogContent>
       </Dialog>
 

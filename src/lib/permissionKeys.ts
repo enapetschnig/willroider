@@ -52,6 +52,7 @@ export type PermissionKey =
   | "arbeitsplanung.view"
   | "arbeitsplanung.edit"
   | "arbeitsplanung.partien_verwalten"
+  | "arbeitsplanung.abwesenheiten"
   | "tagesplanung.view"
   | "tagesplanung.edit"
   | "tagesplanung.freigeben"
