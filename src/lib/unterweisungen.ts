@@ -3,7 +3,36 @@
 
 import type { EvaluierungTyp } from "@/integrations/supabase/types";
 
-export type UnterweisungType = "werkstatt" | "baustelle" | "fertigteilmontage";
+export type UnterweisungType = "werkstatt" | "baustelle" | "fertigteilmontage" | "tagesbaustelle";
+
+/** Eingabefeld im Kopf der Evaluierung Tagesbaustellen. */
+export type FeldItem = {
+  key: string;
+  label: string;
+  typ?: "text" | "date" | "tel" | "number" | "textarea";
+  /** Über die ganze Breite (Anschrift, Beschreibung, Ablauf). */
+  breit?: boolean;
+};
+
+/** Eine Maßnahme rechts neben der Gefährdung: ☒ umzusetzen / ☐ nicht erforderlich. */
+export type MassnahmeItem = {
+  key: string;
+  label: string;
+  /** Mit Textzeile („Sonstiges: …“). Der Text liegt unter „t.<key>“. */
+  freitext?: boolean;
+};
+
+/** Eine Gefährdung (☒ vorhanden / ☐ nicht vorhanden) mit ihren Maßnahmen. */
+export type GefahrGruppe = {
+  key: string;
+  label: string;
+  hinweis?: string;
+  /** Angaben zur Gefährdung (Absturzhöhe, Höhe der Freileitung …). */
+  zusatz?: { key: string; label: string }[];
+  massnahmen: MassnahmeItem[];
+  /** „Sonstige Gefährdung“: Art und Maßnahme sind frei einzutragen. */
+  frei?: boolean;
+};
 
 export type Section =
   | { kind: "text"; heading?: string; lines: string[] }
@@ -12,7 +41,9 @@ export type Section =
       kind: "arbeitsmittel";
       heading: string;
       items: { key: string; label: string }[];
-    };
+    }
+  | { kind: "felder"; heading: string; items: FeldItem[] }
+  | { kind: "gefahren"; heading: string; gruppen: GefahrGruppe[] };
 
 export interface UnterweisungContent {
   id: UnterweisungType;
@@ -40,6 +71,11 @@ export const UNTERWEISUNG_OPTIONS: { value: UnterweisungType; label: string; des
     label: "Montageanweisung Fertigteile",
     description: "Wand- & Deckenelemente, Anschlagen, Versetzen, Lagerung",
   },
+  {
+    value: "tagesbaustelle",
+    label: "Evaluierung Tagesbaustellen (SiGe-Dokument)",
+    description: "§§ 4-5 ASchG · Gefahrenermittlung je Baustelle nach Vorlage Ingenieurbüro Wulz",
+  },
 ];
 
 export function unterweisungLabel(typ: EvaluierungTyp | null | undefined): string {
@@ -50,6 +86,8 @@ export function unterweisungLabel(typ: EvaluierungTyp | null | undefined): strin
       return "Baustelle";
     case "fertigteilmontage":
       return "Fertigteilmontage";
+    case "tagesbaustelle":
+      return "Tagesbaustelle (SiGe)";
     case "kurz":
       return "Kurzversion";
     case "lang":
@@ -486,10 +524,176 @@ const FERTIGTEILMONTAGE: UnterweisungContent = {
     "Ich bestätige, dass ich die Montageanweisung für Fertigteilelemente vollständig gelesen, verstanden und akzeptiert habe. Ich werde die Vorgaben bei Versetzarbeiten einhalten.",
 };
 
+// ─── Evaluierung Tagesbaustellen — Sicherheits- und Gesundheitsschutzdokument
+// lt. §§ 4-5 ASchG. Vorlage: Ingenieurbüro Wulz GmbH („Evaluierung neu.xlsx“,
+// September 2026). Werte liegen flach in evaluierungen.checkliste:
+//   f.<feld>            Kopfangaben (Text)
+//   g.<gefahr>          „x“ = Gefährdung vorhanden
+//   m.<gefahr>.<mass>   „x“ = Maßnahme umzusetzen
+//   t.<schlüssel>       Freitexte (Absturzhöhe, Sonstiges …)
+const sonstiges = (g: string): MassnahmeItem => ({ key: `m.${g}.sonst`, label: "Sonstiges", freitext: true });
+
+export const TAGESBAUSTELLE_FELDER: FeldItem[] = [
+  { key: "f.verfasser", label: "Evaluierungsverfasser" },
+  { key: "f.anschrift", label: "Anschrift der Baustelle", typ: "textarea", breit: true },
+  { key: "f.beschreibung", label: "Beschreibung des Bauvorhabens", typ: "textarea", breit: true },
+  { key: "f.baubeginn", label: "Baubeginn", typ: "date" },
+  { key: "f.bauende", label: "Voraussichtliches Ende", typ: "date" },
+  { key: "f.objekt", label: "Herzustellendes Objekt", breit: true },
+  { key: "f.ablauf", label: "Vorgesehener Arbeitsablauf", typ: "textarea", breit: true },
+  { key: "f.bauleiter", label: "Bauleiter" },
+  { key: "f.bauleiter_tel", label: "Handy Bauleiter", typ: "tel" },
+  { key: "f.partiefuehrer", label: "Partieführer" },
+  { key: "f.partiefuehrer_tel", label: "Handy Partieführer", typ: "tel" },
+  { key: "f.max_an", label: "Max. Anzahl der Arbeitnehmer", typ: "number" },
+  { key: "f.sub", label: "Subunternehmer" },
+  { key: "f.sub_taetigkeit", label: "Auszuführende Tätigkeit (Sub)" },
+  { key: "f.sub_anschrift", label: "Anschrift Subunternehmer", breit: true },
+  { key: "f.sub_max", label: "Max. Anzahl Arbeitnehmer des Subunternehmers", typ: "number" },
+];
+
+export const TAGESBAUSTELLE_GEFAHREN: GefahrGruppe[] = [
+  {
+    key: "absturz",
+    label: "Absturzgefahr",
+    zusatz: [{ key: "t.absturz_hoehe", label: "Voraussichtliche Absturzhöhe" }],
+    massnahmen: [
+      { key: "m.absturz.dachfang", label: "Dachfanggerüst" },
+      { key: "m.absturz.arbeitsgeruest", label: "Arbeitsgerüst" },
+      { key: "m.absturz.sicherung", label: "Absturzsicherung (Brust-, Mittel- und Fußwehr)" },
+      { key: "m.absturz.abgrenzung", label: "Abgrenzung (Brustwehr in 2,0 m Abstand zur Absturzkante)" },
+      { key: "m.absturz.psa", label: "Anseilschutz (PSA gegen Absturz)" },
+      sonstiges("absturz"),
+    ],
+  },
+  {
+    key: "strom",
+    label: "Gefahren durch elektrischen Strom",
+    hinweis: "Hochspannungsleitungen",
+    zusatz: [{ key: "t.freileitung_hoehe", label: "Höhe der Freileitung über dem Baufeld" }],
+    massnahmen: [
+      {
+        key: "m.strom.begrenzung",
+        label: "Hub- und Schwenkbegrenzung für Baugeräte (Mobil- und Autokräne, Hebebühnen, Stapler etc.)",
+      },
+      {
+        key: "m.strom.abstand",
+        label:
+          "Schutzabstände einhalten (Baugeräte so positionieren, dass sie nicht in den Gefahrenbereich der Freileitung gelangen)",
+      },
+      { key: "m.strom.abschaltung", label: "Abschaltung der Freileitung" },
+      sonstiges("strom"),
+    ],
+  },
+  {
+    key: "einbauten",
+    label: "Gefahren durch vorhandene Einbauten",
+    hinweis: "Strom, Gas, Wasser, Heizung etc.",
+    massnahmen: [
+      { key: "m.einbauten.plaene", label: "Einbautenpläne beim Auftraggeber einfordern" },
+      { key: "m.einbauten.strom", label: "Stromleitungen freischalten (5 Sicherheitsregeln lt. ESV)" },
+      { key: "m.einbauten.gas", label: "Gasleitungen Schieber / Hähne schließen" },
+      { key: "m.einbauten.wasser", label: "Wasserleitungen Schieber / Hähne schließen" },
+      { key: "m.einbauten.abwasser", label: "Abwasserleitungen schließen" },
+      { key: "m.einbauten.schutz", label: "Vorhandene Einbauten schützen" },
+      sonstiges("einbauten"),
+    ],
+  },
+  {
+    key: "strasse",
+    label: "Gefahren durch Straßenverkehr",
+    zusatz: [{ key: "t.strasse_verkehr", label: "Angrenzende Verkehrseinrichtungen" }],
+    massnahmen: [
+      {
+        key: "m.strasse.bescheid",
+        label:
+          "Straßenrechtlicher Bescheid lt. § 90 StVO einholen und Maßnahmen lt. Bescheid umsetzen (Verkehrszeichen, Absperrungen, Leiteinrichtungen etc.)",
+      },
+      { key: "m.strasse.einfahrt", label: "Baustellen-Ein- und Ausfahrt kennzeichnen" },
+      { key: "m.strasse.leitbaken", label: "Aufstellen von Leitbaken und Warnleuchten" },
+      { key: "m.strasse.warnweste", label: "Warnweste tragen" },
+      sonstiges("strasse"),
+    ],
+  },
+  {
+    key: "dritte",
+    label: "Gefährdung Dritter",
+    hinweis: "Anrainer, Fußgänger, Passanten",
+    massnahmen: [
+      { key: "m.dritte.absperrung", label: "Baustellenabsperrung gegenüber öffentlich zugänglichen Bereichen" },
+      { key: "m.dritte.schutzgeruest", label: "Schutzgerüst" },
+      { key: "m.dritte.passagengeruest", label: "Passagengerüst" },
+      { key: "m.dritte.umleitung", label: "Umleitung einrichten (Anrainer, Fußgänger, Radfahrer)" },
+      sonstiges("dritte"),
+    ],
+  },
+  {
+    key: "bahn",
+    label: "Gefahren durch Bahnverkehr",
+    zusatz: [{ key: "t.bahn_verkehr", label: "Angrenzende Verkehrseinrichtungen" }],
+    massnahmen: [
+      {
+        key: "m.bahn.uebereinkommen",
+        label:
+          "Arbeitsübereinkommen beim Bahnbetreiber einholen (innerhalb des Bauverbotsbereiches von 12,0 m ab dem äußersten angrenzenden Gleis)",
+      },
+      {
+        key: "m.bahn.gleisabstand",
+        label: "Sicherheitsabstände zu Gefahrenräumen des Schienenverkehrs einhalten (3,0 m ab Gleisachse)",
+      },
+      {
+        key: "m.bahn.oberleitung",
+        label:
+          "Sicherheitsabstände zu Gefahrenbereichen von Oberleitungsanlagen einhalten (3,0 m ab spannungsführender Bahnstromanlage)",
+      },
+      { key: "m.bahn.sperren", label: "Sperren von Gleisanlagen beim Bahnbetreiber vereinbaren" },
+      { key: "m.bahn.freischaltung", label: "Freischaltung von Oberleitungsanlagen beim Bahnbetreiber vereinbaren" },
+      { key: "m.bahn.warnweste", label: "Warnweste tragen" },
+      sonstiges("bahn"),
+    ],
+  },
+  {
+    key: "gewaesser",
+    label: "Gefahren durch angrenzende Gewässer",
+    zusatz: [{ key: "t.gewaesser_art", label: "Angrenzendes Gewässer" }],
+    massnahmen: [
+      { key: "m.gewaesser.sicherung", label: "Absturzsicherung (Brust-, Mittel- und Fußwehr)" },
+      { key: "m.gewaesser.personal", label: "Geeignetes Personal (kein Arbeitseinsatz von Nichtschwimmern)" },
+      { key: "m.gewaesser.rettungsringe", label: "Vorhalten von Rettungsringen" },
+      { key: "m.gewaesser.schwimmwesten", label: "Tragepflicht für Schwimmwesten" },
+      { key: "m.gewaesser.rettungsboot", label: "Rettungsboot (bei starker Strömung)" },
+      sonstiges("gewaesser"),
+    ],
+  },
+  ...[1, 2, 3, 4].map<GefahrGruppe>((n) => ({
+    key: `sonstige${n}`,
+    label: "Sonstige Gefährdung",
+    frei: true,
+    zusatz: [{ key: `t.sonstige${n}_art`, label: "Art der Gefährdung" }],
+    massnahmen: [{ key: `m.sonstige${n}.massnahme`, label: "Umzusetzende Maßnahme", freitext: true }],
+  })),
+];
+
+export const TAGESBAUSTELLE: UnterweisungContent = {
+  id: "tagesbaustelle",
+  title: "Gefahrenermittlung und Beurteilung bei Bau- und Montagearbeiten",
+  subtitle: "Evaluierung Tagesbaustellen · Holzbau Willroider GmbH",
+  shortLabel: "Tagesbaustelle",
+  rechtsgrundlage:
+    "Sicherheits- und Gesundheitsschutzdokument lt. §§ 4-5 ASchG · Externe Sicherheitsfachkraft: Ing. Stephan Wulz (Ingenieurbüro Wulz GmbH) · § 3 (6) Person lt. ASchG: Johannes Maurer",
+  sections: [
+    { kind: "felder", heading: "Angaben zur Baustelle", items: TAGESBAUSTELLE_FELDER },
+    { kind: "gefahren", heading: "Besondere Gefahren im Arbeitsbereich", gruppen: TAGESBAUSTELLE_GEFAHREN },
+  ],
+  bestätigung:
+    "Ich habe die Gefahrenermittlung und Beurteilung für diese Baustelle gelesen, die Unterweisung verstanden und nehme die festgelegten Sicherheitsmaßnahmen zur Kenntnis.",
+};
+
 const ALL: Record<UnterweisungType, UnterweisungContent> = {
   werkstatt: WERKSTATT,
   baustelle: BAUSTELLE,
   fertigteilmontage: FERTIGTEILMONTAGE,
+  tagesbaustelle: TAGESBAUSTELLE,
 };
 
 export function getUnterweisung(typ: EvaluierungTyp | null | undefined): UnterweisungContent | null {

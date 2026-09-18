@@ -18,7 +18,7 @@ export type StundenStatus = 'offen' | 'zm_freigabe' | 'buero_freigabe' | 'export
 export type Wochentyp = 'L' | 'K' | 'F' | 'U' | 'BU' | 'BV';
 export type ArbeitszeitModell = 'zimmerei_sommer' | 'fix_40h' | 'individuell';
 export type FahrzeugKategorie = 'anlage' | 'baustelle' | 'bauleiter';
-export type EvaluierungTyp = 'werkstatt' | 'baustelle' | 'fertigteilmontage' | 'kurz' | 'lang';
+export type EvaluierungTyp = 'werkstatt' | 'baustelle' | 'fertigteilmontage' | 'tagesbaustelle' | 'kurz' | 'lang';
 export type AngebotStatus = 'offen' | 'in_verhandlung' | 'angenommen' | 'abgelehnt' | 'zurueckgezogen';
 export type AngebotOrdnerEnum = 'ausschreibungsunterlagen' | 'plaene' | 'subunternehmer' | 'angebotsunterlagen';
 

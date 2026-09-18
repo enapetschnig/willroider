@@ -5,6 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ShieldAlert, CheckCircle2, Eraser } from "lucide-react";
 import { getUnterweisung } from "@/lib/unterweisungen";
+import {
+  TagesbaustelleFelderAnsicht,
+  TagesbaustelleGefahrenAnsicht,
+} from "@/components/evaluierung/Tagesbaustelle";
 import type { EvaluierungTyp, Json } from "@/integrations/supabase/types";
 import { localIso, werktageSeit } from "@/lib/dateFmt";
 
@@ -238,6 +242,12 @@ export function UnterweisungInhalt({
                 </CardContent>
               </Card>
             );
+          }
+          if (sec.kind === "felder") {
+            return <TagesbaustelleFelderAnsicht key={i} items={sec.items} werte={checkliste} />;
+          }
+          if (sec.kind === "gefahren") {
+            return <TagesbaustelleGefahrenAnsicht key={i} gruppen={sec.gruppen} werte={checkliste} />;
           }
           if (sec.kind === "arbeitsmittel") {
             return (

@@ -221,7 +221,9 @@ export default function BaustelleDetail() {
     }
   };
 
-  const setPflichtUnterweisung = async (typ: "" | "werkstatt" | "baustelle" | "fertigteilmontage") => {
+  const setPflichtUnterweisung = async (
+    typ: "" | "werkstatt" | "baustelle" | "fertigteilmontage" | "tagesbaustelle",
+  ) => {
     if (!b) return;
     if (!typ) {
       toast({ title: "Pflicht-Unterweisung wird nur entfernt, wenn keine angelegt ist." });
@@ -885,6 +887,7 @@ export default function BaustelleDetail() {
                       {(
                         [
                           ["baustelle", "Baustelle"],
+                          ["tagesbaustelle", "Tagesbaustelle (SiGe-Dokument)"],
                           ["fertigteilmontage", "Fertigteilmontage"],
                           ["werkstatt", "Werkstatt"],
                         ] as const

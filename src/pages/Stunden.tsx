@@ -12,6 +12,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
+import { MeineStundenberichteCard } from "@/components/stunden/MeineStundenberichteCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -1075,6 +1076,9 @@ export default function Stunden() {
   return (
     <div className="space-y-4 max-w-3xl mx-auto pb-24 lg:pb-0">
       <PageHeader title="Stundenerfassung" />
+
+      {/* 14-tägiger Stundenbericht: offen → unterschreiben, sonst wann der nächste kommt */}
+      {user && <MeineStundenberichteCard userId={user.id} />}
 
       {/* Personen-Picker — nur für Polier/Admin */}
       {hasPicker && user && (

@@ -19,11 +19,23 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Plus, ShieldCheck, ShieldAlert, CheckCircle2, Clock, ChevronDown, ChevronUp, Sparkles, FileText } from "lucide-react";
 import type { Database, EvaluierungTyp, Json } from "@/integrations/supabase/types";
-import { UNTERWEISUNG_OPTIONS, getUnterweisung, unterweisungLabel } from "@/lib/unterweisungen";
+import {
+  UNTERWEISUNG_OPTIONS,
+  TAGESBAUSTELLE_FELDER,
+  TAGESBAUSTELLE_GEFAHREN,
+  getUnterweisung,
+  unterweisungLabel,
+} from "@/lib/unterweisungen";
 import { localIso } from "@/lib/dateFmt";
 import { EvaluierungKiDialog } from "@/components/EvaluierungKiDialog";
 import { EvaluierungVorlagenCard } from "@/components/admin/EvaluierungVorlagenCard";
 import { makeEvaluierungPdf } from "@/lib/evaluierungPdf";
+import { makeTagesbaustellePdf } from "@/lib/evaluierungTagesbaustellePdf";
+import {
+  TagesbaustelleFelderForm,
+  TagesbaustelleGefahrenForm,
+  vorbelegen,
+} from "@/components/evaluierung/Tagesbaustelle";
 
 type Eval = Database["public"]["Tables"]["evaluierungen"]["Row"];
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
@@ -136,7 +148,47 @@ export default function Evaluierung() {
     }));
   };
 
+  /** Evaluierung Tagesbaustellen: EIN Dokument mit allen Unterschriften
+   *  (Seite 4 der Wulz-Vorlage), nicht ein PDF je Mitarbeiter. */
+  const downloadTagesbaustellePdf = async (e: Eval) => {
+    const b = baustellen.find((x) => x.id === e.baustelle_id);
+    const v = profiles.find((p) => p.id === e.vortragender_id);
+    // Alle Unterschriften dieser Unterweisung — auch von Leuten außerhalb
+    // der Partie (Zuteilung über den Tagesplan).
+    const { data: sigs } = await supabase
+      .from("evaluierung_unterschriften")
+      .select("mitarbeiter_id, unterschrift_data, unterschrieben_am, status")
+      .eq("evaluierung_id", e.id)
+      .not("unterschrift_data", "is", null)
+      .order("unterschrieben_am");
+    const unterschriften = ((sigs as any[]) ?? [])
+      .filter((s) => s.status !== "archiviert")
+      .map((s) => {
+        const p = profiles.find((x) => x.id === s.mitarbeiter_id);
+        return {
+          name: p ? `${p.vorname} ${p.nachname}` : "—",
+          funktion: `Holzbau Willroider · ${p?.is_partieleiter ? "Partieführer" : p?.qualifikation || "Mitarbeiter"}`,
+          datum: s.unterschrieben_am ? new Date(s.unterschrieben_am).toLocaleDateString("de-AT") : null,
+          unterschriftBase64: s.unterschrift_data as string | null,
+        };
+      });
+    const doc = await makeTagesbaustellePdf({
+      datum: new Date(e.datum).toLocaleDateString("de-AT"),
+      baustelle: b?.bvh_name ?? "—",
+      kostenstelle: b?.kostenstelle ?? "",
+      werte: (e.checkliste as Record<string, string>) ?? {},
+      vortragender: v ? `${v.vorname} ${v.nachname}` : "",
+      notizen: e.notizen ?? "",
+      unterschriften,
+    });
+    doc.save(`Evaluierung-Tagesbaustelle-${b?.kostenstelle || b?.bvh_name || "X"}-${e.datum}.pdf`);
+  };
+
   const downloadPdf = async (e: Eval, profile: Profile, sig: Unterschrift) => {
+    if (e.typ === "tagesbaustelle") {
+      await downloadTagesbaustellePdf(e);
+      return;
+    }
     const b = baustellen.find((x) => x.id === e.baustelle_id);
     const v = profiles.find((p) => p.id === e.vortragender_id);
     const cl = (e.checkliste as Record<string, string>) ?? {};
@@ -421,6 +473,17 @@ export default function Evaluierung() {
                       {e.abgeschlossen ? "Abgeschlossen" : "Offen"}
                     </Badge>
                     <div className="flex gap-1">
+                      {e.typ === "tagesbaustelle" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => downloadTagesbaustellePdf(e)}
+                          title="Gesamtes Dokument mit allen Unterschriften"
+                        >
+                          <FileText className="h-4 w-4 sm:mr-1" />
+                          <span className="hidden sm:inline">PDF</span>
+                        </Button>
+                      )}
                       {canCreate && (
                         <Button size="sm" variant="outline" onClick={() => openEdit(e)}>
                           Öffnen
@@ -631,7 +694,51 @@ export default function Evaluierung() {
                 </div>
               </div>
 
-              {(() => {
+              {editing.typ === "tagesbaustelle" && (
+                <div className="space-y-4 border-t pt-3">
+                  <TagesbaustelleFelderForm
+                    items={TAGESBAUSTELLE_FELDER}
+                    werte={checklist}
+                    onChange={(k, v) => setChecklist((s) => ({ ...s, [k]: v }))}
+                    onVorbelegen={() => {
+                      const b = baustellen.find((x) => x.id === editing.baustelle_id);
+                      if (!b) {
+                        toast({ title: "Zuerst die Baustelle wählen" });
+                        return;
+                      }
+                      const bl = b.bauleiter_id ? profiles.find((p) => p.id === b.bauleiter_id) : null;
+                      const pf = b.partie_id
+                        ? profiles.find((p) => p.partie_id === b.partie_id && p.is_partieleiter)
+                        : null;
+                      const ich = profiles.find((p) => p.id === user?.id);
+                      setChecklist((s) =>
+                        vorbelegen(s, {
+                          verfasser: ich ? `${ich.vorname} ${ich.nachname}` : null,
+                          anschrift: [b.baustellen_adresse, [b.plz, b.ort].filter(Boolean).join(" ")]
+                            .filter(Boolean)
+                            .join("\n"),
+                          beschreibung: b.art_bauarbeiten,
+                          baubeginn: b.start_datum,
+                          bauende: b.end_datum,
+                          objekt: b.bvh_name,
+                          bauleiter: bl ? `${bl.vorname} ${bl.nachname}` : null,
+                          bauleiterTel: bl?.telefon ?? null,
+                          partiefuehrer: pf ? `${pf.vorname} ${pf.nachname}` : null,
+                          partiefuehrerTel: pf?.telefon ?? null,
+                          maxAn: b.anzahl_mitarbeiter != null ? String(b.anzahl_mitarbeiter) : null,
+                        }),
+                      );
+                    }}
+                  />
+                  <TagesbaustelleGefahrenForm
+                    gruppen={TAGESBAUSTELLE_GEFAHREN}
+                    werte={checklist}
+                    onChange={(k, v) => setChecklist((s) => ({ ...s, [k]: v }))}
+                  />
+                </div>
+              )}
+
+              {editing.typ !== "tagesbaustelle" && (() => {
                 const items = getCheckItems(editing.typ ?? "baustelle");
                 if (items.length === 0) {
                   return (

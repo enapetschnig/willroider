@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { EinsatzplanArchiv } from "@/components/arbeitsplanung/EinsatzplanArchiv";
 import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
@@ -2110,7 +2111,7 @@ export function PoliereinsatzView({
 
       {/* PDF-Zeitraum wählen */}
       <Dialog open={pdfOffen} onOpenChange={(o) => !o && setPdfOffen(false)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileDown className="h-5 w-5 text-primary" />
@@ -2183,6 +2184,7 @@ export function PoliereinsatzView({
               passen mehr Tage und mehr Zeilen auf ein Blatt — bei langen
               Zeiträumen sind das deutlich weniger Seiten.
             </div>
+            <EinsatzplanArchiv canEdit={canEdit} format={pdfFormat} />
           </div>
           <DialogFooter className="flex-row gap-2">
             <Button variant="outline" onClick={() => setPdfOffen(false)} className="flex-1">
