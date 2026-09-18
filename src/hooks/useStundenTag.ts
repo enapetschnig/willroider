@@ -164,7 +164,16 @@ export function useSaveStundenTag() {
           .insert({ ...tagPayload, erfasst_von: user?.id ?? null })
           .select("id")
           .single();
-        if (error) throw error;
+        if (error) {
+          // Doppelter Tag: Es gibt schon einen Eintrag, den man nicht sehen
+          // darf (Person außerhalb der eigenen Partie/Einteilung).
+          if ((error as { code?: string }).code === "23505") {
+            throw new Error(
+              "Für diese Person gibt es an diesem Tag schon einen Eintrag, den du nicht sehen darfst. Bitte im Büro melden.",
+            );
+          }
+          throw error;
+        }
         tagId = data.id;
       }
       if (!tagId) throw new Error("Tag-ID fehlt nach Save");

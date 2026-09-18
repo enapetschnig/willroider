@@ -277,7 +277,15 @@ export default function Stunden() {
       // canCreateForOthers (nicht nur isAdmin): eine Custom-Rolle mit
       // stunden.create_andere bekam sonst einen sichtbaren, aber LEEREN
       // PersonPicker — mode war "admin", Members wurden nie geladen.
-      if (canCreateForOthers) {
+      // Alle Personen nur für die, die auch alle Tage lesen dürfen. Ein
+      // Vorarbeiter hat „für andere erfassen", sieht seit 18.09. aber nur
+      // seine Partie und seine Einteilung — Leute außerhalb würden hier
+      // leer erscheinen und beim Speichern mit einem doppelten Tag kollidieren.
+      const darfAlleLesen =
+        isAdmin ||
+        hasPermission("stunden.view_alle") ||
+        hasPermission("stunden.edit_alle");
+      if (canCreateForOthers && darfAlleLesen) {
         const [{ data: members }, { data: partien }] = await Promise.all([
           supabase.from("profiles").select("*").eq("is_active", true).order("nachname"),
           supabase.from("partien").select("*").order("name"),
