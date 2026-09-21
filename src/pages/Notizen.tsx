@@ -24,9 +24,10 @@ import {
   Loader2,
   ChevronLeft,
   Building2,
-  Eraser,
   Save,
+  PenTool,
 } from "lucide-react";
+import { NotizZeichnen, type SkizzeDaten } from "@/components/notizen/NotizZeichnen";
 
 type Ordner = { id: string; name: string; sort_order: number };
 type Notiz = {
@@ -36,6 +37,9 @@ type Notiz = {
   titel: string;
   inhalt: string;
   updated_at: string;
+  skizze: SkizzeDaten | null;
+  skizze_vorschau: string | null;
+  skizze_am: string | null;
 };
 type Anhang = {
   id: string;
@@ -80,6 +84,7 @@ export default function Notizen() {
   const [dirty, setDirty] = useState(false);
 
   const [skizzeOpen, setSkizzeOpen] = useState(false);
+  const [vorschauUrl, setVorschauUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const load = async () => {
@@ -113,6 +118,19 @@ export default function Notizen() {
     void ladeAnhaenge(aktuelleNotiz.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aktuelleNotiz?.id]);
+
+  // Vorschau der Zeichnung (kurzlebige Adresse)
+  useEffect(() => {
+    const pfad = aktuelleNotiz?.skizze_vorschau;
+    if (!pfad) {
+      setVorschauUrl(null);
+      return;
+    }
+    supabase.storage
+      .from("notizen-anhaenge")
+      .createSignedUrl(pfad, 3600)
+      .then(({ data }) => setVorschauUrl(data?.signedUrl ? `${data.signedUrl}&t=${aktuelleNotiz?.skizze_am ?? ""}` : null));
+  }, [aktuelleNotiz?.skizze_vorschau, aktuelleNotiz?.skizze_am]);
 
   const ladeAnhaenge = async (notizId: string) => {
     const { data } = await supabase
@@ -212,9 +230,11 @@ export default function Notizen() {
   const notizLoeschen = async () => {
     if (!selNotiz || !aktuelleNotiz) return;
     if (!window.confirm(`Notiz „${aktuelleNotiz.titel || "Ohne Titel"}" löschen?`)) return;
-    // Anhänge im Storage mit aufräumen
-    if (anhaenge.length > 0) {
-      await supabase.storage.from("notizen-anhaenge").remove(anhaenge.map((a) => a.pfad));
+    // Anhänge und Zeichnung im Storage mit aufräumen
+    const pfade = anhaenge.map((a) => a.pfad);
+    if (aktuelleNotiz.skizze_vorschau) pfade.push(aktuelleNotiz.skizze_vorschau);
+    if (pfade.length > 0) {
+      await supabase.storage.from("notizen-anhaenge").remove(pfade);
     }
     await supabase.from("notizen" as any).delete().eq("id", selNotiz);
     setSelNotiz(null);
@@ -353,7 +373,10 @@ export default function Notizen() {
                     selNotiz === n.id ? "bg-primary/10" : "hover:bg-muted"
                   }`}
                 >
-                  <div className="text-sm font-medium truncate">{n.titel || "Ohne Titel"}</div>
+                  <div className="text-sm font-medium truncate flex items-center gap-1.5">
+                    {n.skizze_vorschau && <PenTool className="h-3.5 w-3.5 text-primary shrink-0" />}
+                    <span className="truncate">{n.titel || "Ohne Titel"}</span>
+                  </div>
                   <div className="text-[11px] text-muted-foreground truncate">
                     {fmtDatum(n.updated_at)}
                     {b ? ` · ${b.bvh_name}` : ""}
@@ -454,9 +477,19 @@ export default function Notizen() {
                       <Paperclip className="h-4 w-4" /> Datei anheften
                     </Button>
                     <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setSkizzeOpen(true)}>
-                      <Pencil className="h-4 w-4" /> Skizze zeichnen
+                      <PenTool className="h-4 w-4" /> {aktuelleNotiz.skizze_vorschau ? "Zeichnung öffnen" : "Zeichnen"}
                     </Button>
                   </div>
+                  {vorschauUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setSkizzeOpen(true)}
+                      className="block rounded-md border bg-white overflow-hidden hover:ring-2 hover:ring-primary/40 max-w-full"
+                      title="Zeichnung öffnen"
+                    >
+                      <img src={vorschauUrl} alt="Zeichnung" className="max-h-72 object-contain" />
+                    </button>
+                  )}
                   {anhaenge.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {anhaenge.map((a) => (
@@ -497,149 +530,17 @@ export default function Notizen() {
         </Card>
       </div>
 
-      <SkizzeDialog
-        open={skizzeOpen}
-        onOpenChange={setSkizzeOpen}
-        onSave={(blob) => {
-          setSkizzeOpen(false);
-          void anhangHochladen(null, true, blob);
-        }}
-      />
+      {aktuelleNotiz && skizzeOpen && (
+        <NotizZeichnen
+          open={skizzeOpen}
+          onOpenChange={setSkizzeOpen}
+          notizId={aktuelleNotiz.id}
+          titel={titel}
+          baustelleId={baustelleId || null}
+          initial={aktuelleNotiz.skizze}
+          onSaved={() => void load()}
+        />
+      )}
     </div>
-  );
-}
-
-// ── Skizzen-Canvas: Zeichnen mit Finger/Maus/Stift ────────────────────
-const FARBEN = ["#111827", "#dc2626", "#2563eb", "#16a34a", "#f59e0b"];
-
-function SkizzeDialog({
-  open,
-  onOpenChange,
-  onSave,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  onSave: (blob: Blob) => void;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const drawing = useRef(false);
-  const [farbe, setFarbe] = useState(FARBEN[0]);
-  const [dick, setDick] = useState(3);
-
-  // Canvas beim Öffnen leeren (weißer Grund für PNG-Export)
-  useEffect(() => {
-    if (!open) return;
-    const c = canvasRef.current;
-    if (!c) return;
-    const ctx = c.getContext("2d");
-    if (!ctx) return;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, c.width, c.height);
-  }, [open]);
-
-  const pos = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const c = canvasRef.current!;
-    const r = c.getBoundingClientRect();
-    return {
-      x: ((e.clientX - r.left) / r.width) * c.width,
-      y: ((e.clientY - r.top) / r.height) * c.height,
-    };
-  };
-
-  const start = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    drawing.current = true;
-    const ctx = canvasRef.current?.getContext("2d");
-    if (!ctx) return;
-    const p = pos(e);
-    ctx.strokeStyle = farbe;
-    ctx.lineWidth = dick;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y);
-    (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
-  };
-
-  const move = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!drawing.current) return;
-    const ctx = canvasRef.current?.getContext("2d");
-    if (!ctx) return;
-    const p = pos(e);
-    ctx.lineTo(p.x, p.y);
-    ctx.stroke();
-  };
-
-  const end = () => {
-    drawing.current = false;
-  };
-
-  const leeren = () => {
-    const c = canvasRef.current;
-    const ctx = c?.getContext("2d");
-    if (!c || !ctx) return;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, c.width, c.height);
-  };
-
-  const speichern = () => {
-    canvasRef.current?.toBlob((blob) => {
-      if (blob) onSave(blob);
-    }, "image/png");
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>Skizze zeichnen</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            {FARBEN.map((f) => (
-              <button
-                key={f}
-                onClick={() => setFarbe(f)}
-                className={`h-7 w-7 rounded-full border-2 ${farbe === f ? "border-primary scale-110" : "border-transparent"}`}
-                style={{ background: f }}
-                aria-label={`Farbe ${f}`}
-              />
-            ))}
-            <div className="flex items-center gap-1 ml-2">
-              {[2, 4, 8].map((w) => (
-                <button
-                  key={w}
-                  onClick={() => setDick(w)}
-                  className={`h-7 w-7 rounded border flex items-center justify-center ${dick === w ? "bg-primary/10 border-primary" : ""}`}
-                  aria-label={`Strichstärke ${w}`}
-                >
-                  <span className="rounded-full bg-foreground" style={{ width: w + 2, height: w + 2 }} />
-                </button>
-              ))}
-            </div>
-            <Button variant="outline" size="sm" className="ml-auto gap-1.5" onClick={leeren}>
-              <Eraser className="h-4 w-4" /> Leeren
-            </Button>
-          </div>
-          <canvas
-            ref={canvasRef}
-            width={1000}
-            height={620}
-            className="w-full rounded-md border bg-white touch-none cursor-crosshair"
-            onPointerDown={start}
-            onPointerMove={move}
-            onPointerUp={end}
-            onPointerLeave={end}
-          />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Abbrechen
-          </Button>
-          <Button onClick={speichern}>
-            <Save className="h-4 w-4 mr-1.5" /> Skizze speichern
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

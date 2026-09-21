@@ -53,6 +53,15 @@ export default defineConfig(({ mode }) => ({
         // generierte Service Worker unverändert bleibt.
         importScripts: ['push-sw.js'],
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+        // Die Zeichenfläche (Excalidraw) bringt viele Nachlade-Bausteine mit
+        // (Diagramm-Bibliotheken, Schrift-Teilmengen). Die sollen nicht bei
+        // jeder App-Aktualisierung auf jedes Handy — sie werden bei Bedarf geladen.
+        globIgnores: [
+          '**/subset-*.js',
+          '**/*-[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]-*.js',
+          '**/mammoth*', '**/cytoscape*', '**/katex*', '**/html2canvas*',
+          '**/mermaid*', '**/chunk-*.js',
+        ],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024 // 5 MB
       }
     })
