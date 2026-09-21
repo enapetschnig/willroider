@@ -26,6 +26,7 @@ import StundenBerichteListe from "@/pages/StundenBerichteListe";
 import HalleErfassung from "@/pages/HalleErfassung";
 import Taetigkeitsbericht from "@/pages/Taetigkeitsbericht";
 import TaetigkeitsberichteListe from "@/pages/TaetigkeitsberichteListe";
+import BerichteArchiv from "@/pages/BerichteArchiv";
 import Berichte from "@/pages/Berichte";
 import Notizen from "@/pages/Notizen";
 import Aenderungswuensche from "@/pages/Aenderungswuensche";
@@ -124,6 +125,7 @@ const App = () => (
               <Route path="/stunden/auswertung" element={<RequirePermission perm="stunden.view_alle"><Stundenauswertung /></RequirePermission>} />
               <Route path="/stundenberichte" element={<RequirePermission perm="stunden.bsb.bestaetigen"><StundenBerichteListe /></RequirePermission>} />
               <Route path="/taetigkeitsberichte" element={<RequirePermission perm="stunden.taetigkeitsbericht.freigeben"><TaetigkeitsberichteListe /></RequirePermission>} />
+              <Route path="/berichte-archiv" element={<RequirePermission perm="stunden.bsb.bestaetigen"><BerichteArchiv /></RequirePermission>} />
               <Route path="/stundenbericht/:id" element={<RequirePermission perm="stunden.view_eigene"><StundenBericht /></RequirePermission>} />
               <Route path="/berichte" element={<RequirePermission perm="berichte.view"><Berichte /></RequirePermission>} />
               <Route path="/aenderungswuensche" element={<RequirePermission perm="feedback.view_alle"><Aenderungswuensche /></RequirePermission>} />

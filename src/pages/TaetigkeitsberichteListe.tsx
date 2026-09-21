@@ -16,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { UnterschriftDialog } from "@/components/UnterschriftDialog";
 import { ChevronLeft, ChevronRight, CheckCircle2, Clock, Eye, Loader2, LockOpen, PenLine, AlertCircle } from "lucide-react";
 import { localIso } from "@/lib/dateFmt";
 import { periodeVonDatum, periodeVerschieben, periodeTitel, type Periode } from "@/lib/taetigkeitsbericht";
@@ -49,7 +48,6 @@ export default function TaetigkeitsberichteListe() {
   const [tage, setTage] = useState<Record<string, number>>({});
   const [wartendAlle, setWartendAlle] = useState<Zeile[]>([]);
   const [laden, setLaden] = useState(true);
-  const [signFuer, setSignFuer] = useState<Angestellter | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -110,27 +108,10 @@ export default function TaetigkeitsberichteListe() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [angestellte, zeilen]);
 
-  const oeffnen = (id: string) =>
-    navigate(`/taetigkeitsbericht?ma=${id}&jahr=${periode.jahr}&monat=${periode.monat}`);
-
-  const freigeben = async (dataUrl: string) => {
-    if (!signFuer) return;
-    setBusy(signFuer.id);
-    const { error } = await (supabase as any).rpc("taetigkeitsbericht_freigeben", {
-      p_mitarbeiter: signFuer.id,
-      p_jahr: periode.jahr,
-      p_monat: periode.monat,
-      p_unterschrift: dataUrl,
-    });
-    setBusy(null);
-    setSignFuer(null);
-    if (error) {
-      toast({ variant: "destructive", title: "Nicht freigegeben", description: error.message });
-      return;
-    }
-    toast({ title: `Freigegeben: ${signFuer.vorname} ${signFuer.nachname}` });
-    void load();
-  };
+  const oeffnen = (id: string, freigeben = false) =>
+    navigate(
+      `/taetigkeitsbericht?ma=${id}&jahr=${periode.jahr}&monat=${periode.monat}${freigeben ? "&freigeben=1" : ""}`,
+    );
 
   const wiederOeffnen = async (a: Angestellter) => {
     if (!window.confirm(`Tätigkeitsbericht von ${a.vorname} ${a.nachname} wieder öffnen? Die Freigabe wird zurückgenommen.`)) return;
@@ -155,7 +136,7 @@ export default function TaetigkeitsberichteListe() {
     <div className="space-y-4 max-w-3xl mx-auto">
       <PageHeader
         title="Tätigkeitsberichte freigeben"
-        description="Angestellte unterschreiben, Geschäftsführung gibt frei — danach ist die Periode gesperrt."
+        description="Angestellte unterschreiben, Geschäftsführung gibt frei — danach ist die Periode gesperrt und das PDF liegt im Archiv und in SharePoint."
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => setPeriode((p) => periodeVerschieben(p, -1))}>
@@ -244,8 +225,8 @@ export default function TaetigkeitsberichteListe() {
                         <span className="hidden sm:inline">Ansehen</span>
                       </Button>
                       {status === "unterschrieben" && (
-                        <Button size="sm" className="h-8" onClick={() => setSignFuer(a)} disabled={busy === a.id}>
-                          {busy === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 sm:mr-1" />}
+                        <Button size="sm" className="h-8" onClick={() => oeffnen(a.id, true)} title="Bericht ansehen und mit Unterschrift freigeben">
+                          <CheckCircle2 className="h-3.5 w-3.5 sm:mr-1" />
                           <span className="hidden sm:inline">Freigeben</span>
                         </Button>
                       )}
@@ -267,12 +248,6 @@ export default function TaetigkeitsberichteListe() {
         </CardContent>
       </Card>
 
-      <UnterschriftDialog
-        open={!!signFuer}
-        onOpenChange={(o) => !o && setSignFuer(null)}
-        onSave={freigeben}
-        titel={signFuer ? `Freigabe: ${signFuer.vorname} ${signFuer.nachname}` : "Freigabe unterschreiben"}
-      />
     </div>
   );
 }

@@ -32,6 +32,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useStundenTageList, useSaveStundenTag, useDeleteStundenTag, type SaveEintrag } from "@/hooks/useStundenTag";
 import { localIso } from "@/lib/dateFmt";
+import { archiviereBericht } from "@/lib/berichtArchiv";
 import {
   ANGESTELLTEN_SOLL,
   TB_FARBEN,
@@ -222,7 +223,19 @@ export default function Taetigkeitsbericht() {
     }
     toast({ title: "Tätigkeitsbericht freigegeben", description: "Die Periode ist jetzt gesperrt." });
     ladeUnterschrift();
+    await archiviereNachFreigabe(dataUrl);
   }
+
+  // Aus der Freigabe-Liste mit ?freigeben=1: Unterschrift-Dialog gleich öffnen,
+  // sobald klar ist, dass der Bericht unterschrieben und noch nicht freigegeben ist.
+  const freigebenParam = params.get("freigeben") === "1";
+  const freigebenAutoRef = useRef(false);
+  useEffect(() => {
+    if (!freigebenParam || freigebenAutoRef.current) return;
+    if (!darfFreigeben || !unterschrift || gesperrt) return;
+    freigebenAutoRef.current = true;
+    setFreigabeSignOffen(true);
+  }, [freigebenParam, darfFreigeben, unterschrift, gesperrt]);
 
   async function wiederOeffnen() {
     if (!window.confirm("Freigabe zurücknehmen und die Periode wieder öffnen?")) return;
@@ -727,7 +740,15 @@ export default function Taetigkeitsbericht() {
       doc.save(`Fahrtenbuch_${maName.replace(/\s+/g, "_")}_${periode.jahr}-${String(periode.monat).padStart(2, "0")}.pdf`);
       return;
     }
-    const doc = makeTaetigkeitsberichtPdf({
+    const doc = baueBerichtPdf();
+    doc.save(`Taetigkeitsbericht_${maName.replace(/\s+/g, "_")}_${periode.jahr}-${String(periode.monat).padStart(2, "0")}.pdf`);
+  }
+
+  /** Das Berichts-PDF — für den Ausdruck und fürs Archiv nach der Freigabe.
+   *  `freigabeNeu` liefert die eben geleistete Freigabe, bevor sie geladen ist. */
+  function baueBerichtPdf(freigabeNeu?: { name: string; am: string; unterschrift: string | null }) {
+    const f = freigabeNeu ?? freigabe;
+    return makeTaetigkeitsberichtPdf({
       name: maName,
       titel: periodeTitel(periode),
       tage: periode.tage,
@@ -746,15 +767,34 @@ export default function Taetigkeitsbericht() {
       unterschriebenAm: unterschrift
         ? new Date(unterschrift.am).toLocaleDateString("de-AT")
         : null,
-      freigabe: freigabe
+      freigabe: f
         ? {
-            name: freigabe.name,
-            am: new Date(freigabe.am).toLocaleDateString("de-AT"),
-            unterschrift: freigabe.unterschrift,
+            name: f.name,
+            am: new Date(f.am).toLocaleDateString("de-AT"),
+            unterschrift: f.unterschrift,
           }
         : null,
     });
-    doc.save(`Taetigkeitsbericht_${maName.replace(/\s+/g, "_")}_${periode.jahr}-${String(periode.monat).padStart(2, "0")}.pdf`);
+  }
+
+  /** Nach der Freigabe: fertiges PDF ins Archiv (App + SharePoint-Kopie). */
+  async function archiviereNachFreigabe(unterschriftFreigabe: string) {
+    try {
+      const name = `${(profile as any)?.vorname ?? ""} ${(profile as any)?.nachname ?? ""}`.trim();
+      const doc = baueBerichtPdf({ name, am: new Date().toISOString(), unterschrift: unterschriftFreigabe });
+      await archiviereBericht({
+        art: "taetigkeitsbericht",
+        mitarbeiterId: zielMa,
+        jahr: periode.jahr,
+        monat: periode.monat,
+        periodeLabel: periodeTitel(periode),
+        dateiname: `Tätigkeitsbericht ${periode.jahr}-${String(periode.monat).padStart(2, "0")} ${maName}.pdf`,
+        doc,
+      });
+      toast({ title: "Im Archiv abgelegt", description: "Die Kopie nach SharePoint folgt automatisch." });
+    } catch (e) {
+      toast({ variant: "destructive", title: "Archiv-Ablage fehlgeschlagen", description: (e as Error).message });
+    }
   }
 
   // ─── Render ──────────────────────────────────────────────────────────

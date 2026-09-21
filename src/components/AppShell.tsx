@@ -25,6 +25,7 @@ import {
   X,
   NotebookPen,
   Bell,
+  Archive,
 } from "lucide-react";
 import { InstallPromptDialog } from "./InstallPromptDialog";
 import { detectPlatform } from "./InstallGuide";
@@ -93,6 +94,7 @@ const NAV: NavItem[] = [
   { to: "/stunden/auswertung", label: "Auswertung", icon: BarChart3, perm: "stunden.view_alle", end: true },
   { to: "/stundenberichte", label: "Stundenberichte", icon: FileSpreadsheet, perm: "stunden.bsb.bestaetigen", end: false },
   { to: "/taetigkeitsberichte", label: "Tätigkeitsberichte", icon: ClipboardList, perm: "stunden.taetigkeitsbericht.freigeben", end: true },
+  { to: "/berichte-archiv", label: "Berichte-Archiv", icon: Archive, perm: "stunden.bsb.bestaetigen", end: true },
   { to: "/berichte", label: "Berichte", icon: FileText, perm: "berichte.view", end: false },
   { to: "/aenderungswuensche", label: "Änderungswünsche", icon: MessageSquarePlus, perm: "feedback.view_alle", end: true },
   { to: "/notizen", label: "Notizen", icon: NotebookPen, perm: "admin.view", end: true },

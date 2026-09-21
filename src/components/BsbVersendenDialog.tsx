@@ -30,6 +30,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { edgeFunctionErrorMessage } from "@/lib/edgeError";
 import { Loader2, Mail, FileText } from "lucide-react";
 import { buildBerichtPdf } from "@/lib/bsbPdfHelper";
+import { archiviereBericht, base64ZuBlob } from "@/lib/berichtArchiv";
 
 interface PreparedAttachment {
   berichtId: string;
@@ -225,6 +226,39 @@ export function BsbVersendenDialog({
       }
       onSent?.();
       onOpenChange(false);
+
+      // Archiv: die eben versendeten (= bestätigten) Berichte als PDF
+      // aufheben und nach SharePoint kopieren (Stundenlisten <Jahr>).
+      const fehlerIds = new Set(fehlerArr.map((f: any) => f?.id).filter(Boolean));
+      try {
+        const { data: metas } = await supabase
+          .from("stunden_berichte")
+          .select("id, mitarbeiter_id, jahr, monat, teil")
+          .in("id", prepared.map((p) => p.berichtId));
+        for (const p of prepared) {
+          if (fehlerIds.has(p.berichtId)) continue;
+          const m = (metas as any[] | null)?.find((x) => x.id === p.berichtId);
+          if (!m) continue;
+          const monatName = new Date(m.jahr, m.monat - 1, 1).toLocaleDateString("de-AT", { month: "long", year: "numeric" });
+          await archiviereBericht({
+            art: "stundenbericht",
+            mitarbeiterId: m.mitarbeiter_id,
+            jahr: m.jahr,
+            monat: m.monat,
+            teil: m.teil,
+            periodeLabel: `${monatName} · Teil ${m.teil === 1 ? "I" : "II"}`,
+            dateiname: `Stundenbericht ${m.jahr}-${String(m.monat).padStart(2, "0")} Teil ${m.teil === 1 ? "I" : "II"} ${p.maName}.pdf`,
+            blob: base64ZuBlob(p.contentBase64),
+            berichtId: p.berichtId,
+          });
+        }
+      } catch (e) {
+        toast({
+          variant: "destructive",
+          title: "Archiv-Ablage fehlgeschlagen",
+          description: `${(e as Error).message} — die Mail ist trotzdem raus.`,
+        });
+      }
     } catch (e) {
       const msg = (e as Error).message ?? "";
       let description = `Versand fehlgeschlagen: ${msg}. Die Berichte selbst sind gespeichert.`;
