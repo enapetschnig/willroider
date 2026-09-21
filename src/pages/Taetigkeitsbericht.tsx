@@ -880,6 +880,7 @@ export default function Taetigkeitsbericht() {
               fahrerName={maName}
               kannBearbeiten={kannBearbeiten}
               kostenstellen={Array.from(new Set(zeilenStamm.map((s) => s.kst))).sort()}
+              onPeriodeWechsel={(datum) => setPeriode(periodeVonDatum(datum))}
             />
           ) : (
           <div className="overflow-auto max-h-[calc(100vh-15rem)]">

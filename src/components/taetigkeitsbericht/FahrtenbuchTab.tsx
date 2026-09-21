@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, Plus, Trash2, Upload } from "lucide-react";
 import { parseFahrtenDatei } from "./fahrtenbuchImport";
 import { supabase } from "@/integrations/supabase/client";
+import { localIso } from "@/lib/dateFmt";
 import { useToast } from "@/hooks/use-toast";
 import {
   TB_FARBEN,
@@ -108,6 +109,7 @@ export function FahrtenbuchTab({
   fahrerName,
   kannBearbeiten,
   kostenstellen,
+  onPeriodeWechsel,
 }: {
   mitarbeiterId: string;
   periode: Periode;
@@ -117,6 +119,8 @@ export function FahrtenbuchTab({
   fahrerName: string;
   kannBearbeiten: boolean;
   kostenstellen: string[];
+  /** Wird ein Datum außerhalb der Periode gewählt, springt die Ansicht dorthin. */
+  onPeriodeWechsel?: (datum: string) => void;
 }) {
   const { toast } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
@@ -136,6 +140,17 @@ export function FahrtenbuchTab({
         .update(patch)
         .eq("id", id);
       if (error) throw error;
+      // Nachträgliche Fahrt aus einer früheren Periode (Änderungswunsch
+      // S. Egger 21.09.): das Datum darf überall liegen — die Ansicht
+      // wechselt dann in die Periode, zu der die Fahrt gehört.
+      if (patch.datum && (patch.datum < periode.von || patch.datum > periode.bis)) {
+        toast({
+          title: "Fahrt verschoben",
+          description: `Die Fahrt vom ${new Date(patch.datum + "T00:00:00").toLocaleDateString("de-AT")} steht jetzt in der Periode dieses Datums.`,
+        });
+        onPeriodeWechsel?.(patch.datum);
+        return;
+      }
       onReload();
     } catch (e) {
       fehler(e);
@@ -181,7 +196,8 @@ export function FahrtenbuchTab({
     setBusy("neu");
     try {
       // Vorbelegung: heute, wenn es in der Periode liegt — sonst Periodenstart.
-      const heute = new Date().toISOString().slice(0, 10);
+      // Lokales Datum, nicht UTC — sonst ist es nach 22 Uhr schon „morgen".
+      const heute = localIso();
       const datum = heute >= periode.von && heute <= periode.bis ? heute : periode.von;
       // Abfahrts-Stand mit dem letzten bekannten Ankunfts-Stand vorbelegen.
       const letzterStand = [...fahrten].reverse().find((f) => f.km_ende != null)?.km_ende ?? null;
@@ -378,8 +394,8 @@ export function FahrtenbuchTab({
                   <input
                     type="date"
                     value={f.datum}
-                    min={periode.von}
-                    max={periode.bis}
+                    // Bewusst ohne min/max: Fahrten dürfen nachträglich in eine
+                    // frühere Periode eingetragen werden (die Ansicht folgt).
                     onChange={(e) => e.target.value && aendern(f.id, { datum: e.target.value })}
                     style={{ border: "none", background: "transparent", fontFamily: SERIF, fontSize: 15, fontWeight: 600, width: "100%" }}
                   />
@@ -507,6 +523,10 @@ export function FahrtenbuchTab({
                     )}{" "}
                     Fahrt hinzufügen
                   </button>
+                  <span className="text-[11px] text-muted-foreground">
+                    Fahrt von früher? Hinzufügen und in der Zeile das Datum ändern — die
+                    Fahrt wandert in die richtige Periode.
+                  </span>
                   <button
                     type="button"
                     onClick={() => dateiRef.current?.click()}
