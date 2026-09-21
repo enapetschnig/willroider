@@ -61,6 +61,23 @@ export default defineConfig(({ mode }) => ({
           '**/*-[A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]-*.js',
           '**/mammoth*', '**/cytoscape*', '**/katex*', '**/html2canvas*',
           '**/mermaid*', '**/chunk-*.js',
+          '**/excalidraw/**',
+        ],
+        // Was nicht vorab im Cache liegt, bleibt nach dem ersten Laden
+        // erhalten — so geht die Zeichenfläche auch ohne Netz, sobald sie
+        // einmal offen war (eigene Bausteine, Schriften).
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) =>
+              url.origin === self.location.origin &&
+              (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/excalidraw/')),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'nachgeladen',
+              expiration: { maxEntries: 300, maxAgeSeconds: 60 * 60 * 24 * 90 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
         ],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024 // 5 MB
       }
