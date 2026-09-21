@@ -24,6 +24,7 @@ import {
   MessageSquarePlus,
   X,
   NotebookPen,
+  Bell,
 } from "lucide-react";
 import { InstallPromptDialog } from "./InstallPromptDialog";
 import { detectPlatform } from "./InstallGuide";
@@ -36,6 +37,8 @@ import {
   type BeforeInstallPromptEvent,
 } from "@/lib/pwaInstall";
 import { useAuth } from "@/contexts/AuthContext";
+import { PushEinstellungDialog } from "@/components/PushEinstellungDialog";
+import { pushAboAuffrischen } from "@/lib/push";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -89,6 +92,7 @@ const NAV: NavItem[] = [
       istAngestellter || hasPermission("stunden.taetigkeitsbericht") },
   { to: "/stunden/auswertung", label: "Auswertung", icon: BarChart3, perm: "stunden.view_alle", end: true },
   { to: "/stundenberichte", label: "Stundenberichte", icon: FileSpreadsheet, perm: "stunden.bsb.bestaetigen", end: false },
+  { to: "/taetigkeitsberichte", label: "Tätigkeitsberichte", icon: ClipboardList, perm: "stunden.taetigkeitsbericht.freigeben", end: true },
   { to: "/berichte", label: "Berichte", icon: FileText, perm: "berichte.view", end: false },
   { to: "/aenderungswuensche", label: "Änderungswünsche", icon: MessageSquarePlus, perm: "feedback.view_alle", end: true },
   { to: "/notizen", label: "Notizen", icon: NotebookPen, perm: "admin.view", end: true },
@@ -100,7 +104,7 @@ const NAV: NavItem[] = [
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { profile, role, isAdmin, canReview, hasPermission, signOut, einfacheAnsicht } = useAuth();
+  const { user, profile, role, isAdmin, canReview, hasPermission, signOut, einfacheAnsicht } = useAuth();
   const navigate = useNavigate();
   const [installOpen, setInstallOpen] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
@@ -203,6 +207,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   const istAngestellter = (profile as any)?.zeiterfassung_typ === "angestellter";
+
+  // Push: ein auf diesem Gerät bestehendes Abo still mit dem Konto verknüpfen.
+  const [pushOffen, setPushOffen] = useState(false);
+  useEffect(() => {
+    if (user?.id) void pushAboAuffrischen(user.id);
+  }, [user?.id]);
 
   // Einfache Ansicht: nur Mein Tag, Baustellen, Zeiterfassung/Halle.
   const EINFACH = new Set(["/mein-tag", "/baustellen", "/stunden", "/halle", "/taetigkeitsbericht"]);
@@ -367,6 +377,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <MessageSquarePlus className="mr-2 h-4 w-4" />
                     <span>Änderungswunsch senden</span>
                   </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      setPushOffen(true);
+                    }}
+                  >
+                    <Bell className="mr-2 h-4 w-4" />
+                    <span>Benachrichtigungen</span>
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <ChangePasswordDialog />
                   <DropdownMenuSeparator />
@@ -379,6 +398,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
+
+        <PushEinstellungDialog open={pushOffen} onOpenChange={setPushOffen} />
 
         {/* Einmaliger Hinweis auf den Feedback-Kanal — dezent, wegklickbar */}
         {feedbackHint && (

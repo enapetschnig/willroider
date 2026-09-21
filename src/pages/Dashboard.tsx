@@ -30,6 +30,8 @@ import type { Database } from "@/integrations/supabase/types";
 import { BerichteHintCard } from "@/components/dashboard/BerichteHintCard";
 import { NeuerLohnzettelHintCard } from "@/components/dashboard/NeuerLohnzettelHintCard";
 import { StundenBerichtHintCard } from "@/components/dashboard/StundenBerichtHintCard";
+import { TaetigkeitsberichtHintCard } from "@/components/dashboard/TaetigkeitsberichtHintCard";
+import { PushHinweisCard } from "@/components/dashboard/PushHinweisCard";
 import { UnterschriftenCard } from "@/components/dashboard/UnterschriftenCard";
 import { TagesplanPreview } from "@/components/TagesplanPreview";
 import {
@@ -541,6 +543,12 @@ export default function Dashboard() {
 
       {/* Baustellenstundenbericht (MA: Durchsicht, Büro: Kontrolle) */}
       <StundenBerichtHintCard />
+
+      {/* Tätigkeitsbericht (Angestellte: unterschreiben, GF: freigeben) */}
+      <TaetigkeitsberichtHintCard />
+
+      {/* Push-Benachrichtigungen auf diesem Gerät einschalten */}
+      <PushHinweisCard />
 
       {/* Offene Unterweisungs-Unterschriften des angemeldeten MA */}
       <UnterschriftenCard />

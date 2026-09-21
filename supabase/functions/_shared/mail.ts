@@ -88,3 +88,30 @@ export async function sendeEinladungsMail(opts: {
     return { ok: false, error: e instanceof Error ? e.message : 'Mail-Versand fehlgeschlagen' };
   }
 }
+
+/** Einfache Text-Mail über Resend — für Erinnerungen, wenn kein Push-Gerät da ist. */
+export async function sendeMail(opts: {
+  to: string;
+  subject: string;
+  text: string;
+}): Promise<{ ok: boolean; id?: string; error?: string }> {
+  const key = Deno.env.get('RESEND_API_KEY');
+  if (!key) return { ok: false, error: 'RESEND_API_KEY nicht konfiguriert' };
+  const from = Deno.env.get('RESEND_FROM') ?? 'berichte@willroider.app';
+  const replyTo = Deno.env.get('RESEND_REPLY_TO') ?? 'maurer@willroider.at';
+  const html = `<p style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;white-space:pre-line">${
+    opts.text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/(https?:\/\/\S+)/g, '<a href="$1">$1</a>')
+  }</p>`;
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from, reply_to: [replyTo], to: [opts.to], subject: opts.subject, text: opts.text, html }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: (data as any)?.message ?? `Resend antwortet ${res.status}` };
+    return { ok: true, id: (data as any)?.id };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Mail-Versand fehlgeschlagen' };
+  }
+}

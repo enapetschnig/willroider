@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -25,7 +26,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { ChevronLeft, ChevronRight, Loader2, Pen, Plus, Printer, Trash2, Users } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ChevronRight, Loader2, Lock, LockOpen, Pen, Plus, Printer, Trash2, Users } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -39,6 +40,7 @@ import {
   WOCHENTAG_KURZ,
   berechneSummen,
   ladeBerichtZeilen,
+  periodeFuer,
   periodeTitel,
   periodeVerschieben,
   periodeVonDatum,
@@ -94,10 +96,18 @@ export default function Taetigkeitsbericht() {
   const { user, profile, isAdmin, hasPermission } = useAuth();
   const { toast } = useToast();
   const darfFremde = hasPermission("stunden.taetigkeitsbericht");
+  const darfFreigeben = hasPermission("stunden.taetigkeitsbericht.freigeben");
+  // Aus der Freigabe-Liste kommt man mit ?ma=…&jahr=…&monat=… direkt hierher.
+  const [params] = useSearchParams();
 
-  const [periode, setPeriode] = useState<Periode>(() => periodeVonDatum(localIso()));
+  const [periode, setPeriode] = useState<Periode>(() => {
+    const j = Number(params.get("jahr"));
+    const m = Number(params.get("monat"));
+    if (j > 2000 && m >= 1 && m <= 12) return periodeFuer(j, m);
+    return periodeVonDatum(localIso());
+  });
   const [tab, setTab] = useState<"bericht" | "fahrtenbuch">("bericht");
-  const [maId, setMaId] = useState<string>("");
+  const [maId, setMaId] = useState<string>(() => params.get("ma") ?? "");
   const [angestellte, setAngestellte] = useState<Profile[]>([]);
   const [zeilenStamm, setZeilenStamm] = useState<BerichtZeile[]>([]);
   const [sichtbar, setSichtbar] = useState<string[]>([]);
@@ -106,7 +116,6 @@ export default function Taetigkeitsbericht() {
 
   const zielMa = maId || user?.id || "";
   const istEigener = zielMa === user?.id;
-  const kannBearbeiten = istEigener || isAdmin;
 
   // ─── Stammdaten ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -160,11 +169,19 @@ export default function Taetigkeitsbericht() {
   // ─── Unterschrift der Periode ────────────────────────────────────────
   const [unterschrift, setUnterschrift] = useState<{ data: string; am: string } | null>(null);
   const [signOffen, setSignOffen] = useState(false);
+  /** Freigabe durch Geschäftsführung/Stellvertreter — danach ist die Periode gesperrt. */
+  const [freigabe, setFreigabe] = useState<{ von: string | null; name: string; am: string; unterschrift: string | null } | null>(null);
+  const [freigabeSignOffen, setFreigabeSignOffen] = useState(false);
+  const [freigabeBusy, setFreigabeBusy] = useState(false);
+  const gesperrt = !!freigabe;
+  // Bearbeiten: eigener Bericht oder Verwaltung — aber nie eine freigegebene
+  // Periode. Auch der Freigeber muss dafür zuerst „Wieder öffnen".
+  const kannBearbeiten = (istEigener || isAdmin) && !gesperrt;
   const ladeUnterschrift = useCallback(async () => {
     if (!zielMa) return;
     const { data } = await supabase
       .from("taetigkeitsbericht_unterschriften" as any)
-      .select("unterschrift_data, unterschrieben_am")
+      .select("unterschrift_data, unterschrieben_am, status, freigegeben_von, freigegeben_am, freigabe_unterschrift_data")
       .eq("mitarbeiter_id", zielMa)
       .eq("jahr", periode.jahr)
       .eq("monat", periode.monat)
@@ -173,7 +190,56 @@ export default function Taetigkeitsbericht() {
     setUnterschrift(
       row ? { data: row.unterschrift_data, am: row.unterschrieben_am } : null,
     );
+    if (row?.status === "freigegeben") {
+      let name = "";
+      if (row.freigegeben_von) {
+        const { data: p } = await supabase
+          .from("profiles")
+          .select("vorname, nachname")
+          .eq("id", row.freigegeben_von)
+          .maybeSingle();
+        name = p ? `${p.vorname} ${p.nachname}` : "";
+      }
+      setFreigabe({ von: row.freigegeben_von, name, am: row.freigegeben_am, unterschrift: row.freigabe_unterschrift_data });
+    } else {
+      setFreigabe(null);
+    }
   }, [zielMa, periode.jahr, periode.monat]);
+
+  async function freigeben(dataUrl: string) {
+    setFreigabeBusy(true);
+    const { error } = await (supabase as any).rpc("taetigkeitsbericht_freigeben", {
+      p_mitarbeiter: zielMa,
+      p_jahr: periode.jahr,
+      p_monat: periode.monat,
+      p_unterschrift: dataUrl,
+    });
+    setFreigabeBusy(false);
+    setFreigabeSignOffen(false);
+    if (error) {
+      toast({ variant: "destructive", title: "Nicht freigegeben", description: error.message });
+      return;
+    }
+    toast({ title: "Tätigkeitsbericht freigegeben", description: "Die Periode ist jetzt gesperrt." });
+    ladeUnterschrift();
+  }
+
+  async function wiederOeffnen() {
+    if (!window.confirm("Freigabe zurücknehmen und die Periode wieder öffnen?")) return;
+    setFreigabeBusy(true);
+    const { error } = await (supabase as any).rpc("taetigkeitsbericht_wieder_oeffnen", {
+      p_mitarbeiter: zielMa,
+      p_jahr: periode.jahr,
+      p_monat: periode.monat,
+    });
+    setFreigabeBusy(false);
+    if (error) {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+      return;
+    }
+    toast({ title: "Wieder geöffnet" });
+    ladeUnterschrift();
+  }
   useEffect(() => {
     ladeUnterschrift();
   }, [ladeUnterschrift]);
@@ -680,6 +746,13 @@ export default function Taetigkeitsbericht() {
       unterschriebenAm: unterschrift
         ? new Date(unterschrift.am).toLocaleDateString("de-AT")
         : null,
+      freigabe: freigabe
+        ? {
+            name: freigabe.name,
+            am: new Date(freigabe.am).toLocaleDateString("de-AT"),
+            unterschrift: freigabe.unterschrift,
+          }
+        : null,
     });
     doc.save(`Taetigkeitsbericht_${maName.replace(/\s+/g, "_")}_${periode.jahr}-${String(periode.monat).padStart(2, "0")}.pdf`);
   }
@@ -765,6 +838,35 @@ export default function Taetigkeitsbericht() {
           </div>
         )}
       </div>
+
+      {/* Stand der Freigabe — Änderungswunsch J. Maurer: Freigabe wie beim Stundenbericht */}
+      {gesperrt ? (
+        <div className="mb-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 flex items-center gap-2 flex-wrap text-sm text-emerald-900">
+          <Lock className="h-4 w-4 shrink-0" />
+          <span className="flex-1">
+            <strong>Freigegeben</strong> am {new Date(freigabe!.am).toLocaleDateString("de-AT")}
+            {freigabe!.name ? ` von ${freigabe!.name}` : ""} — die Periode ist gesperrt.
+          </span>
+          {darfFreigeben && (
+            <Button size="sm" variant="outline" className="h-8" onClick={wiederOeffnen} disabled={freigabeBusy}>
+              <LockOpen className="h-3.5 w-3.5 mr-1.5" /> Wieder öffnen
+            </Button>
+          )}
+        </div>
+      ) : unterschrift ? (
+        <div className="mb-3 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 flex items-center gap-2 flex-wrap text-sm text-blue-900">
+          <Pen className="h-4 w-4 shrink-0" />
+          <span className="flex-1">
+            Unterschrieben am {new Date(unterschrift.am).toLocaleDateString("de-AT")} — wartet auf
+            Freigabe durch die Geschäftsführung.
+          </span>
+          {darfFreigeben && tab === "bericht" && (
+            <Button size="sm" className="h-8" onClick={() => setFreigabeSignOffen(true)} disabled={freigabeBusy}>
+              <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" /> Freigeben
+            </Button>
+          )}
+        </div>
+      ) : null}
 
       <Card className="overflow-hidden">
         <CardContent className="p-0">
@@ -1191,6 +1293,12 @@ export default function Taetigkeitsbericht() {
         onOpenChange={setSignOffen}
         onSave={speichereUnterschrift}
         titel="Tätigkeitsbericht unterschreiben"
+      />
+      <UnterschriftDialog
+        open={freigabeSignOffen}
+        onOpenChange={setFreigabeSignOffen}
+        onSave={freigeben}
+        titel={`Freigabe: ${maName}`}
       />
     </div>
   );

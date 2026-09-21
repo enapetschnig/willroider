@@ -50,6 +50,8 @@ export interface TaetigkeitsberichtInput {
   /** Base64-PNG der in der App geleisteten Unterschrift. */
   unterschrift?: string | null;
   unterschriebenAm?: string | null;
+  /** Freigabe durch Geschäftsführung/Stellvertreter (Name, Datum, Unterschrift). */
+  freigabe?: { name: string; am: string; unterschrift: string | null } | null;
 }
 
 /** "#d6e4f0" → [214, 228, 240] — die App-Farben unverändert ins PDF. */
@@ -367,6 +369,25 @@ export function renderTaetigkeitsbericht(
       pageW / 2 - 20,
       y + 4,
     );
+  }
+
+  // Freigabe-Block — steht nur, wenn der Bericht freigegeben ist.
+  if (input.freigabe) {
+    const fy = y + (input.unterschrift ? 24 : 12);
+    doc.setFont("times", "normal");
+    doc.setFontSize(10);
+    doc.text(`Freigegeben: ${input.freigabe.am} · ${input.freigabe.name}`, margin, fy + 11);
+    doc.text("Unterschrift Freigabe:", pageW / 2 - 20, fy + 11);
+    if (input.freigabe.unterschrift) {
+      try {
+        doc.addImage(input.freigabe.unterschrift, "PNG", pageW / 2 + 16, fy + 1, 44, 14, undefined, "FAST");
+      } catch {
+        /* beschädigtes Bild darf das PDF nicht verhindern */
+      }
+    }
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.2);
+    doc.line(pageW / 2 + 16, fy + 15.5, pageW / 2 + 64, fy + 15.5);
   }
 }
 
