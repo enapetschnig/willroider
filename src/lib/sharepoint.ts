@@ -23,22 +23,51 @@ export type SharePointDatei = {
   web_url: string | null;
   geaendert_am: string | null;
   geaendert_von: string | null;
+  dokument_id?: string | null;
 };
 
 /** Kennzeichnung im Frontend: gespiegelte Dateien tragen dieses Präfix. */
 export const SP_PREFIX = "sp:";
 export const istSharePointId = (id: string) => id.startsWith(SP_PREFIX);
 
-export async function ladeSharePointDateien(baustelleId: string): Promise<SharePointDatei[]> {
-  const { data, error } = await (supabase as any)
+export async function ladeSharePointDateien(
+  baustelleId: string,
+  /** true = auch die Zeilen, die zu einer App-Datei gehören (echter Baum:
+   *  dort zeigt die App die SharePoint-Datei statt der App-Kopie). */
+  alle = false,
+): Promise<SharePointDatei[]> {
+  let q = (supabase as any)
     .from("sharepoint_dateien")
-    .select("id, baustelle_id, ordner, subpath, sp_pfad, dateiname, groesse, mimetype, web_url, geaendert_am, geaendert_von")
+    .select("id, baustelle_id, ordner, subpath, sp_pfad, dateiname, groesse, mimetype, web_url, geaendert_am, geaendert_von, dokument_id")
     .eq("baustelle_id", baustelleId)
-    .is("verschwunden_am", null)
-    // Dateien, die aus der App stammen, stehen dort schon — sonst doppelt.
-    .is("dokument_id", null);
+    .is("verschwunden_am", null);
+  // Dateien, die aus der App stammen, stehen dort schon — sonst doppelt.
+  if (!alle) q = q.is("dokument_id", null);
+  const { data, error } = await q;
   if (error) return [];
   return (data as SharePointDatei[]) ?? [];
+}
+
+/** Ein Ordner aus SharePoint (auch leere) — Grundlage für den echten Baum. */
+export type SharePointUnterordner = {
+  id: string;
+  pfad: string;
+  name: string;
+  top: string;
+  /** Klasse (1-baustellenmanagement, fotos …) — nur für Rechte und Ablagen. */
+  ordner: string;
+  tiefe: number;
+};
+
+export async function ladeSharePointUnterordner(baustelleId: string): Promise<SharePointUnterordner[]> {
+  const { data, error } = await (supabase as any)
+    .from("sharepoint_unterordner")
+    .select("id, pfad, name, top, ordner, tiefe")
+    .eq("baustelle_id", baustelleId)
+    .is("verschwunden_am", null)
+    .order("pfad");
+  if (error) return [];
+  return (data as SharePointUnterordner[]) ?? [];
 }
 
 /**

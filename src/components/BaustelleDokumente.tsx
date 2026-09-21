@@ -39,6 +39,7 @@ import {
   MailWarning,
   Cloud,
   Download,
+  type LucideIcon,
 } from "lucide-react";
 import { DocViewerDialog, type DocViewerItem } from "@/components/dokumente/DocViewerDialog";
 import { DocSendDialog, type DocSendItem } from "@/components/dokumente/DocSendDialog";
@@ -82,10 +83,13 @@ import {
   SP_PREFIX,
   istSharePointId,
   ladeSharePointDateien,
+  ladeSharePointUnterordner,
   sharePointDateiUrl,
   sharePointHochladenAnstossen,
   dateiHerunterladen,
+  type SharePointUnterordner,
 } from "@/lib/sharepoint";
+import { ordnerKlasse } from "@/lib/ordnerKlasse";
 
 // Einheitliche, dezente Folder-Farbe (Windows-Yellow)
 const FOLDER_COLOR = "#eab308";
@@ -104,21 +108,28 @@ type OrdnerMarker = Database["public"]["Tables"]["dokument_ordner"]["Row"];
 const FOLDERS = BAUSTELLEN_ORDNER.map((o) => ({
   ...o,
   icon: o.key === "fotos" ? ImageIcon : o.key === "92-sonstiges" ? FolderOpen : FileText,
+  /** Klasse = Ordnerart für Rechte/Farben. Bei App-Ordnern der Schlüssel selbst. */
+  klasse: o.key as OrdnerKey,
 }));
 
-type FolderKey = OrdnerKey;
+/**
+ * Oberster Ordner in der Ansicht. Bei Baustellen ohne SharePoint-Ordner
+ * einer der festen App-Schlüssel („91-plaene"); bei verknüpften Baustellen
+ * der ECHTE SharePoint-Ordner als „sp:<Name>" — die App zeigt seit dem
+ * 21.09.2026 den Baum so, wie er in SharePoint liegt (Wunsch E. Winkler).
+ * „sp:" ohne Namen = Dateien direkt im Baustellenordner.
+ */
+type FolderKey = string;
+type FolderDef = { key: FolderKey; label: string; klasse: OrdnerKey; color: string; icon: LucideIcon };
+const SP_ROOT_KEY = "sp:";
+const spKey = (top: string) => `${SP_PREFIX}${top}`;
+const spTopName = (key: FolderKey) => (key.startsWith(SP_PREFIX) ? key.slice(SP_PREFIX.length) : null);
 
 function isImage(mimetype?: string | null) {
   return !!mimetype && mimetype.startsWith("image/");
 }
 function isPdf(mimetype?: string | null) {
   return !!mimetype && mimetype === "application/pdf";
-}
-function folderMeta(key: string | null | undefined) {
-  return (
-    FOLDERS.find((f) => f.key === (key ?? "92-sonstiges")) ??
-    FOLDERS.find((f) => f.key === "92-sonstiges")!
-  );
 }
 
 export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
@@ -128,6 +139,14 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   /** dokument_id → letzter Versand (für „schon verschickt?"). */
   const [versand, setVersand] = useState<Map<string, VersandInfo>>(new Map());
   const [folderMarkers, setFolderMarkers] = useState<OrdnerMarker[]>([]);
+  /** Baustelle hat einen SharePoint-Ordner → echter Baum statt App-Ordner. */
+  const [verknuepft, setVerknuepft] = useState(false);
+  const [spOrdner, setSpOrdner] = useState<SharePointUnterordner[]>([]);
+  /** Zusätzliche oberste Ordner aus Dateien/Markern (falls der Ordner-Spiegel hinterherhinkt). */
+  const [spTopsExtra, setSpTopsExtra] = useState<string[]>([]);
+  const [hatWurzelDateien, setHatWurzelDateien] = useState(false);
+  /** Unterpfad für den nächsten Upload, wenn er nicht der aktuelle ist (Foto-Kachel). */
+  const [uploadSub, setUploadSub] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   // "root" = Top-Level-Übersicht (alle 14 Ordner). Sonst = im Ordner drin.
   // ?ordner=91-plaene (aus „Mein Tag") öffnet den Ordner direkt
@@ -135,6 +154,8 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     const o = new URLSearchParams(window.location.search).get("ordner");
     return o && BAUSTELLEN_ORDNER.some((f) => f.key === o) ? (o as FolderKey) : "root";
   });
+  /** Tiefer Link (?ordner=91-plaene) bei verknüpfter Baustelle: nach dem Laden auf den echten Ordner umbiegen. */
+  const deepLinkRef = useRef<string | null>(new URLSearchParams(window.location.search).get("ordner"));
   const [currentSubpath, setCurrentSubpath] = useState<string>(""); // Unterordner-Pfad
   const [uploadFolder, setUploadFolder] = useState<FolderKey>("fotos");
   const [newFolderOpen, setNewFolderOpen] = useState(false);
@@ -184,21 +205,104 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   // Sichtbare Ordner: Ausnahme je Person (profiles.ordner_sichtbar) schlägt
   // den Rollenstandard. Die Datenbank prüft dasselbe (darf_ordner_sehen) —
   // hier geht es nur um die Anzeige.
+  /** Alle obersten Ordner dieser Baustelle — echt (SharePoint) oder fest (App). */
+  const alleFolders = useMemo<FolderDef[]>(() => {
+    if (!verknuepft) return FOLDERS as FolderDef[];
+    const namen = new Map<string, string>(); // name → klasse
+    spOrdner.filter((o) => o.tiefe === 1).forEach((o) => namen.set(o.name, o.ordner));
+    spTopsExtra.forEach((n) => { if (!namen.has(n)) namen.set(n, ordnerKlasse(n)); });
+    const collator = new Intl.Collator("de-AT", { numeric: true, sensitivity: "base" });
+    const liste: FolderDef[] = [...namen.entries()]
+      .sort((a, b) => collator.compare(a[0], b[0]))
+      .map(([name, klasse]) => {
+        const def = BAUSTELLEN_ORDNER.find((o) => o.key === klasse);
+        return {
+          key: spKey(name),
+          label: name,
+          klasse: klasse as OrdnerKey,
+          color: def?.color ?? "#6b7280",
+          icon: klasse === "fotos" ? ImageIcon : FileText,
+        };
+      });
+    if (hatWurzelDateien) {
+      liste.push({ key: SP_ROOT_KEY, label: "Direkt im Baustellenordner", klasse: "92-sonstiges", color: "#6b7280", icon: FolderOpen });
+    }
+    return liste;
+  }, [verknuepft, spOrdner, spTopsExtra, hatWurzelDateien]);
+
   const visibleFolders = useMemo(() => {
     const r = role ?? "mitarbeiter";
     const eigene = (profile as any)?.ordner_sichtbar as string[] | null | undefined;
     const allowed = eigene ?? visibility[r] ?? DEFAULT_VISIBILITY[r] ?? DEFAULT_VISIBILITY.mitarbeiter;
     const allowedSet = new Set(allowed);
     const istPruefer = r === "geschaeftsfuehrung" || r === "buero";
-    return FOLDERS.filter((f) => allowedSet.has(f.key)).map((f) =>
-      // Für alle außer Büro/GF ist „2-Schriftverkehr" nur der Berichtsordner
-      f.key === "2-schriftverkehr" && !istPruefer ? { ...f, label: "Berichte" } : f,
+    // Verknüpft: ein oberster Ordner zählt auch als sichtbar, wenn darunter
+    // ein sichtbarer Unterordner liegt (z. B. „08-Sonstiges/Fotos" für
+    // Mitarbeiter) — was er darin sieht, begrenzt ohnehin die Datenbank.
+    const topsMitSichtbaremKind = new Set(
+      spOrdner.filter((o) => o.tiefe > 1 && allowedSet.has(o.ordner)).map((o) => spKey(o.top)),
     );
-  }, [role, visibility, profile]);
+    return alleFolders.filter((f) => istPruefer || allowedSet.has(f.klasse) || topsMitSichtbaremKind.has(f.key)).map((f) =>
+      // Für alle außer Büro/GF ist der Schriftverkehr nur der Berichtsordner
+      f.klasse === "2-schriftverkehr" && !istPruefer && !verknuepft ? { ...f, label: "Berichte" } : f,
+    );
+  }, [role, visibility, profile, alleFolders, verknuepft, spOrdner]);
+
+  const folderMeta = (key: string | null | undefined): FolderDef =>
+    alleFolders.find((f) => f.key === key) ??
+    (FOLDERS.find((f) => f.key === (key ?? "92-sonstiges")) as FolderDef | undefined) ??
+    (FOLDERS.find((f) => f.key === "92-sonstiges") as FolderDef);
+
+  /** Bei verknüpfter Baustelle: der echte oberste Ordner einer Klasse. */
+  const topFuerKlasse = (klasse: string): FolderDef | undefined =>
+    alleFolders.find((f) => f.klasse === klasse && f.key !== SP_ROOT_KEY);
+
+  /**
+   * Schnellzugriff „Pläne / Fotos / Unterweisung" — bei jeder Baustelle
+   * gleich, egal wie der Bauleiter seine Ordner nummeriert. Fotos und
+   * Unterweisung dürfen auf einen noch nicht vorhandenen Unterordner
+   * zeigen; angelegt wird er beim ersten Hochladen.
+   */
+  const schnellzugriff = useMemo(() => {
+    type Ziel = { key: FolderKey; sub: string; label: string; icon: LucideIcon };
+    const out: Ziel[] = [];
+    const sichtbar = (key: FolderKey) => visibleFolders.some((f) => f.key === key);
+    if (!verknuepft) {
+      if (sichtbar("91-plaene")) out.push({ key: "91-plaene", sub: "", label: "Pläne", icon: FileText });
+      if (sichtbar("fotos")) out.push({ key: "fotos", sub: "", label: "Fotos", icon: ImageIcon });
+      if (sichtbar("evaluierung")) out.push({ key: "evaluierung", sub: "", label: "Unterweisung", icon: FileText });
+      return out;
+    }
+    const plaene = topFuerKlasse("91-plaene");
+    if (plaene && sichtbar(plaene.key)) out.push({ key: plaene.key, sub: "", label: "Pläne", icon: FileText });
+    const bm = topFuerKlasse("1-baustellenmanagement");
+    const fotoOrdner = [...spOrdner].filter((o) => o.ordner === "fotos").sort((a, b) => a.tiefe - b.tiefe)[0];
+    if (fotoOrdner) {
+      const key = spKey(fotoOrdner.top);
+      if (sichtbar(key)) out.push({ key, sub: fotoOrdner.pfad.split("/").slice(1).join("/"), label: "Fotos", icon: ImageIcon });
+    } else if (bm && sichtbar(bm.key)) {
+      out.push({ key: bm.key, sub: "Fotos", label: "Fotos", icon: ImageIcon });
+    }
+    const unterweisung = spOrdner.find((o) => /unterweisung|evaluierung/i.test(o.name));
+    if (unterweisung) {
+      const key = spKey(unterweisung.top);
+      if (sichtbar(key)) out.push({ key, sub: unterweisung.pfad.split("/").slice(1).join("/"), label: "Unterweisung", icon: FileText });
+    } else if (bm && sichtbar(bm.key)) {
+      out.push({ key: bm.key, sub: "Unterweisung", label: "Unterweisung", icon: FileText });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verknuepft, alleFolders, visibleFolders, spOrdner]);
 
   const load = async () => {
     setLoading(true);
-    const [d, m, sp] = await Promise.all([
+    const { data: bst } = await supabase
+      .from("baustellen")
+      .select("sharepoint_item_id")
+      .eq("id", baustelleId)
+      .maybeSingle();
+    const istVerknuepft = !!(bst as any)?.sharepoint_item_id;
+    const [d, m, sp, uo] = await Promise.all([
       supabase
         .from("dokumente")
         .select("*")
@@ -208,30 +312,79 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         .from("dokument_ordner")
         .select("*")
         .eq("baustelle_id", baustelleId),
-      ladeSharePointDateien(baustelleId),
+      ladeSharePointDateien(baustelleId, istVerknuepft),
+      istVerknuepft ? ladeSharePointUnterordner(baustelleId) : Promise.resolve([] as SharePointUnterordner[]),
     ]);
-    const eigene = (d.data as Dokument[]) ?? [];
-    // Dateien aus SharePoint kommen in dieselbe Liste, damit Ordner,
-    // Zählung und Suche unverändert funktionieren. Sie sind am Präfix
-    // erkennbar und bleiben schreibgeschützt.
-    const gespiegelt: Dokument[] = sp.map((s) => ({
-      id: SP_PREFIX + s.id,
-      baustelle_id: s.baustelle_id,
-      mitarbeiter_id: null,
-      ordner: s.ordner,
-      typ: null,
-      dateiname: s.dateiname,
-      storage_path: "",
-      groesse: s.groesse,
-      mimetype: s.mimetype,
-      hochgeladen_von: null,
-      notizen: s.geaendert_von ? `SharePoint · zuletzt ${s.geaendert_von}` : "SharePoint",
-      created_at: s.geaendert_am ?? new Date(0).toISOString(),
-      subpath: s.subpath,
-    })) as Dokument[];
-    const liste = [...eigene, ...gespiegelt];
+    setVerknuepft(istVerknuepft);
+    setSpOrdner(uo);
+    const alleEigene = (d.data as Dokument[]) ?? [];
+    // Verknüpft: App-Dateien, die schon in SharePoint liegen, zeigt die App
+    // als SharePoint-Datei — dort, wo sie wirklich liegen.
+    const eigene = istVerknuepft
+      ? alleEigene.filter((x) => !(x as any).sharepoint_item_id)
+      : alleEigene;
+
+    // Anzeige-Ordner je Datei. Ohne Verknüpfung: der App-Ordner. Mit
+    // Verknüpfung: der echte oberste SharePoint-Ordner („sp:<Name>").
+    const topsAusDateien = new Set<string>();
+    let wurzel = false;
+    const gespiegelt: Dokument[] = sp.map((s) => {
+      let key: string = s.ordner ?? "92-sonstiges";
+      let sub: string | null = s.subpath;
+      if (istVerknuepft) {
+        const teile = s.sp_pfad.split("/");
+        if (teile.length > 1) {
+          key = spKey(teile[0]);
+          topsAusDateien.add(teile[0]);
+          sub = teile.slice(1, -1).join("/") || null;
+        } else {
+          key = SP_ROOT_KEY;
+          wurzel = true;
+          sub = null;
+        }
+      }
+      return {
+        id: SP_PREFIX + s.id,
+        baustelle_id: s.baustelle_id,
+        mitarbeiter_id: null,
+        ordner: key,
+        typ: null,
+        dateiname: s.dateiname,
+        storage_path: "",
+        groesse: s.groesse,
+        mimetype: s.mimetype,
+        hochgeladen_von: null,
+        notizen: s.geaendert_von ? `SharePoint · zuletzt ${s.geaendert_von}` : "SharePoint",
+        created_at: s.geaendert_am ?? new Date(0).toISOString(),
+        subpath: sub,
+      } as Dokument;
+    });
+    let eigeneAnzeige = eigene;
+    if (istVerknuepft) {
+      const tops = new Map<string, string>();
+      uo.filter((o) => o.tiefe === 1).forEach((o) => tops.set(o.ordner, o.name));
+      const bm = tops.get("1-baustellenmanagement") ?? uo.find((o) => o.tiefe === 1)?.name ?? null;
+      eigeneAnzeige = eigene.map((x) => {
+        const ziel = (x as any).sharepoint_ziel_pfad as string | null;
+        const top = ziel ? ziel.split("/")[0] : (tops.get(x.ordner ?? "92-sonstiges") ?? bm);
+        if (top) topsAusDateien.add(top);
+        return { ...x, ordner: top ? spKey(top) : SP_ROOT_KEY };
+      });
+      if (!bm && eigene.length > 0) wurzel = true;
+    }
+    setSpTopsExtra([...topsAusDateien]);
+    setHatWurzelDateien(wurzel);
+    const liste = [...eigeneAnzeige, ...gespiegelt];
     setDocs(liste);
     setFolderMarkers((m.data as OrdnerMarker[]) ?? []);
+
+    // Tiefer Link (?ordner=91-plaene) auf den echten Ordner umbiegen.
+    if (istVerknuepft && deepLinkRef.current) {
+      const klasse = deepLinkRef.current;
+      deepLinkRef.current = null;
+      const top = uo.find((o) => o.tiefe === 1 && o.ordner === klasse)?.name;
+      setCurrentFolder(top ? spKey(top) : "root");
+    }
 
     // Versand-Nachweis je Dokument: letzter Versand + Anzahl. Separat
     // geladen, weil die Protokoll-Tabelle nicht an dokumente hängt.
@@ -258,10 +411,18 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     setLoading(false);
   };
 
-  // Subpath zurücksetzen, wenn der Top-Level-Ordner wechselt
+  // Subpath zurücksetzen, wenn der Top-Level-Ordner wechselt — außer eine
+  // Kachel (Fotos/Unterweisung) will direkt in einen Unterordner springen.
+  const pendingSubRef = useRef<string | null>(null);
   useEffect(() => {
-    setCurrentSubpath("");
+    setCurrentSubpath(pendingSubRef.current ?? "");
+    pendingSubRef.current = null;
   }, [currentFolder]);
+  const springeZu = (key: FolderKey, sub: string) => {
+    pendingSubRef.current = sub;
+    if (currentFolder === key) setCurrentSubpath(sub);
+    else setCurrentFolder(key);
+  };
 
   // Visibility-Settings laden (einmalig)
   useEffect(() => {
@@ -345,8 +506,14 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     folderMarkers.forEach((m) => {
       if (m.ordner === currentFolder) allSubpaths.push(m.subpath);
     });
+    // Echte SharePoint-Ordner — auch leere.
+    spOrdner.forEach((o) => {
+      if (o.tiefe > 1 && spKey(o.top) === currentFolder) {
+        allSubpaths.push(o.pfad.split("/").slice(1).join("/"));
+      }
+    });
     return getDirectSubfolders(allSubpaths, currentSubpath);
-  }, [docs, folderMarkers, currentFolder, currentSubpath]);
+  }, [docs, folderMarkers, spOrdner, currentFolder, currentSubpath]);
 
   // Statistik pro Unterordner (Anzahl darunter, latest)
   const subfolderStats = useMemo(() => {
@@ -392,7 +559,11 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       const safeName = sanitizeStorageName(file.name);
       const sub = subpath ? subpath.split("/").map(sanitizeFolderName).filter(Boolean).join("/") : "";
       const subStorageSegment = sub ? `${sub}/` : "";
-      const path = `${baustelleId}/${folder}/${subStorageSegment}${Date.now()}_${safeName}`;
+      // Echter SharePoint-Ordner als Ziel; die Klasse bleibt der App-Ordner
+      // (Rechte, Speicherpfad). Ohne Verknüpfung ist der Schlüssel der App-Ordner.
+      const spTop = spTopName(folder);
+      const klasse = spTop !== null ? (folderMeta(folder).klasse as string) : folder;
+      const path = `${baustelleId}/${klasse}/${subStorageSegment}${Date.now()}_${safeName}`;
       const { error: upErr } = await supabase.storage
         .from("baustellen")
         .upload(path, file, { contentType: file.type || undefined });
@@ -406,8 +577,9 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       }
       const { error: dbErr } = await supabase.from("dokumente").insert({
         baustelle_id: baustelleId,
-        ordner: folder,
+        ordner: klasse,
         subpath: sub || null,
+        sharepoint_ziel_pfad: spTop || null,
         dateiname: file.name,
         storage_path: path,
         mimetype: file.type,
@@ -440,10 +612,11 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   };
 
   // Convenience: alte upload-Signatur weiterhin nutzbar (lädt in currentSubpath)
-  const upload = (files: FileList | File[] | null, folder: FolderKey) => {
+  const upload = (files: FileList | File[] | null, folder: FolderKey, subpathOverride?: string | null) => {
     if (!files || files.length === 0) return;
     const list = Array.from(files);
-    const items: UploadItem[] = list.map((f) => ({ file: f, subpath: currentSubpath }));
+    const sub = subpathOverride ?? (currentFolder === folder ? currentSubpath : "");
+    const items: UploadItem[] = list.map((f) => ({ file: f, subpath: sub }));
     return uploadItems(items, folder);
   };
 
@@ -712,9 +885,14 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     const ids = roheIds.filter((id) => !istSharePointId(id));
     if (ids.length < roheIds.length) nurLesenHinweis();
     if (ids.length === 0) return;
+    const zielTop = spTopName(targetOrdner);
     const { data, error } = await supabase
       .from("dokumente")
-      .update({ ordner: targetOrdner, subpath: targetSubpath || null })
+      .update({
+        ordner: zielTop !== null ? (folderMeta(targetOrdner).klasse as string) : targetOrdner,
+        subpath: targetSubpath || null,
+        ...(zielTop !== null ? { sharepoint_ziel_pfad: zielTop || null } : {}),
+      } as any)
       .in("id", ids)
       .select("id");
     if (error) {
@@ -835,14 +1013,29 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     load();
   };
 
+  /** Wohin Fotos gehen — Kachel „Fotos", sonst App-Ordner „fotos". */
+  const fotoZiel = (): { key: FolderKey; sub: string } => {
+    const z = schnellzugriff.find((s) => s.label === "Fotos");
+    return z ? { key: z.key, sub: z.sub } : { key: "fotos", sub: "" };
+  };
+
   const triggerCamera = () => {
-    setUploadFolder("fotos");
+    const z = fotoZiel();
+    setUploadFolder(z.key);
+    setUploadSub(z.sub);
     cameraRef.current?.click();
   };
 
   const triggerUpload = () => {
-    // In der Ordner-Ansicht → in diesen Ordner. In Wurzel → fotos als Default.
-    setUploadFolder(currentFolder === "root" ? "fotos" : currentFolder);
+    // In der Ordner-Ansicht → in diesen Ordner. In Wurzel → Fotos als Default.
+    if (currentFolder === "root") {
+      const z = fotoZiel();
+      setUploadFolder(z.key);
+      setUploadSub(z.sub);
+    } else {
+      setUploadFolder(currentFolder);
+      setUploadSub(null);
+    }
     fileRef.current?.click();
   };
 
@@ -956,7 +1149,8 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       if (defaultDropFolder === null) {
         // Im Root-View: Paste landet kommentarlos im Fotos-Ordner —
         // ist die gängigste Erwartung beim Screenshot-Einfügen.
-        upload(files, "fotos");
+        const z = fotoZiel();
+        upload(files, z.key, z.sub);
       } else {
         upload(files, defaultDropFolder);
       }
@@ -1111,7 +1305,8 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         ref={cameraRef}
         className="hidden"
         onChange={(e) => {
-          upload(e.target.files, "fotos");
+          upload(e.target.files, uploadFolder, uploadSub);
+          setUploadSub(null);
           if (cameraRef.current) cameraRef.current.value = "";
         }}
       />
@@ -1121,7 +1316,8 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         ref={fileRef}
         className="hidden"
         onChange={(e) => {
-          upload(e.target.files, uploadFolder);
+          upload(e.target.files, uploadFolder, uploadSub);
+          setUploadSub(null);
           if (fileRef.current) fileRef.current.value = "";
         }}
       />
@@ -1219,6 +1415,30 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
           )}
         </div>
       </div>
+
+      {/* Schnellzugriff: bei jeder Baustelle gleich, egal wie die Ordner heißen */}
+      {currentFolder === "root" && schnellzugriff.length > 0 && (
+        <div className="grid grid-cols-3 gap-2">
+          {schnellzugriff.map((z) => (
+            <button
+              key={z.label}
+              type="button"
+              onClick={() => springeZu(z.key, z.sub)}
+              className="rounded-lg border bg-card hover:bg-primary/5 hover:border-primary/40 p-3 flex flex-col items-center gap-1 text-sm font-medium transition"
+            >
+              <z.icon className="h-6 w-6 text-primary" />
+              {z.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {currentFolder === "root" && verknuepft && (
+        <div className="text-[11px] text-muted-foreground px-1 flex items-center gap-1.5">
+          <Cloud className="h-3.5 w-3.5 text-sky-600" />
+          Ordner wie in SharePoint — genau so, wie sie der Bauleiter angelegt hat.
+        </div>
+      )}
 
       {currentFolder === "root" && (
         <div className="text-[11px] text-muted-foreground -mt-1 px-1">
