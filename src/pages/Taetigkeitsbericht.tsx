@@ -350,6 +350,13 @@ export default function Taetigkeitsbericht() {
     return out;
   }, [tageList, periode.tage, zeilenStamm]);
 
+  // Wechselt die Person oder die Periode, fängt die Zeilenliste bei null an.
+  // Vorher blieben Kostenstellen aus fremden Berichten stehen (Änderungswunsch
+  // J. Maurer 22.09.: „4020 BST oder 4504 sind nicht mein Bericht").
+  useEffect(() => {
+    setSichtbar([]);
+  }, [zielMa, periode.jahr, periode.monat]);
+
   // Zeilen, die angezeigt werden: alles mit Stunden plus manuell zugeschaltete.
   useEffect(() => {
     const mitStunden = Object.keys(zellen).filter((k) =>
