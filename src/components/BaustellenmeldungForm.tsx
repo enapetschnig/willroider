@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,6 +20,7 @@ type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 
 /** Feste Empfänger der Baustellenmeldung — im Formular abwählbar/ergänzbar. */
 const FESTE_EMPFAENGER = ["schneider@willroider.at", "maurer@willroider.at"];
+const MAURER = "maurer@willroider.at";
 
 const MAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -175,6 +176,29 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
     if (!initial?.id && vorwahl === "planung") void vergebeNaechsteKst(PLANUNG_KST);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** Wer die Meldung standardmäßig bekommt (J. Maurer 23.09.2026):
+   *  Planung → niemand, Sammel-Kostenstellen 1404020–1404070 → nur Maurer,
+   *  sonst Schneider und Maurer. Abwählen/Zuschalten von Hand bleibt möglich;
+   *  erst wenn die Regel wechselt (Art oder Kostenstelle), wird neu vorbelegt. */
+  const meldungsRegel: "keine" | "nur_maurer" | "beide" =
+    art === "planung"
+      ? "keine"
+      : SAMMEL_KST.some((basis) => kostenstelle.trim().startsWith(basis))
+        ? "nur_maurer"
+        : "beide";
+  const letzteRegel = useRef<string | null>(null);
+  useEffect(() => {
+    if (letzteRegel.current === meldungsRegel) return;
+    letzteRegel.current = meldungsRegel;
+    setEmpfaengerListe((l) =>
+      l.map((e) =>
+        FESTE_EMPFAENGER.includes(e.mail)
+          ? { ...e, aktiv: meldungsRegel === "beide" || (meldungsRegel === "nur_maurer" && e.mail === MAURER) }
+          : e,
+      ),
+    );
+  }, [meldungsRegel]);
   const [artBauarbeiten, setArtBauarbeiten] = useState(initial?.art_bauarbeiten ?? "");
   const [auftragssumme, setAuftragssumme] = useState<string>(
     initial?.auftragssumme != null ? String(initial.auftragssumme) : ""
@@ -747,6 +771,13 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
             <Mail className="h-4 w-4 text-primary" />
             Baustellenmeldung per Mail senden an
           </div>
+          {meldungsRegel !== "beide" && (
+            <div className="text-[11px] text-muted-foreground">
+              {meldungsRegel === "keine"
+                ? "Bei einer Planung geht keine Meldung raus — bei Bedarf eine Adresse antippen."
+                : "Sammel-Kostenstelle: die Meldung geht nur an Johannes Maurer."}
+            </div>
+          )}
           <div className="flex flex-wrap gap-1.5">
             {empfaengerListe.map((e, i) => {
               const fest = FESTE_EMPFAENGER.includes(e.mail);
