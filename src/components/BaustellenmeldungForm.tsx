@@ -10,7 +10,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { pruefeEdgeAntwort } from "@/lib/edgeError";
 import { useAuth } from "@/contexts/AuthContext";
 import { generateBaustellenanlageDocx, DOCX_MIME } from "@/lib/baustellenanlageDocx";
-import { Save, Mail, X } from "lucide-react";
+import { Save, Mail, X, PencilRuler, HardHat, ArrowRight } from "lucide-react";
+import { UNTERWEISUNG_OPTIONS } from "@/lib/unterweisungen";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
 
@@ -36,6 +37,11 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(bin);
 }
 
+/** Kostenstelle aller Planungen (Wunsch J. Maurer 23.09.2026). */
+export const PLANUNG_KST = "1404895";
+
+export type BaustellenArt = "ausfuehrung" | "planung";
+
 /** Sammel-Kostenstellen mit automatischer Nummernvergabe (<Basis>-<JJ><NN>). */
 const SAMMEL_KST = [
   "1404020",
@@ -50,6 +56,11 @@ interface Props {
   initial?: Partial<Baustelle> | null;
   onSaved?: (id: string) => void;
   onCancel?: () => void;
+  /** „uebernahme": aus der Planung `initial` wird eine NEUE Ausführung —
+   *  Daten vorbelegt, neue Kostenstelle, Stunden bleiben auf der Planung. */
+  modus?: "normal" | "uebernahme";
+  /** Bei neuen Baustellen die Auswahl Planung/Ausführung überspringen. */
+  vorwahl?: BaustellenArt;
 }
 
 /**
@@ -57,8 +68,21 @@ interface Props {
  * Nur die 13 Originalfelder. Partie / Pflicht-Unterweisung etc. werden
  * danach in der BaustelleDetail-Seite (Team-Tab) zugeordnet.
  */
-export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
+export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "normal", vorwahl }: Props) {
   const { user } = useAuth();
+  const uebernahme = modus === "uebernahme" && !!initial?.id;
+  /** Neu anlegen (auch bei der Übernahme: es entsteht eine neue Baustelle). */
+  const istNeu = !initial?.id || uebernahme;
+  /** Planung oder Ausführung — bei neuen Baustellen zuerst zu wählen. */
+  const [art, setArt] = useState<BaustellenArt | null>(
+    uebernahme
+      ? "ausfuehrung"
+      : initial?.id
+        ? (((initial as any).art as BaustellenArt) ?? "ausfuehrung")
+        : (vorwahl ?? null),
+  );
+  /** Pflicht-Unterweisung (Evaluierung) — bei neuer Ausführung Pflicht. */
+  const [evaluierungTyp, setEvaluierungTyp] = useState<string>("");
   const { toast } = useToast();
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [saving, setSaving] = useState(false);
@@ -116,7 +140,8 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
   const [startDatum, setStartDatum] = useState(initial?.start_datum ?? "");
   const [endDatum, setEndDatum] = useState(initial?.end_datum ?? "");
   const [bauleiterId, setBauleiterId] = useState<string>(initial?.bauleiter_id ?? "");
-  const [kostenstelle, setKostenstelle] = useState(initial?.kostenstelle ?? "");
+  // Bei der Übernahme bekommt die Ausführung eine NEUE Kostenstelle.
+  const [kostenstelle, setKostenstelle] = useState(uebernahme ? "" : (initial?.kostenstelle ?? ""));
 
   /** Nächste freie Nummer für eine Sammel-Kostenstelle vergeben.
    *  Format: <Basis>-<JJ><NN>, z.B. 1404030-2603 (Jahr 26, laufende Nr. 03). */
@@ -145,6 +170,11 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
     const nn = String(maxNr + 1).padStart(2, "0");
     setKostenstelle(`${prefix}${nn}`);
   };
+  // Vorgewählte Planung: Kostenstelle gleich vergeben.
+  useEffect(() => {
+    if (!initial?.id && vorwahl === "planung") void vergebeNaechsteKst(PLANUNG_KST);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [artBauarbeiten, setArtBauarbeiten] = useState(initial?.art_bauarbeiten ?? "");
   const [auftragssumme, setAuftragssumme] = useState<string>(
     initial?.auftragssumme != null ? String(initial.auftragssumme) : ""
@@ -182,10 +212,47 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
       });
   }, [initial?.bauleiter_id]);
 
+  /** Pflichtfelder: bei NEUER Ausführung alles (Wunsch J. Maurer) plus
+   *  Evaluierung, bei Planung nur Bauvorhaben und Kostenstelle. Beim
+   *  Bearbeiten bestehender Baustellen wird nicht nachträglich erzwungen. */
+  const pflichtAusfuehrung = istNeu && art === "ausfuehrung";
+  const fehlend = (): string[] => {
+    const f: string[] = [];
+    if (!bvhName.trim()) f.push("Bauvorhaben");
+    if (istNeu && !kostenstelle.trim()) f.push("Kostenstelle");
+    if (pflichtAusfuehrung) {
+      if (!bauherr.trim()) f.push("Bauherr");
+      if (!bauherrAdresse.trim() || !bauherrPlz.trim() || !bauherrOrt.trim()) f.push("Wohnanschrift Bauherr");
+      if (!adresse.trim() || !plz.trim() || !ort.trim()) f.push("Baustellenanschrift");
+      if (!startDatum) f.push("Baubeginn");
+      if (!endDatum) f.push("Voraussichtliches Ende");
+      if (!bauleiterId) f.push("Bauleiter");
+      if (!artBauarbeiten.trim()) f.push("Art der Bauarbeiten");
+      if (!auftragssumme) f.push("Auftragssumme");
+      if (!anzahlMitarbeiter) f.push("Beschäftigte");
+      if (!evaluierungTyp) f.push("Evaluierung");
+    }
+    return f;
+  };
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!bvhName.trim()) {
-      toast({ variant: "destructive", title: "Bauvorhaben fehlt" });
+    const fehlt = fehlend();
+    if (fehlt.length > 0) {
+      toast({
+        variant: "destructive",
+        title: "Noch nicht vollständig",
+        description: `Bitte ausfüllen: ${fehlt.join(", ")}.`,
+      });
+      return;
+    }
+    const kst = kostenstelle.trim();
+    if (art === "planung" && !kst.startsWith(PLANUNG_KST)) {
+      toast({ variant: "destructive", title: "Kostenstelle passt nicht", description: `Planungen laufen auf ${PLANUNG_KST}.` });
+      return;
+    }
+    if (art === "ausfuehrung" && istNeu && kst.startsWith(PLANUNG_KST)) {
+      toast({ variant: "destructive", title: "Kostenstelle passt nicht", description: `${PLANUNG_KST} ist für Planungen — bitte die Kostenstelle der Ausführung wählen.` });
       return;
     }
     setSaving(true);
@@ -210,11 +277,11 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
       anzahl_mitarbeiter: anzahlMitarbeiter ? Number(anzahlMitarbeiter) : null,
       bautraeger,
       besonderes_augenmerk: besonderesAugenmerk.trim() || null,
-      created_by: user?.id ?? null,
-      ...(initial?.id ? {} : { status: "geplant" }),
+      art: art ?? "ausfuehrung",
+      ...(istNeu ? { status: "geplant", created_by: user?.id ?? null } : {}),
     };
 
-    let id = initial?.id;
+    let id = uebernahme ? undefined : initial?.id;
     let savedRow: Baustelle | null = null;
     if (id) {
       const { data, error } = await supabase
@@ -242,6 +309,37 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
       }
       savedRow = data as Baustelle;
       id = savedRow.id;
+
+      // Neue Ausführung: Evaluierung gleich als Pflicht-Unterweisung setzen.
+      if (art === "ausfuehrung" && evaluierungTyp) {
+        const { error: evErr } = await (supabase as any).rpc("unterweisung_setzen", {
+          p_baustelle: id,
+          p_typ: evaluierungTyp,
+        });
+        if (evErr) {
+          toast({
+            variant: "destructive",
+            title: "Evaluierung nicht gesetzt",
+            description: `${evErr.message} — bitte in der Baustelle im Reiter „Team“ nachholen.`,
+          });
+        }
+      }
+
+      // Übernahme: Unterlagen, Ordner und OneDrive wandern mit, Stunden und
+      // Kosten bleiben auf der Planung.
+      if (uebernahme && initial?.id) {
+        const { error: ueErr } = await (supabase as any).rpc("planung_uebernehmen", {
+          p_planung: initial.id,
+          p_ausfuehrung: id,
+        });
+        if (ueErr) {
+          toast({
+            variant: "destructive",
+            title: "Planung nicht übernommen",
+            description: `${ueErr.message} — die neue Baustelle ist angelegt, die Unterlagen liegen noch bei der Planung.`,
+          });
+        }
+      }
     }
 
     // DOCX 1:1 aus dem Original-Template erzeugen und ablegen
@@ -321,7 +419,11 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
     }
 
     toast({
-      title: initial?.id ? "Baustelle aktualisiert" : "Baustelle angelegt",
+      title: uebernahme
+        ? "In Ausführung übernommen"
+        : initial?.id
+          ? art === "planung" ? "Planung aktualisiert" : "Baustelle aktualisiert"
+          : art === "planung" ? "Planung angelegt" : "Baustelle angelegt",
       description: docxFuerMail
         ? "Baustellenmeldung als DOCX im Ordner Baustellenanlage abgelegt."
         : "Gespeichert.",
@@ -340,9 +442,11 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
         const antwort = await supabase.functions.invoke("dokument-versenden", {
           body: {
             empfaenger: aktiveEmpfaenger.join(", "),
-            betreff: `Baustellenmeldung ${bvhName}`,
+            betreff: art === "planung" ? `Planung ${bvhName} (${kostenstelle})` : `Baustellenmeldung ${bvhName}`,
             text:
-              `Hallo,\n\nim Anhang die Baustellenmeldung für „${bvhName}".\n\n` +
+              (art === "planung"
+                ? `Hallo,\n\nneue Planung „${bvhName}" auf Kostenstelle ${kostenstelle}. Im Anhang das Datenblatt.\n\n`
+                : `Hallo,\n\nim Anhang die Baustellenmeldung für „${bvhName}".\n\n`) +
               `Mit freundlichen Grüßen`,
             attachments: [
               { filename: docxFuerMail.dateiname, contentBase64: docxFuerMail.base64 },
@@ -371,8 +475,62 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
     onSaved?.(id!);
   };
 
+  // Schritt 1 bei neuen Baustellen: Planung oder Ausführung
+  if (art === null) {
+    return (
+      <div className="space-y-3">
+        <div className="text-sm text-muted-foreground">Was wird angelegt?</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setArt("planung");
+              void vergebeNaechsteKst(PLANUNG_KST);
+            }}
+            className="rounded-lg border-2 p-4 text-left hover:border-primary hover:bg-primary/5 transition space-y-1"
+          >
+            <PencilRuler className="h-6 w-6 text-primary" />
+            <div className="font-semibold">Planung</div>
+            <div className="text-xs text-muted-foreground">
+              Planung und Entwurf auf Kostenstelle {PLANUNG_KST}. Wird später mit einem Klick zur Baustelle.
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setArt("ausfuehrung")}
+            className="rounded-lg border-2 p-4 text-left hover:border-primary hover:bg-primary/5 transition space-y-1"
+          >
+            <HardHat className="h-6 w-6 text-primary" />
+            <div className="font-semibold">Ausführung</div>
+            <div className="text-xs text-muted-foreground">
+              Baustelle mit eigener Kostenstelle. Alle Angaben und die Evaluierung sind Pflicht.
+            </div>
+          </button>
+        </div>
+        {onCancel && (
+          <Button type="button" variant="outline" onClick={onCancel} className="w-full">
+            Abbrechen
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  const stern = pflichtAusfuehrung ? " *" : "";
+
   return (
     <form onSubmit={onSubmit} className="space-y-4">
+      {uebernahme && (
+        <div className="rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm flex gap-2">
+          <ArrowRight className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+          <div>
+            Aus der Planung <strong>{initial?.bvh_name}</strong> ({initial?.kostenstelle}) wird eine
+            Baustelle. Neue Kostenstelle wählen und fehlende Angaben ergänzen. Stunden und Kosten
+            bleiben auf der Planung, die Baustelle beginnt bei null. Dokumente, Ordner und
+            OneDrive-Verknüpfung wandern mit.
+          </div>
+        </div>
+      )}
       {/* Empfänger-Header (wie Vorlage oben) */}
       <Card className="border-2">
         <CardContent className="p-3 sm:p-4">
@@ -387,7 +545,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
             ))}
           </div>
           <div className="text-center text-base sm:text-lg font-bold">
-            Baustellenmeldung Zimmerei Willroider
+            {art === "planung" ? "Planung Zimmerei Willroider" : "Baustellenmeldung Zimmerei Willroider"}
           </div>
         </CardContent>
       </Card>
@@ -397,14 +555,14 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
         <Field label="Bauvorhaben *">
           <Input value={bvhName} onChange={(e) => setBvhName(e.target.value)} required autoFocus />
         </Field>
-        <Field label="Bauherr">
+        <Field label={`Bauherr${stern}`}>
           <Input value={bauherr} onChange={(e) => setBauherr(e.target.value)} />
         </Field>
 
         {/* Wohnanschrift Bauherr — Straße / PLZ / Ort */}
         <div className="rounded-md border bg-muted/20 p-3 space-y-3">
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Wohnanschrift Bauherr
+            Wohnanschrift Bauherr{stern}
           </div>
           <Field label="Straße, Hausnummer">
             <Input
@@ -428,7 +586,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
         {/* Baustellenanschrift — Straße / PLZ / Ort */}
         <div className="rounded-md border bg-muted/20 p-3 space-y-3">
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Baustellenanschrift
+            Baustellenanschrift{stern}
           </div>
           <Field label="Straße, Hausnummer">
             <Input
@@ -478,14 +636,14 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
           )}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Baubeginn">
+          <Field label={`Baubeginn${stern}`}>
             <Input type="date" value={startDatum} onChange={(e) => setStartDatum(e.target.value)} />
           </Field>
-          <Field label="Vorraussichtl. Ende">
+          <Field label={`Vorraussichtl. Ende${stern}`}>
             <Input type="date" value={endDatum} onChange={(e) => setEndDatum(e.target.value)} />
           </Field>
         </div>
-        <Field label="Verantwortlicher Bauleiter und Beauftragter im Sinne des § 9 VStG">
+        <Field label={`Verantwortlicher Bauleiter und Beauftragter im Sinne des § 9 VStG${stern}`}>
           <select
             value={bauleiterId}
             onChange={(e) => setBauleiterId(e.target.value)}
@@ -499,16 +657,16 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
             ))}
           </select>
         </Field>
-        <Field label="Erfasst unter (Kostenstelle)">
+        <Field label={`Erfasst unter (Kostenstelle)${istNeu ? " *" : ""}`}>
           <Input
             value={kostenstelle}
             onChange={(e) => setKostenstelle(e.target.value)}
-            placeholder="z.B. 1404030-2603"
+            placeholder={art === "planung" ? `z.B. ${PLANUNG_KST}-2601` : "z.B. 1404030-2603"}
           />
           {/* Sammel-Kostenstellen: Knopf vergibt automatisch die nächste
               freie Nummer im Format <Basis>-<JJ><NN> (z.B. 1404030-2603). */}
           <div className="flex flex-wrap gap-1.5 mt-1.5">
-            {SAMMEL_KST.map((basis) => (
+            {(art === "planung" ? [PLANUNG_KST] : SAMMEL_KST).map((basis) => (
               <button
                 key={basis}
                 type="button"
@@ -521,7 +679,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
             ))}
           </div>
         </Field>
-        <Field label="Art der Bauarbeiten">
+        <Field label={`Art der Bauarbeiten${stern}`}>
           <Input
             value={artBauarbeiten}
             onChange={(e) => setArtBauarbeiten(e.target.value)}
@@ -529,7 +687,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
           />
         </Field>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Auftragssumme, ca. (EUR)">
+          <Field label={`Auftragssumme, ca. (EUR)${stern}`}>
             <Input
               type="number"
               inputMode="decimal"
@@ -538,7 +696,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
               onChange={(e) => setAuftragssumme(e.target.value)}
             />
           </Field>
-          <Field label="Beschäftigte i. M.">
+          <Field label={`Beschäftigte i. M.${stern}`}>
             <Input
               type="number"
               inputMode="numeric"
@@ -564,6 +722,23 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
             placeholder="Hinweis, der bei jedem Bericht oben sichtbar wird"
           />
         </Field>
+
+        {pflichtAusfuehrung && (
+          <Field label="Evaluierung / Pflicht-Unterweisung *" hint="Wer auf die Baustelle eingeteilt wird, bekommt sie automatisch zum Unterschreiben.">
+            <select
+              value={evaluierungTyp}
+              onChange={(e) => setEvaluierungTyp(e.target.value)}
+              className="w-full h-10 rounded-md border bg-background px-3 text-sm"
+            >
+              <option value="">— wählen —</option>
+              {UNTERWEISUNG_OPTIONS.map((u) => (
+                <option key={u.value} value={u.value}>
+                  {u.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
 
         {/* Empfänger — bewusst hier, direkt über den Knöpfen: man sieht vor
             dem Klick, wer die Meldung bekommt. Abwählen = geht nicht raus. */}
@@ -659,9 +834,13 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel }: Props) {
             ? "Versendet…"
             : saving
               ? "Speichert…"
-              : (initial?.id
-                  ? "Speichern + DOCX aktualisieren"
-                  : "Baustelle anlegen + DOCX erstellen") +
+              : (uebernahme
+                  ? "In Ausführung übernehmen + DOCX erstellen"
+                  : initial?.id
+                    ? "Speichern + DOCX aktualisieren"
+                    : art === "planung"
+                      ? "Planung anlegen + DOCX erstellen"
+                      : "Baustelle anlegen + DOCX erstellen") +
                 (aktiveEmpfaenger.length > 0
                   ? " + an " + aktiveEmpfaenger.length + " senden"
                   : "")}

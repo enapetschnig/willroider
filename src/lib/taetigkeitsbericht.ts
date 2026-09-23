@@ -184,6 +184,9 @@ export interface BerichtZeile {
   taetigkeitId: string | null;
   /** `baustelle` bringt Taggeld-Anspruch, `firma` nicht. */
   art: "baustelle" | "firma";
+  /** Im „Kostenstelle hinzufügen" wählbar (aktive/geplante Baustellen).
+   *  Abgeschlossene bleiben in der Liste, damit ihre Stunden sichtbar sind. */
+  waehlbar: boolean;
 }
 
 /**
@@ -199,16 +202,17 @@ export function kstAusKostenstelle(lang: string | null | undefined): string {
 }
 
 /**
- * Alle wählbaren Zeilen: aktive und geplante Baustellen plus die internen
- * Kostenstellen aus `taetigkeiten_stamm` (bereich = 'buero').
+ * Alle Zeilen: Baustellen (auch abgeschlossene und übernommene Planungen —
+ * sonst verschwänden deren Stunden aus dem Bericht) plus die internen
+ * Kostenstellen aus `taetigkeiten_stamm` (bereich = 'buero'). Zum
+ * Hinzufügen wählbar sind nur aktive und geplante (`waehlbar`).
  * Sortierung: interne zuerst (wie in der Excel), dann Baustellen nach Kst.
  */
 export async function ladeBerichtZeilen(): Promise<BerichtZeile[]> {
   const [{ data: bs }, { data: intern }] = await Promise.all([
     supabase
       .from("baustellen")
-      .select("id, bvh_name, kostenstelle, status")
-      .in("status", ["aktiv", "geplant"]),
+      .select("id, bvh_name, kostenstelle, status"),
     supabase
       .from("taetigkeiten_stamm")
       .select("id, bezeichnung, kostenstelle, sort_order, is_active, bereich" as "*")
@@ -225,6 +229,7 @@ export async function ladeBerichtZeilen(): Promise<BerichtZeile[]> {
       baustelleId: null,
       taetigkeitId: t.id,
       art: "firma" as const,
+      waehlbar: true,
     }));
 
   const bsZeilen: BerichtZeile[] = ((bs as any[]) ?? [])
@@ -235,6 +240,7 @@ export async function ladeBerichtZeilen(): Promise<BerichtZeile[]> {
       baustelleId: b.id as string,
       taetigkeitId: null,
       art: "baustelle" as const,
+      waehlbar: b.status === "aktiv" || b.status === "geplant",
     }))
     .sort((a, b) => a.kst.localeCompare(b.kst) || a.bezeichnung.localeCompare(b.bezeichnung));
 

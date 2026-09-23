@@ -379,7 +379,12 @@ export default function Taetigkeitsbericht() {
     const mitStunden = Object.keys(zellen).filter((k) =>
       periode.tage.some((t) => (zellen[k]?.[t] ?? 0) > 0),
     );
-    setSichtbar((cur) => Array.from(new Set([...cur, ...mitStunden])));
+    // Nur bei neuen Zeilen einen neuen Stand setzen: `tageList = []` ist
+    // beim Laden jedes Mal ein neues Array — sonst Endlosschleife.
+    setSichtbar((cur) => {
+      const neu = mitStunden.filter((k) => !cur.includes(k));
+      return neu.length > 0 ? [...cur, ...neu] : cur;
+    });
   }, [zellen, periode.tage]);
 
   const zeilen = useMemo(() => {
@@ -1020,7 +1025,7 @@ export default function Taetigkeitsbericht() {
               onKennzeichenGespeichert={(wert) => setKennzeichenDb({ ma: zielMa, wert })}
               fahrerName={maName}
               kannBearbeiten={kannBearbeiten}
-              kostenstellen={Array.from(new Set(zeilenStamm.map((s) => s.kst))).sort()}
+              kostenstellen={Array.from(new Set(zeilenStamm.filter((s) => s.waehlbar).map((s) => s.kst))).sort()}
               onPeriodeWechsel={(datum) => setPeriode(periodeVonDatum(datum))}
             />
           ) : (
@@ -1241,7 +1246,7 @@ export default function Taetigkeitsbericht() {
                             <CommandEmpty>Nichts gefunden.</CommandEmpty>
                             <CommandGroup>
                               {zeilenStamm
-                                .filter((s) => !sichtbar.includes(s.key))
+                                .filter((s) => s.waehlbar && !sichtbar.includes(s.key))
                                 .map((s) => (
                                   <CommandItem
                                     key={s.key}

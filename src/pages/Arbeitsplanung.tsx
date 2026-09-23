@@ -226,7 +226,8 @@ export default function Arbeitsplanung() {
         .in("kategorie", ["baustelle", "bauleiter"])
         .order("inventar_nr"),
     ]);
-    setBaustellen((bs.data as Baustelle[]) ?? []);
+    // Planungen (Kostenstelle 1404895) sind Büroarbeit — keine Einsatzplanung.
+    setBaustellen(((bs.data as Baustelle[]) ?? []).filter((b) => (b as any).art !== "planung"));
     // Sortierung: Werkvorfertigung immer oben, „Lager" immer unten,
     // alle anderen alphabetisch dazwischen.
     const partieRang = (name: string) =>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, Building2, ListOrdered, Search, Cloud, CloudOff } from "lucide-react";
+import { Plus, Building2, ListOrdered, Search, Cloud, CloudOff, PencilRuler, ArrowRight } from "lucide-react";
 import { KostenstellenListe } from "@/components/baustellen/KostenstellenListe";
 import {
   Dialog,
@@ -22,7 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { BaustellenmeldungForm } from "@/components/BaustellenmeldungForm";
+import { BaustellenmeldungForm, type BaustellenArt } from "@/components/BaustellenmeldungForm";
 import { SharePointVerknuepfenDialog } from "@/components/baustelle/SharePointVerknuepfenDialog";
 import type { Database, BaustellenStatus } from "@/integrations/supabase/types";
 
@@ -40,6 +40,7 @@ export default function Baustellen() {
   const { canCreateBaustelle, user, isAdmin, canReview } = useAuth();
   /** Baustelle, für die gerade ein SharePoint-Ordner gesucht wird. */
   const [verknuepfen, setVerknuepfen] = useState<Baustelle | null>(null);
+  const navigate = useNavigate();
   const [data, setData] = useState<Baustelle[]>([]);
   const [partien, setPartien] = useState<Partie[]>([]);
   // Suche + Statusfilter liegen in der URL, nicht in lokalem State: Beim
@@ -48,12 +49,14 @@ export default function Baustellen() {
   // erhalten (und ist per Zurück-Taste/Teilen wiederherstellbar).
   const [params, setParams] = useSearchParams();
   const search = params.get("q") ?? "";
-  // Reiter Baustellen/Kostenstellen — in der URL, damit Zurück-Navigation
-  // aus einem Baustellenordner wieder auf der Kostenstellenliste landet.
-  const tab = params.get("tab") === "kostenstellen" ? "kostenstellen" : "baustellen";
-  const setTab = (t: "baustellen" | "kostenstellen") => {
+  // Reiter Baustellen/Planung/Kostenstellen — in der URL, damit Zurück-
+  // Navigation aus einem Baustellenordner wieder im selben Reiter landet.
+  type Reiter = "baustellen" | "planung" | "kostenstellen";
+  const tabParam = params.get("tab");
+  const tab: Reiter = tabParam === "kostenstellen" || tabParam === "planung" ? tabParam : "baustellen";
+  const setTab = (t: Reiter) => {
     const n = new URLSearchParams(params);
-    if (t === "kostenstellen") n.set("tab", t);
+    if (t !== "baustellen") n.set("tab", t);
     else n.delete("tab");
     setParams(n, { replace: true });
   };
@@ -71,6 +74,8 @@ export default function Baustellen() {
     setParams(n, { replace: true });
   };
   const [dialogOpen, setDialogOpen] = useState(false);
+  /** Planung, die gerade in eine Ausführung übernommen wird. */
+  const [uebernahmeVon, setUebernahmeVon] = useState<Baustelle | null>(null);
 
   const load = async () => {
     const [bs, p] = await Promise.all([
@@ -102,8 +107,16 @@ export default function Baustellen() {
     };
   }, []);
 
+  const artVon = (b: Baustelle): BaustellenArt => ((b as any).art === "planung" ? "planung" : "ausfuehrung");
+  /** Baustellen bzw. Planungen — je nach Reiter. */
+  const reiterListe = useMemo(
+    () => data.filter((b) => artVon(b) === (tab === "planung" ? "planung" : "ausfuehrung")),
+    [data, tab],
+  );
+  const kstVon = useMemo(() => new Map(data.map((b) => [b.id, b.kostenstelle])), [data]);
+
   const filtered = useMemo(() => {
-    const list = data.filter((b) => {
+    const list = reiterListe.filter((b) => {
       if (statusFilter !== "alle" && b.status !== statusFilter) return false;
       if (search) {
         const q = search.toLowerCase();
@@ -128,7 +141,7 @@ export default function Baustellen() {
       if (aMine !== bMine) return aMine - bMine;
       return kstKey(a).localeCompare(kstKey(b), "de", { numeric: true });
     });
-  }, [data, search, statusFilter, user]);
+  }, [reiterListe, search, statusFilter, user]);
 
   return (
     <div className="space-y-4">
@@ -138,7 +151,7 @@ export default function Baustellen() {
         actions={
           canCreateBaustelle ? (
             <Button onClick={() => setDialogOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" /> Neue Baustelle
+              <Plus className="h-4 w-4 mr-2" /> {tab === "planung" ? "Neue Planung" : "Neue Baustelle"}
             </Button>
           ) : undefined
         }
@@ -155,6 +168,13 @@ export default function Baustellen() {
           <Building2 className="h-4 w-4 mr-1.5" /> Baustellen
         </Button>
         <Button
+          variant={tab === "planung" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setTab("planung")}
+        >
+          <PencilRuler className="h-4 w-4 mr-1.5" /> Planung
+        </Button>
+        <Button
           variant={tab === "kostenstellen" ? "default" : "outline"}
           size="sm"
           onClick={() => setTab("kostenstellen")}
@@ -165,7 +185,7 @@ export default function Baustellen() {
 
       {tab === "kostenstellen" && <KostenstellenListe baustellen={data} />}
 
-      {tab === "baustellen" && (
+      {tab !== "kostenstellen" && (
       <>
       <Card>
         <CardContent className="p-3 flex flex-col sm:flex-row gap-2 sm:gap-3 items-stretch sm:items-center">
@@ -191,9 +211,9 @@ export default function Baustellen() {
             </SelectContent>
           </Select>
           <div className="text-xs text-muted-foreground">
-            {filtered.length} / {data.length} Baustellen
+            {filtered.length} / {reiterListe.length} {tab === "planung" ? "Planungen" : "Baustellen"}
             <span className="ml-2">
-              · {data.filter((x) => (x as any).sharepoint_item_id).length} mit OneDrive
+              · {reiterListe.filter((x) => (x as any).sharepoint_item_id).length} mit OneDrive
             </span>
           </div>
         </CardContent>
@@ -202,13 +222,20 @@ export default function Baustellen() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
         {filtered.map((b) => {
           const partie = partien.find((p) => p.id === b.partie_id);
+          const istPlanung = artVon(b) === "planung";
+          const inAusfuehrung: string | null = (b as any).in_ausfuehrung_id ?? null;
+          const ausPlanung: string | null = (b as any).aus_planung_id ?? null;
           return (
             <Link to={`/baustellen/${b.id}`} key={b.id}>
               <Card className="hover:shadow-md hover:border-primary/40 transition-all h-full">
                 <CardContent className="p-4 space-y-2">
                   <div className="flex items-start gap-2">
                     <div className="h-10 w-10 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
-                      <Building2 className="h-5 w-5 text-primary" />
+                      {istPlanung ? (
+                        <PencilRuler className="h-5 w-5 text-primary" />
+                      ) : (
+                        <Building2 className="h-5 w-5 text-primary" />
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold truncate">{b.bvh_name}</div>
@@ -216,9 +243,47 @@ export default function Baustellen() {
                         {b.kostenstelle ?? "—"}
                       </div>
                     </div>
-                    <Badge variant="outline">{STATUS_LABEL[b.status]}</Badge>
+                    <Badge variant="outline">
+                      {istPlanung && inAusfuehrung ? "Übernommen" : STATUS_LABEL[b.status]}
+                    </Badge>
                   </div>
-                  {(b as any).sharepoint_item_id ? (
+                  {istPlanung && inAusfuehrung && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        // Die Karte ist selbst ein Link — kein <a> im <a>.
+                        e.preventDefault();
+                        e.stopPropagation();
+                        navigate(`/baustellen/${inAusfuehrung}`);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-medium text-emerald-800 hover:underline"
+                    >
+                      <ArrowRight className="h-3 w-3" />
+                      In Ausführung: {kstVon.get(inAusfuehrung) ?? "Baustelle"}
+                    </button>
+                  )}
+                  {istPlanung && !inAusfuehrung && canCreateBaustelle && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 w-full"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setUebernahmeVon(b);
+                      }}
+                    >
+                      <ArrowRight className="h-3.5 w-3.5 mr-1.5" /> In Ausführung übernehmen
+                    </Button>
+                  )}
+                  {!istPlanung && ausPlanung && (
+                    <div className="text-[10px] text-muted-foreground">
+                      Aus Planung {kstVon.get(ausPlanung) ?? ""}
+                    </div>
+                  )}
+                  {/* Übernommene Planung: OneDrive liegt jetzt bei der Baustelle */}
+                  {istPlanung && inAusfuehrung ? null : (b as any).sharepoint_item_id ? (
                     <div
                       className="inline-flex items-center gap-1 rounded-full bg-sky-50 border border-sky-200 px-2 py-0.5 text-[10px] font-medium text-sky-800"
                       title={(b as any).sharepoint_pfad ?? ""}
@@ -290,13 +355,13 @@ export default function Baustellen() {
         {filtered.length === 0 && (
           <Card className="md:col-span-2 lg:col-span-3">
             <CardContent className="p-8 text-center text-sm text-muted-foreground space-y-3">
-              {data.length === 0 ? (
+              {reiterListe.length === 0 ? (
                 <>
-                  <div>Noch keine Baustellen angelegt.</div>
+                  <div>{tab === "planung" ? "Noch keine Planungen angelegt." : "Noch keine Baustellen angelegt."}</div>
                   {canCreateBaustelle && (
                     <div>
                       <Button onClick={() => setDialogOpen(true)} size="sm">
-                        <Plus className="h-4 w-4 mr-2" /> Erste Baustelle anlegen
+                        <Plus className="h-4 w-4 mr-2" /> {tab === "planung" ? "Erste Planung anlegen" : "Erste Baustelle anlegen"}
                       </Button>
                     </div>
                   )}
@@ -304,7 +369,7 @@ export default function Baustellen() {
               ) : (
                 <>
                   <div>
-                    Keine Baustellen passen zu deinem Filter. Filter ändern oder zurücksetzen.
+                    Nichts passt zu deinem Filter. Filter ändern oder zurücksetzen.
                   </div>
                   <div>
                     <Button
@@ -339,15 +404,35 @@ export default function Baustellen() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Baustellenmeldung</DialogTitle>
+            <DialogTitle>{tab === "planung" ? "Neue Planung" : "Baustellenmeldung"}</DialogTitle>
           </DialogHeader>
           <BaustellenmeldungForm
+            vorwahl={tab === "planung" ? "planung" : undefined}
             onCancel={() => setDialogOpen(false)}
             onSaved={() => {
               setDialogOpen(false);
               load();
             }}
           />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!uebernahmeVon} onOpenChange={(o) => !o && setUebernahmeVon(null)}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>In Ausführung übernehmen</DialogTitle>
+          </DialogHeader>
+          {uebernahmeVon && (
+            <BaustellenmeldungForm
+              initial={uebernahmeVon}
+              modus="uebernahme"
+              onCancel={() => setUebernahmeVon(null)}
+              onSaved={() => {
+                setUebernahmeVon(null);
+                load();
+              }}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>

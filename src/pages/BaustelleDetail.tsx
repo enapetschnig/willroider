@@ -23,6 +23,8 @@ import {
   Pencil,
   AlertTriangle,
   ExternalLink,
+  PencilRuler,
+  ArrowRight,
 } from "lucide-react";
 import {
   Dialog,
@@ -72,7 +74,7 @@ const STATUS_LABEL: Record<BaustellenStatus, string> = {
 export default function BaustelleDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { isAdmin, hasPermission } = useAuth();
+  const { isAdmin, hasPermission, canCreateBaustelle } = useAuth();
   /** Eine Baustelle endgültig zu löschen ist destruktiv und kaskadiert auf
    *  Berichte/Stunden/Einteilungen. Erlaubt nur Geschäftsführung — entspricht
    *  der RLS-Policy `baustellen_delete_gf_only`. */
@@ -95,6 +97,10 @@ export default function BaustelleDetail() {
   const [terminDialog, setTerminDialog] = useState(false);
   const [kostenDialog, setKostenDialog] = useState(false);
   const [editDialog, setEditDialog] = useState(false);
+  /** Planung → Ausführung übernehmen (Dialog mit dem Anlageformular). */
+  const [uebernahmeOffen, setUebernahmeOffen] = useState(false);
+  /** Gegenstück Planung ↔ Ausführung (für den Querverweis). */
+  const [gegenstueck, setGegenstueck] = useState<{ id: string; kostenstelle: string | null; bvh_name: string } | null>(null);
   // ?tab=dokumente&ordner=91-plaene aus „Mein Tag" → direkt im richtigen Ordner
   const [activeTab, setActiveTab] = useState<string>(
     () => new URLSearchParams(window.location.search).get("tab") || "dokumente",
@@ -258,6 +264,20 @@ export default function BaustelleDetail() {
     load();
   }, [id]);
 
+  const gegenId: string | null = (b as any)?.in_ausfuehrung_id ?? (b as any)?.aus_planung_id ?? null;
+  useEffect(() => {
+    if (!gegenId) {
+      setGegenstueck(null);
+      return;
+    }
+    supabase
+      .from("baustellen")
+      .select("id, kostenstelle, bvh_name")
+      .eq("id", gegenId)
+      .maybeSingle()
+      .then(({ data }) => setGegenstueck((data as any) ?? null));
+  }, [gegenId]);
+
   const updateStatus = async (status: BaustellenStatus) => {
     if (!b) return;
     const { error } = await supabase.from("baustellen").update({ status }).eq("id", b.id);
@@ -376,6 +396,58 @@ export default function BaustelleDetail() {
           !canEditStatus ? <Badge>{STATUS_LABEL[b.status]}</Badge> : undefined
         }
       />
+
+      {/* Planung: Hinweis und Übernahme in die Ausführung */}
+      {(b as any).art === "planung" && (
+        <Card className="border-primary/40 bg-primary/5">
+          <CardContent className="p-3 flex flex-col sm:flex-row gap-3 sm:items-center">
+            <PencilRuler className="h-5 w-5 text-primary shrink-0 hidden sm:block" />
+            <div className="flex-1 text-sm">
+              {(b as any).in_ausfuehrung_id ? (
+                <>
+                  <strong>Planung — in Ausführung übernommen</strong>
+                  {(b as any).in_ausfuehrung_am &&
+                    ` am ${new Date((b as any).in_ausfuehrung_am).toLocaleDateString("de-AT")}`}
+                  . Stunden und Kosten der Planung bleiben hier, Unterlagen liegen bei der Baustelle.
+                </>
+              ) : (
+                <>
+                  <strong>Planung</strong> — Stunden und Kosten laufen auf dieser Kostenstelle. Wird
+                  daraus ein Auftrag, mit „In Ausführung übernehmen“ die Baustelle anlegen.
+                </>
+              )}
+            </div>
+            {(b as any).in_ausfuehrung_id ? (
+              <Button
+                variant="outline"
+                className="h-11 sm:h-10"
+                onClick={() => navigate(`/baustellen/${(b as any).in_ausfuehrung_id}`)}
+              >
+                <ArrowRight className="h-4 w-4 mr-1.5" /> Zur Baustelle {gegenstueck?.kostenstelle ?? ""}
+              </Button>
+            ) : (
+              canCreateBaustelle && (
+                <Button className="h-11 sm:h-10" onClick={() => setUebernahmeOffen(true)}>
+                  <ArrowRight className="h-4 w-4 mr-1.5" /> In Ausführung übernehmen
+                </Button>
+              )
+            )}
+          </CardContent>
+        </Card>
+      )}
+      {(b as any).aus_planung_id && (
+        <div className="text-xs text-muted-foreground">
+          Hervorgegangen aus der Planung{" "}
+          <button
+            type="button"
+            className="text-primary hover:underline font-medium"
+            onClick={() => navigate(`/baustellen/${(b as any).aus_planung_id}`)}
+          >
+            {gegenstueck?.kostenstelle ?? "ansehen"}
+          </button>{" "}
+          — deren Stunden und Kosten bleiben dort.
+        </div>
+      )}
 
       {/* Toolbar — Status / Bearbeiten / Löschen jeweils nach Permission */}
       {(canEditStatus || canEdit || canDelete) && (
@@ -1021,7 +1093,7 @@ export default function BaustelleDetail() {
       <Dialog open={editDialog} onOpenChange={setEditDialog}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Baustelle bearbeiten</DialogTitle>
+            <DialogTitle>{(b as any).art === "planung" ? "Planung bearbeiten" : "Baustelle bearbeiten"}</DialogTitle>
           </DialogHeader>
           <BaustellenmeldungForm
             initial={b}
@@ -1031,6 +1103,26 @@ export default function BaustelleDetail() {
               load();
             }}
           />
+        </DialogContent>
+      </Dialog>
+
+      {/* Planung → Ausführung */}
+      <Dialog open={uebernahmeOffen} onOpenChange={setUebernahmeOffen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>In Ausführung übernehmen</DialogTitle>
+          </DialogHeader>
+          {uebernahmeOffen && (
+            <BaustellenmeldungForm
+              initial={b}
+              modus="uebernahme"
+              onCancel={() => setUebernahmeOffen(false)}
+              onSaved={(neueId) => {
+                setUebernahmeOffen(false);
+                navigate(`/baustellen/${neueId}`);
+              }}
+            />
+          )}
         </DialogContent>
       </Dialog>
 

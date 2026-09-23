@@ -222,7 +222,8 @@ export default function Tagesplanung() {
           .order("bvh_name"),
         supabase.from("fahrzeuge").select("*").order("kennzeichen"),
       ]);
-      setAllBaustellen((bs as Baustelle[]) ?? []);
+      // Planungen (Kostenstelle 1404895) werden nicht eingeteilt.
+      setAllBaustellen(((bs as Baustelle[]) ?? []).filter((b) => (b as any).art !== "planung"));
       setAllFahrzeuge((fz as Fahrzeug[]) ?? []);
     })();
   }, []);
