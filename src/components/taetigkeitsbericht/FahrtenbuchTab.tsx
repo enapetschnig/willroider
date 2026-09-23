@@ -110,6 +110,7 @@ export function FahrtenbuchTab({
   kannBearbeiten,
   kostenstellen,
   onPeriodeWechsel,
+  onKennzeichenGespeichert,
 }: {
   mitarbeiterId: string;
   periode: Periode;
@@ -121,6 +122,8 @@ export function FahrtenbuchTab({
   kostenstellen: string[];
   /** Wird ein Datum außerhalb der Periode gewählt, springt die Ansicht dorthin. */
   onPeriodeWechsel?: (datum: string) => void;
+  /** Nach dem Speichern des Kennzeichens — die Seite hält den Wert selbst. */
+  onKennzeichenGespeichert?: (wert: string) => void;
 }) {
   const { toast } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
@@ -307,11 +310,24 @@ export function FahrtenbuchTab({
   }
 
   async function speichereKennzeichen(v: string) {
-    const { error } = await supabase
+    const wert = v.trim();
+    // .select(): ein von RLS verworfener Update liefert sonst „kein Fehler",
+    // obwohl nichts gespeichert wurde.
+    const { data, error } = await supabase
       .from("profiles")
-      .update({ fahrtenbuch_kennzeichen: v.trim() || null } as any)
-      .eq("id", mitarbeiterId);
-    if (error) fehler(error);
+      .update({ fahrtenbuch_kennzeichen: wert || null } as any)
+      .eq("id", mitarbeiterId)
+      .select("id");
+    if (error) {
+      fehler(error);
+      return;
+    }
+    if (!data || data.length === 0) {
+      fehler(new Error("Keine Berechtigung, das Kennzeichen dieser Person zu ändern."));
+      return;
+    }
+    onKennzeichenGespeichert?.(wert);
+    toast({ title: "Kennzeichen gespeichert", description: wert || "(leer)" });
   }
 
   const label = periodeKurz(periode);

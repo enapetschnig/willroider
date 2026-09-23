@@ -731,10 +731,30 @@ export default function Taetigkeitsbericht() {
     return m ? `${m.vorname} ${m.nachname}`.trim() : "";
   }, [zielMa, user, profile, angestellte]);
 
+  // Kennzeichen direkt aus der Datenbank je Person — das Profil im
+  // Anmelde-Zwischenspeicher erneuert sich nach dem Speichern nicht, das Feld
+  // stand danach wieder leer da (Änderungswunsch E. Winkler 23.09.).
+  const [kennzeichenDb, setKennzeichenDb] = useState<{ ma: string; wert: string } | null>(null);
+  useEffect(() => {
+    if (!zielMa) return;
+    let aktiv = true;
+    supabase
+      .from("profiles")
+      .select("fahrtenbuch_kennzeichen")
+      .eq("id", zielMa)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (aktiv) setKennzeichenDb({ ma: zielMa, wert: ((data as any)?.fahrtenbuch_kennzeichen as string) ?? "" });
+      });
+    return () => {
+      aktiv = false;
+    };
+  }, [zielMa]);
   const kennzeichen = useMemo(() => {
+    if (kennzeichenDb && kennzeichenDb.ma === zielMa) return kennzeichenDb.wert;
     if (zielMa === user?.id) return ((profile as any)?.fahrtenbuch_kennzeichen as string) ?? "";
     return ((angestellte.find((a) => a.id === zielMa) as any)?.fahrtenbuch_kennzeichen as string) ?? "";
-  }, [zielMa, user, profile, angestellte]);
+  }, [kennzeichenDb, zielMa, user, profile, angestellte]);
 
   function druck() {
     if (tab === "fahrtenbuch") {
@@ -924,6 +944,7 @@ export default function Taetigkeitsbericht() {
               fahrten={fahrten}
               onReload={ladeFahrten}
               kennzeichen={kennzeichen}
+              onKennzeichenGespeichert={(wert) => setKennzeichenDb({ ma: zielMa, wert })}
               fahrerName={maName}
               kannBearbeiten={kannBearbeiten}
               kostenstellen={Array.from(new Set(zeilenStamm.map((s) => s.kst))).sort()}
