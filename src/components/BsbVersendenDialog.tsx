@@ -230,16 +230,19 @@ export function BsbVersendenDialog({
       // Archiv: die eben versendeten (= bestätigten) Berichte als PDF
       // aufheben und nach SharePoint kopieren (Stundenlisten <Jahr>).
       const fehlerIds = new Set(fehlerArr.map((f: any) => f?.id).filter(Boolean));
-      try {
-        const { data: metas } = await supabase
-          .from("stunden_berichte")
-          .select("id, mitarbeiter_id, jahr, monat, teil")
-          .in("id", prepared.map((p) => p.berichtId));
-        for (const p of prepared) {
-          if (fehlerIds.has(p.berichtId)) continue;
-          const m = (metas as any[] | null)?.find((x) => x.id === p.berichtId);
-          if (!m) continue;
-          const monatName = new Date(m.jahr, m.monat - 1, 1).toLocaleDateString("de-AT", { month: "long", year: "numeric" });
+      // Jeder Bericht einzeln — ein Fehler bei einem darf die übrigen nicht
+      // mitreißen (sie sind schon versendet und kämen sonst nie ins Archiv).
+      const archivFehler: string[] = [];
+      const { data: metas } = await supabase
+        .from("stunden_berichte")
+        .select("id, mitarbeiter_id, jahr, monat, teil, status")
+        .in("id", prepared.map((p) => p.berichtId));
+      for (const p of prepared) {
+        if (fehlerIds.has(p.berichtId)) continue;
+        const m = (metas as any[] | null)?.find((x) => x.id === p.berichtId);
+        if (!m || (m.status !== "versendet" && m.status !== "bestaetigt")) continue;
+        const monatName = new Date(m.jahr, m.monat - 1, 1).toLocaleDateString("de-AT", { month: "long", year: "numeric" });
+        try {
           await archiviereBericht({
             art: "stundenbericht",
             mitarbeiterId: m.mitarbeiter_id,
@@ -251,12 +254,15 @@ export function BsbVersendenDialog({
             blob: base64ZuBlob(p.contentBase64),
             berichtId: p.berichtId,
           });
+        } catch (e) {
+          archivFehler.push(`${p.maName}: ${(e as Error).message}`);
         }
-      } catch (e) {
+      }
+      if (archivFehler.length > 0) {
         toast({
           variant: "destructive",
-          title: "Archiv-Ablage fehlgeschlagen",
-          description: `${(e as Error).message} — die Mail ist trotzdem raus.`,
+          title: `${archivFehler.length} Bericht${archivFehler.length === 1 ? "" : "e"} nicht im Archiv`,
+          description: `${archivFehler[0]} — die Mail ist trotzdem raus. Im Bericht über „Ins Archiv legen“ nachholen.`,
         });
       }
     } catch (e) {

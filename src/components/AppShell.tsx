@@ -39,7 +39,7 @@ import {
 } from "@/lib/pwaInstall";
 import { useAuth } from "@/contexts/AuthContext";
 import { PushEinstellungDialog } from "@/components/PushEinstellungDialog";
-import { pushAboAuffrischen } from "@/lib/push";
+import { pushAboAuffrischen, pushVomKontoLoesen } from "@/lib/push";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -233,6 +233,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   });
 
   const handleLogout = async () => {
+    // Gerät vom Konto lösen, solange die Anmeldung noch gilt — sonst kämen
+    // auf einem geteilten Tablet die Erinnerungen der vorigen Person weiter.
+    await pushVomKontoLoesen();
     await signOut();
     navigate("/auth");
   };

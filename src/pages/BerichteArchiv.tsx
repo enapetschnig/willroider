@@ -43,6 +43,8 @@ type Zeile = {
   versendet_am: string | null;
   versendet_an: string | null;
   erstellt_am: string;
+  /** Bericht wurde danach wieder geöffnet — dieses PDF gilt nicht mehr. */
+  ueberholt_am: string | null;
   mitarbeiter: { vorname: string; nachname: string } | null;
 };
 
@@ -86,8 +88,8 @@ export default function BerichteArchiv() {
     setZeilen(liste);
     setAusgewaehlt(new Set());
 
-    // Vollständigkeit — nur die jeweils neueste Datei je Person zählt.
-    const personen = new Set(liste.map((z) => `${z.mitarbeiter_id}|${z.teil ?? ""}`)).size;
+    // Vollständigkeit — nur gültige (nicht überholte) Dateien zählen.
+    const personen = new Set(liste.filter((z) => !z.ueberholt_am).map((z) => `${z.mitarbeiter_id}|${z.teil ?? ""}`)).size;
     if (art === "taetigkeitsbericht") {
       const { count } = await supabase
         .from("profiles")
@@ -129,9 +131,10 @@ export default function BerichteArchiv() {
   }, [zeilen]);
   const aeltere = zeilen.length - neueste.length;
 
-  const alleGewaehlt = neueste.length > 0 && neueste.every((z) => ausgewaehlt.has(z.id));
+  const gueltige = neueste.filter((z) => !z.ueberholt_am);
+  const alleGewaehlt = gueltige.length > 0 && gueltige.every((z) => ausgewaehlt.has(z.id));
   const toggleAlle = () =>
-    setAusgewaehlt(alleGewaehlt ? new Set() : new Set(neueste.map((z) => z.id)));
+    setAusgewaehlt(alleGewaehlt ? new Set() : new Set(gueltige.map((z) => z.id)));
   const toggle = (id: string) =>
     setAusgewaehlt((s) => {
       const n = new Set(s);
@@ -298,7 +301,12 @@ export default function BerichteArchiv() {
               </div>
               {neueste.map((z) => (
                 <div key={z.id} className="flex items-center gap-3 px-3 py-2">
-                  <Checkbox checked={ausgewaehlt.has(z.id)} onCheckedChange={() => toggle(z.id)} aria-label="Bericht auswählen" />
+                  <Checkbox
+                    checked={ausgewaehlt.has(z.id)}
+                    onCheckedChange={() => toggle(z.id)}
+                    disabled={!!z.ueberholt_am}
+                    aria-label="Bericht auswählen"
+                  />
                   <div className="flex-1 min-w-0">
                     <div className="font-medium truncate">
                       {z.mitarbeiter ? `${z.mitarbeiter.nachname} ${z.mitarbeiter.vorname}` : "—"}
@@ -314,7 +322,11 @@ export default function BerichteArchiv() {
                   ) : (
                     <CloudOff className="h-4 w-4 text-muted-foreground shrink-0" aria-label={z.sharepoint_fehler ?? "SharePoint-Kopie folgt"} />
                   )}
-                  {z.versendet_am ? (
+                  {z.ueberholt_am ? (
+                    <Badge variant="outline" className="bg-amber-100 text-amber-900 border-amber-300 text-[10px]" title="Der Bericht wurde danach wieder geöffnet — neu freigeben/bestätigen, dann kommt ein neues PDF.">
+                      überholt
+                    </Badge>
+                  ) : z.versendet_am ? (
                     <Badge variant="outline" className="bg-emerald-100 text-emerald-900 border-emerald-300 text-[10px]">
                       versendet {fmt(z.versendet_am)}
                     </Badge>

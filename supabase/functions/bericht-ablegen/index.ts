@@ -98,21 +98,19 @@ Deno.serve(async (req) => {
     const { data: datei, error: dErr } = await sb.storage.from("berichte-archiv").download(z.storage_pfad);
     if (dErr || !datei) return { ok: false, fehler: `Datei fehlt: ${dErr?.message ?? z.storage_pfad}` };
     const bytes = new Uint8Array(await datei.arrayBuffer());
-    // Jahres-Unterordner (anlegen, wenn er fehlt)
-    let elternId = ziel.wurzel_item_id;
-    const unterName = (ziel.unterordner ?? "{jahr}").replace("{jahr}", String(z.jahr)).trim();
-    if (unterName) {
-      const vorhanden = await kindMitNamen(ziel.drive_id, elternId, unterName);
-      if (vorhanden?.folder) elternId = vorhanden.id;
-      else if (!vorhanden) {
-        const neu = await ordnerAnlegen(ziel.drive_id, elternId, unterName);
-        elternId = neu.id;
-        // Frisch angelegter Ordner: SharePoint braucht einen Moment, sonst
-        // antwortet der erste Upload mit 400 (so beim ersten Test gesehen).
-        await new Promise((r) => setTimeout(r, 2500));
-      } else return { ok: false, fehler: `„${unterName}" ist in SharePoint eine Datei, kein Ordner` };
-    }
     try {
+      // Jahres-Unterordner (anlegen, wenn er fehlt). ordnerAnlegen liefert
+      // { item, neu } — früher wurde fälschlich neu.id verwendet, der erste
+      // Upload eines Jahres ging dadurch an „items/undefined" (Fehler 400).
+      let elternId = ziel.wurzel_item_id;
+      const unterName = (ziel.unterordner ?? "{jahr}").replace("{jahr}", String(z.jahr)).trim();
+      if (unterName) {
+        const vorhanden = await kindMitNamen(ziel.drive_id, elternId, unterName);
+        if (vorhanden && !vorhanden.folder) {
+          throw new Error(`„${unterName}" ist in SharePoint eine Datei, kein Ordner`);
+        }
+        elternId = vorhanden?.id ?? (await ordnerAnlegen(ziel.drive_id, elternId, unterName)).item.id;
+      }
       const item = await dateiHochladen(ziel.drive_id, elternId, z.dateiname, bytes, "application/pdf");
       await sb
         .from("bericht_archiv")

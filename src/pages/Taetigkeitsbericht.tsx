@@ -124,7 +124,7 @@ export default function Taetigkeitsbericht() {
   }, []);
 
   useEffect(() => {
-    if (!darfFremde) return;
+    if (!darfFremde && !darfFreigeben) return;
     supabase
       .from("profiles")
       .select("*")
@@ -132,7 +132,7 @@ export default function Taetigkeitsbericht() {
       .eq("zeiterfassung_typ", "angestellter" as any)
       .order("nachname")
       .then(({ data }) => setAngestellte((data as Profile[]) ?? []));
-  }, [darfFremde]);
+  }, [darfFremde, darfFreigeben]);
 
   // ─── Tage der Periode ────────────────────────────────────────────────
   const { data: tageList = [], refetch } = useStundenTageList({
@@ -151,8 +151,13 @@ export default function Taetigkeitsbericht() {
 
   // ─── Fahrtenbuch der Periode ─────────────────────────────────────────
   const [fahrten, setFahrten] = useState<FahrtRow[]>([]);
+  // Laufnummern: eine verspätete Antwort für die VORIGE Person/Periode darf
+  // den Stand der aktuellen nicht überschreiben.
+  const fahrtenNr = useRef(0);
+  const unterschriftNr = useRef(0);
   const ladeFahrten = useCallback(async () => {
     if (!zielMa) return;
+    const nr = ++fahrtenNr.current;
     const { data } = await supabase
       .from("fahrtenbuch_eintraege" as any)
       .select("*")
@@ -161,6 +166,7 @@ export default function Taetigkeitsbericht() {
       .lte("datum", periode.bis)
       .order("datum")
       .order("abfahrt", { ascending: true, nullsFirst: true });
+    if (nr !== fahrtenNr.current) return;
     setFahrten((data as any as FahrtRow[]) ?? []);
   }, [zielMa, periode.von, periode.bis]);
   useEffect(() => {
@@ -180,6 +186,7 @@ export default function Taetigkeitsbericht() {
   const kannBearbeiten = (istEigener || isAdmin) && !gesperrt;
   const ladeUnterschrift = useCallback(async () => {
     if (!zielMa) return;
+    const nr = ++unterschriftNr.current;
     const { data } = await supabase
       .from("taetigkeitsbericht_unterschriften" as any)
       .select("unterschrift_data, unterschrieben_am, status, freigegeben_von, freigegeben_am, freigabe_unterschrift_data")
@@ -187,6 +194,7 @@ export default function Taetigkeitsbericht() {
       .eq("jahr", periode.jahr)
       .eq("monat", periode.monat)
       .maybeSingle();
+    if (nr !== unterschriftNr.current) return;
     const row = data as any;
     setUnterschrift(
       row ? { data: row.unterschrift_data, am: row.unterschrieben_am } : null,
@@ -201,10 +209,19 @@ export default function Taetigkeitsbericht() {
           .maybeSingle();
         name = p ? `${p.vorname} ${p.nachname}` : "";
       }
+      if (nr !== unterschriftNr.current) return;
       setFreigabe({ von: row.freigegeben_von, name, am: row.freigegeben_am, unterschrift: row.freigabe_unterschrift_data });
     } else {
       setFreigabe(null);
     }
+  }, [zielMa, periode.jahr, periode.monat]);
+
+  // Person oder Periode gewechselt: alten Stand sofort weg, nicht erst,
+  // wenn die neue Antwort da ist (sonst kurz fremde Sperre/Unterschrift/km).
+  useEffect(() => {
+    setFahrten([]);
+    setUnterschrift(null);
+    setFreigabe(null);
   }, [zielMa, periode.jahr, periode.monat]);
 
   async function freigeben(dataUrl: string) {
@@ -723,33 +740,44 @@ export default function Taetigkeitsbericht() {
   }, [zielMa, periode.von]);
 
   // ─── PDF ─────────────────────────────────────────────────────────────
-  const maName = useMemo(() => {
-    if (zielMa === user?.id) {
-      return `${(profile as any)?.vorname ?? ""} ${(profile as any)?.nachname ?? ""}`.trim();
-    }
-    const m = angestellte.find((a) => a.id === zielMa);
-    return m ? `${m.vorname} ${m.nachname}`.trim() : "";
-  }, [zielMa, user, profile, angestellte]);
 
   // Kennzeichen direkt aus der Datenbank je Person — das Profil im
   // Anmelde-Zwischenspeicher erneuert sich nach dem Speichern nicht, das Feld
   // stand danach wieder leer da (Änderungswunsch E. Winkler 23.09.).
-  const [kennzeichenDb, setKennzeichenDb] = useState<{ ma: string; wert: string } | null>(null);
+  const [kennzeichenDb, setKennzeichenDb] = useState<{ ma: string; wert: string; name?: string } | null>(null);
   useEffect(() => {
     if (!zielMa) return;
     let aktiv = true;
     supabase
       .from("profiles")
-      .select("fahrtenbuch_kennzeichen")
+      .select("vorname, nachname, fahrtenbuch_kennzeichen")
       .eq("id", zielMa)
       .maybeSingle()
       .then(({ data }) => {
-        if (aktiv) setKennzeichenDb({ ma: zielMa, wert: ((data as any)?.fahrtenbuch_kennzeichen as string) ?? "" });
+        const d = data as any;
+        if (aktiv) {
+          setKennzeichenDb({
+            ma: zielMa,
+            wert: (d?.fahrtenbuch_kennzeichen as string) ?? "",
+            // Name auch ohne Angestellten-Liste (Freigeber ohne Leserecht auf
+            // die Liste) — sonst hieße das Archiv-PDF „Tätigkeitsbericht 2026-09 .pdf".
+            name: d ? `${d.vorname ?? ""} ${d.nachname ?? ""}`.trim() : undefined,
+          });
+        }
       });
     return () => {
       aktiv = false;
     };
   }, [zielMa]);
+  const maName = useMemo(() => {
+    if (kennzeichenDb?.ma === zielMa && kennzeichenDb.name) return kennzeichenDb.name;
+    if (zielMa === user?.id) {
+      return `${(profile as any)?.vorname ?? ""} ${(profile as any)?.nachname ?? ""}`.trim();
+    }
+    const m = angestellte.find((a) => a.id === zielMa);
+    return m ? `${m.vorname} ${m.nachname}`.trim() : "";
+  }, [kennzeichenDb, zielMa, user, profile, angestellte]);
+
   const kennzeichen = useMemo(() => {
     if (kennzeichenDb && kennzeichenDb.ma === zielMa) return kennzeichenDb.wert;
     if (zielMa === user?.id) return ((profile as any)?.fahrtenbuch_kennzeichen as string) ?? "";
@@ -805,10 +833,17 @@ export default function Taetigkeitsbericht() {
   }
 
   /** Nach der Freigabe: fertiges PDF ins Archiv (App + SharePoint-Kopie). */
-  async function archiviereNachFreigabe(unterschriftFreigabe: string) {
+  async function archiviereNachFreigabe(
+    unterschriftFreigabe: string | null,
+    von?: { name: string; am: string },
+  ) {
+    if (!maName) {
+      toast({ variant: "destructive", title: "Nicht archiviert", description: "Name der Person nicht geladen — bitte Seite neu laden und „Ins Archiv legen“ drücken." });
+      return;
+    }
     try {
-      const name = `${(profile as any)?.vorname ?? ""} ${(profile as any)?.nachname ?? ""}`.trim();
-      const doc = baueBerichtPdf({ name, am: new Date().toISOString(), unterschrift: unterschriftFreigabe });
+      const name = von?.name ?? `${(profile as any)?.vorname ?? ""} ${(profile as any)?.nachname ?? ""}`.trim();
+      const doc = baueBerichtPdf({ name, am: von?.am ?? new Date().toISOString(), unterschrift: unterschriftFreigabe });
       await archiviereBericht({
         art: "taetigkeitsbericht",
         mitarbeiterId: zielMa,
@@ -819,10 +854,37 @@ export default function Taetigkeitsbericht() {
         doc,
       });
       toast({ title: "Im Archiv abgelegt", description: "Die Kopie nach SharePoint folgt automatisch." });
+      setArchivFehlt(false);
     } catch (e) {
-      toast({ variant: "destructive", title: "Archiv-Ablage fehlgeschlagen", description: (e as Error).message });
+      toast({ variant: "destructive", title: "Archiv-Ablage fehlgeschlagen", description: `${(e as Error).message} — über „Ins Archiv legen“ nachholen.` });
+      setArchivFehlt(true);
     }
   }
+
+  // Freigegeben, aber nicht (mehr) im Archiv? Dann kann der Freigeber es
+  // nachholen — die Ablage passiert im Browser und kann scheitern.
+  const [archivFehlt, setArchivFehlt] = useState(false);
+  useEffect(() => {
+    if (!freigabe || !darfFreigeben || !zielMa) {
+      setArchivFehlt(false);
+      return;
+    }
+    let aktiv = true;
+    (supabase as any)
+      .from("bericht_archiv")
+      .select("id", { count: "exact", head: true })
+      .eq("art", "taetigkeitsbericht")
+      .eq("mitarbeiter_id", zielMa)
+      .eq("jahr", periode.jahr)
+      .eq("monat", periode.monat)
+      .is("ueberholt_am", null)
+      .then(({ count }: { count: number | null }) => {
+        if (aktiv) setArchivFehlt((count ?? 0) === 0);
+      });
+    return () => {
+      aktiv = false;
+    };
+  }, [freigabe, darfFreigeben, zielMa, periode.jahr, periode.monat]);
 
   // ─── Render ──────────────────────────────────────────────────────────
   /** Spaltenfarbe: Feiertag/So dunkel, Sa hell — über die GANZE Spalte. */
@@ -888,7 +950,7 @@ export default function Taetigkeitsbericht() {
           ))}
         </div>
 
-        {darfFremde && angestellte.length > 0 && (
+        {(darfFremde || darfFreigeben) && angestellte.length > 0 && (
           <div className="flex items-center gap-2 text-sm">
             <Users className="h-4 w-4 text-muted-foreground" />
             <select
@@ -914,6 +976,17 @@ export default function Taetigkeitsbericht() {
             <strong>Freigegeben</strong> am {new Date(freigabe!.am).toLocaleDateString("de-AT")}
             {freigabe!.name ? ` von ${freigabe!.name}` : ""} — die Periode ist gesperrt.
           </span>
+          {darfFreigeben && archivFehlt && (
+            <Button
+              size="sm"
+              className="h-8"
+              disabled={freigabeBusy || zeilen.length === 0}
+              onClick={() => archiviereNachFreigabe(freigabe!.unterschrift, { name: freigabe!.name, am: freigabe!.am })}
+              title="Freigegeben, aber noch nicht im Archiv"
+            >
+              Ins Archiv legen
+            </Button>
+          )}
           {darfFreigeben && (
             <Button size="sm" variant="outline" className="h-8" onClick={wiederOeffnen} disabled={freigabeBusy}>
               <LockOpen className="h-3.5 w-3.5 mr-1.5" /> Wieder öffnen

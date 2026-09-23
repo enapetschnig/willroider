@@ -4,10 +4,11 @@
 // Gerät als E-Mail:
 //   tb_unterschrift  Angestellte: Tätigkeitsbericht der abgelaufenen Periode
 //                    (21.–20.) nicht unterschrieben → am 21., 24. und 28.
-//   tb_luecke        Angestellte: seit 3 Werktagen kein Eintrag im
-//                    Tätigkeitsbericht → alle 3 Tage
+//   tb_luecke        Angestellte: seit 3 Arbeitstagen kein Eintrag im
+//                    Tätigkeitsbericht → alle 3 Tage (Feiertage, Betriebs-
+//                    urlaub laut Arbeitszeitkalender zählen nicht)
 //   bsb_unterschrift Bauarbeiter: Stundenbericht seit 2 Tagen offen → alle 3 Tage
-//   unterweisung     fällige Unterweisung nicht bestätigt → täglich
+//   unterweisung     fällige Unterweisung (höchstens 14 Tage alt) nicht bestätigt → täglich
 //   tb_freigabe      Freigeber: N Tätigkeitsberichte warten → täglich
 //   bsb_kontrolle    Büro: N Stundenberichte warten auf Kontrolle → täglich
 //
@@ -16,6 +17,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.79.0";
 import { sendeAnPerson, schonGeschickt, type Nachricht } from "../_shared/push.ts";
+import { isWerktag } from "../_shared/feiertage.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,14 +39,28 @@ function addDays(iso: string, n: number): string {
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
-/** Werktage (Mo–Fr) zurück — für „seit 3 Werktagen nichts eingetragen". */
-function werktageZurueck(iso: string, n: number): string {
+/** Montag einer ISO-Kalenderwoche. */
+function kwMontag(jahr: number, kw: number): string {
+  const jan4 = new Date(Date.UTC(jahr, 0, 4));
+  const wd = (jan4.getUTCDay() + 6) % 7;
+  jan4.setUTCDate(jan4.getUTCDate() - wd + (kw - 1) * 7);
+  return jan4.toISOString().slice(0, 10);
+}
+
+/** Arbeitstag = Werktag ohne Feiertag und nicht frei laut Arbeitszeitkalender
+ *  (Betriebsurlaub, kurze Woche). Sonst gäbe es über Weihnachten Erinnerungen. */
+function istArbeitstag(iso: string, frei: Set<string>): boolean {
+  return isWerktag(iso) && !frei.has(iso);
+}
+
+/** n Arbeitstage zurück — für „seit 3 Arbeitstagen nichts eingetragen". */
+function arbeitstageZurueck(iso: string, n: number, frei: Set<string>): string {
   let d = iso;
   let rest = n;
-  while (rest > 0) {
+  let schutz = 0;
+  while (rest > 0 && schutz++ < 60) {
     d = addDays(d, -1);
-    const wd = new Date(d + "T00:00:00Z").getUTCDay();
-    if (wd !== 0 && wd !== 6) rest--;
+    if (istArbeitstag(d, frei)) rest--;
   }
   return d;
 }
@@ -102,8 +118,27 @@ Deno.serve(async (req) => {
   // Nachrichten zu alten Berichten bekommt.
   const { data: ab } = await sb.from("app_settings").select("value").eq("key", "erinnerungen_ab").maybeSingle();
   const abDatum = typeof ab?.value === "string" ? ab.value : null;
-  if (!probe && abDatum && heute < abDatum) {
-    return json({ ok: true, heute, uebersprungen: `Erinnerungen starten am ${abDatum}` });
+  // Fehlt die Einstellung, wird NICHT verschickt — lieber still als ein
+  // Schwall alter Nachrichten.
+  if (!probe && (!abDatum || heute < abDatum)) {
+    return json({ ok: true, heute, uebersprungen: abDatum ? `Erinnerungen starten am ${abDatum}` : "app_settings.erinnerungen_ab fehlt" });
+  }
+
+  // Freie Tage laut Arbeitszeitkalender (Betriebsurlaub, Fenstertage, kurze Woche)
+  const frei = new Set<string>();
+  {
+    const j = Number(heute.slice(0, 4));
+    const { data: kal } = await sb
+      .from("arbeitszeitkalender")
+      .select("jahr, kw, wochentyp, soll_mo, soll_di, soll_mi, soll_do, soll_fr")
+      .in("jahr", [j - 1, j]);
+    for (const r of (kal ?? []) as Array<Record<string, unknown>>) {
+      const mon = kwMontag(Number(r.jahr), Number(r.kw));
+      const perDay = [r.soll_mo, r.soll_di, r.soll_mi, r.soll_do, r.soll_fr];
+      for (let wd = 0; wd < 5; wd++) {
+        if (r.wochentyp === "BU" || (perDay[wd] != null && Number(perDay[wd]) === 0)) frei.add(addDays(mon, wd));
+      }
+    }
   }
   const geschickt: Record<string, number> = {};
   const kanaele = { push: 0, mail: 0, keiner: 0 };
@@ -144,9 +179,8 @@ Deno.serve(async (req) => {
 
   // ── tb_luecke: seit 3 Werktagen kein Eintrag ───────────────────────────
   {
-    const wd = new Date(heute + "T00:00:00Z").getUTCDay();
-    if (wd >= 1 && wd <= 5 && angestellte.length > 0) {
-      const seit = werktageZurueck(heute, 3);
+    if (istArbeitstag(heute, frei) && angestellte.length > 0) {
+      const seit = arbeitstageZurueck(heute, 3, frei);
       const { data: tage } = await sb
         .from("stunden_tage")
         .select("mitarbeiter_id")
@@ -163,7 +197,7 @@ Deno.serve(async (req) => {
             art: "tb_luecke",
             bezug: null,
             titel: "Tätigkeitsbericht nachtragen",
-            text: "Seit drei Werktagen steht nichts in deinem Tätigkeitsbericht. Bitte die Tage nachtragen.",
+            text: "Seit drei Arbeitstagen steht nichts in deinem Tätigkeitsbericht. Bitte die Tage nachtragen.",
             url: "/taetigkeitsbericht",
           },
         });
@@ -208,6 +242,9 @@ Deno.serve(async (req) => {
       .eq("status", "offen")
       .is("unterschrift_data", null)
       .lte("faellig_am", new Date().toISOString())
+      // Nur die letzten zwei Wochen — alte Altlasten werden nicht am ersten
+      // Tag alle auf einmal angemahnt.
+      .gte("faellig_am", new Date(Date.now() - 14 * 86400 * 1000).toISOString())
       .range(0, 999);
     for (const u of (faellig ?? []) as Array<any>) {
       if (!alle.some((p) => p.id === u.mitarbeiter_id)) continue;

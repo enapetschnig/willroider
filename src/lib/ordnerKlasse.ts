@@ -36,3 +36,28 @@ export function ordnerKlasse(name: string | null | undefined): OrdnerKey {
   if (/unterweisung|evaluierung/.test(n)) return "evaluierung";
   return "92-sonstiges";
 }
+
+/**
+ * Klasse aus oberstem Ordner + Unterpfad — muss mit pfadKlasse in
+ * supabase/functions/_shared/ordnerklasse.ts übereinstimmen: ein Unterordner
+ * „Fotos" gilt als Fotos, „Unterweisung"/„Evaluierung" als Unterweisung,
+ * sonst zählt der oberste Ordner. Sonst lehnt die Speicherregel z. B. ein
+ * Foto eines Mitarbeiters in „02-Baustellenmanagement/Fotos" ab.
+ */
+export function pfadKlasse(top: string, subpath: string | null | undefined): OrdnerKey {
+  const erstes = (subpath ?? "").split("/")[0]?.trim() ?? "";
+  if (/^(fotos?|bilder)$/i.test(erstes)) return "fotos";
+  if (/unterweisung|evaluierung/i.test(erstes)) return "evaluierung";
+  return ordnerKlasse(top);
+}
+
+/** Pfadteil für Speicher-Schlüssel: Supabase lehnt Umlaute und manche
+ *  Sonderzeichen im Schlüssel ab. Der Anzeigename bleibt unverändert. */
+export function speicherPfadTeil(teil: string): string {
+  return teil
+    .replace(/[äöüÄÖÜß]/g, (c) => ({ ä: "ae", ö: "oe", ü: "ue", Ä: "Ae", Ö: "Oe", Ü: "Ue", ß: "ss" })[c] ?? c)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w.\- ]+/g, "_")
+    .trim() || "_";
+}

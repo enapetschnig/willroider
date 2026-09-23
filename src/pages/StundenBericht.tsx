@@ -45,6 +45,7 @@ import { BsbVersendenDialog } from "@/components/BsbVersendenDialog";
 import { useZulagenTypen } from "@/hooks/useStammdatenStunden";
 import { aggregiereZulagen } from "@/lib/stundenAggregation";
 import { buildBerichtPdf } from "@/lib/bsbPdfHelper";
+import { archiviereBericht } from "@/lib/berichtArchiv";
 
 const STATUS_LABEL: Record<TagStatus, string> = {
   baustelle: "Baustelle",
@@ -156,9 +157,24 @@ export default function StundenBericht() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user, isAdmin } = useAuth();
+  const [archivBusy, setArchivBusy] = useState(false);
   const qc = useQueryClient();
 
   const { data: bericht, isLoading } = useStundenBericht(id);
+  /** Anzahl gültiger Archiv-PDFs dieses Berichts (null = noch unbekannt). */
+  const { data: archivStand = null } = useQuery({
+    queryKey: ["bericht_archiv_stand", id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { count } = await (supabase as any)
+        .from("bericht_archiv")
+        .select("id", { count: "exact", head: true })
+        .eq("art", "stundenbericht")
+        .eq("bericht_id", id)
+        .is("ueberholt_am", null);
+      return (count ?? 0) as number;
+    },
+  });
   const aktionen = useStundenBerichtAktionen();
 
   const { data: tage = [] } = useStundenTageList({
@@ -301,6 +317,34 @@ export default function StundenBericht() {
       </div>
     );
   }
+
+  // Versendet, aber nicht im Archiv (Ablage im Browser gescheitert oder
+  // Bericht von vor dem Archiv)? Dann kann das Büro es hier nachholen.
+  const archivFehlt = archivStand === 0 && bericht.status === "versendet" && isAdmin;
+  const insArchiv = async () => {
+    setArchivBusy(true);
+    try {
+      const { doc, maName: name } = await buildBerichtPdf(bericht.id);
+      const monatLang = new Date(bericht.jahr, bericht.monat - 1, 1).toLocaleDateString("de-AT", { month: "long", year: "numeric" });
+      await archiviereBericht({
+        art: "stundenbericht",
+        mitarbeiterId: bericht.mitarbeiter_id,
+        jahr: bericht.jahr,
+        monat: bericht.monat,
+        teil: bericht.teil,
+        periodeLabel: `${monatLang} · Teil ${bericht.teil === 1 ? "I" : "II"}`,
+        dateiname: `Stundenbericht ${bericht.jahr}-${String(bericht.monat).padStart(2, "0")} Teil ${bericht.teil === 1 ? "I" : "II"} ${name}.pdf`,
+        doc,
+        berichtId: bericht.id,
+      });
+      toast({ title: "Im Archiv abgelegt", description: "Die Kopie nach SharePoint folgt automatisch." });
+      qc.invalidateQueries({ queryKey: ["bericht_archiv_stand", bericht.id] });
+    } catch (e) {
+      toast({ variant: "destructive", title: "Nicht archiviert", description: (e as Error).message });
+    } finally {
+      setArchivBusy(false);
+    }
+  };
 
   const istEigentuemer = bericht.mitarbeiter_id === user?.id;
   const editierbar =
@@ -525,6 +569,16 @@ export default function StundenBericht() {
           </div>
         </CardContent>
       </Card>
+
+      {archivFehlt && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 flex items-center gap-2 flex-wrap text-sm text-amber-900">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-700" />
+          <span className="flex-1">Versendet, aber noch nicht im Berichte-Archiv.</span>
+          <Button size="sm" className="h-8" onClick={insArchiv} disabled={archivBusy}>
+            Ins Archiv legen
+          </Button>
+        </div>
+      )}
 
       {/* Geändert-Hinweis — gelb solange offen, grün sobald Büro bestätigt hat */}
       {geaendert.size > 0 && (() => {

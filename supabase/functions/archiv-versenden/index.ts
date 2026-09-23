@@ -64,11 +64,15 @@ Deno.serve(async (req) => {
   });
   const { data: zeilen, error } = await sb
     .from("bericht_archiv")
-    .select("id, art, dateiname, storage_pfad, periode_label, groesse")
+    .select("id, art, dateiname, storage_pfad, periode_label, groesse, ueberholt_am")
     .in("id", ids);
   if (error) return json({ ok: false, fehler: error.message }, 500);
   const liste = (zeilen ?? []) as Array<{ id: string; art: string; dateiname: string; storage_pfad: string; periode_label: string; groesse: number | null }>;
   if (liste.length === 0) return json({ ok: false, fehler: "Berichte nicht gefunden" }, 404);
+  const ueberholt = liste.filter((z) => (z as { ueberholt_am?: string | null }).ueberholt_am);
+  if (ueberholt.length > 0) {
+    return json({ ok: false, fehler: `${ueberholt[0].dateiname} ist überholt (Bericht wurde wieder geöffnet) und wird nicht versendet.` }, 400);
+  }
 
   const gesamt = liste.reduce((s, z) => s + (z.groesse ?? 0), 0);
   const alsLinks = gesamt > MAX_ANHANG_BYTES;

@@ -17,7 +17,7 @@
 // Zeitraum-Vorgabe: Montag der laufenden Woche + 12 Wochen, Querformat A3.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.79.0";
-import { dateiHochladen, graphKonfiguriert } from "../_shared/graph.ts";
+import { dateiHochladen, graphKonfiguriert, kindMitNamen, ordnerAnlegen } from "../_shared/graph.ts";
 import {
   makePoliereinsatzPdf,
   type PdfAbwesenheit,
@@ -316,19 +316,34 @@ Deno.serve(async (req) => {
     .select("value")
     .eq("key", "einsatzplan_sharepoint")
     .maybeSingle();
-  const zielWert = (ziel?.value ?? null) as { drive_id?: string; item_id?: string } | null;
+  // Ziel: entweder fester Ordner (item_id) oder — seit 23.09.2026 — ein
+  // Elternordner mit Jahresmuster („Einsatzplanung PDF {jahr}"), damit 2027
+  // nicht im 2026er Ordner landet. Der Jahresordner wird angelegt, wenn er fehlt.
+  const zielWert = (ziel?.value ?? null) as {
+    drive_id?: string;
+    item_id?: string;
+    eltern_item_id?: string;
+    ordner_muster?: string;
+  } | null;
   // Nur-Archiv-Lauf (Prüfung): { ohne_sharepoint: true } lässt SharePoint aus.
   const ohneSharePoint = body.ohne_sharepoint === true;
   if (ohneSharePoint) {
     spFehler = "ausgelassen (nur Archiv)";
-  } else if (zielWert?.drive_id && zielWert?.item_id) {
+  } else if (zielWert?.drive_id && (zielWert?.item_id || zielWert?.eltern_item_id)) {
     if (!graphKonfiguriert()) {
       spFehler = "Graph-Zugangsdaten fehlen";
     } else {
       try {
+        let ordnerId = zielWert.item_id ?? "";
+        if (zielWert.eltern_item_id && zielWert.ordner_muster) {
+          const name = zielWert.ordner_muster.replace("{jahr}", String(jahr));
+          const da = await kindMitNamen(zielWert.drive_id, zielWert.eltern_item_id, name);
+          if (da && !da.folder) throw new Error(`„${name}" ist eine Datei, kein Ordner`);
+          ordnerId = da?.id ?? (await ordnerAnlegen(zielWert.drive_id, zielWert.eltern_item_id, name)).item.id;
+        }
         const item = await dateiHochladen(
           zielWert.drive_id,
-          zielWert.item_id,
+          ordnerId,
           dateiname,
           bytes,
           "application/pdf",

@@ -89,7 +89,7 @@ import {
   dateiHerunterladen,
   type SharePointUnterordner,
 } from "@/lib/sharepoint";
-import { ordnerKlasse } from "@/lib/ordnerKlasse";
+import { ordnerKlasse, pfadKlasse, speicherPfadTeil } from "@/lib/ordnerKlasse";
 
 // Einheitliche, dezente Folder-Farbe (Windows-Yellow)
 const FOLDER_COLOR = "#eab308";
@@ -320,8 +320,12 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     const alleEigene = (d.data as Dokument[]) ?? [];
     // Verknüpft: App-Dateien, die schon in SharePoint liegen, zeigt die App
     // als SharePoint-Datei — dort, wo sie wirklich liegen.
+    // Erst ausblenden, wenn die SharePoint-Zeile wirklich da ist — sonst
+    // verschwand eine frisch hochgeladene Datei bis zum nächsten Abgleich
+    // (bis zu 10 Minuten) und wurde doppelt hochgeladen.
+    const gespiegelteIds = new Set(sp.map((s) => s.dokument_id).filter(Boolean) as string[]);
     const eigene = istVerknuepft
-      ? alleEigene.filter((x) => !(x as any).sharepoint_item_id)
+      ? alleEigene.filter((x) => !gespiegelteIds.has(x.id))
       : alleEigene;
 
     // Anzeige-Ordner je Datei. Ohne Verknüpfung: der App-Ordner. Mit
@@ -366,8 +370,10 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       const bm = tops.get("1-baustellenmanagement") ?? uo.find((o) => o.tiefe === 1)?.name ?? null;
       eigeneAnzeige = eigene.map((x) => {
         const ziel = (x as any).sharepoint_ziel_pfad as string | null;
-        const top = ziel ? ziel.split("/")[0] : (tops.get(x.ordner ?? "92-sonstiges") ?? bm);
+        // „/" = direkt in den Baustellenordner hochgeladen
+        const top = ziel === "/" ? "" : ziel ? ziel.split("/")[0] : (tops.get(x.ordner ?? "92-sonstiges") ?? bm);
         if (top) topsAusDateien.add(top);
+        else wurzel = true;
         return { ...x, ordner: top ? spKey(top) : SP_ROOT_KEY };
       });
       if (!bm && eigene.length > 0) wurzel = true;
@@ -558,11 +564,13 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       setUploading({ name: file.name, idx: i + 1, total: items.length });
       const safeName = sanitizeStorageName(file.name);
       const sub = subpath ? subpath.split("/").map(sanitizeFolderName).filter(Boolean).join("/") : "";
-      const subStorageSegment = sub ? `${sub}/` : "";
-      // Echter SharePoint-Ordner als Ziel; die Klasse bleibt der App-Ordner
-      // (Rechte, Speicherpfad). Ohne Verknüpfung ist der Schlüssel der App-Ordner.
+      // Speicher-Schlüssel ohne Umlaute (Supabase lehnt sie ab); der
+      // Unterpfad in der Tabelle behält die echten Namen.
+      const subStorageSegment = sub ? `${sub.split("/").map(speicherPfadTeil).join("/")}/` : "";
+      // Echter SharePoint-Ordner als Ziel; die Klasse (Rechte, Speicherpfad)
+      // ergibt sich aus oberstem Ordner UND Unterordner — „…/Fotos" ist Fotos.
       const spTop = spTopName(folder);
-      const klasse = spTop !== null ? (folderMeta(folder).klasse as string) : folder;
+      const klasse = spTop !== null ? pfadKlasse(spTop, sub) : folder;
       const path = `${baustelleId}/${klasse}/${subStorageSegment}${Date.now()}_${safeName}`;
       const { error: upErr } = await supabase.storage
         .from("baustellen")
@@ -579,7 +587,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         baustelle_id: baustelleId,
         ordner: klasse,
         subpath: sub || null,
-        sharepoint_ziel_pfad: spTop || null,
+        sharepoint_ziel_pfad: spTop === null ? null : spTop || "/",
         dateiname: file.name,
         storage_path: path,
         mimetype: file.type,
@@ -889,9 +897,9 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     const { data, error } = await supabase
       .from("dokumente")
       .update({
-        ordner: zielTop !== null ? (folderMeta(targetOrdner).klasse as string) : targetOrdner,
+        ordner: zielTop !== null ? pfadKlasse(zielTop, targetSubpath) : targetOrdner,
         subpath: targetSubpath || null,
-        ...(zielTop !== null ? { sharepoint_ziel_pfad: zielTop || null } : {}),
+        ...(zielTop !== null ? { sharepoint_ziel_pfad: zielTop || "/" } : {}),
       } as any)
       .in("id", ids)
       .select("id");

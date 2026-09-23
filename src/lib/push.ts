@@ -89,19 +89,15 @@ export async function pushEinschalten(userId: string): Promise<void> {
     });
   }
   const j = abo.toJSON();
-  const { error } = await (supabase as any).from("push_abos").upsert(
-    {
-      user_id: userId,
-      endpoint: abo.endpoint,
-      p256dh: j.keys?.p256dh ?? "",
-      auth: j.keys?.auth ?? "",
-      geraet: navigator.userAgent.slice(0, 160),
-      aktiv: true,
-      fehler: 0,
-      letzter_fehler: null,
-    },
-    { onConflict: "endpoint" },
-  );
+  // Über die Datenbank-Funktion: sie übernimmt ein Gerät auch dann, wenn es
+  // vorher jemand anderem gehörte (geteiltes Tablet). Die Zeilenregel ließe
+  // das direkte Überschreiben fremder Zeilen zu Recht nicht zu.
+  const { error } = await (supabase as any).rpc("push_abo_registrieren", {
+    p_endpoint: abo.endpoint,
+    p_p256dh: j.keys?.p256dh ?? "",
+    p_auth: j.keys?.auth ?? "",
+    p_geraet: navigator.userAgent.slice(0, 160),
+  });
   if (error) throw new Error(error.message);
 }
 
@@ -123,19 +119,29 @@ export async function pushAboAuffrischen(userId: string): Promise<void> {
     const abo = reg ? await reg.pushManager.getSubscription() : null;
     if (!abo) return;
     const j = abo.toJSON();
-    await (supabase as any).from("push_abos").upsert(
-      {
-        user_id: userId,
-        endpoint: abo.endpoint,
-        p256dh: j.keys?.p256dh ?? "",
-        auth: j.keys?.auth ?? "",
-        geraet: navigator.userAgent.slice(0, 160),
-        aktiv: true,
-      },
-      { onConflict: "endpoint" },
-    );
+    await (supabase as any).rpc("push_abo_registrieren", {
+      p_endpoint: abo.endpoint,
+      p_p256dh: j.keys?.p256dh ?? "",
+      p_auth: j.keys?.auth ?? "",
+      p_geraet: navigator.userAgent.slice(0, 160),
+    });
   } catch {
     /* still */
+  }
+}
+
+/** Beim Abmelden: dieses Gerät vom Konto lösen, damit auf einem geteilten
+ *  Gerät keine Erinnerungen der vorigen Person mehr ankommen. Die Erlaubnis
+ *  im Browser bleibt; meldet sich jemand an, übernimmt pushAboAuffrischen. */
+export async function pushVomKontoLoesen(): Promise<void> {
+  try {
+    if (!pushUnterstuetzt()) return;
+    const reg = await registrierung();
+    const abo = reg ? await reg.pushManager.getSubscription() : null;
+    if (!abo) return;
+    await (supabase as any).from("push_abos").delete().eq("endpoint", abo.endpoint);
+  } catch {
+    /* still — Abmelden darf daran nicht scheitern */
   }
 }
 

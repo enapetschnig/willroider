@@ -37,9 +37,19 @@ export function ordnerKlasse(name: string | null | undefined): string {
 export function dateiKlasse(segmente: string[]): { ordner: string; top: string; subpath: string } {
   if (segmente.length === 0) return { ordner: "92-sonstiges", top: "", subpath: "" };
   const [top, ...rest] = segmente;
-  let ordner = ordnerKlasse(top);
-  if (rest.length > 0 && /^(fotos?|bilder)$/i.test(rest[0]) && ordner !== "fotos") {
-    ordner = "fotos";
-  }
-  return { ordner, top, subpath: rest.join("/") };
+  return { ordner: pfadKlasse(top, rest.join("/")), top, subpath: rest.join("/") };
+}
+
+/**
+ * Klasse aus oberstem Ordner + Unterpfad: ein Unterordner „Fotos" gilt als
+ * Fotos, „Unterweisung"/„Evaluierung" als Unterweisung — egal, unter welchem
+ * obersten Ordner er liegt. Sonst zählt der oberste Ordner. Gegenstück:
+ * pfadKlasse in src/lib/ordnerKlasse.ts (App-Uploads müssen dieselbe Klasse
+ * bekommen, sonst lehnt die Speicherregel sie für Mitarbeiter ab).
+ */
+export function pfadKlasse(top: string, subpath: string | null | undefined): string {
+  const erstes = (subpath ?? "").split("/")[0]?.trim() ?? "";
+  if (/^(fotos?|bilder)$/i.test(erstes)) return "fotos";
+  if (/unterweisung|evaluierung/i.test(erstes)) return "evaluierung";
+  return ordnerKlasse(top);
 }

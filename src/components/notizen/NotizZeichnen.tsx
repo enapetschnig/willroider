@@ -133,6 +133,9 @@ export function NotizZeichnen({
   const [planOffen, setPlanOffen] = useState(false);
   const geraetRef = useRef<HTMLInputElement>(null);
   const dirtyRef = useRef(false);
+  /** Zählt jede Änderung — nach dem Speichern bleibt „ungespeichert", wenn
+   *  während des Speicherns weitergezeichnet wurde. */
+  const aenderungNr = useRef(0);
 
   // Seiten: aktuelle Seite lebt in Excalidraw, die anderen hier.
   const start = useMemo(() => {
@@ -159,6 +162,7 @@ export function NotizZeichnen({
   useEffect(() => {
     if (start.ausBackup) {
       dirtyRef.current = true;
+    aenderungNr.current++;
       toast({ title: "Zwischenstand wiederhergestellt", description: "Die letzte Zeichnung war noch nicht gespeichert — sie wird jetzt gesichert." });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -185,6 +189,7 @@ export function NotizZeichnen({
   const speichern = useCallback(async (): Promise<boolean> => {
     if (!api) return true;
     setBusy("speichern");
+    const stand = aenderungNr.current;
     try {
       const { exportToBlob } = await import("@excalidraw/excalidraw");
       const { seiten, files } = alleDaten();
@@ -197,7 +202,7 @@ export function NotizZeichnen({
           .eq("id", notizId);
         if (error) throw error;
         localStorage.removeItem(BACKUP_KEY(notizId));
-        dirtyRef.current = false;
+        dirtyRef.current = aenderungNr.current !== stand;
         onSaved();
         return true;
       }
@@ -225,7 +230,7 @@ export function NotizZeichnen({
         .eq("id", notizId);
       if (error) throw error;
       localStorage.removeItem(BACKUP_KEY(notizId));
-      dirtyRef.current = false;
+      dirtyRef.current = aenderungNr.current !== stand;
       onSaved();
       return true;
     } catch (e) {
@@ -279,6 +284,7 @@ export function NotizZeichnen({
     api.scrollToContent(undefined, { fitToContent: true, animate: false });
     setSeite(seite + 1);
     dirtyRef.current = true;
+    aenderungNr.current++;
   };
   const seiteLoeschen = () => {
     if (!api || seitenRef.current.length <= 1) return;
@@ -290,6 +296,7 @@ export function NotizZeichnen({
     api.history.clear();
     setSeite(ziel);
     dirtyRef.current = true;
+    aenderungNr.current++;
   };
 
   // ── Bilder einfügen ───────────────────────────────────────────────────
@@ -314,6 +321,7 @@ export function NotizZeichnen({
     api.updateScene({ elements: [...api.getSceneElements(), ...neu] });
     api.scrollToContent(neu, { fitToContent: true, animate: false });
     dirtyRef.current = true;
+    aenderungNr.current++;
   };
 
   const bildAusDatei = (f: File): Promise<{ dataURL: string; breite: number; hoehe: number; mimeType: string }> =>
@@ -456,6 +464,7 @@ export function NotizZeichnen({
     const n = reihe[(reihe.indexOf(papier) + 1) % reihe.length];
     setPapier(n);
     dirtyRef.current = true;
+    aenderungNr.current++;
   };
   const papierName: Record<Papier, string> = { blanko: "Blanko", kariert: "Kariert", liniert: "Liniert", punkte: "Punkte" };
 
@@ -528,6 +537,7 @@ export function NotizZeichnen({
               }}
               onChange={(_els: unknown, appState: { zoom?: { value?: number }; scrollX?: number; scrollY?: number }) => {
                 dirtyRef.current = true;
+    aenderungNr.current++;
                 if (sichtRaf.current) return;
                 sichtRaf.current = requestAnimationFrame(() => {
                   sichtRaf.current = null;
