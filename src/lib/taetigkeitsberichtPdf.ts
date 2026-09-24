@@ -410,6 +410,7 @@ export function makeAlleTaetigkeitsberichtePdf(
 
 export interface FahrtenbuchPdfInput {
   name: string;
+  /** Standard-Kennzeichen — gilt für Fahrten ohne eigenes. */
   kennzeichen: string;
   periode: Periode;
   fahrten: FahrtRow[];
@@ -439,18 +440,28 @@ export function makeFahrtenbuchPdf(input: FahrtenbuchPdfInput): jsPDF {
   doc.rect(margin + 16, 20.2, 60, 5.5, "FD");
   doc.setFont("times", "normal");
   doc.text(input.name, margin + 18, 24);
+  // Kennzeichen je Fahrt (seit 24.09.): im Kopf alle der Periode.
+  const kennzeichenJeFahrt = (f: FahrtRow) => f.kennzeichen || input.kennzeichen || "";
+  const alleKennzeichen = Array.from(new Set(input.fahrten.map(kennzeichenJeFahrt).filter(Boolean)));
   doc.setFont("times", "bold");
   doc.text("Kennzeichen:", margin + 90, 24);
   doc.setFillColor(...GELB);
-  doc.rect(margin + 116, 20.2, 40, 5.5, "FD");
+  doc.rect(margin + 116, 20.2, 100, 5.5, "FD");
   doc.setFont("times", "normal");
-  doc.text(input.kennzeichen, margin + 118, 24);
+  doc.text(alleKennzeichen.length > 0 ? alleKennzeichen.join(", ") : input.kennzeichen, margin + 118, 24, {
+    maxWidth: 96,
+  });
+
+  /** Ort, darunter die Uhrzeit, falls eingetragen. */
+  const ortZeit = (ort: string | null | undefined, zeit: string | null | undefined) =>
+    [ort ?? "", zeit?.slice(0, 5) ?? ""].filter(Boolean).join("\n");
 
   const body = input.fahrten.map((f) => [
     label,
     new Date(f.datum + "T00:00:00").toLocaleDateString("de-AT"),
-    f.abfahrt?.slice(0, 5) ?? "",
-    f.ankunft?.slice(0, 5) ?? "",
+    kennzeichenJeFahrt(f),
+    ortZeit(f.abfahrt_ort, f.abfahrt),
+    ortZeit(f.ankunft_ort, f.ankunft),
     f.reiseweg ?? "",
     // km-Stände ohne erzwungene Kommastelle — „154320", nicht „154320,0".
     zGanz(f.km_start),
@@ -464,6 +475,7 @@ export function makeFahrtenbuchPdf(input: FahrtenbuchPdfInput): jsPDF {
     head: [[
       "Tätigkeitsbericht",
       "Datum",
+      "Kennzeichen",
       "Abfahrt",
       "Ankunft",
       "Reiseweg / Bemerkungen",
@@ -490,15 +502,18 @@ export function makeFahrtenbuchPdf(input: FahrtenbuchPdfInput): jsPDF {
       halign: "center",
       valign: "middle",
     },
+    // Querformat: 281 mm nutzbar — Abfahrt/Ankunft (Orte) bekommen den
+    // meisten Platz, der Reiseweg nimmt den Rest.
     columnStyles: {
-      0: { cellWidth: 30, fontStyle: "bold" },
-      1: { cellWidth: 22 },
-      2: { cellWidth: 16, halign: "center" },
-      3: { cellWidth: 16, halign: "center" },
-      5: { cellWidth: 20, halign: "right" },
-      6: { cellWidth: 20, halign: "right" },
-      7: { cellWidth: 18, halign: "right", fontStyle: "bold" },
-      8: { cellWidth: 26 },
+      0: { cellWidth: 30, fontStyle: "bold" }, // „November-Dezember“ passt knapp
+      1: { cellWidth: 18 },
+      2: { cellWidth: 21 },
+      3: { cellWidth: 49 },
+      4: { cellWidth: 49 },
+      6: { cellWidth: 17, halign: "right" },
+      7: { cellWidth: 17, halign: "right" },
+      8: { cellWidth: 16, halign: "right", fontStyle: "bold" },
+      9: { cellWidth: 22 },
     },
     margin: { left: margin, right: margin },
   });

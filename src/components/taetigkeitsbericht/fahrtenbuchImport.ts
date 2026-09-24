@@ -29,6 +29,9 @@ export interface ImportFahrt {
   datum: string;
   abfahrt: string | null;
   ankunft: string | null;
+  /** „Von" und „Nach" der App — seit 24.09. eigene Felder statt Reiseweg. */
+  abfahrt_ort: string | null;
+  ankunft_ort: string | null;
   reiseweg: string | null;
   km_start: number | null;
   km_ende: number | null;
@@ -194,7 +197,9 @@ async function parsePdf(
         datum: offen.datum,
         abfahrt: null,
         ankunft: null,
-        reiseweg: [offen.von.join(" "), offen.nach.join(" ")].filter(Boolean).join(" – ") || null,
+        abfahrt_ort: offen.von.join(" ").trim() || null,
+        ankunft_ort: offen.nach.join(" ").trim() || null,
+        reiseweg: null,
         km_start: offen.staende.length > 0 ? r2(offen.staende[0]) : null,
         km_ende: offen.staende.length > 1 ? r2(offen.staende[offen.staende.length - 1]) : null,
         km: r2(offen.km),
@@ -315,7 +320,9 @@ export async function parseFahrtenDatei(
       datum: start.iso,
       abfahrt: start.zeit,
       ankunft: stopp?.zeit ?? null,
-      reiseweg: [von, nach].filter(Boolean).join(" – ") || null,
+      abfahrt_ort: von || null,
+      ankunft_ort: nach || null,
+      reiseweg: null,
       km_start: kmStart != null ? r2(kmStart) : null,
       km_ende: kmEnde != null ? r2(kmEnde) : null,
       km: r2(km),
