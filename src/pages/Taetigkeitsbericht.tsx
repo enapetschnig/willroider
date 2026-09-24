@@ -165,7 +165,10 @@ export default function Taetigkeitsbericht() {
       .gte("datum", periode.von)
       .lte("datum", periode.bis)
       .order("datum")
-      .order("abfahrt", { ascending: true, nullsFirst: true });
+      .order("abfahrt", { ascending: true, nullsFirst: true })
+      // Gleicher Tag ohne Uhrzeit: in Eingabe-Reihenfolge — die „vorige
+      // Fahrt" (Kennzeichen/Abfahrtsort vorbelegen) ist dann die unterste.
+      .order("created_at", { ascending: true });
     if (nr !== fahrtenNr.current) return;
     setFahrten((data as any as FahrtRow[]) ?? []);
   }, [zielMa, periode.von, periode.bis]);

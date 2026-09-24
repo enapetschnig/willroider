@@ -9,16 +9,23 @@
  *
  * Die km je Tag fließen direkt in die Zeile „gefahrene km" des
  * Tätigkeitsberichts — eine Quelle, keine Doppelerfassung.
+ *
+ * Seit dem Änderungswunsch J. Mainhard (24.09.): Kennzeichen je Fahrt
+ * (leer = Standard-Kennzeichen aus dem Kopf) und Abfahrt/Ankunft als
+ * Orte mit Vorschlägen (OrtFeld). Die Uhrzeit bleibt klein darunter.
+ * Die km bleiben reine Tacho-Werte — es wird keine Strecke berechnet.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Plus, Trash2, Upload } from "lucide-react";
 import { parseFahrtenDatei } from "./fahrtenbuchImport";
+import { OrtFeld, type OrtVorschlag } from "./OrtFeld";
 import { supabase } from "@/integrations/supabase/client";
 import { localIso } from "@/lib/dateFmt";
 import { useToast } from "@/hooks/use-toast";
 import {
   TB_FARBEN,
+  kstAusKostenstelle,
   periodeKurz,
   periodeTitel,
   r2,
@@ -31,6 +38,10 @@ export interface FahrtRow {
   datum: string;
   abfahrt: string | null;
   ankunft: string | null;
+  abfahrt_ort: string | null;
+  ankunft_ort: string | null;
+  /** Leer = es gilt das Standard-Kennzeichen der Person. */
+  kennzeichen: string | null;
   reiseweg: string | null;
   km_start: number | null;
   km_ende: number | null;
@@ -49,6 +60,15 @@ const zelle: React.CSSProperties = {
 };
 
 
+/** Firmenadressen für die Schnellauswahl der Orte. Beide kommen in echten
+ *  Fahrten vor: „Willroiderstraße 13, Villach“ steht auf den Firmen-PDFs,
+ *  die Driversnote-Importe nennen den Standort „Willroider-Allee 10,
+ *  St. Niklas an der Drau“. Welche bleibt, ist offen (JOURNAL.md). */
+const FIRMA_ORTE: OrtVorschlag[] = [
+  { text: "Holzbau Willroider, Willroiderstraße 13, 9500 Villach", art: "firma" },
+  { text: "Holzbau Willroider, Willroider-Allee 10, 9580 St. Niklas an der Drau", art: "firma" },
+];
+
 const zahl = (n: number | null | undefined): string =>
   n == null || n === 0 ? "" : String(r2(Number(n))).replace(".", ",");
 
@@ -59,12 +79,17 @@ function FbText({
   breit,
   rechts,
   liste,
+  platzhalter,
+  rahmen,
 }: {
   wert: string;
   onCommit: (v: string) => void;
   breit?: boolean;
   rechts?: boolean;
   liste?: string;
+  platzhalter?: string;
+  /** Sichtbar als Eingabefeld (Kopf) — sonst wie eine Excel-Zelle. */
+  rahmen?: boolean;
 }) {
   const [text, setText] = useState(wert);
   const alt = useRef(wert);
@@ -78,6 +103,7 @@ function FbText({
     <input
       value={text}
       list={liste}
+      placeholder={platzhalter}
       onChange={(e) => setText(e.target.value)}
       onBlur={() => {
         if (text !== wert) onCommit(text);
@@ -88,9 +114,11 @@ function FbText({
       }}
       style={{
         width: breit ? "100%" : 72,
-        border: "none",
+        border: rahmen ? "1px solid #9ca3af" : "none",
+        borderRadius: rahmen ? 3 : undefined,
+        padding: rahmen ? "1px 6px" : undefined,
         outline: "none",
-        background: "transparent",
+        background: rahmen ? "#fff" : "transparent",
         fontFamily: SERIF,
         fontSize: 15,
         fontWeight: 600,
@@ -127,6 +155,105 @@ export function FahrtenbuchTab({
 }) {
   const { toast } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
+
+  // ── Vorschläge: Kennzeichen, Baustellen, frühere Orte ────────────────
+  const [fahrzeuge, setFahrzeuge] = useState<{ kennzeichen: string; bezeichnung: string | null }[]>([]);
+  const [baustellenOrte, setBaustellenOrte] = useState<OrtVorschlag[]>([]);
+  const [ortHistorie, setOrtHistorie] = useState<string[]>([]);
+
+  useEffect(() => {
+    let aktiv = true;
+    supabase
+      .from("fahrzeuge")
+      .select("kennzeichen, bezeichnung, aktiv")
+      .order("kennzeichen")
+      .then(({ data }) => {
+        if (!aktiv) return;
+        // „ANL-…" sind Anlagen ohne echtes Kennzeichen (siehe Fahrzeuge.tsx).
+        setFahrzeuge(
+          ((data as any[]) ?? []).filter((f) => f.aktiv !== false && f.kennzeichen && !f.kennzeichen.startsWith("ANL-")),
+        );
+      });
+    supabase
+      .from("baustellen")
+      .select("bvh_name, kostenstelle, baustellen_adresse, plz, ort, status, kategorie")
+      .neq("status", "abgeschlossen")
+      .order("bvh_name")
+      .then(({ data }) => {
+        if (!aktiv) return;
+        const liste: OrtVorschlag[] = [];
+        for (const b of (data as any[]) ?? []) {
+          if (b.kategorie === "maschine") continue;
+          const strasse = (b.baustellen_adresse ?? "").trim();
+          if (!strasse) continue; // nur Baustellen mit Adresse
+          const ortName = (b.ort ?? "").trim();
+          const plzOrt = [b.plz, ortName].map((x) => (x ?? "").trim()).filter(Boolean).join(" ");
+          // Manche Adressen enthalten den Ort schon („Hauptplatz 1, 9500 Villach").
+          const adresse =
+            ortName && strasse.toLowerCase().includes(ortName.toLowerCase())
+              ? strasse
+              : [strasse, plzOrt].filter(Boolean).join(", ");
+          const titel = (b.bvh_name ?? "").trim();
+          liste.push({
+            text: titel ? `${titel}, ${adresse}` : adresse,
+            art: "baustelle",
+            titel: titel || undefined,
+            adresse,
+            kostenstelle: kstAusKostenstelle(b.kostenstelle) || undefined,
+          });
+        }
+        setBaustellenOrte(liste);
+      });
+    return () => {
+      aktiv = false;
+    };
+  }, []);
+
+  // Frühere Orte der Person — auch aus alten Fahrten, deren Reiseweg der
+  // Driversnote-Import als „Von – Nach" geschrieben hat (nur Vorschläge,
+  // die alten Einträge selbst bleiben unverändert).
+  useEffect(() => {
+    let aktiv = true;
+    supabase
+      .from("fahrtenbuch_eintraege" as any)
+      .select("abfahrt_ort, ankunft_ort, reiseweg")
+      .eq("mitarbeiter_id", mitarbeiterId)
+      .order("datum", { ascending: false })
+      .limit(500)
+      .then(({ data }) => {
+        if (!aktiv) return;
+        const orte: string[] = [];
+        for (const f of (data as any[]) ?? []) {
+          if (f.abfahrt_ort) orte.push(f.abfahrt_ort);
+          if (f.ankunft_ort) orte.push(f.ankunft_ort);
+          const teile = (f.reiseweg ?? "").split(" – ").map((t: string) => t.trim()).filter(Boolean);
+          if (teile.length === 2) orte.push(...teile);
+        }
+        setOrtHistorie(orte);
+      });
+    return () => {
+      aktiv = false;
+    };
+  }, [mitarbeiterId]);
+
+  const ortVorschlaege = useMemo<OrtVorschlag[]>(() => {
+    // Häufigste zuerst; die laufende Periode zählt sofort mit.
+    const zaehler = new Map<string, { text: string; n: number }>();
+    const bekannt = new Set([...FIRMA_ORTE, ...baustellenOrte].map((v) => v.text.toLowerCase()));
+    const orte = [...ortHistorie, ...fahrten.flatMap((f) => [f.abfahrt_ort, f.ankunft_ort])];
+    for (const o of orte) {
+      const text = (o ?? "").trim();
+      const k = text.toLowerCase();
+      if (!text || bekannt.has(k)) continue;
+      const e = zaehler.get(k);
+      if (e) e.n++;
+      else zaehler.set(k, { text, n: 1 });
+    }
+    const frueher = [...zaehler.values()]
+      .sort((a, b) => b.n - a.n)
+      .map((e): OrtVorschlag => ({ text: e.text, art: "frueher" }));
+    return [...FIRMA_ORTE, ...baustellenOrte, ...frueher];
+  }, [baustellenOrte, ortHistorie, fahrten]);
 
   const fehler = (e: unknown) =>
     toast({
@@ -204,11 +331,27 @@ export function FahrtenbuchTab({
       const datum = heute >= periode.von && heute <= periode.bis ? heute : periode.von;
       // Abfahrts-Stand mit dem letzten bekannten Ankunfts-Stand vorbelegen.
       const letzterStand = [...fahrten].reverse().find((f) => f.km_ende != null)?.km_ende ?? null;
+      // Kennzeichen und Abfahrtsort aus der vorigen Fahrt — ist die Periode
+      // noch leer, aus der letzten Fahrt davor.
+      let vorige: Pick<FahrtRow, "kennzeichen" | "ankunft_ort">[] = [...fahrten].reverse();
+      if (vorige.length === 0) {
+        const { data } = await supabase
+          .from("fahrtenbuch_eintraege" as any)
+          .select("kennzeichen, ankunft_ort")
+          .eq("mitarbeiter_id", mitarbeiterId)
+          .lt("datum", periode.von)
+          .order("datum", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(20);
+        vorige = (data as any[]) ?? [];
+      }
       const { error } = await supabase.from("fahrtenbuch_eintraege" as any).insert({
         mitarbeiter_id: mitarbeiterId,
         datum,
         km: 0,
         km_start: letzterStand,
+        kennzeichen: vorige.find((f) => f.kennzeichen)?.kennzeichen || kennzeichen.trim() || null,
+        abfahrt_ort: vorige[0]?.ankunft_ort || null,
       });
       if (error) throw error;
       onReload();
@@ -282,7 +425,8 @@ export function FahrtenbuchTab({
 
       if (einfuegen.length > 0) {
         const { error } = await supabase.from("fahrtenbuch_eintraege" as any).insert(
-          einfuegen.map((f) => ({ ...f, mitarbeiter_id: mitarbeiterId })),
+          // Importierte Fahrten bekommen das Standard-Kennzeichen aus dem Kopf.
+          einfuegen.map((f) => ({ ...f, mitarbeiter_id: mitarbeiterId, kennzeichen: kennzeichen.trim() || null })),
         );
         if (error) throw error;
       }
@@ -310,7 +454,7 @@ export function FahrtenbuchTab({
   }
 
   async function speichereKennzeichen(v: string) {
-    const wert = v.trim();
+    const wert = v.trim().toUpperCase();
     // .select(): ein von RLS verworfener Update liefert sonst „kein Fehler",
     // obwohl nichts gespeichert wurde.
     const { data, error } = await supabase
@@ -341,12 +485,12 @@ export function FahrtenbuchTab({
 
   return (
     <div className="overflow-auto max-h-[calc(100vh-15rem)]">
-      <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 900 }}>
+      <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1250 }}>
         <thead>
           {/* Titelband wie die Excel: Dunkelblau, weiß, über alle Spalten */}
           <tr>
             <th
-              colSpan={10}
+              colSpan={11}
               style={{
                 ...zelle,
                 background: TB_FARBEN.fahrtenbuchTitel,
@@ -365,15 +509,25 @@ export function FahrtenbuchTab({
             <th colSpan={2} style={{ ...zelle, textAlign: "left", fontWeight: 700 }}>
               Fahrer:
             </th>
-            <th colSpan={3} style={{ ...zelle, background: TB_FARBEN.eingabe, textAlign: "left", fontWeight: 400 }}>
+            <th colSpan={4} style={{ ...zelle, background: TB_FARBEN.eingabe, textAlign: "left", fontWeight: 400 }}>
               {fahrerName}
             </th>
             <th colSpan={2} style={{ ...zelle, textAlign: "left", fontWeight: 700 }}>
-              Kennzeichen:
+              Standard-Kennzeichen:
             </th>
             <th colSpan={3} style={{ ...zelle, background: TB_FARBEN.eingabe, textAlign: "left", fontWeight: 400 }}>
+              {/* Vorher ohne Rahmen — man sah nicht, dass man hier tippen kann
+                  (Änderungswunsch J. Mainhard 24.09.). Gilt für neue Fahrten
+                  und für alte Fahrten ohne eigenes Kennzeichen. */}
               {kannBearbeiten ? (
-                <FbText wert={kennzeichen} onCommit={speichereKennzeichen} breit />
+                <FbText
+                  wert={kennzeichen}
+                  onCommit={speichereKennzeichen}
+                  liste="fb-kennzeichen"
+                  platzhalter="Kennzeichen eintragen"
+                  rahmen
+                  breit
+                />
               ) : (
                 kennzeichen
               )}
@@ -382,9 +536,10 @@ export function FahrtenbuchTab({
           <tr>
             <th style={{ ...kopfWeiss, minWidth: 96 }}>Tätigkeitsbericht</th>
             <th style={{ ...kopfWeiss, minWidth: 108 }}>Datum</th>
-            <th style={{ ...kopfWeiss, minWidth: 76 }}>Abfahrt</th>
-            <th style={{ ...kopfWeiss, minWidth: 76 }}>Ankunft</th>
-            <th style={{ ...kopfWeiss, minWidth: 220 }}>Reiseweg / Bemerkungen</th>
+            <th style={{ ...kopfWeiss, minWidth: 110 }}>Kennzeichen</th>
+            <th style={{ ...kopfWeiss, minWidth: 210 }}>Abfahrt</th>
+            <th style={{ ...kopfWeiss, minWidth: 210 }}>Ankunft</th>
+            <th style={{ ...kopfWeiss, minWidth: 180 }}>Reiseweg / Bemerkungen</th>
             <th style={{ ...kopfWeiss, minWidth: 84 }}>
               km-Stand
               <br />
@@ -419,20 +574,60 @@ export function FahrtenbuchTab({
                   new Date(f.datum + "T00:00:00").toLocaleDateString("de-AT")
                 )}
               </td>
-              {(["abfahrt", "ankunft"] as const).map((feld) => (
-                <td key={feld} style={zelle}>
-                  {kannBearbeiten ? (
-                    <input
-                      type="time"
-                      value={f[feld]?.slice(0, 5) ?? ""}
-                      onChange={(e) => aendern(f.id, { [feld]: e.target.value || null })}
-                      style={{ border: "none", background: "transparent", fontFamily: SERIF, fontSize: 15, fontWeight: 600, width: "100%" }}
-                    />
-                  ) : (
-                    f[feld]?.slice(0, 5) ?? ""
-                  )}
-                </td>
-              ))}
+              <td style={zelle}>
+                {kannBearbeiten ? (
+                  <FbText
+                    wert={f.kennzeichen ?? ""}
+                    // Leer = Standard-Kennzeichen — grau angezeigt, nicht gespeichert.
+                    platzhalter={kennzeichen}
+                    liste="fb-kennzeichen"
+                    onCommit={(v) => aendern(f.id, { kennzeichen: v.trim().toUpperCase() || null })}
+                    breit
+                  />
+                ) : (
+                  f.kennzeichen || kennzeichen
+                )}
+              </td>
+              {(["abfahrt", "ankunft"] as const).map((feld) => {
+                const ortFeld = feld === "abfahrt" ? "abfahrt_ort" : "ankunft_ort";
+                const zeit = f[feld]?.slice(0, 5) ?? "";
+                return (
+                  <td key={feld} style={{ ...zelle, verticalAlign: "top" }}>
+                    {kannBearbeiten ? (
+                      <>
+                        <OrtFeld
+                          wert={f[ortFeld] ?? ""}
+                          vorschlaege={ortVorschlaege}
+                          platzhalter={feld === "abfahrt" ? "Von …" : "Nach …"}
+                          onCommit={(text, v) =>
+                            aendern(f.id, {
+                              [ortFeld]: text.trim() || null,
+                              // Ziel ist eine Baustelle → deren Kostenstelle,
+                              // solange noch keine eingetragen ist.
+                              ...(feld === "ankunft" && v?.kostenstelle && !f.kostenstelle
+                                ? { kostenstelle: v.kostenstelle }
+                                : {}),
+                            })
+                          }
+                        />
+                        {/* Uhrzeit freiwillig, klein unter dem Ort. */}
+                        <input
+                          type="time"
+                          value={zeit}
+                          title={feld === "abfahrt" ? "Uhrzeit Abfahrt (freiwillig)" : "Uhrzeit Ankunft (freiwillig)"}
+                          onChange={(e) => aendern(f.id, { [feld]: e.target.value || null })}
+                          style={{ border: "none", background: "transparent", fontFamily: SERIF, fontSize: 11, color: "#555", width: 84 }}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        {f[ortFeld]}
+                        {zeit && <div style={{ fontSize: 11, color: "#555" }}>{zeit}</div>}
+                      </>
+                    )}
+                  </td>
+                );
+              })}
               <td style={zelle}>
                 {kannBearbeiten ? (
                   <FbText
@@ -516,7 +711,7 @@ export function FahrtenbuchTab({
 
           {fahrten.length === 0 && (
             <tr>
-              <td colSpan={10} style={{ ...zelle, textAlign: "center", fontStyle: "italic", padding: "14px 0" }}>
+              <td colSpan={11} style={{ ...zelle, textAlign: "center", fontStyle: "italic", padding: "14px 0" }}>
                 Noch keine Fahrten in dieser Periode.
               </td>
             </tr>
@@ -524,7 +719,7 @@ export function FahrtenbuchTab({
 
           {kannBearbeiten && (
             <tr>
-              <td colSpan={10} style={{ ...zelle, textAlign: "left" }}>
+              <td colSpan={11} style={{ ...zelle, textAlign: "left" }}>
                 <div className="flex items-center gap-4 flex-wrap">
                   <button
                     type="button"
@@ -577,6 +772,12 @@ export function FahrtenbuchTab({
       <datalist id="fb-kostenstellen">
         {kostenstellen.map((k) => (
           <option key={k} value={k} />
+        ))}
+      </datalist>
+      {/* Kennzeichen aus der Fahrzeugliste — freie Eingabe bleibt möglich. */}
+      <datalist id="fb-kennzeichen">
+        {fahrzeuge.map((f) => (
+          <option key={f.kennzeichen} value={f.kennzeichen} label={f.bezeichnung ?? undefined} />
         ))}
       </datalist>
     </div>
