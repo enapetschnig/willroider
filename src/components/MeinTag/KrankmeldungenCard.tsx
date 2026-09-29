@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { HeartPulse, Paperclip, Plus, Trash2, Loader2 } from "lucide-react";
+import { HeartPulse, Paperclip, Pencil, Plus, Trash2, Loader2 } from "lucide-react";
 import {
   uploadMaDokument,
   getMaDokumentSignedUrl,
@@ -33,6 +33,43 @@ const fmtDate = (iso: string) =>
     year: "numeric",
   });
 
+/** Entwurf einer NEUEN Krankmeldung — überlebt, wenn das Handy die Seite
+ *  beim Fotografieren neu lädt (J. Maurer 29.09.: „fliegt man aus dem
+ *  Vorgang“). Gelöscht beim Einreichen oder Abbrechen. */
+const ENTWURF_PREFIX = "krankmeldung-entwurf-";
+interface Entwurf {
+  von: string;
+  bis: string;
+  notiz: string;
+  stundenModus: boolean;
+  stundenWert: string;
+  datei?: string;
+}
+function ladeEntwurf(userId: string): Entwurf | null {
+  try {
+    const roh = sessionStorage.getItem(ENTWURF_PREFIX + userId);
+    return roh ? (JSON.parse(roh) as Entwurf) : null;
+  } catch {
+    return null;
+  }
+}
+function speichereEntwurf(userId: string, e: Entwurf | null) {
+  try {
+    if (e) sessionStorage.setItem(ENTWURF_PREFIX + userId, JSON.stringify(e));
+    else sessionStorage.removeItem(ENTWURF_PREFIX + userId);
+  } catch {
+    /* privater Modus o. Ä. — dann eben ohne Entwurf */
+  }
+}
+/** Gibt es einen offenen Entwurf? (für „Mehr“ in der einfachen Ansicht) */
+export function hatKrankmeldungEntwurf(): boolean {
+  try {
+    return Object.keys(sessionStorage).some((k) => k.startsWith(ENTWURF_PREFIX));
+  } catch {
+    return false;
+  }
+}
+
 function tageImRange(von: string, bis: string): number {
   const a = new Date(von + "T00:00:00").getTime();
   const b = new Date(bis + "T00:00:00").getTime();
@@ -43,7 +80,9 @@ export function KrankmeldungenCard({ userId }: { userId: string }) {
   const { toast } = useToast();
   const [items, setItems] = useState<Krankmeldung[]>([]);
   const [doks, setDoks] = useState<Record<string, Dokument>>({});
-  const [open, setOpen] = useState(false);
+  // Offener Entwurf nach einem Neuladen → Formular gleich wieder öffnen.
+  const [open, setOpen] = useState(() => !!ladeEntwurf(userId));
+  const [bearbeiten, setBearbeiten] = useState<Krankmeldung | null>(null);
 
   const load = async () => {
     const { data: items } = await supabase
@@ -200,6 +239,14 @@ export function KrankmeldungenCard({ userId }: { userId: string }) {
                   )}
                   <button
                     type="button"
+                    onClick={() => setBearbeiten(k)}
+                    className="text-muted-foreground hover:text-foreground hover:bg-muted rounded p-0.5"
+                    title="Bearbeiten (Datum, Stunden, Notiz, Foto nachreichen)"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => remove(k)}
                     className="text-red-700 hover:bg-red-50 rounded p-0.5"
                     title="Löschen"
@@ -211,6 +258,14 @@ export function KrankmeldungenCard({ userId }: { userId: string }) {
             })}
           </div>
         )}
+        {/* Bestehende Krankmeldung ändern — gleicher Dialog, vorbefüllt. */}
+        <KrankmeldungDialog
+          userId={userId}
+          open={!!bearbeiten}
+          onOpenChange={(v) => !v && setBearbeiten(null)}
+          vorhanden={bearbeiten}
+          vorhandenDok={bearbeiten?.dokument_id ? doks[bearbeiten.dokument_id] ?? null : null}
+        />
       </CardContent>
     </Card>
   );
@@ -219,14 +274,24 @@ export function KrankmeldungenCard({ userId }: { userId: string }) {
 function KrankmeldungDialog({
   userId,
   open,
-  onOpenChange,
+  onOpenChange: onOpenChangeRoh,
   trigger,
+  vorhanden,
+  vorhandenDok,
 }: {
   userId: string;
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  trigger: React.ReactNode;
+  trigger?: React.ReactNode;
+  /** Gesetzt = bestehende Krankmeldung bearbeiten statt neu einreichen. */
+  vorhanden?: Krankmeldung | null;
+  vorhandenDok?: Dokument | null;
 }) {
+  // Schließen (Abbrechen, X, Einreichen) verwirft den Entwurf.
+  const onOpenChange = (v: boolean) => {
+    if (!v && !vorhanden) speichereEntwurf(userId, null);
+    onOpenChangeRoh(v);
+  };
   const { toast } = useToast();
   const today = localIso();
   const [von, setVon] = useState(today);
@@ -241,14 +306,20 @@ function KrankmeldungDialog({
   const [stundenWert, setStundenWert] = useState("2");
   const [stundenVerfuegbar, setStundenVerfuegbar] = useState(false);
 
+  const [dateiFehlt, setDateiFehlt] = useState<string | null>(null);
+
   useEffect(() => {
     if (open) {
-      setVon(today);
-      setBis(today);
-      setNotiz("");
+      const entwurf = vorhanden ? null : ladeEntwurf(userId);
+      const vStd = vorhanden ? Number((vorhanden as any).stunden) || 0 : 0;
+      setVon(vorhanden?.von ?? entwurf?.von ?? today);
+      setBis(vorhanden?.bis ?? entwurf?.bis ?? today);
+      setNotiz(vorhanden?.notiz ?? entwurf?.notiz ?? "");
       setFile(null);
-      setStundenModus(false);
-      setStundenWert("2");
+      setStundenModus(vorhanden ? vStd > 0 : entwurf?.stundenModus ?? false);
+      setStundenWert(vStd > 0 ? String(vStd).replace(".", ",") : entwurf?.stundenWert ?? "2");
+      // Nach einem Neuladen ist das gewählte Foto weg — darauf hinweisen.
+      setDateiFehlt(entwurf?.datei ?? null);
       supabase
         .from("krankmeldungen")
         .select("stunden" as "*")
@@ -256,7 +327,20 @@ function KrankmeldungDialog({
         .then(({ error }) => setStundenVerfuegbar(!error));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, vorhanden?.id]);
+
+  // Entwurf laufend sichern (nur bei neuen Meldungen).
+  useEffect(() => {
+    if (!open || vorhanden) return;
+    speichereEntwurf(userId, {
+      von,
+      bis,
+      notiz,
+      stundenModus,
+      stundenWert,
+      datei: file?.name ?? dateiFehlt ?? undefined,
+    });
+  }, [open, vorhanden, userId, von, bis, notiz, stundenModus, stundenWert, file, dateiFehlt]);
 
   const stunden = Number(stundenWert.replace(",", ".")) || 0;
   const istStunden = stundenModus && stundenVerfuegbar && von === bis;
@@ -285,14 +369,37 @@ function KrankmeldungDialog({
         dokumentId = r.dokumentId;
         storagePath = r.storagePath;
       }
-      const { error } = await supabase.from("krankmeldungen").insert({
-        mitarbeiter_id: userId,
-        von,
-        bis,
-        ...(istStunden ? { stunden } : {}),
-        dokument_id: dokumentId,
-        notiz: notiz.trim() || null,
-      } as any);
+      let error: { message: string } | null = null;
+      if (vorhanden) {
+        // Bearbeiten: Die Datenbank bucht die Krank-Stunden im Tätigkeits-
+        // bericht selbst um, wenn sich Datum oder Stunden ändern.
+        const { data: geaendert, error: upErr } = await supabase
+          .from("krankmeldungen")
+          .update({
+            von,
+            bis,
+            stunden: istStunden ? stunden : null,
+            dokument_id: dokumentId ?? vorhanden.dokument_id,
+            notiz: notiz.trim() || null,
+          } as any)
+          .eq("id", vorhanden.id)
+          .select("id");
+        error =
+          upErr ??
+          (!geaendert || geaendert.length === 0
+            ? { message: "Die Krankmeldung konnte nicht geändert werden (fehlende Berechtigung)." }
+            : null);
+      } else {
+        const { error: insErr } = await supabase.from("krankmeldungen").insert({
+          mitarbeiter_id: userId,
+          von,
+          bis,
+          ...(istStunden ? { stunden } : {}),
+          dokument_id: dokumentId,
+          notiz: notiz.trim() || null,
+        } as any);
+        error = insErr;
+      }
       if (error) {
         // Storage-Cleanup: hochgeladene Datei wieder entfernen
         if (dokumentId && storagePath) {
@@ -302,10 +409,23 @@ function KrankmeldungDialog({
             /* ignore */
           }
         }
-        throw error;
+        throw new Error(error.message);
       }
+      // Foto ersetzt → das alte Dokument aufräumen.
+      if (vorhanden && dokumentId && vorhandenDok) {
+        try {
+          await deleteMaDokument(vorhandenDok.id, vorhandenDok.storage_path);
+        } catch {
+          /* ignore */
+        }
+      }
+      if (!vorhanden) speichereEntwurf(userId, null);
       toast({
-        title: istStunden ? "Arzttermin eingetragen" : "Krankmeldung eingereicht",
+        title: vorhanden
+          ? "Krankmeldung geändert"
+          : istStunden
+            ? "Arzttermin eingetragen"
+            : "Krankmeldung eingereicht",
         description: istStunden
           ? `${fmtDate(von)} · ${String(stunden).replace(".", ",")} Stunden`
           : `${fmtDate(von)} – ${fmtDate(bis)}`,
@@ -324,12 +444,12 @@ function KrankmeldungDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <HeartPulse className="h-5 w-5 text-red-500" />
-            Krankmeldung / Arzttermin
+            {vorhanden ? "Krankmeldung bearbeiten" : "Krankmeldung / Arzttermin"}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
@@ -386,7 +506,10 @@ function KrankmeldungDialog({
                 ref={inputRef}
                 type="file"
                 className="hidden"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => {
+                  setFile(e.target.files?.[0] ?? null);
+                  setDateiFehlt(null);
+                }}
               />
               <Button
                 type="button"
@@ -395,14 +518,23 @@ function KrankmeldungDialog({
                 onClick={() => inputRef.current?.click()}
               >
                 <Paperclip className="h-3.5 w-3.5 mr-1.5" />
-                {file ? "Datei wechseln" : "Foto/PDF anhängen"}
+                {file || vorhandenDok ? "Datei wechseln" : "Foto/PDF anhängen"}
               </Button>
-              {file && (
+              {file ? (
                 <div className="text-xs text-muted-foreground truncate flex-1">
                   {file.name} ({Math.round(file.size / 1024)} KB)
                 </div>
-              )}
+              ) : vorhandenDok ? (
+                <div className="text-xs text-muted-foreground truncate flex-1">
+                  Angehängt: {vorhandenDok.dateiname}
+                </div>
+              ) : null}
             </div>
+            {dateiFehlt && !file && (
+              <div className="text-[11px] text-amber-700 mt-1">
+                Das Foto „{dateiFehlt}“ ist nicht angekommen — bitte noch einmal anhängen.
+              </div>
+            )}
             <div className="text-[11px] text-muted-foreground mt-1">
               Foto vom Handy, PDF oder Word.
             </div>
@@ -441,7 +573,7 @@ function KrankmeldungDialog({
           </Button>
           <Button onClick={submit} disabled={busy}>
             {busy && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
-            Einreichen
+            {vorhanden ? "Speichern" : "Einreichen"}
           </Button>
         </DialogFooter>
       </DialogContent>

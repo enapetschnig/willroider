@@ -1,5 +1,39 @@
 # Journal
 
+## 2026-09-29 · Wunsch von Johannes Maurer (Krankmeldung)
+
+**Meldungen:** Die Krankmeldung erscheint nicht im Tätigkeitsbericht. Am Handy
+„fliegt man aus dem Vorgang“, sobald ein Kamerafoto gemacht wird. Danach kann man
+nichts mehr bearbeiten.
+
+**Ursache:** Beim Zurückkommen aus der Kamera erneuert das Handy die Anmeldung.
+Dabei hat die Seite „Mein Tag“ sich komplett neu aufgebaut (kurz „Lädt…“), und das
+offene Krankmeldungs-Formular wurde geschlossen, bevor man einreichen konnte. Laut
+Server-Protokoll kam am 29.09. um 08:08 vom Handy nie ein Speichervorgang an. Die
+Krankmeldung gab es also noch gar nicht, deshalb war auch der Tätigkeitsbericht leer.
+Die um 08:14 eingereichte Meldung (28.09., 2 Std. Zahnarzt) steht korrekt im Bericht.
+
+**Geändert:**
+- `AuthContext`: `user` und `profile` behalten beim Erneuern der Anmeldung dasselbe
+  Objekt, wenn sich inhaltlich nichts ändert. So laden Seiten nicht mehr grundlos
+  neu. Das gilt für die ganze App.
+- `MeinTag`: „Lädt…“ erscheint nur beim ersten Laden. Neu geladen wird nur, wenn sich
+  die Person oder die Partie ändert.
+- Die Krankmeldung merkt sich den Entwurf (Datum, Stunden, Notiz) im Browser. Lädt
+  das Handy die Seite beim Fotografieren doch komplett neu, öffnet sich das Formular
+  wieder mit allen Angaben und dem Hinweis, das Foto noch einmal anzuhängen.
+- **Neu: Krankmeldung bearbeiten** (Stift-Symbol in „Mein Tag“ → Krankmeldung):
+  Datum, Stunden und Notiz lassen sich ändern und ein Foto nachreichen oder tauschen.
+- Migration `20260929100000_krankmeldung_bearbeiten.sql` (**angewendet**):
+  - Mitarbeiter dürfen die eigene Krankmeldung ändern.
+  - Ändern sich Datum oder Stunden, bucht die Datenbank die Krank-Einträge im
+    Tätigkeitsbericht um. Im zurückgerollten Test wurde aus 2 Std. richtig 3 Std.,
+    die Arbeitsstunden blieben stehen.
+
+**Offen:**
+- Ganztägige Krankmeldungen überschreiben weiterhin nur Tage im Status „erfasst“.
+  Das ist unverändert, aber aufgefallen.
+
 ## 2026-09-24 · Roboter · Wunsch von Jürgen Mainhard
 
 **Meldung (Tätigkeitsbericht → Fahrtenbuch):** „Fahrtenbuch Eingabe Kennzeichen,

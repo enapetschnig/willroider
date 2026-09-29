@@ -24,7 +24,7 @@ import { useNavigate } from "react-router-dom";
 import { findeOderErstelleBerichtMitVorausfuellung } from "@/hooks/useBericht";
 import { werktagePlus } from "@/lib/feiertage";
 import { UrlaubAntraegeCard } from "@/components/UrlaubAntragDialog";
-import { KrankmeldungenCard } from "@/components/MeinTag/KrankmeldungenCard";
+import { KrankmeldungenCard, hatKrankmeldungEntwurf } from "@/components/MeinTag/KrankmeldungenCard";
 import { LohnzettelCard } from "@/components/MeinTag/LohnzettelCard";
 import { MeineStundenCard } from "@/components/MeinTag/MeineStundenCard";
 import { UnterweisungOffenCard } from "@/components/MeinTag/UnterweisungOffenCard";
@@ -506,7 +506,9 @@ function VorschauCard({ userId }: { userId: string }) {
 
 export default function MeinTag() {
   const { user, profile, einfacheAnsicht } = useAuth();
-  const [mehrOffen, setMehrOffen] = useState(false);
+  // Offener Krankmeldungs-Entwurf (Seite beim Fotografieren neu geladen)
+  // → „Mehr“ gleich aufgeklappt, damit das Formular sichtbar ist.
+  const [mehrOffen, setMehrOffen] = useState(hatKrankmeldungEntwurf);
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [partie, setPartie] = useState<Partie | null>(null);
   const [colleagues, setColleagues] = useState<{ id: string; vorname: string; nachname: string }[]>([]);
@@ -517,9 +519,11 @@ export default function MeinTag() {
   const [zaSaldo, setZaSaldo] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // „Lädt…" nur beim ersten Mal — beim Nachladen (Realtime, Rückkehr aus
+  // der Kamera) blieb sonst die ganze Seite kurz leer, und offene Dialoge
+  // wie die Krankmeldung wurden dabei geschlossen (J. Maurer 29.09.).
   const load = async () => {
     if (!user || !profile) return;
-    setLoading(true);
 
     if (!profile.partie_id) {
       setBaustellen([]);
@@ -594,7 +598,8 @@ export default function MeinTag() {
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [user, profile]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, profile?.partie_id]);
 
   // Eigene Konto-Salden laden
   useEffect(() => {

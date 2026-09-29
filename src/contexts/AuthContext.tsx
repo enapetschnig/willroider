@@ -93,7 +93,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle(),
       supabase.from("user_roles").select("role").eq("user_id", userId).maybeSingle(),
     ]);
-    setProfile((prof as unknown as Profile) ?? null);
+    // Gleiches Profil → gleiches Objekt behalten. Sonst lädt jede Seite,
+    // die am Profil hängt, bei jeder Token-Erneuerung neu — am Handy passiert
+    // das beim Zurückkommen aus der Kamera, und offene Formulare (z. B. die
+    // Krankmeldung) verschwanden mitten im Ausfüllen (J. Maurer 29.09.).
+    const neuProf = (prof as unknown as Profile) ?? null;
+    setProfile((alt) => (JSON.stringify(alt) === JSON.stringify(neuProf) ? alt : neuProf));
     setRole((roleData?.role as AppRole) ?? null);
     await loadPermissions();
   }, [loadPermissions]);
@@ -104,7 +109,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const handle = async (s: Session | null) => {
       if (!mounted) return;
       setSession(s);
-      setUser(s?.user ?? null);
+      // Dieselbe Person → dasselbe user-Objekt (siehe loadProfile).
+      setUser((alt) => (alt && s?.user && alt.id === s.user.id ? alt : s?.user ?? null));
       if (s?.user) {
         await loadProfile(s.user.id);
       } else {
