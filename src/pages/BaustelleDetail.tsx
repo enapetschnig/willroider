@@ -25,6 +25,8 @@ import {
   ExternalLink,
   PencilRuler,
   ArrowRight,
+  Download,
+  Loader2,
 } from "lucide-react";
 import {
   Dialog,
@@ -90,6 +92,20 @@ export default function BaustelleDetail() {
   const [stunden, setStunden] = useState<StundenZeile[]>([]);
   const [evals, setEvals] = useState<Eval[]>([]);
   const [tabletOffen, setTabletOffen] = useState(false);
+  // Unterweisungsnachweis als PDF (Vorlage „Gefahrenevaluierung Baustellen")
+  const [pdfLaedt, setPdfLaedt] = useState<string | null>(null);
+  const nachweisPdf = async (evaluierungId: string) => {
+    setPdfLaedt(evaluierungId);
+    try {
+      const { erstelleUnterweisungNachweisPdf } = await import("@/lib/unterweisungNachweisPdf");
+      const { doc, dateiname } = await erstelleUnterweisungNachweisPdf(evaluierungId);
+      doc.save(dateiname);
+    } catch (e) {
+      toast({ variant: "destructive", title: "PDF nicht erstellt", description: (e as Error).message });
+    } finally {
+      setPdfLaedt(null);
+    }
+  };
   const [nachweisKey, setNachweisKey] = useState(0);
   const [partie, setPartie] = useState<Partie | null>(null);
   const [team, setTeam] = useState<Profile[]>([]);
@@ -937,6 +953,22 @@ export default function BaustelleDetail() {
                       <Button size="sm" className="h-10" onClick={() => setTabletOffen(true)}>
                         Am Tablet unterschreiben lassen
                       </Button>
+                      {/* Fertig unterschriebene Unterweisung als ein Dokument
+                          (Wunsch N. Gwenger 29.09.) */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-10"
+                        disabled={pdfLaedt === b.pflicht_evaluierung_id}
+                        onClick={() => nachweisPdf(b.pflicht_evaluierung_id!)}
+                      >
+                        {pdfLaedt === b.pflicht_evaluierung_id ? (
+                          <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                        ) : (
+                          <Download className="h-4 w-4 mr-1.5" />
+                        )}
+                        Nachweis als PDF
+                      </Button>
                       <Button
                         size="sm"
                         variant="outline"
@@ -946,7 +978,11 @@ export default function BaustelleDetail() {
                         Inhalt bearbeiten / Ergänzung anlegen
                       </Button>
                     </div>
-                    <UnterweisungNachweis evaluierungId={b.pflicht_evaluierung_id} refreshKey={nachweisKey} />
+                    <UnterweisungNachweis
+                      evaluierungId={b.pflicht_evaluierung_id}
+                      refreshKey={nachweisKey}
+                      darfAendern
+                    />
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -989,9 +1025,24 @@ export default function BaustelleDetail() {
                     {new Date(e.datum).toLocaleDateString("de-AT")} ·{" "}
                     <Badge variant="outline">{e.typ}</Badge>
                   </div>
-                  <Badge variant={e.abgeschlossen ? "default" : "outline"}>
-                    {e.abgeschlossen ? "Abgeschlossen" : "Offen"}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={e.abgeschlossen ? "default" : "outline"}>
+                      {e.abgeschlossen ? "Abgeschlossen" : "Offen"}
+                    </Badge>
+                    <button
+                      type="button"
+                      onClick={() => nachweisPdf(e.id)}
+                      disabled={pdfLaedt === e.id}
+                      className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted"
+                      title="Nachweis mit allen Unterschriften als PDF"
+                    >
+                      {pdfLaedt === e.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Download className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
                 </div>
               ))}
               {evals.length === 0 && (

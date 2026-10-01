@@ -67,7 +67,8 @@ function ergebnisLabel(e: ChecklisteItem): {
 } {
   const v = (e.ergebnis ?? e.status ?? "").toString().toLowerCase();
   if (v === "io" || v === "i.o.") return { text: "i.O.", color: GRUEN };
-  if (v === "nio" || v === "n.i.o." || v === "nicht_io")
+  // Die App speichert „nicht i.O." — das fiel bisher durch und stand als „—" im PDF.
+  if (v === "nio" || v === "n.i.o." || v === "nicht_io" || v === "nicht i.o.")
     return { text: "nicht i.O.", color: ROT };
   if (v === "na" || v === "n.a." || v === "nicht_anwendbar")
     return { text: "n.A.", color: GRAU };

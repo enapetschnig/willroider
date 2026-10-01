@@ -1,5 +1,47 @@
 # Journal
 
+## 2026-10-01 · Wünsche von Niklas Gwenger (Stundenbericht, Unterweisung)
+
+**1. „Angestellte haben keinen Baustellenstundenbericht, wir schreiben Tätigkeitsbericht“**
+- **Ursache:** Die Datenbank-Funktion `stunden_bericht_erzeugen` (Cron „bsb-abend“,
+  täglich 18:00) legte Berichte für alle mit Stunden an, auch für Angestellte. Seit
+  heute sind die Erinnerungen scharf. Um 09:00 bekamen 8 Angestellte eine Mail und
+  einer eine Push-Nachricht „Stundenbericht unterschreiben“.
+- Migration `20261001100000_bsb_ohne_angestellte.sql` (**angewendet**):
+  - Die Funktion überspringt `zeiterfassung_typ = 'angestellter'`.
+  - Die 41 offenen, nie unterschriebenen Berichte von Angestellten sind gelöscht
+    (Freigabe Christoph).
+  - Die 9 versendeten Berichte von Angestellten bleiben als Nachweis stehen.
+- Dashboard: Die Karte „Dein Baustellenstundenbericht wartet …“ erscheint für
+  Angestellte nicht mehr. Die Kontroll-Karte fürs Büro bleibt.
+
+**2. „Mitarbeiter hinzufügen bzw. ändern … Wo sehe ich die fertig unterschriebene
+Unterweisung … ähnlich wie die Vorlage von Christian“**
+- Vorlage: „5.1 Unterweisung 2.docx“ (Gefahrenevaluierung Baustellen –
+  Zimmerei/Tischlerei, Google Drive).
+- **Neu:** Auf der Baustelle unter „Unterweisung“ gibt es den Knopf **„Nachweis als
+  PDF“**, außerdem ein Download-Symbol bei jeder Evaluierung. Erzeugt wird ein
+  Dokument im Aufbau der Vorlage (`src/lib/unterweisungNachweisPdf.ts`):
+  - Seite 1: Angaben zur Baustelle (Anschrift, Art und Umfang, Arbeitsbeginn und
+    -ende als KW, Bauleiter, Partieführer, Anzahl), Hinweis § 4 ASchG, „Schulung und
+    Unterweisung auf Baustelle“ mit der Tabelle Name | Unterschrift | Name |
+    Unterschrift samt Unterschriftsbildern, „Evaluierung durchgeführt“.
+  - Ab Seite 2: „Gefahrenermittlung / Festlegung von Maßnahmen“ mit dem Zustand
+    i.O. / nicht i.O. / n.A. je Punkt.
+  - Bei Tagesbaustellen (SiGe) kommt weiter das Wulz-Formular.
+- **Neu:** In der Unterweisungsliste lassen sich Mitarbeiter von Hand hinzufügen
+  und offene (noch nicht unterschriebene) wieder herausnehmen. Wer von Hand dazukommt,
+  hat keine Fälligkeit: Die Unterweisung erscheint in der App und kann unterschrieben
+  werden, gesperrt wird erst bei einer Einteilung über den Tagesplan. Dafür war keine
+  Datenbank-Änderung nötig, das Büro darf das laut Rechten schon.
+- Nebenbei behoben: Die Einzel-PDF je Mitarbeiter zeigte „nicht i.O.“ als „—“.
+
+**Offen:**
+- Sebastian Egger, 21.07.: „Liste Sonderdimensionen Hölzer“ wartet weiter auf die
+  Besprechung (Liste fehlt).
+- Die Erinnerungsfunktion (`erinnerungen`) schließt Angestellte nicht selbst aus.
+  Das ist nicht mehr nötig, weil für sie keine Berichte mehr entstehen.
+
 ## 2026-09-29 · Wunsch von Johannes Maurer (Krankmeldung)
 
 **Meldungen:** Die Krankmeldung erscheint nicht im Tätigkeitsbericht. Am Handy

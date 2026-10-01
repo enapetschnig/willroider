@@ -19,19 +19,22 @@ function monatLabel(jahr: number, monat: number): string {
 }
 
 export function StundenBerichtHintCard() {
-  const { user, canReview } = useAuth();
+  const { user, profile, canReview } = useAuth();
+  // Angestellte führen den Tätigkeitsbericht, keinen Baustellenstundenbericht
+  // (N. Gwenger 01.10.) — die Kontroll-Karte fürs Büro bleibt.
+  const istAngestellter = (profile as any)?.zeiterfassung_typ === "angestellter";
 
   const meine = useStundenBerichteList({
     mitarbeiterId: user?.id,
     status: "offen",
-    enabled: !!user,
+    enabled: !!user && !istAngestellter,
   });
   const kontrolle = useStundenBerichteList({
     status: "unterschrieben",
     enabled: !!user && canReview,
   });
 
-  const meinOffen = meine.data?.[0];
+  const meinOffen = istAngestellter ? undefined : meine.data?.[0];
   const kontrollCount = kontrolle.data?.length ?? 0;
 
   if (!meinOffen && kontrollCount === 0) return null;
