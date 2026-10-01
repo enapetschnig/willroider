@@ -1,5 +1,22 @@
 # Journal
 
+## 2026-10-01 · Wunsch von Johannes Maurer („aktualisiert sich beim Öffnen nochmal“)
+
+**Ursache:** Die App fragte beim Öffnen nach einer neuen Version und lud sich bei
+einem Treffer sofort neu (`registerType: 'autoUpdate'`). Heute wurde mehrmals
+ausgeliefert, also passierte das sichtbar, gleich nach dem Öffnen.
+
+**Geändert:**
+- `vite.config.ts`: `registerType: 'prompt'`.
+- `src/main.tsx`: Eine gefundene neue Version wird erst übernommen, wenn die App im
+  Hintergrund ist. Außerdem lädt die App bei fehlenden nachgeladenen Bausteinen
+  einmal neu (`vite:preloadError`).
+- **Übergang:** Handys mit der alten Version bekommen die neue erst, wenn die App
+  einmal ganz geschlossen wird.
+
+**Offen:** „Ansicht am Handy sollte noch verbessert werden“ ist unklar, weil der
+Screenshot fehlt. Rückfrage an Christoph.
+
 ## 2026-10-01 · Wünsche von Niklas Gwenger (Stundenbericht, Unterweisung)
 
 **1. „Angestellte haben keinen Baustellenstundenbericht, wir schreiben Tätigkeitsbericht“**

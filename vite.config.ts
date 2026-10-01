@@ -18,7 +18,10 @@ export default defineConfig(({ mode }) => ({
     react(), 
     mode === "development" && componentTagger(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // 'prompt': Die neue Version wird nicht sofort beim Öffnen übernommen
+      // (die App lud sich sonst sichtbar ein zweites Mal — J. Maurer 01.10.),
+      // sondern in src/main.tsx, sobald die App im Hintergrund ist.
+      registerType: 'prompt',
       // Registrierung erfolgt manuell in src/main.tsx (registerSW mit
       // periodischem Update-Check) — Plugin soll nichts zusätzlich injizieren.
       injectRegister: null,
