@@ -14,8 +14,20 @@ ausgeliefert, also passierte das sichtbar, gleich nach dem Öffnen.
 - **Übergang:** Handys mit der alten Version bekommen die neue erst, wenn die App
   einmal ganz geschlossen wird.
 
-**Offen:** „Ansicht am Handy sollte noch verbessert werden“ ist unklar, weil der
-Screenshot fehlt. Rückfrage an Christoph.
+**„Ansicht am Handy sollte noch verbessert werden“** (Screenshot von Christoph,
+02.10.): Die Startseite war breiter als das Handy, rechts blieb ein leerer
+Streifen.
+- **Ursache:** In „Aktive Baustellen“ drückte ein langer Baustellenname die Karte
+  breiter als den Bildschirm (gemessen: 866 statt 393 Punkte). `truncate` griff nicht,
+  weil das Grid-Element keine `min-w-0` hatte.
+- **Behoben:** `grid-cols-1` und `min-w-0`. Am Handy steht der Zeitraum jetzt in der
+  zweiten Zeile, damit der Name mehr Platz hat.
+- **Nachgemessen:** im Test-Browser (Chromium, Pixel-5-Breite, nachgestellte Daten,
+  keine echten Konten). Die Seitenbreite ist jetzt gleich der Bildschirmbreite, auch
+  mit offenem Benutzer-Menü.
+- **Für spätere Tests:** Der Test-Browser startet hier, wenn `libnspr4`/`libnss3`
+  per `apt-get download` ins Zwischenverzeichnis geholt und über `LD_LIBRARY_PATH`
+  eingebunden werden.
 
 ## 2026-10-01 · Wünsche von Niklas Gwenger (Stundenbericht, Unterweisung)
 

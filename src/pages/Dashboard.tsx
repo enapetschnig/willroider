@@ -1147,24 +1147,33 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-2">
+          // grid-cols-1 + min-w-0: Ein langer Baustellenname drückte die Karte
+          // sonst breiter als das Handy — die ganze Startseite wurde breiter
+          // und wirkte verkleinert, rechts blieb ein leerer Streifen
+          // (J. Maurer 01.10.). Jetzt wird der Name mit „…" gekürzt.
+          <div className="grid grid-cols-1 gap-2">
             {aktiveBaustellen.map((b) => (
-              <Link key={b.id} to={`/baustellen/${b.id}`}>
+              <Link key={b.id} to={`/baustellen/${b.id}`} className="block min-w-0">
                 <Card className="hover:shadow-md transition-shadow">
                   <CardContent className="p-3 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 min-w-0">
                         <Building2 className="h-4 w-4 text-primary shrink-0" />
                         <span className="font-semibold truncate">{b.bvh_name}</span>
-                        <Badge variant={STATUS_VARIANT[b.status]} className="text-[10px]">
+                        <Badge variant={STATUS_VARIANT[b.status]} className="text-[10px] shrink-0">
                           {STATUS_LABEL[b.status]}
                         </Badge>
                       </div>
                       <div className="text-xs text-muted-foreground truncate">
                         {[b.kostenstelle, b.ort, b.bauherr].filter(Boolean).join(" · ")}
                       </div>
+                      {/* Am Handy steht der Zeitraum unten — der Name braucht den Platz. */}
+                      <div className="sm:hidden text-xs text-muted-foreground">
+                        {b.start_datum && new Date(b.start_datum).toLocaleDateString("de-AT")} →{" "}
+                        {b.end_datum ? new Date(b.end_datum).toLocaleDateString("de-AT") : "offen"}
+                      </div>
                     </div>
-                    <div className="text-right text-xs text-muted-foreground shrink-0">
+                    <div className="hidden sm:block text-right text-xs text-muted-foreground shrink-0">
                       {b.start_datum && new Date(b.start_datum).toLocaleDateString("de-AT")} →{" "}
                       {b.end_datum ? new Date(b.end_datum).toLocaleDateString("de-AT") : "offen"}
                     </div>
