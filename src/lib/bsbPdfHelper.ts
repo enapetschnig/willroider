@@ -157,7 +157,9 @@ export async function buildBerichtPdf(
         // wurde; die Maschine wandert in den Tätigkeitstext. Genau das
         // meint „Stunden müssen auf die Baustelle gebucht werden".
         const zielId = e.ziel_baustelle_id ?? e.baustelle_id;
-        key = `b:${zielId ?? "none"}`;
+        // In der Firma gearbeitet: eigene Zeile (N. Gwenger 05.10.).
+        const inFirma = e.ort === "firma";
+        key = `b:${zielId ?? "none"}${inFirma ? "|firma" : ""}`;
         const b = zielId ? baustelleMap.get(zielId) : null;
         label = (b as any)?.bvh_name ?? "Baustelle";
         kst = (b as any)?.kostenstelle ?? "";
@@ -166,6 +168,7 @@ export async function buildBerichtPdf(
           const mName = (maschine as any)?.bvh_name;
           if (mName) label = `${label} (${mName})`;
         }
+        if (inFirma) label = `${label} (in der Firma)`;
       } else if (e.art === "firma") {
         key = "firma";
         label = "Firma";

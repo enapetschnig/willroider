@@ -25,6 +25,9 @@ export interface SaveEintrag {
   /** Nur bei Werk-/Hallenstunden: die Baustelle, FÜR die gearbeitet wird.
    *  baustelle_id bleibt die Maschine — daran hängt der Taggeld-Ausschluss. */
   ziel_baustelle_id?: string | null;
+  /** Auf der Baustelle oder in der Firma. Fehlt der Wert (Masken, die den Ort
+   *  nicht kennen), bleibt der bisher gespeicherte Ort der Zeile erhalten. */
+  ort?: "baustelle" | "firma";
   stunden: number;
   notiz: string | null;
 }
@@ -178,6 +181,22 @@ export function useSaveStundenTag() {
       }
       if (!tagId) throw new Error("Tag-ID fehlt nach Save");
 
+      // Ort (Baustelle/Firma) der bisherigen Zeilen merken: Masken ohne
+      // Ort-Auswahl (Tätigkeitsbericht, Halle, Büro-Korrektur) schreiben den
+      // Tag komplett neu — ohne das hier fiele „Firma" still auf „Baustelle"
+      // zurück, und es gäbe plötzlich wieder Taggeld.
+      const { data: vorher } = await supabase
+        .from("stunden_taetigkeiten")
+        .select("art, baustelle_id, taetigkeit_id, ort")
+        .eq("stunden_tag_id", tagId);
+      const ortVorher = (t: SaveEintrag): "baustelle" | "firma" => {
+        const alt = ((vorher as any[]) ?? []).filter(
+          (v) => v.art === t.art && v.baustelle_id === t.baustelle_id,
+        );
+        const genau = alt.find((v) => v.taetigkeit_id === t.taetigkeit_id) ?? alt[0];
+        return genau?.ort === "firma" ? "firma" : "baustelle";
+      };
+
       // Tätigkeiten komplett ersetzen — Delete-Fehler MUSS abbrechen,
       // sonst verdoppeln die nachfolgenden Inserts die Einträge.
       const { error: delErr } = await supabase
@@ -195,6 +214,7 @@ export function useSaveStundenTag() {
             taetigkeit_freitext: t.taetigkeit_freitext,
             baustelle_id: t.baustelle_id,
             ziel_baustelle_id: t.ziel_baustelle_id ?? null,
+            ort: t.art === "baustelle" ? t.ort ?? ortVorher(t) : "baustelle",
             stunden: t.stunden,
             notiz: t.notiz,
           })),

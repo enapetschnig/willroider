@@ -831,6 +831,8 @@ export type Database = {
           baustelle_id: string | null;
           /** Nur Werk/Halle: Baustelle, für die vorgefertigt wird. */
           ziel_baustelle_id: string | null;
+          /** Wo gearbeitet wurde — „firma" gibt kein Taggeld (05.10.2026). */
+          ort: "baustelle" | "firma";
           stunden: number;
           notiz: string | null;
           created_at: string;

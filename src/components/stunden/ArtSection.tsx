@@ -137,6 +137,36 @@ export function ArtSection({
               </>
             )}
 
+            {/* Wo wurde gearbeitet? Muss am Bericht ersichtlich sein
+                (N. Gwenger 05.10.). Firma gibt kein Taggeld. Werk/Halle ist
+                ohnehin Firma — dort kein Umschalter. */}
+            {art === "baustelle" && !istMaschine && (
+              <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-1" role="radiogroup" aria-label="Ort">
+                {(
+                  [
+                    ["baustelle", "Auf der Baustelle"],
+                    ["firma", "In der Firma"],
+                  ] as const
+                ).map(([wert, text]) => {
+                  const aktiv = (row.ort ?? "baustelle") === wert;
+                  return (
+                    <button
+                      key={wert}
+                      type="button"
+                      role="radio"
+                      aria-checked={aktiv}
+                      onClick={() => onUpdate(row.key, { ort: wert })}
+                      className={`h-9 rounded text-sm font-medium transition-colors ${
+                        aktiv ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {text}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="flex items-center justify-between gap-2">
               <StundenZelle
                 value={row.stunden}

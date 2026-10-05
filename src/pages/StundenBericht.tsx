@@ -245,7 +245,10 @@ export default function StundenBericht() {
           // Werk-Stunden laufen auf die Baustelle, für die vorgefertigt
           // wurde; die Maschine steht in Klammern dahinter.
           const zielId = (e as any).ziel_baustelle_id ?? e.baustelle_id;
-          key = `b:${zielId ?? "none"}`;
+          // In der Firma gearbeitet: eigene Zeile, damit es am Bericht
+          // ersichtlich ist (N. Gwenger 05.10.).
+          const inFirma = (e as any).ort === "firma";
+          key = `b:${zielId ?? "none"}${inFirma ? "|firma" : ""}`;
           const b = zielId ? baustelleMap.get(zielId) : null;
           label = b?.bvh_name ?? "Baustelle";
           kst = b?.kostenstelle ?? "";
@@ -253,6 +256,7 @@ export default function StundenBericht() {
             const mName = baustelleMap.get(e.baustelle_id)?.bvh_name;
             if (mName) label = `${label} (${mName})`;
           }
+          if (inFirma) label = `${label} (in der Firma)`;
         } else if (e.art === "firma") {
           key = "firma";
           label = "Firma";

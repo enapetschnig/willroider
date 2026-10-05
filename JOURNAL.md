@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-10-05 · Wunsch von Niklas Gwenger (Baustelle oder Firma)
+
+**Meldung (Baustellenstundenbericht):** „Auf den Berichten muss ersichtlich sein, ob
+der Mitarbeiter auf der Baustelle war oder in der Firma … Sollte man beim Stunden
+schreiben auswählen können.“
+
+**Entscheidung Christoph:** Der Ort wird je Zeile gewählt, Stunden „In der Firma“
+geben kein Taggeld.
+
+**Geändert:**
+- Migration `20261005100000_stunden_ort.sql` (**angewendet**):
+  - Neue Spalte `stunden_taetigkeiten.ort` (`baustelle` | `firma`, Standard
+    `baustelle`). Alle 1778 bestehenden Zeilen stehen auf „baustelle“, rückwirkend
+    ändert sich nichts.
+  - Der Bericht-Schnappschuss (`stunden_bericht_erzeugen`) nimmt den Ort mit.
+- **Stunden und Tag bearbeiten:** Jede Baustellen-Zeile hat den Umschalter „Auf der
+  Baustelle / In der Firma“. Werk/Halle haben keinen, die sind ohnehin Firma.
+- **Taggeld:** Firma-Zeilen zählen nicht, sowohl beim automatischen Taggeld beim
+  Speichern als auch in `taggeldFuerTag` (Stundenauswertung, Stundenzettel).
+- **Bericht und PDF:** Firma-Stunden stehen in einer eigenen Zeile, zum Beispiel
+  „HMH Skrube (in der Firma)“. Die Änderungsmarkierung (gelb) erkennt einen
+  Wechsel Baustelle ↔ Firma. Altberichte ohne Ort werden nicht gelb.
+- **Speichern:** Masken ohne Umschalter (Tätigkeitsbericht, Halle, Büro-Korrektur)
+  übernehmen den bisherigen Ort jeder Zeile. Sonst fiele „Firma“ beim nächsten
+  Speichern still auf „Baustelle“ zurück.
+- Nebenbei: „Tag bearbeiten“ verlor beim Speichern die Ziel-Baustelle von
+  Werk-Stunden. Das ist behoben.
+
+**Geprüft:** im Test-Browser (Handy-Breite, nachgestellte Daten, Service Worker
+blockiert, kein echter Server).
+- „In der Firma“ + Baustelle + 8 Std. → gespeichert `ort: "firma"`, kein Taggeld.
+- Gegenprobe „Auf der Baustelle“ → `ort: "baustelle"`, 1× Taggeld kurz.
+
 ## 2026-10-01 · Wunsch von Johannes Maurer („aktualisiert sich beim Öffnen nochmal“)
 
 **Ursache:** Die App fragte beim Öffnen nach einer neuen Version und lud sich bei

@@ -49,6 +49,8 @@ function rowsAusTag(tag: StundenTagFull | null): EintragRow[] {
     key: newKey(),
     art: tt.art,
     baustelle_id: tt.baustelle_id,
+    ziel_baustelle_id: (tt as any).ziel_baustelle_id ?? null,
+    ort: (tt as any).ort === "firma" ? "firma" : "baustelle",
     taetigkeit_id: tt.taetigkeit_id,
     taetigkeit_freitext: tt.taetigkeit_freitext ?? "",
     stunden: Number(tt.stunden),
@@ -193,6 +195,8 @@ export function TagBearbeitenDialog({
                 ? e.taetigkeit_freitext.trim() || null
                 : null,
             baustelle_id: e.art === "baustelle" ? e.baustelle_id : null,
+            ziel_baustelle_id: e.art === "baustelle" ? e.ziel_baustelle_id ?? null : null,
+            ort: e.art === "baustelle" && e.ort === "firma" ? "firma" : "baustelle",
             stunden: Number(e.stunden),
             notiz: e.notiz.trim() || null,
           };

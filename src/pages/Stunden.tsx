@@ -498,6 +498,7 @@ export default function Stunden() {
             art: tt.art,
             baustelle_id: tt.baustelle_id,
             ziel_baustelle_id: (tt as any).ziel_baustelle_id ?? null,
+            ort: (tt as any).ort === "firma" ? "firma" : "baustelle",
             taetigkeit_id: tt.taetigkeit_id,
             taetigkeit_freitext: tt.taetigkeit_freitext ?? "",
             stunden: Number(tt.stunden),
@@ -876,6 +877,7 @@ export default function Stunden() {
             taetigkeit_freitext:
               arbeit && !r.taetigkeit_id ? r.taetigkeit_freitext.trim() || null : null,
             baustelle_id: r.art === "baustelle" ? r.baustelle_id : null,
+            ort: r.art === "baustelle" && r.ort === "firma" ? "firma" : "baustelle",
             stunden: Number(r.stunden),
             notiz: r.notiz.trim() || null,
           };
@@ -917,8 +919,9 @@ export default function Stunden() {
           }));
 
         // Auto-Taggeld aus den Baustellen-Stunden + Kilometergeld-Fahrt
+        // „In der Firma" gearbeitete Baustellen-Stunden geben kein Taggeld.
         const baustelleStd = rows
-          .filter((r) => r.art === "baustelle")
+          .filter((r) => r.art === "baustelle" && r.ort !== "firma")
           .reduce((s, r) => s + Number(r.stunden), 0);
         const isPolierSelf = uid === primaryUserId && istPolier;
         const polierFahrt = isPolierSelf ? form.fahrt : null;

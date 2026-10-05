@@ -130,6 +130,9 @@ export function taggeldFuerTag(
     .filter(
       (tt) =>
         tt.art === "baustelle" &&
+        // „In der Firma" gearbeitet → keine Auswärtstätigkeit, kein Taggeld
+        // (Entscheidung Christoph 05.10.2026).
+        (tt as { ort?: string }).ort !== "firma" &&
         !(maschinenIds && tt.baustelle_id && maschinenIds.has(tt.baustelle_id)),
     )
     .reduce((s, tt) => s + Number(tt.stunden ?? 0), 0);

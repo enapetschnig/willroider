@@ -14,6 +14,8 @@ export interface SnapshotEintrag {
    *  Seiten normalisieren fehlend und null gleich, damit Altberichte nicht
    *  plötzlich als geändert (gelb) erscheinen. */
   ziel_baustelle_id?: string | null;
+  /** Erst ab 05.10.2026; fehlend = „baustelle". */
+  ort?: string | null;
   taetigkeit_id: string | null;
   taetigkeit_freitext: string | null;
   stunden: number | string;
@@ -27,6 +29,9 @@ function normEintrag(e: SnapshotEintrag): string {
     e.art,
     e.baustelle_id ?? "",
     e.ziel_baustelle_id ?? "",
+    // Nur „firma" zählt — fehlend und „baustelle" sind gleich, damit
+    // Altberichte ohne Ort nicht gelb werden.
+    e.ort === "firma" ? "firma" : "",
     e.taetigkeit_id ?? "",
     (e.taetigkeit_freitext ?? "").trim(),
     (Number(e.stunden) || 0).toFixed(2),

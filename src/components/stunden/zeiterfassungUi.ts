@@ -100,6 +100,9 @@ export interface EintragRow {
   baustelle_id: string | null;
   /** Nur Werk/Halle: die Baustelle, für die vorgefertigt wird. */
   ziel_baustelle_id?: string | null;
+  /** Nur Baustellen-Zeilen: auf der Baustelle (Standard) oder in der Firma
+   *  gearbeitet. Firma gibt kein Taggeld (Wunsch N. Gwenger 05.10.). */
+  ort?: "baustelle" | "firma";
   taetigkeit_id: string | null;
   taetigkeit_freitext: string;
   stunden: number;
