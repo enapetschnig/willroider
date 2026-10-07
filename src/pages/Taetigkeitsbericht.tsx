@@ -51,6 +51,8 @@ import {
   wochentagIndex,
   type BerichtZeile,
   type Periode,
+  freigabeAb,
+  freigabeFaellig,
 } from "@/lib/taetigkeitsbericht";
 import {
   makeFahrtenbuchPdf,
@@ -1005,10 +1007,12 @@ export default function Taetigkeitsbericht() {
         <div className="mb-3 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 flex items-center gap-2 flex-wrap text-sm text-blue-900">
           <Pen className="h-4 w-4 shrink-0" />
           <span className="flex-1">
-            Unterschrieben am {new Date(unterschrift.am).toLocaleDateString("de-AT")} — wartet auf
-            Freigabe durch die Geschäftsführung.
+            Unterschrieben am {new Date(unterschrift.am).toLocaleDateString("de-AT")} —{" "}
+            {freigabeFaellig(periode.jahr, periode.monat, localIso())
+              ? "wartet auf Freigabe durch die Geschäftsführung."
+              : `geht am ${freigabeAb(periode.jahr, periode.monat)} gesammelt zur Freigabe an die Geschäftsführung. Bis dahin kannst du noch ändern und neu unterschreiben.`}
           </span>
-          {darfFreigeben && tab === "bericht" && (
+          {darfFreigeben && tab === "bericht" && freigabeFaellig(periode.jahr, periode.monat, localIso()) && (
             <Button size="sm" className="h-8" onClick={() => setFreigabeSignOffen(true)} disabled={freigabeBusy}>
               <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" /> Freigeben
             </Button>

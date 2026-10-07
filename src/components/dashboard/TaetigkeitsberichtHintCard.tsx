@@ -12,7 +12,7 @@ import { ArrowRight, ChevronRight, FileCheck2, PenLine } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { localIso } from "@/lib/dateFmt";
-import { periodeTitel, periodeVerschieben, periodeVonDatum } from "@/lib/taetigkeitsbericht";
+import { freigabeFaellig, periodeTitel, periodeVerschieben, periodeVonDatum } from "@/lib/taetigkeitsbericht";
 
 export function TaetigkeitsberichtHintCard() {
   const { user, profile, hasPermission } = useAuth();
@@ -39,9 +39,13 @@ export function TaetigkeitsberichtHintCard() {
     if (darfFreigeben) {
       (supabase as any)
         .from("taetigkeitsbericht_unterschriften")
-        .select("id", { count: "exact", head: true })
+        .select("jahr, monat")
         .eq("status", "unterschrieben")
-        .then(({ count }: { count: number | null }) => setWartend(count ?? 0));
+        // Nur abgelaufene Perioden — wer früher unterschreibt, landet trotzdem
+        // erst ab dem 21. gesammelt bei der Freigabe.
+        .then(({ data }: { data: { jahr: number; monat: number }[] | null }) =>
+          setWartend((data ?? []).filter((r) => freigabeFaellig(r.jahr, r.monat, heute)).length),
+        );
     }
   }, [user, istAngestellter, darfFreigeben]);
 

@@ -265,11 +265,15 @@ Deno.serve(async (req) => {
 
   // ── tb_freigabe: Freigeber, wenn Berichte warten ───────────────────────
   {
+    // Nur abgelaufene Perioden (ab dem 21.): früh Unterschriebenes geht
+    // gesammelt nach Periodenende zur Freigabe (Wunsch E. Winkler 07.10.).
     const { data: warten } = await sb
       .from("taetigkeitsbericht_unterschriften")
-      .select("id")
+      .select("id, jahr, monat")
       .eq("status", "unterschrieben");
-    const n = warten?.length ?? 0;
+    const n = ((warten ?? []) as Array<{ jahr: number; monat: number }>).filter(
+      (w) => heute > `${w.jahr}-${String(w.monat).padStart(2, "0")}-20`,
+    ).length;
     if (n > 0) {
       for (const p of alle) {
         const { data: darf } = await sb.rpc("has_permission", { _user_id: p.id, _schluessel: "stunden.taetigkeitsbericht.freigeben" });

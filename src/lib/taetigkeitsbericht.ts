@@ -65,6 +65,21 @@ export function periodeFuer(jahr: number, monat: number): Periode {
 }
 
 /** Die Periode, in die ein Datum fällt. Ab dem 21. zählt schon der Folgemonat. */
+/**
+ * Geht die Periode schon zur Freigabe? Erst ab dem 21. nach ihrem Ende —
+ * gesammelt, auch wenn jemand vorher unterschrieben hat (Wunsch E. Winkler
+ * 07.10.: früh unterschriebene Berichte „leuchteten" bei der GF sofort auf).
+ * jahr/monat = Endmonat der Periode (21.–20.).
+ */
+export function freigabeFaellig(jahr: number, monat: number, heute: string): boolean {
+  return heute > `${jahr}-${String(monat).padStart(2, "0")}-20`;
+}
+
+/** „21.10." — ab wann eine Periode zur Freigabe geht. */
+export function freigabeAb(jahr: number, monat: number): string {
+  return `21.${String(monat).padStart(2, "0")}.`;
+}
+
 export function periodeVonDatum(isoDatum: string): Periode {
   const jahr = Number(isoDatum.slice(0, 4));
   const monat = Number(isoDatum.slice(5, 7));

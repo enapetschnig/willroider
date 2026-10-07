@@ -18,7 +18,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { ChevronLeft, ChevronRight, CheckCircle2, Clock, Eye, Loader2, LockOpen, PenLine, AlertCircle } from "lucide-react";
 import { localIso } from "@/lib/dateFmt";
-import { periodeVonDatum, periodeVerschieben, periodeTitel, type Periode } from "@/lib/taetigkeitsbericht";
+import { freigabeAb, freigabeFaellig, periodeVonDatum, periodeVerschieben, periodeTitel, type Periode } from "@/lib/taetigkeitsbericht";
 
 type Angestellter = { id: string; vorname: string; nachname: string };
 type Zeile = {
@@ -130,7 +130,13 @@ export default function TaetigkeitsberichteListe() {
     void load();
   };
 
-  const wartendAndere = wartendAlle.filter((w) => !(w.jahr === periode.jahr && w.monat === periode.monat));
+  // Freigabe erst nach Periodenende (ab dem 21.) — früh Unterschriebenes
+  // zählt bis dahin nicht als „wartet".
+  const heute = localIso();
+  const periodeFaellig = freigabeFaellig(periode.jahr, periode.monat, heute);
+  const wartendAndere = wartendAlle.filter(
+    (w) => !(w.jahr === periode.jahr && w.monat === periode.monat) && freigabeFaellig(w.jahr, w.monat, heute),
+  );
 
   return (
     <div className="space-y-4 max-w-3xl mx-auto">
@@ -209,9 +215,14 @@ export default function TaetigkeitsberichteListe() {
                         <Clock className="h-3 w-3 mr-1" /> Nicht unterschrieben
                       </Badge>
                     )}
-                    {status === "unterschrieben" && (
+                    {status === "unterschrieben" && periodeFaellig && (
                       <Badge variant="outline" className="bg-blue-100 text-blue-900 border-blue-300 text-[10px]">
                         <PenLine className="h-3 w-3 mr-1" /> Wartet auf Freigabe
+                      </Badge>
+                    )}
+                    {status === "unterschrieben" && !periodeFaellig && (
+                      <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-300 text-[10px]">
+                        <PenLine className="h-3 w-3 mr-1" /> Unterschrieben · Freigabe ab {freigabeAb(periode.jahr, periode.monat)}
                       </Badge>
                     )}
                     {status === "freigegeben" && (
@@ -224,7 +235,7 @@ export default function TaetigkeitsberichteListe() {
                         <Eye className="h-3.5 w-3.5 sm:mr-1" />
                         <span className="hidden sm:inline">Ansehen</span>
                       </Button>
-                      {status === "unterschrieben" && (
+                      {status === "unterschrieben" && periodeFaellig && (
                         <Button size="sm" className="h-8" onClick={() => oeffnen(a.id, true)} title="Bericht ansehen und mit Unterschrift freigeben">
                           <CheckCircle2 className="h-3.5 w-3.5 sm:mr-1" />
                           <span className="hidden sm:inline">Freigeben</span>

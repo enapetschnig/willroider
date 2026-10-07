@@ -1,5 +1,34 @@
 # Journal
 
+## 2026-10-07 · Wunsch von Elias Winkler (Tätigkeitsberichte erst ab dem 21. zur Freigabe)
+
+**Meldung:** „Die Tätigkeitsberichte sollten gesammelt am 21. des Monats zur Freigabe
+an die Geschäftsführung gesendet werden, auch wenn sie schon früher unterschrieben
+wurden. Ich habe zum Probieren eine Unterschrift gesetzt und nun leuchtet das bei
+Hannes immer am Dashboard auf.“
+
+**Ursache:** Jede Unterschrift mit Status „unterschrieben“ zählte sofort als „wartet
+auf Freigabe“, auch für die laufende Periode. Elias hat die Periode September–Oktober
+(endet 20.10.) schon am 23.09. unterschrieben.
+
+**Geändert:** Neue Regel `freigabeFaellig(jahr, monat, heute)` in
+`lib/taetigkeitsbericht.ts`: Zur Freigabe geht eine Periode erst nach ihrem Ende, also
+ab dem 21.
+- **Startseite:** Die Karte „N Tätigkeitsberichte warten auf Freigabe“ zählt nur
+  abgelaufene Perioden.
+- **Freigabe-Liste:** Bei früh Unterschriebenem steht
+  „Unterschrieben · Freigabe ab 21.10.“, ohne Freigeben-Knopf. Der Hinweis „aus
+  anderen Perioden“ zeigt nur fällige Berichte.
+- **Bericht:** Dort steht „geht am 21.10. gesammelt zur Freigabe an die
+  Geschäftsführung. Bis dahin kannst du noch ändern und neu unterschreiben.“ Der
+  Freigeben-Knopf erscheint erst ab dem 21.
+- **Erinnerung `erinnerungen` (Version 4, hochgeladen):** Die tägliche Nachricht
+  „tb_freigabe“ zählt nur fällige Berichte. Ein Probelauf über `net.http_post` mit
+  `probe: true` lieferte 200 und hat nichts verschickt.
+
+**Stand jetzt:** Einzige offene Unterschrift ist Elias, Periode Oktober, nicht fällig.
+Bei Hannes ist die Karte also weg, ab dem 21.10. erscheint sie wieder.
+
 ## 2026-10-05 · Wunsch von Niklas Gwenger (Baustelle oder Firma)
 
 **Meldung (Baustellenstundenbericht):** „Auf den Berichten muss ersichtlich sein, ob
