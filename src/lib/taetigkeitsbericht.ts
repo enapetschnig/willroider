@@ -227,7 +227,7 @@ export async function ladeBerichtZeilen(): Promise<BerichtZeile[]> {
   const [{ data: bs }, { data: intern }] = await Promise.all([
     supabase
       .from("baustellen")
-      .select("id, bvh_name, kostenstelle, status"),
+      .select("id, bvh_name, kostenstelle, status, kategorie"),
     supabase
       .from("taetigkeiten_stamm")
       .select("id, bezeichnung, kostenstelle, sort_order, is_active, bereich" as "*")
@@ -254,8 +254,12 @@ export async function ladeBerichtZeilen(): Promise<BerichtZeile[]> {
       bezeichnung: b.bvh_name ?? "(ohne Namen)",
       baustelleId: b.id as string,
       taetigkeitId: null,
-      art: "baustelle" as const,
-      waehlbar: b.status === "aktiv" || b.status === "geplant",
+      // Interne Kostenstellen der Stundenerfassung (Zimmerei Allgemein,
+      // Woodwork): kein Taggeld; zum Hinzufügen gibt es hier die eigenen
+      // internen Zeilen aus taetigkeiten_stamm, sonst stünde 4899 doppelt.
+      art: b.kategorie === "intern" ? ("firma" as const) : ("baustelle" as const),
+      waehlbar:
+        b.kategorie !== "intern" && (b.status === "aktiv" || b.status === "geplant"),
     }))
     .sort((a, b) => a.kst.localeCompare(b.kst) || a.bezeichnung.localeCompare(b.bezeichnung));
 

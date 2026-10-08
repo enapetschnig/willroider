@@ -1,12 +1,16 @@
 /**
  * Section pro Art (Baustelle/Firma/…) mit Tätigkeit-Splits darunter.
- * Bei `art = "baustelle"` steht die Baustelle einmal oben im Header und gilt
- * für alle Splits. Erklärungs-Notiz je Zeile.
+ * Bei Baustelle und Firma steht die Baustelle bzw. Kostenstelle einmal oben
+ * im Header und gilt für alle Splits. Erklärungs-Notiz je Zeile.
+ *
+ * Firma: Baustelle oder interne Kostenstelle (Zimmerei Allgemein, Woodwork)
+ * wählbar, Pflicht beim Speichern (N. Gwenger 08.10.). Ersetzt den früheren
+ * Umschalter „Auf der Baustelle / In der Firma“ je Baustellen-Zeile.
  */
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Plus, Trash2 } from "lucide-react";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
 import { BaustelleCombobox } from "@/components/stunden/BaustelleCombobox";
 import { StundenZelle } from "./StundenZelle";
@@ -51,11 +55,13 @@ export function ArtSection({
 }) {
   const Icon = STATUS_ICONS[art];
   const arbeit = istArbeitArt(art);
-  const sectionBaustelleId =
-    art === "baustelle" ? rows[0]?.baustelle_id ?? null : null;
+  const istMaschine = kategorie === "maschine";
+  const mitKostenstelle = art === "baustelle" || (art === "firma" && !istMaschine);
+  const sectionBaustelleId = mitKostenstelle ? rows[0]?.baustelle_id ?? null : null;
   const sectionZielId =
     art === "baustelle" ? rows[0]?.ziel_baustelle_id ?? null : null;
-  const istMaschine = kategorie === "maschine";
+  const fehlt =
+    mitKostenstelle && !sectionBaustelleId && rows.some((r) => Number(r.stunden) > 0);
   const artLabel =
     istMaschine && art === "baustelle" ? "Werk/Maschine" : STATUS_LABELS[art];
   return (
@@ -71,15 +77,22 @@ export function ArtSection({
         </span>
       </div>
 
-      {art === "baustelle" && (
+      {mitKostenstelle && (
         <div className="p-2.5 border-b bg-background/50">
           <BaustelleCombobox
             baustellen={baustellen}
             value={sectionBaustelleId ?? ""}
             onChange={(v) => onSectionBaustelle(v || null)}
-            allowClear={!istMaschine}
-            kategorie={kategorie}
+            kategorie={art === "firma" ? "firma" : kategorie}
           />
+          {fehlt && (
+            <p className="mt-1.5 flex items-center gap-1 text-[11px] font-medium text-destructive">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              {art === "firma"
+                ? "Bitte Kostenstelle bzw. Baustelle wählen."
+                : "Bitte Baustelle wählen."}
+            </p>
+          )}
 
           {/* Werk/Halle: für welche Baustelle wird hier vorgefertigt?
               Die Stunden zählen dann auf diese Baustelle — die Maschine
@@ -135,36 +148,6 @@ export function ArtSection({
                   />
                 )}
               </>
-            )}
-
-            {/* Wo wurde gearbeitet? Muss am Bericht ersichtlich sein
-                (N. Gwenger 05.10.). Firma gibt kein Taggeld. Werk/Halle ist
-                ohnehin Firma — dort kein Umschalter. */}
-            {art === "baustelle" && !istMaschine && (
-              <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-1" role="radiogroup" aria-label="Ort">
-                {(
-                  [
-                    ["baustelle", "Auf der Baustelle"],
-                    ["firma", "In der Firma"],
-                  ] as const
-                ).map(([wert, text]) => {
-                  const aktiv = (row.ort ?? "baustelle") === wert;
-                  return (
-                    <button
-                      key={wert}
-                      type="button"
-                      role="radio"
-                      aria-checked={aktiv}
-                      onClick={() => onUpdate(row.key, { ort: wert })}
-                      className={`h-9 rounded text-sm font-medium transition-colors ${
-                        aktiv ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {text}
-                    </button>
-                  );
-                })}
-              </div>
             )}
 
             <div className="flex items-center justify-between gap-2">

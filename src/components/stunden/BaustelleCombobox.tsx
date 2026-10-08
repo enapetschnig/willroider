@@ -26,11 +26,18 @@ export function BaustelleCombobox({
   onChange: (id: string) => void;
   allowClear?: boolean;
   /** Filtert + ändert Label/Icon: 'maschine' für die Halle-Erfassung,
-   *  'baustelle' für die normale Erfassung. Ohne Wert: alle. */
-  kategorie?: "baustelle" | "maschine";
+   *  'baustelle' für die normale Erfassung, 'firma' für Firma-Stunden
+   *  (interne Kostenstellen oben, dann die Baustellen). Ohne Wert: alle. */
+  kategorie?: "baustelle" | "maschine" | "firma";
 }) {
   const [open, setOpen] = useState(false);
-  const liste = kategorie
+  const istFirma = kategorie === "firma";
+  const liste = istFirma
+    ? [
+        ...baustellen.filter((b) => b.kategorie === "intern"),
+        ...baustellen.filter((b) => (b.kategorie ?? "baustelle") === "baustelle"),
+      ]
+    : kategorie
     ? baustellen.filter((b) => (b.kategorie ?? "baustelle") === kategorie)
     : baustellen;
   const selected = liste.find((b) => b.id === value);
@@ -38,9 +45,13 @@ export function BaustelleCombobox({
   const Icon = istMaschine ? Wrench : Building2;
   const placeholderText = istMaschine
     ? "Werk/Maschine wählen…"
+    : istFirma
+    ? "Kostenstelle bzw. Baustelle wählen…"
     : "Baustelle wählen…";
   const searchPlaceholder = istMaschine
     ? "Werk/Maschine suchen…"
+    : istFirma
+    ? "Kostenstelle oder Baustelle suchen…"
     : "Baustelle suchen…";
   const emptyText = istMaschine
     ? "Kein Werk / keine Maschine gefunden."
@@ -112,8 +123,14 @@ export function BaustelleCombobox({
                   Keine Baustelle (allgemein in Firma)
                 </CommandItem>
               )}
-              {liste.map((b) => {
+              {liste.map((b, idx) => {
                 const isSel = b.id === value;
+                // Trennlinie zwischen internen Kostenstellen und Baustellen
+                const ersteBaustelle =
+                  istFirma &&
+                  idx > 0 &&
+                  b.kategorie !== "intern" &&
+                  liste[idx - 1].kategorie === "intern";
                 return (
                   <CommandItem
                     key={b.id}
@@ -122,7 +139,7 @@ export function BaustelleCombobox({
                       onChange(b.id);
                       setOpen(false);
                     }}
-                    className="cursor-pointer"
+                    className={`cursor-pointer ${ersteBaustelle ? "border-t mt-1 pt-2" : ""}`}
                   >
                     <Check
                       className={`mr-2 h-4 w-4 ${isSel ? "opacity-100" : "opacity-0"}`}

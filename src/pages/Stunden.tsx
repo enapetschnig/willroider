@@ -47,6 +47,7 @@ import {
   STATUS_COLORS,
   STATUS_OPTIONS,
   istArbeitArt,
+  fehltKostenstelle,
   newKey,
   gruppiereSections,
   aufStundenRaster,
@@ -808,6 +809,22 @@ export default function Stunden() {
       return;
     }
 
+    // Keine Arbeitsstunden ohne Baustelle bzw. Kostenstelle (Krank, Urlaub,
+    // Schlechtwetter usw. brauchen keine) — N. Gwenger 08.10.
+    const ohneKst = selectedMaList.filter((m) =>
+      (form.maEintraege[m.id] ?? []).some(fehltKostenstelle),
+    );
+    if (ohneKst.length > 0) {
+      toast({
+        variant: "destructive",
+        title: "Baustelle bzw. Kostenstelle fehlt",
+        description: `Bitte bei Baustelle/Firma auswählen: ${ohneKst
+          .map((m) => `${m.vorname} ${m.nachname}`)
+          .join(", ")}`,
+      });
+      return;
+    }
+
     // AZG-Check pro MA
     if (limits) {
       const violations: string[] = [];
@@ -921,7 +938,8 @@ export default function Stunden() {
             taetigkeit_id: arbeit ? r.taetigkeit_id : null,
             taetigkeit_freitext:
               arbeit && !r.taetigkeit_id ? r.taetigkeit_freitext.trim() || null : null,
-            baustelle_id: r.art === "baustelle" ? r.baustelle_id : null,
+            // Firma-Zeilen tragen seit 08.10. ebenfalls eine Kostenstelle.
+            baustelle_id: arbeit ? r.baustelle_id : null,
             ort: r.art === "baustelle" && r.ort === "firma" ? "firma" : "baustelle",
             stunden: Number(r.stunden),
             notiz: r.notiz.trim() || null,
@@ -1546,6 +1564,10 @@ function MaBlock({
     (last, s, idx) => (s.art === "baustelle" ? idx : last),
     -1,
   );
+  const lastFirmaIdx = sections.reduce(
+    (last, s, idx) => (s.art === "firma" ? idx : last),
+    -1,
+  );
 
   const updateEintrag = (key: string, patch: Partial<EintragRow>) =>
     onChange(eintraege.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -1557,7 +1579,7 @@ function MaBlock({
       {
         key: newKey(),
         art,
-        baustelle_id: art === "baustelle" ? baustelle_id : null,
+        baustelle_id: istArbeitArt(art) ? baustelle_id : null,
         taetigkeit_id: null,
         taetigkeit_freitext: "",
         stunden: 0,
@@ -1571,12 +1593,12 @@ function MaBlock({
       eintraege.map((r) => (set.has(r.key) ? { ...r, baustelle_id } : r)),
     );
   };
-  const addWeitereBaustelle = () =>
+  const addWeitereSection = (art: "baustelle" | "firma") =>
     onChange([
       ...eintraege,
       {
         key: newKey(),
-        art: "baustelle",
+        art,
         baustelle_id: null,
         taetigkeit_id: null,
         taetigkeit_freitext: "",
@@ -1646,10 +1668,21 @@ function MaBlock({
                   variant="outline"
                   size="sm"
                   className="w-full h-11"
-                  onClick={addWeitereBaustelle}
+                  onClick={() => addWeitereSection("baustelle")}
                 >
                   <Plus className="h-4 w-4 mr-1.5" />
                   weitere Baustelle
+                </Button>
+              )}
+              {idx === lastFirmaIdx && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full h-11"
+                  onClick={() => addWeitereSection("firma")}
+                >
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  weitere Kostenstelle
                 </Button>
               )}
             </Fragment>

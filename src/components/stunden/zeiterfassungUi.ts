@@ -112,6 +112,14 @@ export interface EintragRow {
 export const istArbeitArt = (art: TagStatus) =>
   art === "baustelle" || art === "firma";
 
+/**
+ * Arbeits-Zeilen (Baustelle/Firma) ohne Kostenstelle. Ohne Baustelle bzw.
+ * Kostenstelle darf nicht gespeichert werden — außer Krank, Urlaub,
+ * Schlechtwetter usw. (Änderungswunsch N. Gwenger 08.10.).
+ */
+export const fehltKostenstelle = (r: Pick<EintragRow, "art" | "baustelle_id" | "stunden">) =>
+  istArbeitArt(r.art) && Number(r.stunden) > 0 && !r.baustelle_id;
+
 export const newKey = () =>
   typeof crypto !== "undefined" && crypto.randomUUID
     ? crypto.randomUUID()
@@ -153,7 +161,7 @@ export interface ArtSectionData {
   /** stabiler Render-Key */
   key: string;
   art: TagStatus;
-  /** Die Baustelle der Section (nur bei art=baustelle, sonst null). */
+  /** Baustelle bzw. Kostenstelle der Section (Baustelle/Firma, sonst null). */
   baustelleId: string | null;
   /** Nur Werk/Halle: die Baustelle, für die vorgefertigt wird. */
   zielBaustelleId: string | null;
@@ -171,9 +179,10 @@ export interface ArtSectionData {
 export function gruppiereSections(eintraege: EintragRow[]): ArtSectionData[] {
   const out: ArtSectionData[] = [];
   for (const art of ART_REIHENFOLGE) {
-    if (art === "baustelle") {
+    if (art === "baustelle" || art === "firma") {
+      // Firma hat seit 08.10. ebenfalls eine Kostenstelle je Section.
       const groups = new Map<string, EintragRow[]>();
-      for (const r of eintraege.filter((e) => e.art === "baustelle")) {
+      for (const r of eintraege.filter((e) => e.art === art)) {
         const k = r.baustelle_id
           ? `${r.baustelle_id}|${r.ziel_baustelle_id ?? ""}`
           : `null:${r.key}`;
@@ -183,7 +192,7 @@ export function gruppiereSections(eintraege: EintragRow[]): ArtSectionData[] {
       }
       for (const [key, rows] of groups) {
         out.push({
-          key: `baustelle:${key}`,
+          key: `${art}:${key}`,
           art,
           baustelleId: rows[0]?.baustelle_id ?? null,
           zielBaustelleId: rows[0]?.ziel_baustelle_id ?? null,

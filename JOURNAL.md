@@ -1,5 +1,48 @@
 # Journal
 
+## 2026-10-08 · Wunsch von Niklas Gwenger (Firma mit Kostenstelle, Pflicht)
+
+**Meldung:** „Baustelle-Firma: Wurde von mir falsch geschrieben. Beim Stunden schreiben
+gibt es die Auswahl Baustelle und Firma. Bei Firma muss auch die Baustelle ausgewählt
+werden können. Es dürfen keine Stunden geschrieben werden ohne eine Baustelle bzw.
+Kostenstelle (außer Krank, Urlaub, Schlechtwetter). Auswählbar sein müssen auch
+1404899 Zimmerei Allgemein (Schulungen etc.) und 4760 Woodwork sonstige Kosten
+(Lagerarbeiten etc.).“
+
+**Geändert:**
+- Migration `20261008120000_interne_kostenstellen.sql` (**angewendet**):
+  `baustellen.kategorie` kennt jetzt `intern`. Zwei neue Zeilen „Zimmerei Allgemein“
+  (1404899) und „Woodwork sonstige Kosten“ (4760), Status aktiv.
+- **Firma hat eine Kostenstelle:** Bei „Firma“ steht oben „Kostenstelle bzw. Baustelle
+  wählen“. Zuerst kommen die beiden internen Kostenstellen, darunter alle Baustellen.
+  Mehrere Kostenstellen am Tag gehen über „weitere Kostenstelle“. Bei „Baustelle“ gibt
+  es die internen nicht (Firma heißt kein Taggeld).
+- **Pflicht:** Arbeitsstunden (Baustelle/Firma) ohne Auswahl werden nicht gespeichert.
+  In der Karte steht ein roter Hinweis, beim Speichern eine Meldung mit den Namen. Das
+  gilt für Stunden, Tag bearbeiten (Bericht) und die Büro-Korrektur. Die Option „Keine
+  Baustelle (allgemein in Firma)“ ist weg. Krank, Urlaub, Schlechtwetter und
+  Berufsschule brauchen nichts.
+- **Umschalter „Auf der Baustelle / In der Firma“ entfernt:** Er stammt aus Niklas'
+  Wunsch vom 05.10., den er jetzt richtiggestellt hat. Benutzt wurde er nie: alle
+  Zeilen stehen auf „baustelle“. Die Auswertung von `ort = firma` bleibt für den Fall
+  bestehen, dass doch Daten kommen.
+- **Berichte:** Im Baustellenstundenbericht (Seite und PDF) steht Firma mit Baustelle
+  als „Baustelle (in der Firma)“ mit deren Kostenstelle. Interne Kostenstellen stehen
+  unter ihrem Namen, zum Beispiel „Zimmerei Allgemein · 1404899“. Firma ohne
+  Kostenstelle (alte Einträge) bleibt „Firma“. Die Baustellen-Seite und die
+  Stundenauswertung zählen Firma-Stunden mit Baustelle auf diese Baustelle.
+- **Tätigkeitsbericht (Angestellte):** Die internen Zeilen erscheinen nur, wenn darauf
+  Stunden liegen, und nicht unter „Kostenstelle hinzufügen“. Dort gibt es schon
+  „Zim Allgemein 4899“, sonst stünde es doppelt.
+- Gespeichert wird `baustelle_id` jetzt auch bei Firma-Zeilen (Stunden, Tag bearbeiten,
+  Büro-Korrektur). Vorher wurde es dort auf leer gesetzt.
+
+**Bestand:** 316 alte Firma-Zeilen haben keine Kostenstelle. Sie bleiben, wie sie sind.
+Erst wer einen solchen Tag bearbeitet, muss eine Kostenstelle wählen.
+
+**Geprüft:** Build ok, Typprüfung ohne neue Fehler. Ein Klicktest in der App steht noch
+aus, weil es hier keinen Testzugang gibt.
+
 ## 2026-10-08 · Zwei Wünsche von Bua Sirnitzer (Stunden schreiben als Polier)
 
 **Meldung 1 (Fahrtgeld):** „Hier darf man nur Fahrtgeld auswählen dürfen. Kein

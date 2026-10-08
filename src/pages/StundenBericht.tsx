@@ -185,12 +185,12 @@ export default function StundenBericht() {
   });
 
   const { data: baustellen = [] } = useQuery({
-    queryKey: ["baustellen_kostenstelle"],
+    queryKey: ["baustellen_kostenstelle", "mit_kategorie"],
     queryFn: async () => {
       const { data } = await supabase
         .from("baustellen")
-        .select("id, bvh_name, kostenstelle");
-      return (data as { id: string; bvh_name: string; kostenstelle: string | null }[]) ?? [];
+        .select("id, bvh_name, kostenstelle, kategorie");
+      return (data as { id: string; bvh_name: string; kostenstelle: string | null; kategorie: string }[]) ?? [];
     },
   });
   const baustelleMap = useMemo(
@@ -257,6 +257,16 @@ export default function StundenBericht() {
             if (mName) label = `${label} (${mName})`;
           }
           if (inFirma) label = `${label} (in der Firma)`;
+        } else if (e.art === "firma" && e.baustelle_id) {
+          // Firma mit Kostenstelle (N. Gwenger 08.10.): interne Kostenstelle
+          // unter ihrem Namen, Baustelle als „… (in der Firma)" — dieselbe
+          // Zeile wie früher die Baustellen-Zeilen mit Ort „Firma".
+          const b = baustelleMap.get(e.baustelle_id);
+          const intern = b?.kategorie === "intern";
+          key = intern ? `b:${e.baustelle_id}` : `b:${e.baustelle_id}|firma`;
+          label = b?.bvh_name ?? "Firma";
+          if (!intern) label = `${label} (in der Firma)`;
+          kst = b?.kostenstelle ?? "";
         } else if (e.art === "firma") {
           key = "firma";
           label = "Firma";

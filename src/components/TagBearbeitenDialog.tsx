@@ -37,6 +37,7 @@ import { ArtSection } from "@/components/stunden/ArtSection";
 import {
   gruppiereSections,
   istArbeitArt,
+  fehltKostenstelle,
   newKey,
   type EintragRow,
 } from "@/components/stunden/zeiterfassungUi";
@@ -113,6 +114,10 @@ export function TagBearbeitenDialog({
     (last, s, idx) => (s.art === "baustelle" ? idx : last),
     -1,
   );
+  const lastFirmaIdx = sections.reduce(
+    (last, s, idx) => (s.art === "firma" ? idx : last),
+    -1,
+  );
 
   const defaultEintrag = (art: TagStatus): EintragRow => {
     const letzteBaustelle =
@@ -147,7 +152,7 @@ export function TagBearbeitenDialog({
       {
         key: newKey(),
         art,
-        baustelle_id: art === "baustelle" ? baustelle_id : null,
+        baustelle_id: istArbeitArt(art) ? baustelle_id : null,
         taetigkeit_id: null,
         taetigkeit_freitext: "",
         stunden: 0,
@@ -161,12 +166,12 @@ export function TagBearbeitenDialog({
       es.map((r) => (set.has(r.key) ? { ...r, baustelle_id } : r)),
     );
   };
-  const addWeitereBaustelle = () =>
+  const addWeitereSection = (art: "baustelle" | "firma") =>
     setEintraege((es) => [
       ...es,
       {
         key: newKey(),
-        art: "baustelle",
+        art,
         baustelle_id: null,
         taetigkeit_id: null,
         taetigkeit_freitext: "",
@@ -176,6 +181,15 @@ export function TagBearbeitenDialog({
     ]);
 
   const handleSave = async () => {
+    // Keine Arbeitsstunden ohne Baustelle bzw. Kostenstelle (N. Gwenger 08.10.)
+    if (eintraege.some(fehltKostenstelle)) {
+      toast({
+        variant: "destructive",
+        title: "Baustelle bzw. Kostenstelle fehlt",
+        description: "Bitte bei Baustelle/Firma eine Auswahl treffen.",
+      });
+      return;
+    }
     try {
       const taetigkeiten: SaveEintrag[] = eintraege
         .filter(
@@ -194,7 +208,7 @@ export function TagBearbeitenDialog({
               arbeit && !e.taetigkeit_id
                 ? e.taetigkeit_freitext.trim() || null
                 : null,
-            baustelle_id: e.art === "baustelle" ? e.baustelle_id : null,
+            baustelle_id: arbeit ? e.baustelle_id : null,
             ziel_baustelle_id: e.art === "baustelle" ? e.ziel_baustelle_id ?? null : null,
             ort: e.art === "baustelle" && e.ort === "firma" ? "firma" : "baustelle",
             stunden: Number(e.stunden),
@@ -323,9 +337,10 @@ export function TagBearbeitenDialog({
             // Kategorie der Section ableiten: zeigt die Baustelle bzw. Maschine
             // korrekt im Picker an, je nachdem worauf der Eintrag heute liegt.
             const sectionKategorie: "baustelle" | "maschine" =
-              s.art === "baustelle" && s.baustelleId
-                ? (baustellen.find((b) => b.id === s.baustelleId)?.kategorie ??
-                    "baustelle")
+              s.art === "baustelle" &&
+              s.baustelleId &&
+              baustellen.find((b) => b.id === s.baustelleId)?.kategorie === "maschine"
+                ? "maschine"
                 : "baustelle";
             return (
             <Fragment key={s.key}>
@@ -355,10 +370,21 @@ export function TagBearbeitenDialog({
                   variant="outline"
                   size="sm"
                   className="w-full h-11"
-                  onClick={addWeitereBaustelle}
+                  onClick={() => addWeitereSection("baustelle")}
                 >
                   <Plus className="h-4 w-4 mr-1.5" />
                   weitere Baustelle
+                </Button>
+              )}
+              {idx === lastFirmaIdx && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full h-11"
+                  onClick={() => addWeitereSection("firma")}
+                >
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  weitere Kostenstelle
                 </Button>
               )}
             </Fragment>

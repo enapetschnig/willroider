@@ -161,6 +161,15 @@ export function AdminTagEditModal({
     setZulagen((cur) => cur.map((z, i) => (i === idx ? { ...z, ...patch } : z)));
 
   const handleSave = async () => {
+    // Keine Arbeitsstunden ohne Baustelle bzw. Kostenstelle (N. Gwenger 08.10.)
+    if (eintraege.some((e) => istArbeitArt(e.art) && e.stunden > 0 && !e.baustelle_id)) {
+      toast({
+        variant: "destructive",
+        title: "Baustelle bzw. Kostenstelle fehlt",
+        description: "Bitte bei Baustelle/Firma eine Auswahl treffen.",
+      });
+      return;
+    }
     try {
       const taetigkeitenPayload: SaveEintrag[] = eintraege
         .filter(
@@ -177,7 +186,8 @@ export function AdminTagEditModal({
               arbeit && !e.taetigkeit_id
                 ? e.taetigkeit_freitext.trim() || null
                 : null,
-            baustelle_id: e.art === "baustelle" ? e.baustelle_id : null,
+            // Firma-Zeilen tragen seit 08.10. ebenfalls eine Kostenstelle.
+            baustelle_id: arbeit ? e.baustelle_id : null,
             stunden: Number(e.stunden),
             notiz: e.notiz.trim() || null,
           };
@@ -327,7 +337,9 @@ export function AdminTagEditModal({
                       </Button>
                     </div>
 
-                    {e.art === "baustelle" && (
+                    {/* Baustelle bzw. bei Firma die Kostenstelle (interne
+                        Kostenstellen nur bei Firma) — N. Gwenger 08.10. */}
+                    {arbeit && (
                       <select
                         value={e.baustelle_id ?? ""}
                         onChange={(ev) =>
@@ -337,10 +349,23 @@ export function AdminTagEditModal({
                         }
                         className="h-8 w-full rounded-md border bg-background px-1 text-xs"
                       >
-                        <option value="">— Baustelle wählen —</option>
-                        {baustellen.map((b) => (
+                        <option value="">
+                          {e.art === "firma"
+                            ? "— Kostenstelle bzw. Baustelle wählen —"
+                            : "— Baustelle wählen —"}
+                        </option>
+                        {(e.art === "firma"
+                          ? [
+                              ...baustellen.filter((b) => b.kategorie === "intern"),
+                              ...baustellen.filter((b) => b.kategorie !== "intern"),
+                            ]
+                          : baustellen.filter((b) => b.kategorie !== "intern")
+                        ).map((b) => (
                           <option key={b.id} value={b.id}>
                             {b.bvh_name}
+                            {b.kategorie === "intern" && b.kostenstelle
+                              ? ` (${b.kostenstelle})`
+                              : ""}
                           </option>
                         ))}
                       </select>

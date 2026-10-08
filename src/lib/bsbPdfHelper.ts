@@ -120,7 +120,7 @@ export async function buildBerichtPdf(
   // 4) Baustellen-Map
   const { data: bs } = await supabase
     .from("baustellen")
-    .select("id, bvh_name, kostenstelle");
+    .select("id, bvh_name, kostenstelle, kategorie");
   const baustelleMap = new Map(
     ((bs as any[]) ?? []).map((b) => [b.id as string, b]),
   );
@@ -169,6 +169,16 @@ export async function buildBerichtPdf(
           if (mName) label = `${label} (${mName})`;
         }
         if (inFirma) label = `${label} (in der Firma)`;
+      } else if (e.art === "firma" && e.baustelle_id) {
+        // Firma mit Kostenstelle (N. Gwenger 08.10.): interne Kostenstelle
+        // unter ihrem Namen, Baustelle als „… (in der Firma)" — dieselbe
+        // Zeile wie früher die Baustellen-Zeilen mit Ort „Firma".
+        const b = baustelleMap.get(e.baustelle_id);
+        const intern = (b as any)?.kategorie === "intern";
+        key = intern ? `b:${e.baustelle_id}` : `b:${e.baustelle_id}|firma`;
+        label = (b as any)?.bvh_name ?? "Firma";
+        if (!intern) label = `${label} (in der Firma)`;
+        kst = (b as any)?.kostenstelle ?? "";
       } else if (e.art === "firma") {
         key = "firma";
         label = "Firma";
