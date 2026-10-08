@@ -410,6 +410,26 @@ function SignatureOverlay({
     };
   }, [step, current]);
 
+  // Passt die Unterweisung ganz auf den Bildschirm, kommt kein Scroll-
+  // Ereignis — der Knopf blieb dann grau (Vorfall Tablet 08.10.). Also auch
+  // ohne Scrollen und bei jeder Größenänderung prüfen.
+  const leseRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = leseRef.current;
+    if (step !== "read" || !el) return;
+    const pruefen = () => {
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 30) setScrolledToBottom(true);
+    };
+    const t = window.setTimeout(pruefen, 300);
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(pruefen) : null;
+    ro?.observe(el);
+    if (el.firstElementChild) ro?.observe(el.firstElementChild);
+    return () => {
+      window.clearTimeout(t);
+      ro?.disconnect();
+    };
+  }, [step, current]);
+
   if (!current) return null;
 
   const u = getUnterweisung(current.typ);
@@ -496,7 +516,8 @@ function SignatureOverlay({
       {step === "read" ? (
         <>
           <div
-            className="flex-1 overflow-y-auto p-4 space-y-3"
+            ref={leseRef}
+            className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3"
             onScroll={onScroll}
             style={{ WebkitOverflowScrolling: "touch" }}
           >
@@ -530,7 +551,7 @@ function SignatureOverlay({
         </>
       ) : (
         <>
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
             <div className="text-sm">Unterschreibe mit dem Finger im Feld unten:</div>
             <div className="border-2 border-dashed rounded-md bg-white">
               <canvas

@@ -17,7 +17,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, ShieldCheck, ShieldAlert, CheckCircle2, Clock, ChevronDown, ChevronUp, Sparkles, FileText } from "lucide-react";
+import { Plus, ShieldCheck, ShieldAlert, CheckCircle2, Clock, ChevronDown, ChevronUp, Sparkles, FileText, Trash2 } from "lucide-react";
+import { loescheUnterweisung, setzePflichtUnterweisung } from "@/lib/pflichtUnterweisung";
 import type { Database, EvaluierungTyp, Json } from "@/integrations/supabase/types";
 import {
   UNTERWEISUNG_OPTIONS,
@@ -317,15 +318,14 @@ export default function Evaluierung() {
       // eine Ergänzung untertags, Regel C). Der Trigger an der Baustelle
       // teilt sie allen Eingeteilten zu — fällig 30 Minuten bzw. 08:00.
       if (baustelleId) {
-        const { error: pflichtErr } = await supabase
-          .from("baustellen")
-          .update({ pflicht_evaluierung_id: evalId })
-          .eq("id", baustelleId);
+        // Über den gemeinsamen Weg: offene Zuteilungen der vorigen
+        // Unterweisung werden dabei archiviert (Vorfall 08.10.).
+        const { error: pflichtErr } = await setzePflichtUnterweisung(baustelleId, evalId!);
         if (pflichtErr) {
           toast({
             variant: "destructive",
             title: "Als gültige Unterweisung nicht gesetzt",
-            description: pflichtErr.message,
+            description: pflichtErr,
           });
         }
       }
@@ -493,6 +493,33 @@ export default function Evaluierung() {
                         <Button size="sm" onClick={() => finalize(e)}>
                           <CheckCircle2 className="h-4 w-4 mr-1" />
                           <span className="hidden sm:inline">Abschließen</span>
+                        </Button>
+                      )}
+                      {/* Falsch angelegte Unterweisung entfernen (Wunsch
+                          N. Gwenger 08.10.) — nur Büro/Verwaltung. */}
+                      {isAdmin && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:text-destructive"
+                          title="Unterweisung löschen"
+                          onClick={async () => {
+                            const name = baustellen.find((b) => b.id === e.baustelle_id)?.bvh_name ?? "Baustelle";
+                            const text =
+                              stats.signed > 0
+                                ? `Achtung: ${stats.signed} Mitarbeiter haben diese Unterweisung (${name}, ${new Date(e.datum).toLocaleDateString("de-AT")}) schon unterschrieben. Beim Löschen gehen diese Unterschriften als Nachweis verloren.\n\nTrotzdem löschen?`
+                                : `Unterweisung ${name} vom ${new Date(e.datum).toLocaleDateString("de-AT")} löschen? Offene Zuteilungen verschwinden mit.`;
+                            if (!window.confirm(text)) return;
+                            const { error } = await loescheUnterweisung(e.id);
+                            if (error) {
+                              toast({ variant: "destructive", title: "Nicht gelöscht", description: error });
+                              return;
+                            }
+                            toast({ title: "Unterweisung gelöscht" });
+                            load();
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       )}
                     </div>

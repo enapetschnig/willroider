@@ -12,6 +12,7 @@
  * beim Drucken weg → das gedruckte Blatt sieht 1:1 wie das Original aus.
  */
 
+import { setzePflichtUnterweisung } from "@/lib/pflichtUnterweisung";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -1254,7 +1255,8 @@ export default function Tagesplanung() {
       .select("id")
       .single();
     if (!error && ev) {
-      await supabase.from("baustellen").update({ pflicht_evaluierung_id: ev.id }).eq("id", baustelleId);
+      // Gemeinsamer Weg — räumt offene Zuteilungen einer vorigen Unterweisung auf.
+      await setzePflichtUnterweisung(baustelleId, (ev as { id: string }).id);
     }
     setLegeAn(null);
     if (error) {

@@ -1,5 +1,48 @@
 # Journal
 
+## 2026-10-08 · Wünsche von Niklas Gwenger (Evaluierung löschen, Tablet-Unterschrift)
+
+**1. „Wie kann ich eine falsche Evaluierung löschen?“**
+- **Vorfall Painter Carport:** Um 06:20 wurde über die Tagesplanung („Standard-
+  Unterweisung anlegen“) eine Baustellen-Unterweisung angelegt, um 06:21 über „Neue
+  Evaluierung“ die richtige Tagesbaustelle. Beide Wege setzten
+  `pflicht_evaluierung_id` direkt. Nur `unterweisung_setzen()` hätte die offenen
+  Zuteilungen der alten archiviert. Jörg Hallegger, Noah Moser und Martin Tripolt
+  hingen ab 08:00 an der falschen Unterweisung, die App war gesperrt.
+- **Sofort:** Die 3 offenen Zuteilungen sind archiviert (Grund „durch neue
+  Unterweisung ersetzt“). Die Evaluierung selbst blieb stehen, weil Christoph das
+  Löschen in der Datenbank abgelehnt hat.
+- **Damit es nicht wieder vorkommt:** Neuer gemeinsamer Weg
+  `lib/pflichtUnterweisung.ts` → `setzePflichtUnterweisung()`. „Neue Evaluierung“ und
+  „Standard-Unterweisung anlegen“ (Tagesplanung) archivieren damit beim Wechsel die
+  offenen, nicht unterschriebenen Zuteilungen der vorigen Unterweisung. Unterschriften
+  bleiben. Eine Datenbank-Regel (Trigger) dafür wurde vorgeschlagen, Christoph hat sie
+  aber nicht eingespielt. Wer `pflicht_evaluierung_id` künftig an anderer Stelle setzt,
+  muss diesen Weg nehmen.
+- **Neu:** Auf der Seite Unterweisungen gibt es für Büro/Verwaltung einen Löschen-Knopf
+  (Mülleimer) je Evaluierung. Bei vorhandenen Unterschriften kommt eine deutliche
+  Warnung.
+
+**2. „Bei den Partieführern geht die Evaluierung am Tablet nicht zum Unterschreiben …
+lässt sich nicht bis zum Ende scrollen“**
+- **Ursache:** Der Knopf „Gelesen und verstanden“ wurde nur durch ein Scroll-Ereignis
+  am Ende frei. Die Tagesbaustellen-Unterweisung passt auf einem iPad komplett auf den
+  Bildschirm, also kam nie ein Scroll-Ereignis und der Knopf blieb für immer grau. Im
+  Test-Browser (iPad quer, nachgestellte Daten) so nachgestellt.
+- **Behoben:** Gilt im Tablet-Modus (`UnterweisungTablet`) und beim eigenen Handy
+  (`EvaluierungSignatureGate`).
+  - Es wird auch ohne Scrollen und bei Größenänderung geprüft (ResizeObserver).
+  - Die Lesebereiche haben `min-h-0`, damit sie in der Flex-Spalte auf iPad/Safari
+    sicher scrollen.
+  - Beim Wechsel zur nächsten Person wird zurückgesetzt.
+- **Geprüft:** Bei der Tagesbaustelle ist der Knopf sofort aktiv. Bei Werkstatt (lang)
+  ist er erst grau und nach dem Scrollen bis ans Ende aktiv.
+- Den „Absturz“ selbst konnte ich nicht nachstellen. Der Screenshot zeigt nur die
+  Liste am PC.
+
+**Werkzeug:** Screenshots der Meldungen jetzt über
+`~/Developer/_baukasten/werkzeuge/wunsch-bilder.mjs` (siehe Memory).
+
 ## 2026-10-08 · Wunsch von Niklas Gwenger (Firma mit Kostenstelle, Pflicht)
 
 **Meldung:** „Baustelle-Firma: Wurde von mir falsch geschrieben. Beim Stunden schreiben

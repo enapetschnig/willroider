@@ -8,7 +8,7 @@
  * Die Funktion prüft serverseitig, dass der Angemeldete Polier/Bauleiter
  * dieser Baustelle ist, und setzt Zeitstempel + Erfasser selbst.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
@@ -60,6 +60,28 @@ export function UnterweisungTablet({
   const [laden, setLaden] = useState(false);
   const [aktiv, setAktiv] = useState<Zeile | null>(null);
   const [untenAngekommen, setUntenAngekommen] = useState(false);
+  const leseRef = useRef<HTMLDivElement>(null);
+
+  // Passt die Unterweisung ganz auf den Bildschirm (großes Tablet), gibt es
+  // nichts zu scrollen — dann kam nie ein Scroll-Ereignis, und der Knopf
+  // „Gelesen und verstanden" blieb für immer grau (N. Gwenger 08.10.: „lässt
+  // sich nicht bis zum Ende scrollen"). Deshalb auch ohne Scrollen prüfen,
+  // und erneut, sobald sich die Höhe ändert (Inhalt lädt nach, Drehen).
+  useEffect(() => {
+    const el = leseRef.current;
+    if (!aktiv || !el) return;
+    const pruefen = () => {
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 30) setUntenAngekommen(true);
+    };
+    const t = window.setTimeout(pruefen, 300);
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(pruefen) : null;
+    ro?.observe(el);
+    if (el.firstElementChild) ro?.observe(el.firstElementChild);
+    return () => {
+      window.clearTimeout(t);
+      ro?.disconnect();
+    };
+  }, [aktiv, unterweisung]);
   const [signatur, setSignatur] = useState(false);
   const [speichert, setSpeichert] = useState(false);
 
@@ -193,7 +215,7 @@ export function UnterweisungTablet({
       </div>
 
       {!aktiv ? (
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
           <div className="text-sm text-muted-foreground">
             Gerät dem Mitarbeiter geben. Er tippt seinen Namen, liest die Unterweisung und
             unterschreibt. Dann der Nächste.
@@ -215,7 +237,10 @@ export function UnterweisungTablet({
             <button
               key={z.id}
               type="button"
-              onClick={() => setAktiv(z)}
+              onClick={() => {
+                setUntenAngekommen(false);
+                setAktiv(z);
+              }}
               className="w-full text-left rounded-lg border-2 border-primary/30 bg-card p-4 flex items-center gap-3 active:bg-muted"
             >
               <div className="flex-1 min-w-0">
@@ -275,7 +300,8 @@ export function UnterweisungTablet({
       ) : (
         <>
           <div
-            className="flex-1 overflow-y-auto p-4 space-y-3"
+            ref={leseRef}
+            className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3"
             onScroll={(e) => {
               const el = e.currentTarget;
               if (el.scrollHeight - el.scrollTop - el.clientHeight < 30) setUntenAngekommen(true);
