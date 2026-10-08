@@ -19,7 +19,6 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -104,6 +103,15 @@ interface ErfassungForm {
   /** Privat gefahrene Kilometer je Mitarbeiter-ID. */
   kmPerMa: Record<string, number>;
   fahrt: SaveFahrt | null;
+}
+
+/** Was am gewählten Datum für eine Person schon gebucht ist. `verborgen`:
+ *  Es gibt einen Tag, der Erfassende darf ihn aber nicht sehen (Person aus
+ *  einer anderen Partie) — dann weder Stunden noch Art bekannt. */
+interface TagStatusInfo {
+  hours: number;
+  tagStatus?: string;
+  verborgen?: boolean;
 }
 
 function emptyForm(): ErfassungForm {
@@ -278,15 +286,13 @@ export default function Stunden() {
       // canCreateForOthers (nicht nur isAdmin): eine Custom-Rolle mit
       // stunden.create_andere bekam sonst einen sichtbaren, aber LEEREN
       // PersonPicker — mode war "admin", Members wurden nie geladen.
-      // Alle Personen nur für die, die auch alle Tage lesen dürfen. Ein
-      // Vorarbeiter hat „für andere erfassen", sieht seit 18.09. aber nur
-      // seine Partie und seine Einteilung — Leute außerhalb würden hier
-      // leer erscheinen und beim Speichern mit einem doppelten Tag kollidieren.
-      const darfAlleLesen =
-        isAdmin ||
-        hasPermission("stunden.view_alle") ||
-        hasPermission("stunden.edit_alle");
-      if (canCreateForOthers && darfAlleLesen) {
+      //
+      // Seit 08.10. (Änderungswunsch B. Sirnitzer) bekommt auch der Polier
+      // mit „für andere erfassen" ALLE Personen zur Auswahl — springt jemand
+      // aus einer anderen Partie ein, muss das Büro nicht mehr umteilen.
+      // Fremde Tage bleiben unsichtbar (Urlaub/Krank seit 18.09. verborgen);
+      // ob jemand schon gebucht hat, sagt stunden_tag_vorhanden (nur Ja/Nein).
+      if (canCreateForOthers) {
         const [{ data: members }, { data: partien }] = await Promise.all([
           supabase.from("profiles").select("*").eq("is_active", true).order("nachname"),
           supabase.from("partien").select("*").order("name"),
@@ -430,16 +436,16 @@ export default function Stunden() {
       ),
     [user, allMembers],
   );
-  const { data: statusForDateMap = new Map<string, { hours: number; tagStatus?: string }>() } = useQuery({
+  const { data: statusForDateMap = new Map<string, TagStatusInfo>() } = useQuery({
     queryKey: ["stunden_status_for_date", date, memberIds],
     queryFn: async () => {
-      if (memberIds.length === 0) return new Map<string, { hours: number; tagStatus?: string }>();
+      if (memberIds.length === 0) return new Map<string, TagStatusInfo>();
       const { data } = await supabase
         .from("stunden_tage")
         .select("mitarbeiter_id, netto_stunden, tag_status")
         .eq("datum", date)
         .in("mitarbeiter_id", memberIds);
-      const map = new Map<string, { hours: number; tagStatus?: string }>();
+      const map = new Map<string, TagStatusInfo>();
       (data ?? []).forEach((r: any) => {
         const cur = map.get(r.mitarbeiter_id) ?? { hours: 0 };
         cur.hours += Number(r.netto_stunden ?? 0);
@@ -449,6 +455,28 @@ export default function Stunden() {
         }
         map.set(r.mitarbeiter_id, cur);
       });
+      // Personen außerhalb der eigenen Sicht (andere Partie): nur Ja/Nein,
+      // ob es den Tag schon gibt — was drinsteht, bleibt verborgen.
+      if (canCreateForOthers) {
+        const unbekannt = memberIds.filter((id) => !map.has(id));
+        if (unbekannt.length > 0) {
+          // RPC fehlt in den generierten Typen — daher der Cast.
+          const { data: vorhanden } = await (supabase as any).rpc(
+            "stunden_tag_vorhanden",
+            { _datum: date, _ids: unbekannt },
+          );
+          // setof uuid: PostgREST liefert je nach Version Strings oder
+          // Objekte { stunden_tag_vorhanden: uuid }.
+          ((vorhanden as unknown[] | null) ?? []).forEach((row) => {
+            const id =
+              typeof row === "string"
+                ? row
+                : (row as { stunden_tag_vorhanden?: string } | null)
+                    ?.stunden_tag_vorhanden;
+            if (id) map.set(id, { hours: 0, verborgen: true });
+          });
+        }
+      }
       return map;
     },
     enabled: !!date && memberIds.length > 0,
@@ -521,6 +549,7 @@ export default function Stunden() {
       fahrt: t.fahrt
         ? {
             fahrtgeld_eur: Number(t.fahrt.fahrtgeld_eur),
+            fahrtgeld_stunden: Number(t.fahrt.fahrtgeld_stunden ?? 0),
             privat_pkw: t.fahrt.privat_pkw,
             km_gefahren:
               t.fahrt.km_gefahren !== null ? Number(t.fahrt.km_gefahren) : null,
@@ -683,9 +712,14 @@ export default function Stunden() {
     return selectedMaList
       .map((m) => {
         const s = statusForDateMap.get(m.id);
-        return { ma: m, h: s?.hours ?? 0, tagStatus: s?.tagStatus };
+        return {
+          ma: m,
+          h: s?.hours ?? 0,
+          tagStatus: s?.tagStatus,
+          verborgen: !!s?.verborgen,
+        };
       })
-      .filter((x) => x.h > 0 || !!x.tagStatus);
+      .filter((x) => x.h > 0 || !!x.tagStatus || x.verborgen);
   }, [selectedMaList, statusForDateMap]);
 
   const arbeitsbeginnEffective =
@@ -850,6 +884,17 @@ export default function Stunden() {
           continue;
         }
         const existingEntry = existingMap.get(uid);
+        // Tag existiert, ist aber nicht sichtbar (andere Partie) — nicht
+        // blind überschreiben, sondern überspringen.
+        if (!existingEntry && statusForDateMap.get(uid)?.verborgen) {
+          toast({
+            title: `${maName} übersprungen`,
+            description:
+              "Hat für diesen Tag schon einen Eintrag. Änderungen bitte übers Büro.",
+          });
+          skippedCount++;
+          continue;
+        }
         if (existingEntry && existingEntry.status !== "erfasst") {
           toast({
             title: `${maName} übersprungen`,
@@ -926,17 +971,16 @@ export default function Stunden() {
         const isPolierSelf = uid === primaryUserId && istPolier;
         const polierFahrt = isPolierSelf ? form.fahrt : null;
         const km = Math.max(0, Number(form.kmPerMa[uid] ?? 0));
+        // Taggeld immer automatisch — kein manuelles Überschreiben mehr
+        // (Änderungswunsch B. Sirnitzer 07.10.: „Kein Taggeld, keine
+        // Geldangaben"). Der Polier wählt nur noch Fahrtgeld in Stunden.
         const auto = berechneTaggeld(baustelleStd, "baustelle");
+        const fahrtgeldStd = polierFahrt?.fahrtgeld_stunden ?? 0;
         let fahrtToSave: SaveFahrt | null = null;
-        if (polierFahrt?.taggeld_manuell) {
+        if (auto.kurz > 0 || auto.lang > 0 || fahrtgeldStd > 0 || km > 0) {
           fahrtToSave = {
-            ...polierFahrt,
-            privat_pkw: km > 0,
-            km_gefahren: km > 0 ? km : null,
-          };
-        } else if (auto.kurz > 0 || auto.lang > 0 || polierFahrt || km > 0) {
-          fahrtToSave = {
-            fahrtgeld_eur: polierFahrt?.fahrtgeld_eur ?? 0,
+            fahrtgeld_eur: 0,
+            fahrtgeld_stunden: fahrtgeldStd,
             privat_pkw: km > 0,
             km_gefahren: km > 0 ? km : null,
             taggeld_kurz: auto.kurz,
@@ -1114,14 +1158,16 @@ export default function Stunden() {
             </span>
           </div>
           <ul className="text-xs text-amber-900 pl-6 space-y-0.5">
-            {konflikte.map(({ ma, h, tagStatus }) => (
+            {konflikte.map(({ ma, h, tagStatus, verborgen }) => (
               <li key={ma.id} className="tabular-nums">
                 <span className="font-medium">
                   {ma.vorname} {ma.nachname}:
                 </span>{" "}
                 {/* STATUS_LABELS statt eigener Liste — sonst stand hier bei
                     einer neuen Art der rohe Datenbank-Wert. */}
-                {tagStatus
+                {verborgen
+                  ? "schon erfasst (wird nicht überschrieben)"
+                  : tagStatus
                   ? (STATUS_LABELS[tagStatus as TagStatus] ?? tagStatus) +
                     (h > 0 ? ` + ${fmtH(h)}` : "")
                   : fmtH(h)}
@@ -1131,6 +1177,8 @@ export default function Stunden() {
           <div className="text-[11px] text-amber-800 pl-6">
             Beim Speichern werden offene Einträge überschrieben — bereits bestätigte
             oder freigegebene Tage werden übersprungen.
+            {konflikte.some((k) => k.verborgen) &&
+              " Tage aus einer anderen Partie bleiben unverändert — Änderungen dort bitte übers Büro."}
           </div>
         </div>
       )}
@@ -1378,19 +1426,24 @@ export default function Stunden() {
             />
           )}
 
-          {/* Fahrt — nur Polier-Self */}
+          {/* Fahrtgeld in Stunden — nur Polier-Self */}
           {istPolier && forUserIds.has(primaryUserId) && (
-            <FahrtSection
-              fahrt={form.fahrt}
-              setFahrt={(fahrt) => setForm((f) => ({ ...f, fahrt }))}
-              baustelle={
-                baustellen.find(
-                  (b) =>
-                    b.id ===
-                    (form.maEintraege[primaryUserId] ?? []).find(
-                      (r) => r.art === "baustelle" && r.baustelle_id,
-                    )?.baustelle_id,
-                ) ?? null
+            <FahrtgeldSection
+              stunden={form.fahrt?.fahrtgeld_stunden ?? 0}
+              onChange={(std) =>
+                setForm((f) => ({
+                  ...f,
+                  fahrt: {
+                    fahrtgeld_eur: 0,
+                    privat_pkw: false,
+                    km_gefahren: null,
+                    taggeld_kurz: 0,
+                    taggeld_lang: 0,
+                    taggeld_manuell: false,
+                    ...f.fahrt,
+                    fahrtgeld_stunden: std,
+                  },
+                }))
               }
             />
           )}
@@ -1857,108 +1910,46 @@ function KilometergeldSection({
   );
 }
 
-// ─── FahrtSection (Polier-Self) ────────────────────────────────────────
+// ─── FahrtgeldSection (Polier-Self) ─────────────────────────────────────
+//
+// Änderungswunsch B. Sirnitzer 07.10.: nur Fahrtgeld, in Stunden, kein
+// Taggeld (läuft automatisch über die Baustellen-Stunden), keine Euro.
 
-function FahrtSection({
-  fahrt,
-  setFahrt,
-  baustelle,
+const FAHRTGELD_OPTIONEN = [0, 0.5, 1, 1.5];
+
+function FahrtgeldSection({
+  stunden,
+  onChange,
 }: {
-  fahrt: SaveFahrt | null;
-  setFahrt: (f: SaveFahrt | null) => void;
-  baustelle: Baustelle | null;
+  stunden: number;
+  onChange: (std: number) => void;
 }) {
-  const enabled = !!fahrt;
-  const toggle = () => {
-    if (enabled) setFahrt(null);
-    else
-      setFahrt({
-        fahrtgeld_eur: Number(baustelle?.fahrtgeld_pauschale_eur ?? 0),
-        privat_pkw: false,
-        km_gefahren: null,
-        taggeld_kurz: 0,
-        taggeld_lang: 0,
-        taggeld_manuell: false,
-      });
-  };
   return (
     <div className="space-y-2 border-t pt-3">
       <div className="flex items-center gap-2">
-        <Switch checked={enabled} onCheckedChange={toggle} />
-        <Label className="text-sm font-semibold flex items-center gap-1.5 cursor-pointer">
-          <Car className="h-4 w-4 text-primary" />
-          Fahrtgeld &amp; Taggeld (Polier)
-        </Label>
+        <Car className="h-4 w-4 text-primary shrink-0" />
+        <span className="text-sm font-semibold">Fahrtgeld (Polier)</span>
       </div>
-      {enabled && fahrt && (
-        <div className="space-y-2 pl-1">
-          <div className="space-y-1">
-            <Label className="text-xs">Fahrtgeld (€)</Label>
-            <Input
-              type="number"
-              step={0.5}
-              min={0}
-              value={fahrt.fahrtgeld_eur}
-              onChange={(e) =>
-                setFahrt({ ...fahrt, fahrtgeld_eur: Number(e.target.value) || 0 })
-              }
-              className="h-9"
-            />
-            {baustelle && Number(baustelle.fahrtgeld_pauschale_eur) > 0 && (
-              <div className="text-[10px] text-muted-foreground">
-                Default aus Baustelle: € {baustelle.fahrtgeld_pauschale_eur}
-              </div>
-            )}
-          </div>
-          <div className="space-y-2 border-t pt-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs font-semibold">Taggeld</Label>
-              <label className="flex items-center gap-2 text-xs cursor-pointer">
-                <Switch
-                  checked={fahrt.taggeld_manuell}
-                  onCheckedChange={(v) => setFahrt({ ...fahrt, taggeld_manuell: v })}
-                />
-                <span>Manuell überschreiben</span>
-              </label>
-            </div>
-            {fahrt.taggeld_manuell ? (
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">Taggeld kurz</Label>
-                  <Input
-                    type="number"
-                    step={1}
-                    min={0}
-                    value={fahrt.taggeld_kurz}
-                    onChange={(e) =>
-                      setFahrt({ ...fahrt, taggeld_kurz: Number(e.target.value) || 0 })
-                    }
-                    className="h-9"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Taggeld lang</Label>
-                  <Input
-                    type="number"
-                    step={1}
-                    min={0}
-                    value={fahrt.taggeld_lang}
-                    onChange={(e) =>
-                      setFahrt({ ...fahrt, taggeld_lang: Number(e.target.value) || 0 })
-                    }
-                    className="h-9"
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="text-xs text-muted-foreground italic">
-                Wird automatisch aus den Baustellen-Stunden berechnet (kurz &lt; 9 h,
-                lang ≥ 9 h).
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <div className="grid grid-cols-4 gap-1.5">
+        {FAHRTGELD_OPTIONEN.map((std) => {
+          const aktiv = Number(stunden) === std;
+          return (
+            <Button
+              key={std}
+              type="button"
+              variant={aktiv ? "default" : "outline"}
+              className="h-11 px-1 text-sm"
+              aria-pressed={aktiv}
+              onClick={() => onChange(std)}
+            >
+              {std === 0 ? "Keins" : `${std.toFixed(1).replace(".", ",")} Std`}
+            </Button>
+          );
+        })}
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Taggeld wird automatisch aus den Baustellen-Stunden berechnet.
+      </p>
     </div>
   );
 }

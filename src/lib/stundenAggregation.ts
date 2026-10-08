@@ -187,6 +187,29 @@ export function aggregiereKilometergeld(
   };
 }
 
+/** Fahrtgeld des Poliers eines Tages in Stunden (0 / 0,5 / 1 / 1,5) — wird
+ *  nur vermerkt, zählt nicht zu den Arbeitsstunden. */
+export function fahrtgeldStundenFuerTag(t: StundenTagFull): number {
+  return Number(t.fahrt?.fahrtgeld_stunden ?? 0);
+}
+
+/** Fahrtgeld-Aggregation über mehrere Tage: Anzahl Tage + Summe Stunden. */
+export function aggregiereFahrtgeld(tage: StundenTagFull[]): {
+  tage: number;
+  stunden: number;
+} {
+  let anzahl = 0;
+  let summe = 0;
+  for (const t of tage) {
+    const std = fahrtgeldStundenFuerTag(t);
+    if (std > 0) {
+      anzahl++;
+      summe += std;
+    }
+  }
+  return { tage: anzahl, stunden: Math.round(summe * 10) / 10 };
+}
+
 /** Formatiert eine Tätigkeits-Liste eines Tages als kompakten Inline-Text:
  *  `"Holzbau 4.5h, Dämmarbeit 4.5h"`. */
 export function fmtTaetigkeitenInline(

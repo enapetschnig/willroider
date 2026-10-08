@@ -211,6 +211,7 @@ export function TagBearbeitenDialog({
       const fahrt: SaveFahrt | null = tag?.fahrt
         ? {
             fahrtgeld_eur: Number(tag.fahrt.fahrtgeld_eur ?? 0),
+            fahrtgeld_stunden: Number(tag.fahrt.fahrtgeld_stunden ?? 0),
             privat_pkw: tag.fahrt.privat_pkw,
             km_gefahren:
               tag.fahrt.km_gefahren != null

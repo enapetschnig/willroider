@@ -512,6 +512,7 @@ export default function Taetigkeitsbericht() {
           fahrt: vorhanden?.fahrt
             ? {
                 fahrtgeld_eur: Number(vorhanden.fahrt.fahrtgeld_eur ?? 0),
+                fahrtgeld_stunden: Number(vorhanden.fahrt.fahrtgeld_stunden ?? 0),
                 privat_pkw: vorhanden.fahrt.privat_pkw,
                 km_gefahren:
                   vorhanden.fahrt.km_gefahren != null ? Number(vorhanden.fahrt.km_gefahren) : null,
@@ -713,6 +714,7 @@ export default function Taetigkeitsbericht() {
           })) ?? [],
         fahrt: {
           fahrtgeld_eur: Number(vorhanden?.fahrt?.fahrtgeld_eur ?? 0),
+          fahrtgeld_stunden: Number(vorhanden?.fahrt?.fahrtgeld_stunden ?? 0),
           privat_pkw: vorhanden?.fahrt?.privat_pkw ?? false,
           km_gefahren:
             vorhanden?.fahrt?.km_gefahren != null ? Number(vorhanden.fahrt.km_gefahren) : null,

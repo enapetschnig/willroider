@@ -11,7 +11,7 @@ import {
   geaenderteTage,
   type BerichtSnapshot,
 } from "@/lib/stundenBerichtDiff";
-import { aggregiereZulagen } from "@/lib/stundenAggregation";
+import { aggregiereFahrtgeld, aggregiereZulagen } from "@/lib/stundenAggregation";
 import {
   makeBaustellenstundenberichtPdf,
   type BsbPdfRow,
@@ -204,6 +204,7 @@ export async function buildBerichtPdf(
     tage,
   );
   const zulagenAgg = aggregiereZulagen(tage, (zt as any[]) ?? []);
+  const fahrtgeldAgg = aggregiereFahrtgeld(tage);
 
   // 8) BsbPdfInput zusammenbauen (gleicher Code-Pfad wie StundenBericht.tsx)
   const pdfRows: BsbPdfRow[] = rows.map((row) => {
@@ -271,9 +272,14 @@ export async function buildBerichtPdf(
     rows: pdfRows,
     summenZeile,
     summeGesamt,
-    zulagen: zulagenAgg.map(
-      (z) => `${z.bezeichnung} ${fmtHNum(z.summe_stunden)} h`,
-    ),
+    zulagen: [
+      ...zulagenAgg.map(
+        (z) => `${z.bezeichnung} ${fmtHNum(z.summe_stunden)} h`,
+      ),
+      ...(fahrtgeldAgg.stunden > 0
+        ? [`Fahrtgeld ${fmtHNum(fahrtgeldAgg.stunden)} h`]
+        : []),
+    ],
     unterschrift: bericht.unterschrift_data,
     unterschriebenAm: bericht.unterschrieben_am
       ? new Date(bericht.unterschrieben_am).toLocaleDateString("de-AT")

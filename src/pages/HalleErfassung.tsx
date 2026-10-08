@@ -327,6 +327,7 @@ export default function HalleErfassung() {
       const fahrt = aktuellerEigenerTag?.fahrt
         ? {
             fahrtgeld_eur: Number(aktuellerEigenerTag.fahrt.fahrtgeld_eur ?? 0),
+            fahrtgeld_stunden: Number(aktuellerEigenerTag.fahrt.fahrtgeld_stunden ?? 0),
             privat_pkw: aktuellerEigenerTag.fahrt.privat_pkw,
             km_gefahren:
               aktuellerEigenerTag.fahrt.km_gefahren != null

@@ -1,5 +1,61 @@
 # Journal
 
+## 2026-10-08 · Zwei Wünsche von Bua Sirnitzer (Stunden schreiben als Polier)
+
+**Meldung 1 (Fahrtgeld):** „Hier darf man nur Fahrtgeld auswählen dürfen. Kein
+Taggeld. Das wird ja automatisch über die Stunden abgewickelt. Keine Geldangaben.
+Unter der Fahrtgeld-Auswahl muss dann noch 0,5 Std, 1,0 Std und 1,5 Std auswählbar
+sein.“
+
+**Entscheidung Christoph:** Die Fahrtgeld-Stunden werden nur vermerkt (PDF,
+Auswertung) und vom Lohnbüro abgerechnet. Sie zählen nicht zu den Arbeitsstunden.
+
+**Geändert:**
+- Migration `20261008100000_fahrtgeld_stunden.sql` (**angewendet**): neue Spalte
+  `stunden_fahrt.fahrtgeld_stunden` (Standard 0). `fahrtgeld_eur` bleibt stehen,
+  wird aber nicht mehr befüllt. Es stand in allen 230 Zeilen 0 und wurde nirgends
+  ausgegeben.
+- **Stunden:** Statt „Fahrtgeld & Taggeld (Polier)“ mit Euro-Feld und „Taggeld
+  manuell überschreiben“ gibt es jetzt nur noch „Fahrtgeld (Polier)“ mit den Knöpfen
+  Keins / 0,5 / 1,0 / 1,5 Std. Das Taggeld wird immer automatisch gerechnet.
+- **Ausgabe:** Stundenzettel-PDF (Spalte Taggeld „FG 1,00 h“ + Summenzeile
+  „Fahrtgeld“), Baustellenstundenbericht (Seite und PDF, Zeile „Zulagen etc.“),
+  Stundenauswertung (Karte „Fahrtgeld (Polier)“ + CSV-Spalte „Fahrtgeld (h)“).
+- Die anderen Masken (Tätigkeitsbericht, Halle, Tag bearbeiten, Büro-Korrektur)
+  übernehmen den gespeicherten Wert beim Speichern.
+
+**Meldung 2 (alle Mitarbeiter):** „Hier muss der Polier alle Mitarbeiter auswählen
+können. Wenn jemand krank ist und/oder bei einem anderen Polier ist, sollte der
+Polier diesen auswählen können und nicht wir im Büro die ganze Partie-Einteilung
+ändern müssen.“
+
+**Ursache:** Seit 18.09. sieht ein Polier nur die Tage seiner Partie und seiner
+Einteilung (Urlaub/Krank verborgen). Deshalb bekam er auch nur seine Partie zur
+Auswahl. Bei Leuten außerhalb wäre sonst das Speichern gescheitert.
+
+**Geändert:**
+- Migration `20261008110000_polier_alle_mitarbeiter.sql` (**angewendet**):
+  - `stunden_tage_select` zusätzlich `erfasst_von = auth.uid()`. Wer einen Tag für
+    jemanden erfasst hat, darf ihn wieder lesen. Ohne das scheiterte schon das
+    Speichern (`insert … returning`).
+  - Neue Funktion `stunden_tag_vorhanden(datum, ids)`: Sie sagt nur Ja/Nein, ob es
+    den Tag schon gibt, ohne Stunden und ohne Art. Nur für Leute mit „für andere
+    erfassen“, Partieleiter oder Verwaltung.
+  - Die Richtlinie ließ sich über `apply_migration` nicht setzen (Zeitüberschreitung),
+    sie ist per `alter policy` mit demselben Inhalt eingespielt.
+- **Stunden:** Wer „für andere erfassen“ hat, bekommt alle aktiven Mitarbeiter zur
+  Auswahl, nach Partie gruppiert, die eigene Partie oben. „Ganze Partie“ gibt es
+  jetzt auch dort, „Alle“ nur noch fürs Büro (ohne eigene Partie).
+- Hat jemand aus einer anderen Partie schon einen Tag, steht in der Auswahl
+  „erfasst“ und im gelben Hinweis „schon erfasst (wird nicht überschrieben)“. Beim
+  Speichern wird die Person übersprungen, Änderungen gehen übers Büro.
+
+**Geprüft:** Build ok, Typprüfung ohne neue Fehler. In der Datenbank als Bua
+nachgestellt (Transaktion, zurückgerollt): Am 07.10. sieht er 2 Tage im Detail, die
+Funktion meldet 18 vorhandene Tage. Ein normaler Mitarbeiter bekommt von der
+Funktion nichts. Ein Klicktest in der App steht noch aus, weil es in dieser
+Umgebung keinen Testzugang gibt.
+
 ## 2026-10-07 · Wunsch von Elias Winkler (Tätigkeitsberichte erst ab dem 21. zur Freigabe)
 
 **Meldung:** „Die Tätigkeitsberichte sollten gesammelt am 21. des Monats zur Freigabe

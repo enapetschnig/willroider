@@ -43,7 +43,7 @@ import { TagBearbeitenDialog } from "@/components/TagBearbeitenDialog";
 import { UnterschriftDialog } from "@/components/UnterschriftDialog";
 import { BsbVersendenDialog } from "@/components/BsbVersendenDialog";
 import { useZulagenTypen } from "@/hooks/useStammdatenStunden";
-import { aggregiereZulagen } from "@/lib/stundenAggregation";
+import { aggregiereFahrtgeld, aggregiereZulagen } from "@/lib/stundenAggregation";
 import { buildBerichtPdf } from "@/lib/bsbPdfHelper";
 import { archiviereBericht } from "@/lib/berichtArchiv";
 
@@ -285,6 +285,7 @@ export default function StundenBericht() {
     () => aggregiereZulagen(tage, zulagenTypen),
     [tage, zulagenTypen],
   );
+  const fahrtgeldAgg = useMemo(() => aggregiereFahrtgeld(tage), [tage]);
 
   /** Kompakte Versand-Vorschau: Stunden pro Baustelle + Gesamtsumme. Nur
    *  Arbeit (Baustelle/Firma) wird summiert — Abwesenheiten zählen nicht. */
@@ -879,7 +880,7 @@ export default function StundenBericht() {
       </Card>
 
       {/* Zulagen */}
-      {zulagenAgg.length > 0 && (
+      {(zulagenAgg.length > 0 || fahrtgeldAgg.stunden > 0) && (
         <Card>
           <CardContent className="p-4 space-y-1">
             <div className="text-xs font-semibold uppercase text-muted-foreground">
@@ -894,6 +895,15 @@ export default function StundenBericht() {
                 </span>
               </div>
             ))}
+            {fahrtgeldAgg.stunden > 0 && (
+              <div className="flex justify-between text-sm tabular-nums">
+                <span>Fahrtgeld</span>
+                <span className="font-medium">
+                  {fmtHNum(fahrtgeldAgg.stunden)} h · {fahrtgeldAgg.tage} Tag
+                  {fahrtgeldAgg.tage === 1 ? "" : "e"}
+                </span>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

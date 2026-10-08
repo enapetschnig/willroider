@@ -40,6 +40,9 @@ export interface SaveZulage {
 
 export interface SaveFahrt {
   fahrtgeld_eur: number;
+  /** Fahrtgeld des Poliers in Stunden (0 / 0,5 / 1 / 1,5) — nur vermerkt,
+   *  zählt nicht zu den Arbeitsstunden. */
+  fahrtgeld_stunden: number;
   privat_pkw: boolean;
   km_gefahren: number | null;
   taggeld_kurz: number;

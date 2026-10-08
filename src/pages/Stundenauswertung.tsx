@@ -53,6 +53,8 @@ import {
   kmFuerTag,
   kilometergeldFuerTag,
   aggregiereKilometergeld,
+  aggregiereFahrtgeld,
+  fahrtgeldStundenFuerTag,
   fmtEur,
   TAGGELD_SATZ_KURZ_EUR,
   TAGGELD_SATZ_LANG_EUR,
@@ -453,7 +455,7 @@ export default function Stundenauswertung() {
   const exportCsv = async () => {
     const lines: string[] = [];
     lines.push(
-      "Mitarbeiter;Datum;Status;Netto;Brutto;Von;Bis;Anwesenheit (min);Tätigkeiten;Zulagen;Taggeld_kurz;Taggeld_lang;Privat-km;Kilometergeld;Anmerkung",
+      "Mitarbeiter;Datum;Status;Netto;Brutto;Von;Bis;Anwesenheit (min);Tätigkeiten;Zulagen;Taggeld_kurz;Taggeld_lang;Privat-km;Kilometergeld;Fahrtgeld (h);Anmerkung",
     );
     const kmSatz = limits?.kilometergeld_satz_eur ?? 0.5;
     const taetById = new Map(taetigkeitenStamm.map((s) => [s.id, s.bezeichnung]));
@@ -495,6 +497,7 @@ export default function Stundenauswertung() {
         const tgLang = tg.lang;
         const km = kmFuerTag(t);
         const kmGeld = kilometergeldFuerTag(t, kmSatz);
+        const fgStd = fahrtgeldStundenFuerTag(t);
         lines.push(
           [
             `${ma!.nachname} ${ma!.vorname}`,
@@ -511,6 +514,7 @@ export default function Stundenauswertung() {
             tgLang,
             km > 0 ? fmtHNum(km) : "",
             kmGeld > 0 ? fmtHNum(kmGeld) : "",
+            fgStd > 0 ? fmtHNum(fgStd) : "",
             cleanCsv(t.tag.anmerkung ?? ""),
           ].join(";"),
         );
@@ -1034,6 +1038,7 @@ function DetailMa({
   // satz_kurz_eur, das Taggeld wurde damit NaN und Maschinen-Tage zählten mit.
   const aggTg = aggregiereTaggeld(tage, pausenDauer, undefined, undefined, maschinenIds);
   const aggKm = aggregiereKilometergeld(tage, limits?.kilometergeld_satz_eur ?? 0.5);
+  const aggFg = aggregiereFahrtgeld(tage);
 
   return (
     <div className="p-3 space-y-3">
@@ -1262,6 +1267,24 @@ function DetailMa({
             )}
           </CardContent>
         </Card>
+
+        {aggFg.stunden > 0 && (
+          <Card>
+            <CardContent className="p-3 space-y-1">
+              <div className="font-semibold text-muted-foreground uppercase text-[10px]">
+                Fahrtgeld (Polier)
+              </div>
+              <div className="flex justify-between tabular-nums">
+                <span>Tage mit Fahrtgeld</span>
+                <span className="font-medium">{aggFg.tage}</span>
+              </div>
+              <div className="flex justify-between tabular-nums pt-1 border-t font-semibold">
+                <span>Summe</span>
+                <span>{fmtHNum(aggFg.stunden)} h</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardContent className="p-3 space-y-1">

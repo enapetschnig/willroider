@@ -967,6 +967,7 @@ export type Database = {
         Row: {
           stunden_tag_id: string;
           fahrtgeld_eur: number;
+          fahrtgeld_stunden: number;
           privat_pkw: boolean;
           km_gefahren: number | null;
           taggeld_kurz: number;

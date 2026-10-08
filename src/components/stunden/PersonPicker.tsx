@@ -43,7 +43,7 @@ export function PersonPicker({
   onSetSelection: (s: Set<string>) => void;
   ownUserId: string;
   ownProfile: Profile | null;
-  statusForDate: Map<string, { hours: number }>;
+  statusForDate: Map<string, { hours: number; verborgen?: boolean }>;
   search: string;
   onSearchChange: (s: string) => void;
   date: string;
@@ -74,10 +74,15 @@ export function PersonPicker({
       }
       map.get(key)!.rows.push(m);
     });
-    return [...map.values()].sort((a, b) =>
-      (a.partie?.name ?? "ZZ").localeCompare(b.partie?.name ?? "ZZ")
+    // Die eigene Partie des Poliers zuerst, dann die anderen alphabetisch.
+    const eigene = partie?.id ?? null;
+    return [...map.values()].sort(
+      (a, b) =>
+        Number((b.partie?.id ?? null) === eigene && !!eigene) -
+          Number((a.partie?.id ?? null) === eigene && !!eigene) ||
+        (a.partie?.name ?? "ZZ").localeCompare(b.partie?.name ?? "ZZ")
     );
-  }, [isAdmin, filteredMembers, partien]);
+  }, [isAdmin, filteredMembers, partien, partie]);
 
   const selectedList = Array.from(selectedIds);
   const selectedProfiles = selectedList
@@ -146,6 +151,11 @@ export function PersonPicker({
         {s && s.hours > 0 && (
           <span className="text-[10px] font-semibold text-emerald-600 tabular-nums shrink-0">
             {s.hours.toFixed(1)} h
+          </span>
+        )}
+        {s?.verborgen && (
+          <span className="text-[10px] font-semibold text-amber-700 shrink-0">
+            erfasst
           </span>
         )}
         {active && <Check className="h-4 w-4 text-primary shrink-0" />}
@@ -251,7 +261,7 @@ export function PersonPicker({
               >
                 Nur mich
               </Button>
-              {!isAdmin && partie && (
+              {partie && (
                 <Button
                   type="button"
                   variant="outline"
@@ -262,7 +272,9 @@ export function PersonPicker({
                   Ganze Partie
                 </Button>
               )}
-              {isAdmin && (
+              {/* „Alle" nur fürs Büro — ein Polier würde damit die ganze
+                  Firma auf seinen Tag buchen. */}
+              {isAdmin && !partie && (
                 <Button
                   type="button"
                   variant="outline"

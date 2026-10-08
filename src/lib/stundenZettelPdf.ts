@@ -17,6 +17,8 @@ import {
   aggregiereZulagen,
   aggregiereTaggeld,
   aggregiereKilometergeld,
+  aggregiereFahrtgeld,
+  fahrtgeldStundenFuerTag,
   taggeldFuerTag,
   fmtEur,
   fmtTaetigkeitenInline,
@@ -98,6 +100,7 @@ export function renderStundenzettel(
     data.maschinenIds,
   );
   const aggKm = aggregiereKilometergeld(data.tage, data.kilometergeldSatz);
+  const aggFg = aggregiereFahrtgeld(data.tage);
 
   // Header
   doc.setFont("helvetica", "bold");
@@ -120,7 +123,10 @@ export function renderStundenzettel(
     const tg = taggeldFuerTag(t, data.pausen, data.maschinenIds);
     const tgK = tg.kurz;
     const tgL = tg.lang;
-    const tgStr = tgL > 0 ? `${tgL}× L` : tgK > 0 ? `${tgK}× K` : "—";
+    const tgBasis = tgL > 0 ? `${tgL}× L` : tgK > 0 ? `${tgK}× K` : "";
+    const fg = fahrtgeldStundenFuerTag(t);
+    const fgStr = fg > 0 ? `FG ${fmtH(fg)}` : "";
+    const tgStr = [tgBasis, fgStr].filter(Boolean).join(" · ") || "—";
     return [d.date, d.wt, status, fmtH(netto), taet || "—", zul || "—", tgStr];
   });
 
@@ -229,6 +235,20 @@ export function renderStundenzettel(
     doc.setFont("helvetica", "normal");
     doc.text(
       `${aggKm.km.toLocaleString("de-AT")} km · ${fmtEur(aggKm.eur)}`,
+      leftX + colW - 1,
+      y,
+      { align: "right" },
+    );
+  }
+
+  // Fahrtgeld (Polier, in Stunden — zählt nicht zu Ist)
+  if (aggFg.stunden > 0) {
+    y += 5;
+    doc.setFont("helvetica", "bold");
+    doc.text("Fahrtgeld", leftX, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(
+      `${aggFg.tage}× · ${fmtH(aggFg.stunden)}`,
       leftX + colW - 1,
       y,
       { align: "right" },
