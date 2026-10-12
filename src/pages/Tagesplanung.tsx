@@ -72,6 +72,7 @@ import {
   Share2,
   CalendarRange,
   GraduationCap,
+  BookOpen,
 } from "lucide-react";
 import { makeTagesplanungPdf } from "@/lib/tagesplanungPdf";
 import { getPoliereinsatzPaareFuerTag, vergleichePartien } from "@/lib/tagesplanung";
@@ -318,7 +319,7 @@ export default function Tagesplanung() {
       .select("id")
       .in("mitarbeiter_id", anfassbar)
       .eq("datum", datum)
-      .in("tag_status", ["urlaub", "krank", "schlechtwetter", "feiertag", "berufsschule"])
+      .in("tag_status", ["urlaub", "krank", "schlechtwetter", "feiertag", "berufsschule", "polierschule"])
       .in("status", ["erfasst", "ma_bestaetigt"]);
     const ids = (tage ?? []).map((t: any) => t.id as string);
     if (ids.length === 0) return { entfernt: 0, ausAntrag };
@@ -667,7 +668,7 @@ export default function Tagesplanung() {
         .from("stunden_tage")
         .select("mitarbeiter_id")
         .eq("datum", datum)
-        .in("tag_status", ["urlaub", "krank", "schlechtwetter", "berufsschule"]),
+        .in("tag_status", ["urlaub", "krank", "schlechtwetter", "berufsschule", "polierschule"]),
       supabase
         .from("urlaubsantraege")
         .select("mitarbeiter_id")
@@ -2362,10 +2363,12 @@ function MitarbeiterSicht({
                     {a.status === "krank" && <HeartPulse className="h-3.5 w-3.5" />}
                     {a.status === "schlechtwetter" && <CloudRain className="h-3.5 w-3.5" />}
                     {a.status === "berufsschule" && <GraduationCap className="h-3.5 w-3.5" />}
+                    {a.status === "polierschule" && <BookOpen className="h-3.5 w-3.5" />}
                     {a.status === "urlaub" && "Urlaub"}
                     {a.status === "krank" && "Krank"}
                     {a.status === "schlechtwetter" && "Schlechtwetter"}
                     {a.status === "berufsschule" && "Berufsschule"}
+                    {a.status === "polierschule" && "Polierschule"}
                     {a.bis && ` bis ${new Date(a.bis).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit" })}`}
                   </span>
                 </div>
@@ -2943,6 +2946,7 @@ function SonderfaelleBlock({
   const krank = abwesende.filter((a) => a.status === "krank");
   const sw = abwesende.filter((a) => a.status === "schlechtwetter");
   const schule = abwesende.filter((a) => a.status === "berufsschule");
+  const polierschule = abwesende.filter((a) => a.status === "polierschule");
 
   const [notizVal, setNotizVal] = useState(notiz);
   const [notizTimer, setNotizTimer] = useState<any>(null);
@@ -3012,6 +3016,12 @@ function SonderfaelleBlock({
           <span style={{ fontWeight: "bold", minWidth: 110 }}>Berufsschule:</span>
           <span>{renderListe(schule)}</span>
         </div>
+        {polierschule.length > 0 && (
+          <div className="flex gap-2">
+            <span style={{ fontWeight: "bold", minWidth: 110 }}>Polierschule:</span>
+            <span>{renderListe(polierschule)}</span>
+          </div>
+        )}
         <div className="pt-2 border-t border-black/20 mt-2">
           <div
             style={{ fontWeight: "bold", marginBottom: 4 }}

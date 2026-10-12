@@ -1,5 +1,23 @@
 # Journal
 
+## 2026-10-12 · Abwesenheit „Polierschule“ (Christoph)
+
+- **Wunsch:** Im Fenster „Abwesenheit eintragen“ der Arbeitsplanung soll neben
+  Berufsschule auch „Polierschule“ stehen.
+- **Umsetzung:** Neuer Code **PS · Polierschule** (Indigo). Er wird wie die
+  Berufsschule behandelt: Der Tag zählt mit dem Tages-Soll, es gibt kein Minus im
+  Zeitausgleich und keinen Urlaubsabzug. Polierschule erscheint in Stunden,
+  Stundenbericht, BSB-PDF, Stundenauswertung, Poliereinsatz und Tagesplanung als
+  abwesend. Im Tagesplan und im PDF steht die Zeile „Polierschule:“ nur, wenn jemand
+  dort ist.
+- **Datenbank:**
+  - `20261012100000_polierschule_enum.sql`: Enum-Wert `polierschule`, ist eingespielt.
+  - `20261012100100_polierschule.sql`: `stunden_tag_recompute` (Vorrang nach
+    Berufsschule) und `plan_fuer_tag` (Abwesenheitsliste). Beim Einspielen zweimal
+    abgelehnt, **noch nicht in der DB**. Ohne sie funktioniert der Knopf, weil der
+    Trigger den Status stehen lässt. Nur „Mein Tag“ und die Polier-Ansicht zeigen
+    Polierschule noch nicht als abwesend.
+
 ## 2026-10-08 · Wünsche von Niklas Gwenger (Evaluierung löschen, Tablet-Unterschrift)
 
 **1. „Wie kann ich eine falsche Evaluierung löschen?“**

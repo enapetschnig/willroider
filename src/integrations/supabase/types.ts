@@ -39,7 +39,11 @@ export type TagStatus =
   | 'feiertag'
   /** Berufsschultag eines Lehrlings — zählt als Arbeitszeit (§ 9 BAG),
    *  wird nur im Abwesenheits-Fenster der Arbeitsplanung erfasst. */
-  | 'berufsschule';
+  | 'berufsschule'
+  /** Polierschule (Kurs/Ausbildung zum Polier) — zählt wie die
+   *  Berufsschule mit dem Tages-Soll, wird nur im Abwesenheits-Fenster
+   *  der Arbeitsplanung erfasst (Wunsch 12.10.2026). */
+  | 'polierschule';
 export type BuchungStatus =
   | 'erfasst'
   | 'ma_bestaetigt'

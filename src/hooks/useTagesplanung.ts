@@ -84,7 +84,7 @@ export function useTagesplanung(datum: string) {
           .from("stunden_tage")
           .select("mitarbeiter_id, tag_status, datum")
           .eq("datum", datum)
-          .in("tag_status", ["urlaub", "krank", "schlechtwetter", "berufsschule"]),
+          .in("tag_status", ["urlaub", "krank", "schlechtwetter", "berufsschule", "polierschule"]),
         // Neue Tabellen — defensiv, falls Migration noch nicht durchgelaufen
         supabase
           .from("urlaubsantraege")
@@ -316,7 +316,7 @@ export function useTagesplanung(datum: string) {
             .select("mitarbeiter_id, tag_status, datum")
             .gt("datum", datum)
             .lte("datum", plusTage(VORSCHAU_TAGE))
-            .in("tag_status", ["urlaub", "krank", "schlechtwetter", "berufsschule"])
+            .in("tag_status", ["urlaub", "krank", "schlechtwetter", "berufsschule", "polierschule"])
             .in("mitarbeiter_id", ids),
           // Krankmeldung mit offenem Ende (bis = NULL) zählt nicht als Ende.
           supabase

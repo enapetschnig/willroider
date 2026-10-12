@@ -12,6 +12,7 @@ import {
   Factory,
   Calendar,
   GraduationCap,
+  BookOpen,
 } from "lucide-react";
 import type { TagStatus } from "@/integrations/supabase/types";
 
@@ -23,6 +24,7 @@ export const STATUS_LABELS: Record<TagStatus, string> = {
   schlechtwetter: "Schlechtwetter",
   feiertag: "Feiertag",
   berufsschule: "Berufsschule",
+  polierschule: "Polierschule",
 };
 
 export const STATUS_ICONS = {
@@ -33,6 +35,7 @@ export const STATUS_ICONS = {
   schlechtwetter: CloudRain,
   feiertag: Calendar,
   berufsschule: GraduationCap,
+  polierschule: BookOpen,
 };
 
 /** Solider Farb-Stil (Knöpfe + Badges, aktiver Zustand). */
@@ -44,6 +47,7 @@ export const STATUS_COLORS: Record<TagStatus, string> = {
   schlechtwetter: "bg-sky-500 text-white border-sky-500",
   feiertag: "bg-violet-500 text-white border-violet-500",
   berufsschule: "bg-teal-600 text-white border-teal-600",
+  polierschule: "bg-indigo-600 text-white border-indigo-600",
 };
 
 /** Outline-Stil (Top-Toggle inaktiv) — gleiche Farbe, transparenter Hintergrund. */
@@ -55,6 +59,7 @@ export const STATUS_OUTLINE: Record<TagStatus, string> = {
   schlechtwetter: "bg-background text-sky-700 border-sky-200",
   feiertag: "bg-background text-violet-700 border-violet-200",
   berufsschule: "bg-background text-teal-700 border-teal-200",
+  polierschule: "bg-background text-indigo-700 border-indigo-200",
 };
 
 /** Linke Akzent-Border je Eintrags-Art (für Section-Karten). */
@@ -66,6 +71,7 @@ export const ART_BORDER: Record<TagStatus, string> = {
   schlechtwetter: "border-l-sky-500",
   feiertag: "border-l-violet-500",
   berufsschule: "border-l-teal-600",
+  polierschule: "border-l-indigo-600",
 };
 
 /** Reihenfolge, in der Art-Sections im MA-Block dargestellt werden. */
@@ -73,6 +79,7 @@ export const ART_REIHENFOLGE: TagStatus[] = [
   "baustelle",
   "firma",
   "berufsschule",
+  "polierschule",
   "urlaub",
   "krank",
   "schlechtwetter",

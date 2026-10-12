@@ -81,6 +81,7 @@ const STATUS_LABEL: Record<TagStatus, string> = {
   schlechtwetter: "SW",
   feiertag: "Feiertag",
   berufsschule: "Berufsschule",
+  polierschule: "Polierschule",
 };
 
 /** Kurzzeichen für Abwesenheits-Tage in der Monatstabelle. */
@@ -90,6 +91,7 @@ const RASTER_KUERZEL: Record<string, string> = {
   schlechtwetter: "SW",
   feiertag: "F",
   berufsschule: "BS",
+  polierschule: "PS",
 };
 
 /** Helle Badge-Farben je Eintrags-Art (Tages-Detail). */
@@ -101,6 +103,7 @@ const ART_BADGE: Record<TagStatus, string> = {
   schlechtwetter: "bg-sky-50 text-sky-700 border border-sky-200",
   feiertag: "bg-violet-50 text-violet-700 border border-violet-200",
   berufsschule: "bg-teal-50 text-teal-700 border border-teal-200",
+  polierschule: "bg-indigo-50 text-indigo-700 border border-indigo-200",
 };
 
 /** Kurz-Übersicht der Einträge eines Tages — für Tooltips. */
