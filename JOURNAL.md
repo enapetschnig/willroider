@@ -1,5 +1,33 @@
 # Journal
 
+## 2026-10-13 · SharePoint: neue Ordner nicht auffindbar (Niklas Gwenger)
+
+- **Wunsch:** „Synchronisiert nicht, Ordner sind seit 2 Wochen erstellt.“ Der Ordner
+  „1404040 Painter Carport“ war in „Ordner verknüpfen“ nicht zu finden.
+- **Ursache 1:** Das Ordnerverzeichnis (`sharepoint_ordner`, Modus `ordner` von
+  `sharepoint-sync`) wurde nie per Zeitplan aufgefrischt, zuletzt von Hand am 14.09.
+  Seither in SharePoint angelegte Ordner kannte die App nicht.
+- **Ursache 2:** Sebastian Egger hat sechs Ordner umbenannt (z. B. „1404030 - Balkone
+  Mittewald“ → „4030 - Balkone Mittewald“). Sie haben dabei neue IDs bekommen, und jeder
+  Abgleich lief für HMH Obersteiner, Carport Inzko, Mischkulnig, Balkone Mittewald, Rohde
+  und Carport Luger auf „Graph 404“.
+- **Behoben:**
+  - Der Zeitplan-Abgleich frischt das Verzeichnis nebenbei auf, sobald es älter als 30
+    Minuten ist. Das dauert ca. 5 s für 900 Ordner.
+  - Der Dialog „Ordner verknüpfen“ holt es beim Öffnen frisch und zeigt dabei „SharePoint
+    wird durchsucht …“.
+  - Den Modus `ordner` dürfen alle auslösen, die verknüpfen dürfen
+    (`is_admin_role`/`can_review`).
+  - Ordner, die es nicht mehr gibt, fliegen aus dem App-Verzeichnis, aber nur für Teams,
+    die vollständig gelesen wurden. In SharePoint wird nichts gelöscht.
+- **Daten:**
+  - Die sechs Egger-Baustellen sind auf die umbenannten Ordner umgehängt (863 Dateien
+    gespiegelt).
+  - Painter Carport und Scherwitzl (BVH Gwenger) sind verknüpft.
+  - Weitere unverknüpfte Baustellen mit passendem Ordner hab ich nicht automatisch
+    angehängt: Ly Vong, Platzer, FF St. Filippen, Marvin, MH Becker, MH Traschl, Ropac,
+    Sanierung Velden (zwei Kandidaten!), Steinwender, Tramlage Lauritsch, Umbau Zangl.
+
 ## 2026-10-12 · Abwesenheit „Polierschule“ (Christoph)
 
 - **Wunsch:** Im Fenster „Abwesenheit eintragen“ der Arbeitsplanung soll neben

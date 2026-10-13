@@ -2,7 +2,9 @@
  * Eine Baustelle mit ihrem Ordner in SharePoint verknüpfen.
  *
  * Gesucht wird im Verzeichnis der Baustellenordner, das die App regelmäßig
- * einliest. Angelegt wird in SharePoint nichts — der Ordner wird dort wie
+ * einliest. Beim Öffnen wird es zusätzlich frisch aus SharePoint geholt —
+ * sonst fehlt ein Ordner, der gerade erst angelegt wurde (Vorfall 13.10.,
+ * N. Gwenger: „Painter Carport" nicht gefunden). Angelegt wird in SharePoint nichts — der Ordner wird dort wie
  * gewohnt von Hand erstellt und hier nur ausgewählt.
  */
 import { useEffect, useState } from "react";
@@ -51,6 +53,27 @@ export function SharePointVerknuepfenDialog({
   const [treffer, setTreffer] = useState<OrdnerTreffer[]>([]);
   const [sucht, setSucht] = useState(false);
   const [arbeitet, setArbeitet] = useState(false);
+  const [frischt, setFrischt] = useState(false);
+  const [aufgefrischt, setAufgefrischt] = useState(0);
+
+  // Verzeichnis beim Öffnen auffrischen (die Funktion überspringt, wenn es
+  // jünger als eine Minute ist), danach die Suche erneut laufen lassen.
+  useEffect(() => {
+    if (!open) return;
+    let aktiv = true;
+    setFrischt(true);
+    supabase.functions
+      .invoke("sharepoint-sync", { body: { modus: "ordner" } })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!aktiv) return;
+        setFrischt(false);
+        setAufgefrischt((n) => n + 1);
+      });
+    return () => {
+      aktiv = false;
+    };
+  }, [open]);
 
   // Beim Öffnen mit dem naheliegendsten Suchbegriff starten.
   useEffect(() => {
@@ -82,7 +105,7 @@ export function SharePointVerknuepfenDialog({
       aktiv = false;
       clearTimeout(t);
     };
-  }, [suche, open]);
+  }, [suche, open, aufgefrischt]);
 
   const verknuepfen = async (o: OrdnerTreffer) => {
     setArbeitet(true);
@@ -145,6 +168,11 @@ export function SharePointVerknuepfenDialog({
                 <Loader2 className="h-3.5 w-3.5 inline mr-1.5 animate-spin" />
                 Suche …
               </div>
+            ) : treffer.length === 0 && frischt ? (
+              <div className="p-3 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 inline mr-1.5 animate-spin" />
+                SharePoint wird nach neuen Ordnern durchsucht …
+              </div>
             ) : treffer.length === 0 ? (
               <div className="p-3 text-xs text-muted-foreground">
                 Nichts gefunden. Anderen Begriff versuchen — oder den Ordner zuerst in SharePoint
@@ -168,7 +196,15 @@ export function SharePointVerknuepfenDialog({
               ))
             )}
           </div>
-          <div className="flex justify-end">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] text-muted-foreground">
+              {frischt && treffer.length > 0 ? (
+                <>
+                  <Loader2 className="h-3 w-3 inline mr-1 animate-spin" />
+                  SharePoint wird nach neuen Ordnern durchsucht …
+                </>
+              ) : null}
+            </span>
             <Button variant="ghost" size="sm" onClick={onClose} disabled={arbeitet}>
               Abbrechen
             </Button>
