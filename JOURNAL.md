@@ -24,9 +24,12 @@
   - Die sechs Egger-Baustellen sind auf die umbenannten Ordner umgehängt (863 Dateien
     gespiegelt).
   - Painter Carport und Scherwitzl (BVH Gwenger) sind verknüpft.
-  - Weitere unverknüpfte Baustellen mit passendem Ordner hab ich nicht automatisch
-    angehängt: Ly Vong, Platzer, FF St. Filippen, Marvin, MH Becker, MH Traschl, Ropac,
-    Sanierung Velden (zwei Kandidaten!), Steinwender, Tramlage Lauritsch, Umbau Zangl.
+  - Auf Christophs OK auch verknüpft (Name und Kostenstelle eindeutig): Ly Vong, Platzer,
+    FF St. Filippen, MH Becker, MH Traschl, Ropac, Steinwender, Tramlage Lauritsch,
+    Umbau Zangl. Dabei 201 Dateien gespiegelt; die Baustellenanlage (.docx) wird
+    hochgeladen.
+  - **Marvin** und **Sanierung Velden** (zwei Kandidaten: Maurer und Egger Sebastian)
+    verknüpft der Bauleiter selbst.
 
 ## 2026-10-12 · Abwesenheit „Polierschule“ (Christoph)
 
