@@ -1,5 +1,29 @@
 # Journal
 
+## 2026-10-15 · SharePoint: alles synchron und in der App zu öffnen (Christoph)
+
+- **Vorgabe:** „Alle Dateien sollen im OneDrive und in der App synchron sein und in der
+  App zum Öffnen gehen.“
+- **Aktualität:**
+  - Vorher wurde jede Baustelle nur etwa einmal pro Stunde abgeglichen (97 verknüpft, 15
+    je 10-Minuten-Lauf, Läufe bis 143 s, knapp an der 150-s-Grenze).
+  - Jetzt gleicht das Öffnen des Dokumente-Reiters die Baustelle sofort ab und lädt neu,
+    wenn sich etwas geändert hat. Das darf jeder, der die Baustelle sehen darf, höchstens
+    alle 2 Minuten (`sharepoint-sync`, nur lesend).
+  - Der Zeitplan hat ein Zeitbudget von 100 s. Was nicht mehr drankommt, ist beim nächsten
+    Lauf zuerst dran.
+- **Öffnen** (`sharepoint-datei`):
+  - Als PDF: Office, Outlook-Mails (.msg/.eml, ~600 Stück), .tif.
+  - iPhone-Fotos (.heic, ~165): Microsoft rechnet HEIC nicht nach JPG um, deshalb die
+    SharePoint-Vorschau in 2000 px.
+  - Jede Datei bringt ihre SharePoint-Adresse mit. Der Betrachter hat „In SharePoint“,
+    für Pläne (.dwg/.dxf/.ifc), die kein Browser zeigt. Download geht immer.
+  - Getestet mit echten Dateien: msg, tif, docx, xlsx → PDF; heic, jpg → JPG; pdf direkt;
+    dwg → SharePoint-Link.
+- **Grenze:**
+  - Was in der App gelöscht wird, bleibt in SharePoint. In SharePoint wird nie gelöscht.
+  - „In SharePoint“ öffnen kann nur, wer ein Microsoft-Konto mit Zugriff aufs Team hat.
+
 ## 2026-10-15 · Neue Baustelle → SharePoint-Ordner nach neuer Struktur (Sebastian Egger)
 
 - **Wunsch (Mail an Christoph, 14./15.10.):** Beim Anlegen einer Baustelle soll im Team

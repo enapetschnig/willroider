@@ -42,6 +42,8 @@ export interface DocViewerItem {
   direkt_url?: string | null;
   /** Adresse für „Download" — bei Office das unveränderte Original. */
   download_url?: string | null;
+  /** Datei in SharePoint öffnen — für Pläne (.dwg, .ifc …), die kein Browser zeigt. */
+  web_url?: string | null;
 }
 
 interface DocViewerDialogProps {
@@ -224,6 +226,17 @@ export function DocViewerDialog({
                 Neuer Tab
               </Button>
             )}
+            {item?.web_url && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => window.open(item.web_url!, "_blank", "noopener")}
+                className="h-8"
+              >
+                <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+                In SharePoint
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"
@@ -277,10 +290,18 @@ export function DocViewerDialog({
                 Datei herunterladen oder in einem neuen Tab öffnen, um sie mit
                 der passenden Anwendung anzuzeigen.
               </div>
-              <Button onClick={handleDownload} className="mt-1">
-                <Download className="h-4 w-4 mr-2" />
-                Herunterladen
-              </Button>
+              <div className="flex flex-wrap justify-center gap-2 mt-1">
+                {item?.web_url && (
+                  <Button variant="outline" onClick={() => window.open(item.web_url!, "_blank", "noopener")}>
+                    <ExternalLink className="h-4 w-4 mr-2" />
+                    In SharePoint öffnen
+                  </Button>
+                )}
+                <Button onClick={handleDownload}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Herunterladen
+                </Button>
+              </div>
             </div>
           )}
         </div>

@@ -153,6 +153,8 @@ export async function sharePointDateiUrl(dateiId: string): Promise<{
   als_pdf: boolean;
   dateiname: string;
   mimetype: string | null;
+  /** Adresse der Datei in SharePoint (eigene Betrachter, z. B. für .dwg). */
+  web_url: string | null;
 } | null> {
   const roh = dateiId.startsWith(SP_PREFIX) ? dateiId.slice(SP_PREFIX.length) : dateiId;
   const { data, error } = await supabase.functions.invoke("sharepoint-datei", {
@@ -165,6 +167,7 @@ export async function sharePointDateiUrl(dateiId: string): Promise<{
     als_pdf: !!data.als_pdf,
     dateiname: data.dateiname,
     mimetype: data.mimetype ?? null,
+    web_url: data.web_url ?? null,
   };
 }
 

@@ -125,6 +125,19 @@ export async function pdfAnsichtUrl(driveId: string, itemId: string): Promise<st
   return null;
 }
 
+/**
+ * Bild als JPG (z. B. iPhone-Fotos .heic, die kaum ein Browser anzeigt).
+ * „content?format=jpg" kann Microsoft für HEIC nicht — die Vorschaubilder
+ * von SharePoint gibt es aber immer als JPG, hier in bis zu 2000 px.
+ */
+export async function jpgAnsichtUrl(driveId: string, itemId: string): Promise<string | null> {
+  const r = await graphGet<{ value?: Array<Record<string, { url?: string }>> }>(
+    `/drives/${driveId}/items/${itemId}/thumbnails?select=c2000x2000`,
+  );
+  if (r.status !== 200) return null;
+  return r.value?.[0]?.c2000x2000?.url ?? null;
+}
+
 // ───────────────────────── Schreiben ─────────────────────────
 // Alles hier drunter legt an. Nichts davon löscht, ersetzt oder benennt um.
 

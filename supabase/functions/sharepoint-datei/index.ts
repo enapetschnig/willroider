@@ -12,10 +12,13 @@
 // Gelesen wird ausschließlich. In SharePoint verändert diese Funktion nichts.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.79.0";
-import { downloadUrl, graphKonfiguriert, pdfAnsichtUrl } from "../_shared/graph.ts";
+import { downloadUrl, graphKonfiguriert, jpgAnsichtUrl, pdfAnsichtUrl } from "../_shared/graph.ts";
 
-/** Dateiarten, die sich nur als PDF ansehen lassen. */
-const OFFICE = /\.(docx?|xlsx?|pptx?|odt|ods|odp|rtf)$/i;
+/** Dateiarten, die sich nur als PDF ansehen lassen — Office, Outlook-Mails
+ *  (.msg/.eml, ~600 Stück in den Baustellenordnern) und TIFF. */
+const ALS_PDF = /\.(docx?|docm|xlsx?|xlsm|pptx?|ppsx?|odt|ods|odp|rtf|msg|eml|tiff?)$/i;
+/** Bilder, die der Browser nicht kann (iPhone) — als JPG. */
+const ALS_JPG = /\.(heic|heif)$/i;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -50,7 +53,7 @@ Deno.serve(async (req) => {
 
   const { data, error } = await sb
     .from("sharepoint_dateien")
-    .select("drive_id, item_id, dateiname, mimetype, groesse")
+    .select("drive_id, item_id, dateiname, mimetype, groesse, web_url")
     .eq("id", datei_id)
     .maybeSingle();
 
@@ -65,11 +68,18 @@ Deno.serve(async (req) => {
   // es entsteht nur eine Ansicht.
   let ansicht = original;
   let alsPdf = false;
-  if (OFFICE.test(String(data.dateiname))) {
+  let alsJpg = false;
+  if (ALS_PDF.test(String(data.dateiname))) {
     const pdf = await pdfAnsichtUrl(data.drive_id as string, data.item_id as string);
     if (pdf) {
       ansicht = pdf;
       alsPdf = true;
+    }
+  } else if (ALS_JPG.test(String(data.dateiname))) {
+    const jpg = await jpgAnsichtUrl(data.drive_id as string, data.item_id as string);
+    if (jpg) {
+      ansicht = jpg;
+      alsJpg = true;
     }
   }
 
@@ -79,7 +89,10 @@ Deno.serve(async (req) => {
     download_url: original,
     als_pdf: alsPdf,
     dateiname: data.dateiname,
-    mimetype: alsPdf ? "application/pdf" : data.mimetype,
+    mimetype: alsPdf ? "application/pdf" : alsJpg ? "image/jpeg" : data.mimetype,
+    // Für Pläne (.dwg, .ifc …), die kein Browser zeigt: SharePoint hat
+    // eigene Betrachter.
+    web_url: data.web_url ?? null,
     groesse: data.groesse,
   });
 });

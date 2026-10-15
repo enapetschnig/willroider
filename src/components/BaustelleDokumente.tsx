@@ -448,6 +448,24 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     load();
   }, [baustelleId]);
 
+  // Beim Öffnen frisch aus SharePoint abgleichen (der Server macht das
+  // höchstens alle 2 Minuten) und danach neu laden, wenn sich etwas
+  // geändert hat — sonst wären Änderungen bis zu einer Stunde alt.
+  useEffect(() => {
+    if (!verknuepft) return;
+    let aktiv = true;
+    supabase.functions
+      .invoke("sharepoint-sync", { body: { modus: "spiegeln", baustelle_id: baustelleId } })
+      .then(({ data }) => {
+        const r = data as { neu?: number; geaendert?: number; weg?: number } | null;
+        if (aktiv && r && (r.neu || r.geaendert || r.weg)) load();
+      })
+      .catch(() => undefined);
+    return () => {
+      aktiv = false;
+    };
+  }, [baustelleId, verknuepft]);
+
   // upload-Folder zurücksetzen falls aktueller Default nicht erlaubt
   useEffect(() => {
     if (visibleFolders.length === 0) return;
@@ -649,6 +667,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         mimetype: ziel.mimetype,
         direkt_url: ziel.url,
         download_url: ziel.download_url,
+        web_url: ziel.web_url,
       });
       return;
     }
