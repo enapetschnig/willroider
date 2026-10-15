@@ -19,7 +19,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { Cloud, Loader2, Search } from "lucide-react";
+import { Cloud, FolderPlus, Loader2, Search } from "lucide-react";
+import { sharePointNachAnlegen } from "@/lib/sharepoint";
 
 export type OrdnerTreffer = {
   item_id: string;
@@ -55,6 +56,46 @@ export function SharePointVerknuepfenDialog({
   const [arbeitet, setArbeitet] = useState(false);
   const [frischt, setFrischt] = useState(false);
   const [aufgefrischt, setAufgefrischt] = useState(0);
+  /** Bauleiter dieser Baustelle hat die neue Ordnerstruktur → „Neu anlegen" anbieten. */
+  const [darfNeu, setDarfNeu] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    let aktiv = true;
+    (async () => {
+      const [{ data: b }, { data: st }] = await Promise.all([
+        supabase.from("baustellen").select("bauleiter_id, art").eq("id", baustelleId).maybeSingle(),
+        (supabase as any).from("app_settings").select("value").eq("key", "sharepoint_neue_struktur").maybeSingle(),
+      ]);
+      const v = (st?.value ?? null) as { alle?: boolean; bauleiter_ids?: string[] } | null;
+      const bl = (b as { bauleiter_id?: string | null; art?: string | null } | null) ?? null;
+      if (!aktiv) return;
+      setDarfNeu(
+        !!v && !!bl?.bauleiter_id && (bl.art ?? "ausfuehrung") === "ausfuehrung" &&
+          (v.alle === true || (v.bauleiter_ids ?? []).includes(bl.bauleiter_id)),
+      );
+    })();
+    return () => {
+      aktiv = false;
+    };
+  }, [open, baustelleId]);
+
+  const neuAnlegen = async () => {
+    setArbeitet(true);
+    const r = await sharePointNachAnlegen(baustelleId);
+    setArbeitet(false);
+    if (r?.angelegt || r?.schon_da) {
+      toast({ title: r.angelegt ? "Ordner angelegt" : "Ordner verknüpft", description: r.pfad });
+      onVerknuepft?.();
+      onClose();
+    } else {
+      toast({
+        variant: "destructive",
+        title: "Nicht angelegt",
+        description: r?.hinweis ?? r?.fehler ?? "Unbekannter Fehler",
+      });
+    }
+  };
 
   // Verzeichnis beim Öffnen auffrischen (die Funktion überspringt, wenn es
   // jünger als eine Minute ist), danach die Suche erneut laufen lassen.
@@ -196,6 +237,12 @@ export function SharePointVerknuepfenDialog({
               ))
             )}
           </div>
+          {darfNeu && (
+            <Button variant="outline" className="w-full" onClick={neuAnlegen} disabled={arbeitet}>
+              {arbeitet ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FolderPlus className="h-4 w-4 mr-2" />}
+              Neuen Ordner nach Vorlage anlegen
+            </Button>
+          )}
           <div className="flex items-center justify-between gap-2">
             <span className="text-[10px] text-muted-foreground">
               {frischt && treffer.length > 0 ? (

@@ -86,6 +86,7 @@ export async function sharePointOrdnerAnlegen(
   baustelleId: string,
   trotzdemAnlegen = false,
   siteId?: string | null,
+  nurNeueStruktur = false,
 ): Promise<{
   ok: boolean;
   angelegt?: boolean;
@@ -101,11 +102,31 @@ export async function sharePointOrdnerAnlegen(
       modus: "ordner",
       baustelle_id: baustelleId,
       trotzdem_anlegen: trotzdemAnlegen,
+      nur_neue_struktur: nurNeueStruktur,
       ...(siteId ? { site_id: siteId } : {}),
     },
   });
   if (error) return { ok: false, fehler: error.message };
   return data;
+}
+
+/**
+ * Nach dem Anlegen einer Baustelle: Ordner in SharePoint suchen oder — bei
+ * Bauleitern mit neuer Struktur (app_settings.sharepoint_neue_struktur) —
+ * nach Vorlage anlegen. Danach gleich spiegeln und die App-Dateien (z. B.
+ * die Baustellenanlage) hochladen, damit alles sofort da ist.
+ */
+export async function sharePointNachAnlegen(baustelleId: string) {
+  const r = await sharePointOrdnerAnlegen(baustelleId, false, null, true);
+  if (r?.ok && (r.angelegt || r.schon_da)) {
+    await supabase.functions
+      .invoke("sharepoint-sync", { body: { modus: "spiegeln", baustelle_id: baustelleId } })
+      .catch(() => undefined);
+    await supabase.functions
+      .invoke("sharepoint-schreiben", { body: { modus: "hochladen", baustelle_id: baustelleId } })
+      .catch(() => undefined);
+  }
+  return r;
 }
 
 /** Die Teams, in denen Baustellenordner liegen (für die Auswahl von Hand). */

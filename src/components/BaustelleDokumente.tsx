@@ -105,7 +105,9 @@ const VERSAND_AB = "2026-07-22";
 type OrdnerMarker = Database["public"]["Tables"]["dokument_ordner"]["Row"];
 
 // Wrapper für Icon-Auswahl analog zu vorher (alle FileText außer Fotos)
-const FOLDERS = BAUSTELLEN_ORDNER.map((o) => ({
+// „00-Baustelle" gibt es nur in SharePoint (neue Struktur) — bei Baustellen
+// ohne verknüpften Ordner kein leerer App-Ordner dafür.
+const FOLDERS = BAUSTELLEN_ORDNER.filter((o) => o.key !== "00-baustelle").map((o) => ({
   ...o,
   icon: o.key === "fotos" ? ImageIcon : o.key === "92-sonstiges" ? FolderOpen : FileText,
   /** Klasse = Ordnerart für Rechte/Farben. Bei App-Ordnern der Schlüssel selbst. */

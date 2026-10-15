@@ -2,6 +2,7 @@
 // Reihenfolge entspricht der File-Server-Aktenstruktur.
 
 export type OrdnerKey =
+  | "00-baustelle"
   | "1-baustellenmanagement"
   | "2-schriftverkehr"
   | "3-aktenvermerke"
@@ -26,6 +27,8 @@ export type OrdnerDef = {
 };
 
 export const BAUSTELLEN_ORDNER: OrdnerDef[] = [
+  // Neue Ordnerstruktur ab 10/2026 (S. Egger): Ordner für die Poliere.
+  { key: "00-baustelle", label: "00-Baustelle", color: "#b45309" },
   { key: "1-baustellenmanagement", label: "1-Baustellenmanagement", color: "#dc2626" },
   { key: "2-schriftverkehr", label: "2-Schriftverkehr", color: "#0ea5e9" },
   { key: "3-aktenvermerke", label: "3-Aktenvermerke", color: "#8b5cf6" },
@@ -57,6 +60,7 @@ export const DEFAULT_VISIBILITY: Record<string, OrdnerKey[]> = {
   geschaeftsfuehrung: BAUSTELLEN_ORDNER.map((o) => o.key),
   buero: BAUSTELLEN_ORDNER.map((o) => o.key),
   bauleiter: [
+    "00-baustelle",
     "1-baustellenmanagement",
     "2-schriftverkehr",
     "3-aktenvermerke",
@@ -70,6 +74,7 @@ export const DEFAULT_VISIBILITY: Record<string, OrdnerKey[]> = {
     "evaluierung",
   ],
   zimmermeister: [
+    "00-baustelle",
     "1-baustellenmanagement",
     "2-schriftverkehr",
     "3-aktenvermerke",

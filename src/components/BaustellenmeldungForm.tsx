@@ -14,6 +14,7 @@ import { Save, Mail, X, PencilRuler, HardHat, ArrowRight } from "lucide-react";
 import { UNTERWEISUNG_OPTIONS } from "@/lib/unterweisungen";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
+import { sharePointNachAnlegen } from "@/lib/sharepoint";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -453,9 +454,27 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
         : "Gespeichert.",
     });
 
-    // In SharePoint wird beim Anlegen einer Baustelle bewusst kein Ordner
-    // erstellt. Die Verknüpfung mit einem vorhandenen Ordner passiert von
-    // Hand im Reiter „Team" der Baustelle.
+    // SharePoint-Ordner: Bei Bauleitern mit neuer Ordnerstruktur legt die
+    // App den Ordner „<Kostenstelle> <BVH>" samt Vorlage und ausgefüllter
+    // Materialliste selbst an (Wunsch S. Egger, 15.10.2026); gibt es schon
+    // einen passenden Ordner, wird er verknüpft. Läuft im Hintergrund —
+    // das Formular wartet nicht auf SharePoint.
+    if (istNeu && art === "ausfuehrung" && id) {
+      const neuId = id;
+      void sharePointNachAnlegen(neuId).then((r) => {
+        if (r?.angelegt) {
+          toast({ title: "SharePoint-Ordner angelegt", description: `${r.pfad} — mit Vorlage und ausgefüllter Materialliste.` });
+        } else if (r?.unklar) {
+          toast({ title: "SharePoint-Ordner nicht angelegt", description: r.hinweis });
+        } else if (r && !r.ok && r.fehler) {
+          toast({
+            variant: "destructive",
+            title: "SharePoint-Ordner nicht angelegt",
+            description: `${r.fehler} — im Reiter „Team“ über „Ordner verknüpfen“ nachholen.`,
+          });
+        }
+      });
+    }
 
     // Versand direkt im Anschluss — die Empfänger stehen schon im Formular,
     // es braucht keinen zweiten Dialog. Ein Fehler beim Versand darf das

@@ -19,6 +19,9 @@ export function ordnerKlasse(name: string | null | undefined): OrdnerKey {
     .replace(/^\d+[-_. ]*/, "")
     .trim();
   if (!n) return "92-sonstiges";
+  // Neue Struktur (S. Egger, 15.10.2026): „00-Baustelle" ist der Ordner
+  // für Poliere — alles, was auf der Baustelle gebraucht wird.
+  if (n === "baustelle") return "00-baustelle";
   if (/baustellenmanagement/.test(n)) return "1-baustellenmanagement";
   // „Vertrag, Schriftverkehr" ist der Berichtsordner — Schriftverkehr vor Vertrag prüfen.
   if (/schriftverkehr/.test(n)) return "2-schriftverkehr";
@@ -46,6 +49,18 @@ export function ordnerKlasse(name: string | null | undefined): OrdnerKey {
  */
 export function pfadKlasse(top: string, subpath: string | null | undefined): OrdnerKey {
   const erstes = (subpath ?? "").split("/")[0]?.trim() ?? "";
+  // In „00-Baustelle" zählt der Unterordner selbst (mit Nummer davor):
+  // Pläne, LV, Fotos und Evaluierung sehen alle wie bisher; Materialliste,
+  // Regie- und Bautagesberichte nur, wer „00-baustelle" sehen darf.
+  if (ordnerKlasse(top) === "00-baustelle") {
+    const u = erstes.toLowerCase().replace(/^\d+[-_. ]*/, "").trim();
+    if (!u) return "00-baustelle";
+    if (/^(fotos?|bilder)$/.test(u)) return "fotos";
+    if (/unterweisung|evaluierung/.test(u)) return "evaluierung";
+    if (/pl(ä|ae)n/.test(u)) return "91-plaene";
+    if (/leistungsverzeichnis/.test(u)) return "95-leistungsverzeichnis";
+    return "00-baustelle";
+  }
   if (/^(fotos?|bilder)$/i.test(erstes)) return "fotos";
   if (/unterweisung|evaluierung/i.test(erstes)) return "evaluierung";
   return ordnerKlasse(top);

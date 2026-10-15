@@ -1,5 +1,63 @@
 # Journal
 
+## 2026-10-15 · Neue Baustelle → SharePoint-Ordner nach neuer Struktur (Sebastian Egger)
+
+- **Wunsch (Mail an Christoph, 14./15.10.):** Beim Anlegen einer Baustelle soll im Team
+  des Bauleiters ein Ordner mit der neuen Struktur entstehen (ZIP „1 Vorlagen Bvh“), dazu
+  seine überarbeitete Materialliste mit den Stammdaten. Bestehende Baustellen bleiben, wie
+  sie sind. „00-Baustelle“ ist der Ordner für die Poliere.
+- **Christophs Vorgaben:** feste Vorlage für alle, Ordnername `<komplette Kostenstelle>
+  <BVH>`, vorerst nur für Sebastian.
+- **Vorlage:** privater Speicher `vorlagen`, liest nur der Server.
+  - `bvh-neu/struktur.json` mit 60 Ordnern und 5 festen Dateien:
+    - 3 PDFs in „ÜA-Holzforschung“
+    - Schlussbrief-Vorlage
+    - Zusatzangebot-Vorlage
+  - `bvh-neu/materialliste.xlsx`: die Mail-Version vom 15.10., NICHT die ältere aus
+    der ZIP.
+  - Neue Vorlage von Sebastian → Dateien dort ersetzen, die Struktur steht in der JSON.
+- **Materialliste:** `_shared/materialliste.ts`.
+  - Setzt nur die Zellen Stammdaten!C2–C14 direkt im XML, ohne Excel-Bibliothek. Die
+    würde Dropdowns (x14), Bilder in Zellen und Druckeinstellungen verlieren.
+  - Der Bauleiter wird so geschrieben, wie ihn das Dropdown kennt (Blatt „Bauleiter“,
+    z. B. Johannes Maurer → „Maurer Hannes“).
+  - Die zwischengespeicherten Werte der `=Stammdaten!Cn`-Verweise werden mitgesetzt,
+    damit die Vorschau stimmt, dazu `fullCalcOnLoad`.
+  - Lokal gegen die echte Vorlage getestet: alle Felder gesetzt, Dropdowns noch da,
+    alle XML-Teile wohlgeformt.
+- **sharepoint-schreiben:**
+  - `app_settings.sharepoint_neue_struktur` (`bauleiter_ids` oder `alle`).
+  - Für diese Bauleiter und nur bei Ausführungen legt `modus: ordner` den Ordner an,
+    wenn kein passender existiert. Inhalt: Struktur (je Ebene parallel), feste Dateien
+    und ausgefüllte Materialliste.
+  - Jeder Schritt prüft vorher, ob es das schon gibt. Ein zweiter Lauf ergänzt nur,
+    auch nach einem Abbruch.
+  - `nur_neue_struktur: true` sorgt dafür, dass der Aufruf nach dem Anlegen bei anderen
+    Bauleitern nichts tut.
+  - Testmodus `vorlage_test` (nur Server) legt die Vorlage in einem beliebigen Team an,
+    ohne Verknüpfung.
+  - Test im stillgelegten Team „Aktuelle BVH Gruber Peter“: Ordner „ZZ TEST
+    App-Vorlage 1404050-2603 Carport Platzer“ mit 60 Ordnern, 5 Dateien und
+    Materialliste in 18 s. Der zweite Lauf hat 0 ergänzt. **Der Testordner liegt noch
+    dort, bitte in SharePoint von Hand löschen.**
+- **App:**
+  - Das Baustellenformular ruft nach dem Speichern einer neuen Ausführung
+    `sharePointNachAnlegen` im Hintergrund auf: anlegen/verknüpfen, gleich spiegeln,
+    App-Dateien (Baustellenanlage) hochladen.
+  - Im Dialog „Ordner verknüpfen“ gibt es bei diesen Bauleitern den Knopf „Neuen Ordner
+    nach Vorlage anlegen“.
+- **Rechte:**
+  - Neue Ordnerart `00-baustelle` (ordnerKlasse in App und Server). Sichtbar für
+    Vorarbeiter, Zimmermeister, Büro und Geschäftsführung (`ordner_visibility`).
+  - Unterordner in 00-Baustelle zählen nach ihrem Namen: Pläne, LV, Fotos und Evaluierung
+    sehen alle wie bisher.
+  - App-Unterweisungen landen bei neuer Struktur in `00-Baustelle/06-Evaluierung`.
+  - Bei Baustellen ohne SharePoint gibt es keinen leeren 00-Ordner.
+- **Nebenbei:** Die Polierschul-Funktionen (`20261012100100_polierschule.sql`) sind jetzt
+  eingespielt.
+- **Offen:** Partieführer in Evaluierung/ÜA-Checkliste der Excel ist fest
+  „Hinteregger Norbert“, er steht nicht in den Stammdaten und wird nicht befüllt.
+
 ## 2026-10-15 · KW im Datumswähler der Arbeitsplanung (Johannes Maurer)
 
 - **Wunsch:** „Kannst du die KW hier seitlich beim Auswählen auch einfügen?“ Der Screenshot
