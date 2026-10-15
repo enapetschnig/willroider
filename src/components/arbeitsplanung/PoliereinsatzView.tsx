@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { DatumKwFeld } from "@/components/ui/datum-kw-feld";
 import { Label } from "@/components/ui/label";
 import { EinsatzplanArchiv } from "@/components/arbeitsplanung/EinsatzplanArchiv";
 import { Switch } from "@/components/ui/switch";
@@ -2124,20 +2125,17 @@ export function PoliereinsatzView({
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <Label className="text-xs">Von</Label>
-                <Input
-                  type="date"
-                  value={pdfVon}
-                  onChange={(e) => setPdfVon(e.target.value)}
-                  className="h-11"
-                />
+                <DatumKwFeld value={pdfVon} onChange={setPdfVon} className="h-11" aria-label="Von" />
               </div>
               <div>
                 <Label className="text-xs">Bis</Label>
-                <Input
-                  type="date"
+                <DatumKwFeld
                   value={pdfBis}
-                  onChange={(e) => setPdfBis(e.target.value)}
+                  onChange={setPdfBis}
+                  min={pdfVon || undefined}
+                  wocheWaehlt="ende"
                   className="h-11"
+                  aria-label="Bis"
                 />
               </div>
             </div>
@@ -2262,11 +2260,10 @@ export function PoliereinsatzView({
                       </span>
                     )}
                   </Label>
-                  <Input
-                    type="date"
+                  <DatumKwFeld
+                    aria-label="Von"
                     value={editDialog.von}
-                    onChange={(e) => {
-                      const v = e.target.value;
+                    onChange={(v) => {
                       // Bis zieht mit, wenn es vor dem neuen Von läge — ein
                       // Einsatz kann nicht rückwärts laufen.
                       setEditDialog({
@@ -2286,11 +2283,12 @@ export function PoliereinsatzView({
                       </span>
                     )}
                   </Label>
-                  <Input
-                    type="date"
+                  <DatumKwFeld
+                    aria-label="Bis"
                     value={editDialog.bis}
                     min={editDialog.von || undefined}
-                    onChange={(e) => setEditDialog({ ...editDialog, bis: e.target.value })}
+                    wocheWaehlt="ende"
+                    onChange={(v) => setEditDialog({ ...editDialog, bis: v })}
                   />
                 </div>
               </div>

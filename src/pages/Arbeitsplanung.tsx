@@ -1,3 +1,4 @@
+import { DatumKwFeld } from "@/components/ui/datum-kw-feld";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
@@ -3510,19 +3511,19 @@ function ZeitraumAendern({
         Zeitraum ändern
       </div>
       <div className="flex items-center gap-1.5">
-        <input
-          type="date"
+        <DatumKwFeld
           value={von}
-          onChange={(e) => setVon(e.target.value)}
-          className="h-9 flex-1 min-w-0 rounded-md border bg-background px-1.5 text-xs"
+          onChange={setVon}
+          className="h-9 flex-1 min-w-0 px-1.5 text-xs"
           aria-label="Von"
         />
         <span className="text-xs text-muted-foreground">–</span>
-        <input
-          type="date"
+        <DatumKwFeld
           value={bis}
-          onChange={(e) => setBis(e.target.value)}
-          className="h-9 flex-1 min-w-0 rounded-md border bg-background px-1.5 text-xs"
+          onChange={setBis}
+          min={von || undefined}
+          wocheWaehlt="ende"
+          className="h-9 flex-1 min-w-0 px-1.5 text-xs"
           aria-label="Bis"
         />
       </div>

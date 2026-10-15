@@ -1,5 +1,16 @@
 # Journal
 
+## 2026-10-15 · KW im Datumswähler der Arbeitsplanung (Johannes Maurer)
+
+- **Wunsch:** „Kannst du die KW hier seitlich beim Auswählen auch einfügen?“ Der Screenshot
+  zeigt den Einsatz-Dialog.
+- Der Browser-Datumswähler (`input type="date"`) kann keine KW anzeigen. Deshalb gibt es
+  das neue Feld `components/ui/datum-kw-feld.tsx` (react-day-picker, ISO-Wochen, Montag
+  zuerst). Links steht die KW-Spalte. Ein Tipp auf die KW wählt bei „Von“ den Montag und
+  bei „Bis“ den Freitag.
+- Eingesetzt in der Arbeitsplanung: Einsatz anlegen/bearbeiten, PDF-Zeitraum und
+  „Zeitraum ändern“.
+
 ## 2026-10-13 · SharePoint: neue Ordner nicht auffindbar (Niklas Gwenger)
 
 - **Wunsch:** „Synchronisiert nicht, Ordner sind seit 2 Wochen erstellt.“ Der Ordner
