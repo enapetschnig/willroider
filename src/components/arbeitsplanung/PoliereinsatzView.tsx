@@ -47,9 +47,11 @@ import {
   Users2,
   FileDown,
   Loader2,
+  ExternalLink,
 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
+import { useHasPermission } from "@/hooks/useHasPermission";
 import { useNavigate } from "react-router-dom";
 import { makePoliereinsatzPdf } from "@/lib/poliereinsatzPdf";
 import { feiertagAt } from "@/lib/feiertage";
@@ -135,6 +137,8 @@ export function PoliereinsatzView({
 }) {
   const { toast } = useToast();
   const navigate = useNavigate();
+  // „Zur Baustelle" aus der Jahresplanung (Wunsch E. Egger, 16.10.2026).
+  const darfBaustelleSehen = useHasPermission("baustellen.view");
   const [zeitraeume, setZeitraeume] = useState<Zeitraum[]>([]);
   const [urlaubByMa, setUrlaubByMa] = useState<Map<string, Map<string, string>>>(
     new Map(),
@@ -2041,6 +2045,20 @@ export function PoliereinsatzView({
                   {new Date(barInfo.z.bis_datum).toLocaleDateString("de-AT")}
                 </div>
               </div>
+              {darfBaustelleSehen && b && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full h-9 mt-2 justify-start gap-2"
+                  onClick={() => {
+                    setBarInfo(null);
+                    navigate(`/baustellen/${b.id}`);
+                  }}
+                  title="Baustelle öffnen — Stammdaten, Team, Dokumente"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" /> Zur Baustelle
+                </Button>
+              )}
               {canEdit && (
                 <Button
                   size="sm"
@@ -2206,8 +2224,22 @@ export function PoliereinsatzView({
       <Dialog open={!!editDialog} onOpenChange={(o) => !o && setEditDialog(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="flex items-center justify-between gap-2 pr-6">
               {editDialog?.id ? "Einsatz bearbeiten" : "Einsatz anlegen"}
+              {darfBaustelleSehen && editDialog?.baustelleId && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 text-xs gap-1.5"
+                  onClick={() => {
+                    const id = editDialog.baustelleId;
+                    setEditDialog(null);
+                    navigate(`/baustellen/${id}`);
+                  }}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" /> Zur Baustelle
+                </Button>
+              )}
             </DialogTitle>
           </DialogHeader>
           {editDialog && (

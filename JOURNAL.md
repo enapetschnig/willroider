@@ -1,5 +1,14 @@
 # Journal
 
+## 2026-10-18 · Jahresplanung: „Zur Baustelle“ (Eckart Egger)
+
+- **Wunsch:** In der Jahresplanung beim Klick auf eine Baustelle mit einem Knopf direkt
+  zur Baustelle kommen, um dort Einstellungen zu ändern.
+- **Umsetzung (PoliereinsatzView):**
+  - Im Info-Fenster am Balken gibt es den Knopf „Zur Baustelle“, im Dialog „Einsatz
+    bearbeiten“ oben rechts den Link „Zur Baustelle“.
+  - Beide öffnen `/baustellen/<id>` und sind nur sichtbar mit `baustellen.view`.
+
 ## 2026-10-18 · Neue Struktur, Runde 2: weniger Ordner, PDFs automatisch (Sebastian Egger)
 
 - **Mail S. Egger 16.10.:**
