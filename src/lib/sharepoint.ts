@@ -110,6 +110,19 @@ export async function sharePointOrdnerAnlegen(
   return data;
 }
 
+/** Legt die App für diesen Bauleiter Ordner nach der neuen Struktur an?
+ *  (app_settings.sharepoint_neue_struktur, Wunsch S. Egger 15.10.2026) */
+export async function neueOrdnerstrukturFuer(bauleiterId: string | null): Promise<boolean> {
+  if (!bauleiterId) return false;
+  const { data } = await (supabase as any)
+    .from("app_settings")
+    .select("value")
+    .eq("key", "sharepoint_neue_struktur")
+    .maybeSingle();
+  const v = (data?.value ?? null) as { alle?: boolean; bauleiter_ids?: string[] } | null;
+  return !!v && (v.alle === true || (v.bauleiter_ids ?? []).includes(bauleiterId));
+}
+
 /**
  * Nach dem Anlegen einer Baustelle: Ordner in SharePoint suchen oder — bei
  * Bauleitern mit neuer Struktur (app_settings.sharepoint_neue_struktur) —

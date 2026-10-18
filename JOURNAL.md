@@ -1,5 +1,39 @@
 # Journal
 
+## 2026-10-18 · Neue Struktur, Runde 2: weniger Ordner, PDFs automatisch (Sebastian Egger)
+
+- **Mail S. Egger 16.10.:**
+  - Neue, schlankere Vorlage (ZIP): 26 statt 60 Ordner. 00-Baustelle hat nur noch
+    01-Montage und 02-Produktion; neu sind 08-Fotos und 06-BauKG.
+  - Bautages- und Regieberichte sowie die Evaluierung (erst wenn unterschrieben) sollen
+    als PDF direkt in 00-Baustelle liegen, mit Nummer, Bezeichnung und Datum.
+  - Die Baustellenanlage soll als PDF direkt in 01-Baustellenmanagement liegen.
+- **Christophs Vorgaben:**
+  - Nummer = Kostenstelle.
+  - Kommt nach Abschluss noch eine Unterschrift dazu, wird eine neue Fassung daneben
+    gelegt.
+  - Baustellenanlage nur als PDF, von der App selbst erzeugt.
+- **Umsetzung:**
+  - `vorlagen/bvh-neu/struktur.json` getauscht, die Materialliste ist unverändert. Test
+    im Gruber-Testordner: genau die 5 neuen Ordner ergänzt.
+  - Neue Spalte `baustellen.sharepoint_struktur` ('bvh-neu'), die der Server beim Anlegen
+    setzt. Nur diese Baustellen bekommen die neue Ablage, alte bleiben, wie sie waren.
+  - `sharepoint-schreiben`: Berichte und Evaluierungs-Nachweise gehen direkt nach
+    00-Baustelle. Berichte heißen `<KS> Bautagesbericht|Regiebericht <JJJJ-MM-TT>.pdf`,
+    `dokumente.dateiname` wird mitgezogen.
+  - `lib/nachweisAblage.ts`: Nach jeder Unterschrift (Handy und Tablet) entsteht das PDF,
+    sobald alle unterschrieben haben, als `<KS> Evaluierung <Art> <Datum>.pdf`, bei
+    Nachzüglern als `… Fassung 2`. Je Stand gibt es genau ein PDF (Speicherpfad mit
+    Anzahl der Unterschriften).
+  - `lib/baustellenanlagePdf.ts` (jsPDF, Felder wie im Word-Formular). Bei neuer
+    Struktur wird nur `<KS> Baustellenanlage <Datum>.pdf` abgelegt, das Word-Formular
+    nur noch für die Mail erzeugt.
+  - Ordnerregel: „Montage“ und „Produktion“ in 00-Baustelle zählen als Pläne, damit
+    Mitarbeiter sie wie bisher sehen. Was direkt in 00 liegt (Berichte, Nachweise), sehen
+    Poliere, Büro und Geschäftsführung.
+- **Datum im Dateinamen** als JJJJ-MM-TT, damit die Dateien im Explorer zeitlich sortiert
+  sind.
+
 ## 2026-10-15 · SharePoint: alles synchron und in der App zu öffnen (Christoph)
 
 - **Vorgabe:** „Alle Dateien sollen im OneDrive und in der App synchron sein und in der

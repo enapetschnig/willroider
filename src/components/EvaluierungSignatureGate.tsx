@@ -1,4 +1,5 @@
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { nachweisAblegenWennFertig } from "@/lib/nachweisAblage";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -469,6 +470,8 @@ function SignatureOverlay({
       setSubmitting(false);
       return;
     }
+    // Letzte Unterschrift? Dann den Nachweis als PDF ablegen (neue Struktur).
+    void nachweisAblegenWennFertig(current.evaluierungId).catch(() => undefined);
     const remaining = pending.slice(1);
     setPending(remaining);
     setStep("read");

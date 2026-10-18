@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { nachweisAblegenWennFertig } from "@/lib/nachweisAblage";
 import { supabase } from "@/integrations/supabase/client";
 import { UnterschriftDialog } from "@/components/UnterschriftDialog";
 import { UnterweisungInhalt } from "@/components/EvaluierungSignatureGate";
@@ -166,6 +167,10 @@ export function UnterweisungTablet({
     setAktiv(null);
     setUntenAngekommen(false);
     void load();
+    // Letzte Unterschrift? Dann den Nachweis als PDF ablegen (neue Struktur).
+    void nachweisAblegenWennFertig(evaluierungId).then((abgelegt) => {
+      if (abgelegt) toast({ title: "Alle haben unterschrieben", description: "Nachweis als PDF in 00-Baustelle abgelegt." });
+    }).catch(() => undefined);
   };
 
   if (!open) return null;

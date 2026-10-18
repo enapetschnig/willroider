@@ -14,7 +14,8 @@ import { Save, Mail, X, PencilRuler, HardHat, ArrowRight } from "lucide-react";
 import { UNTERWEISUNG_OPTIONS } from "@/lib/unterweisungen";
 import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
-import { sharePointNachAnlegen } from "@/lib/sharepoint";
+import { neueOrdnerstrukturFuer, sharePointNachAnlegen } from "@/lib/sharepoint";
+import { makeBaustellenanlagePdf } from "@/lib/baustellenanlagePdf";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -376,16 +377,27 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
       : "";
     /** Frisch erzeugte DOCX für den Mailversand (base64, kein zweiter Download). */
     let docxFuerMail: { dateiname: string; base64: string; dokumentId?: string } | null = null;
+    // Neue SharePoint-Struktur (S. Egger, 16.10.2026): abgelegt wird NUR ein
+    // PDF „<Kostenstelle> Baustellenanlage <Datum>.pdf" — es landet direkt in
+    // „01-Baustellenmanagement". Das Word-Formular gibt es weiter für die Mail.
+    const nurPdf =
+      art === "ausfuehrung" &&
+      ((savedRow as any)?.sharepoint_struktur === "bvh-neu" ||
+        (istNeu && (await neueOrdnerstrukturFuer(bauleiterId || null))));
     try {
       const docxBlob = await generateBaustellenanlageDocx(
         { ...savedRow, ...payload },
         bauleiterName
       );
       const dateStr = localIso().replace(/-/g, "");
-      const path = `${id}/1-baustellenmanagement/baustellenanlage_${dateStr}.docx`;
+      const ablageBlob = nurPdf
+        ? await makeBaustellenanlagePdf({ ...savedRow, ...payload }, bauleiterName)
+        : docxBlob;
+      const ablageMime = nurPdf ? "application/pdf" : DOCX_MIME;
+      const path = `${id}/1-baustellenmanagement/baustellenanlage_${dateStr}.${nurPdf ? "pdf" : "docx"}`;
       const { error: upErr } = await supabase.storage
         .from("baustellen")
-        .upload(path, docxBlob, { contentType: DOCX_MIME, upsert: true });
+        .upload(path, ablageBlob, { contentType: ablageMime, upsert: true });
       if (upErr) {
         // Datei nicht abgelegt → kein Doku-Eintrag, kein Mailversand, und
         // vor allem KEIN falsches „Erfolg". Der Nutzer weiß sonst nicht,
@@ -396,7 +408,10 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
           description: `${upErr.message} — Bitte die Baustellenmeldung später erneut speichern.`,
         });
       } else {
-        const dateiname = `Baustellenanlage ${bvhName} ${dateStr}.docx`;
+        const docxName = `Baustellenanlage ${bvhName} ${dateStr}.docx`;
+        const dateiname = nurPdf
+          ? `${[kostenstelle.trim(), "Baustellenanlage", localIso()].filter(Boolean).join(" ")}.pdf`
+          : docxName;
         // Pfad enthält nur Datum → beim mehrfachen Speichern am selben Tag
         // wird die Datei überschrieben (upsert). Deshalb den vorhandenen
         // dokumente-Eintrag AKTUALISIEREN statt jedes Mal einen neuen
@@ -410,7 +425,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
         if (dokId) {
           await supabase
             .from("dokumente")
-            .update({ dateiname, groesse: docxBlob.size } as any)
+            .update({ dateiname, groesse: ablageBlob.size } as any)
             .eq("id", dokId);
         } else {
           const { data: dok, error: insErr } = await supabase
@@ -420,8 +435,8 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
               ordner: "1-baustellenmanagement",
               dateiname,
               storage_path: path,
-              mimetype: DOCX_MIME,
-              groesse: docxBlob.size,
+              mimetype: ablageMime,
+              groesse: ablageBlob.size,
               hochgeladen_von: user?.id ?? null,
             } as any)
             .select("id")
@@ -432,7 +447,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
         // Für den direkt anschließenden Mailversand merken. Die DOCX liegt
         // ohnehin schon im Speicher — kein erneuter Download nötig.
         if (aktiveEmpfaenger.length > 0) {
-          docxFuerMail = { dateiname, base64: await blobToBase64(docxBlob), dokumentId: dokId };
+          docxFuerMail = { dateiname: docxName, base64: await blobToBase64(docxBlob), dokumentId: dokId };
         }
       }
     } catch (err: any) {
@@ -450,7 +465,9 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
           ? art === "planung" ? "Planung aktualisiert" : "Baustelle aktualisiert"
           : art === "planung" ? "Planung angelegt" : "Baustelle angelegt",
       description: docxFuerMail
-        ? "Baustellenmeldung als DOCX im Ordner Baustellenanlage abgelegt."
+        ? nurPdf
+          ? "Baustellenanlage als PDF in 01-Baustellenmanagement abgelegt."
+          : "Baustellenmeldung als DOCX im Ordner Baustellenanlage abgelegt."
         : "Gespeichert.",
     });
 

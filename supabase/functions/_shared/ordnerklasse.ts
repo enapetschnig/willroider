@@ -60,7 +60,9 @@ export function pfadKlasse(top: string, subpath: string | null | undefined): str
     if (!u) return "00-baustelle";
     if (/^(fotos?|bilder)$/.test(u)) return "fotos";
     if (/unterweisung|evaluierung/.test(u)) return "evaluierung";
-    if (/pl(ä|ae)n/.test(u)) return "91-plaene";
+    // Neue Vorlage 16.10.: „01-Montage" / „02-Produktion" sind die Pläne
+    // für die Baustelle (vorher „01-Pläne/…").
+    if (/pl(ä|ae)n|montage|produktion/.test(u)) return "91-plaene";
     if (/leistungsverzeichnis/.test(u)) return "95-leistungsverzeichnis";
     return "00-baustelle";
   }
