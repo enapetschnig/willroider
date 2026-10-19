@@ -44,6 +44,7 @@ import { localIso } from "@/lib/dateFmt";
 import { UnterweisungTablet } from "@/components/UnterweisungTablet";
 import { UnterweisungNachweis } from "@/components/UnterweisungNachweis";
 import { SharePointOrdnerCard } from "@/components/baustelle/SharePointOrdnerCard";
+import { nachweisAblegenWennFertig } from "@/lib/nachweisAblage";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Termin = Database["public"]["Tables"]["baustellen_termine"]["Row"];
@@ -176,6 +177,16 @@ export default function BaustelleDetail() {
         .sort((a, b) => b.datum.localeCompare(a.datum)) as StundenZeile[]),
     );
     setEvals((e.data as Eval[]) ?? []);
+    // Selbstheilung (19.10.2026): Unterschriebene Evaluierungen ohne
+    // abgelegten Nachweis jetzt nachholen — z. B. wenn das Handy beim
+    // letzten Unterschreiben offline war. Tut nichts, wenn die Baustelle
+    // nicht die neue Struktur hat, nicht alle unterschrieben haben oder der
+    // Nachweis schon liegt.
+    if ((baustelle as any)?.sharepoint_struktur === "bvh-neu") {
+      for (const ev of (e.data as Eval[]) ?? []) {
+        void nachweisAblegenWennFertig((ev as any).id).catch(() => undefined);
+      }
+    }
 
     const { data: allP } = await supabase.from("partien").select("*").order("name");
     setAllPartien((allP as Partie[]) ?? []);

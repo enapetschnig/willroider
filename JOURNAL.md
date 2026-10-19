@@ -1,5 +1,34 @@
 # Journal
 
+## 2026-10-19 · Neue Baustelle → Ordner: so, dass es immer funktioniert (Christoph)
+
+- **Vorgabe:** „Ich will, dass das immer funktioniert.“
+- **1. Kein Raten mehr bei der neuen Struktur** (sharepoint-schreiben):
+  - Verknüpft wird nur ein freier Ordner im Bauleiter-Team, der mit GENAU der
+    Kostenstelle beginnt, also ein halb fertiges Anlegen oder ein von Hand angelegter.
+  - Sonst wird immer neu angelegt. Es gibt keine Ähnlichkeitssuche und keinen
+    Vorschlag, der das Anlegen blockiert.
+  - Hat ein von Hand angelegter Ordner `00-Baustelle`, gilt er als neue Struktur.
+- **2. Unabhängig vom Browser:**
+  - Trigger `baustellen_sharepoint_auftrag` (Insert bzw. Wechsel des Bauleiters): Für
+    Ausführungen von Bauleitern mit neuer Struktur, angelegt ab 15.10., entsteht ein
+    Auftrag in `sharepoint_auftraege`.
+  - Zeitplan `sharepoint-auftraege` (alle 5 Min, versetzt): Er arbeitet Aufträge ab, die
+    älter als 2 Minuten sind, damit der Formular-Aufruf nicht doppelt läuft. Dann
+    spiegelt er sofort und lädt hoch. Bis zu 6 Versuche, danach Status „fehler“.
+  - Getestet:
+    - Trigger in einer Transaktion: Sebastian ergibt 1 Auftrag, Maurer und Planung 0.
+    - Abarbeiter echt: „Egger Test 2“ gelöst und neu beauftragt. Er fand
+      „1404050-2606 Egger Test 2“ über die exakte Kostenstelle, legte keinen zweiten
+      Ordner an, verknüpfte, setzte die Struktur, spiegelte und markierte erledigt.
+- **3. Kein stiller Fehler:**
+  - `SharePointFehlerHintCard` im Dashboard für den Bauleiter der Baustelle und für
+    Admins, mit Weg in den Reiter „Team“.
+- **4. Selbstheilung Nachweise:** Beim Öffnen einer Baustelle mit neuer Struktur wird
+  für jede vollständig unterschriebene Evaluierung ein fehlender Nachweis nachgeholt.
+- **Bleibt:** Das Graph-Client-Geheimnis läuft am 13.03.2027 ab. Danach scheitert jeder
+  SharePoint-Zugriff, der Hinweis im Dashboard würde das zeigen.
+
 ## 2026-10-19 · Absturz Verwaltung → Mitarbeiter (Johannes Maurer)
 
 - **Fehler:** „ReferenceError: Cannot access 'de' before initialization … at Array.filter“

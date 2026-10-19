@@ -35,6 +35,7 @@ import { PushHinweisCard } from "@/components/dashboard/PushHinweisCard";
 import { UnterschriftenCard } from "@/components/dashboard/UnterschriftenCard";
 import { TagesplanPreview } from "@/components/TagesplanPreview";
 import { findeDoppelkonto } from "@/lib/doppelkonto";
+import { SharePointFehlerHintCard } from "@/components/dashboard/SharePointFehlerHintCard";
 import {
   Dialog,
   DialogContent,
@@ -557,6 +558,7 @@ export default function Dashboard() {
 
       {/* Baustellenstundenbericht (MA: Durchsicht, Büro: Kontrolle) */}
       <StundenBerichtHintCard />
+      <SharePointFehlerHintCard />
 
       {/* Tätigkeitsbericht (Angestellte: unterschreiben, GF: freigeben) */}
       <TaetigkeitsberichtHintCard />
