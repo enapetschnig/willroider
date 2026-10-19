@@ -1,5 +1,25 @@
 # Journal
 
+## 2026-10-19 · Fehler: neue Baustelle mit fremdem Ordner verknüpft (S. Egger)
+
+- **Meldung per Mail:** „In der App steht OneDrive verknüpft, aber in meinem Ordner sehe
+  ich das Bauvorhaben nicht.“
+- **Ursache:** „Egger Test 2“ (1404050-2606) wurde nicht angelegt, sondern mit dem Ordner
+  „1404050-2605 Egger Test“ vom 16.10. verknüpft. Die Ähnlichkeitssuche fand beide
+  Wörter, und 1404050 ist eine Sammelkostenstelle.
+- **Behoben (sharepoint-schreiben):**
+  - Ein Ordner mit einer anderen vollständigen Kostenstelle im Namen zählt nie als
+    Treffer.
+  - Ordner, die schon an einer anderen Baustelle hängen, werden nie automatisch
+    verknüpft.
+- **Daten:**
+  - „Egger Test 2“ ist gelöst, der Ordner „1404050-2606 Egger Test 2“ wurde neu angelegt
+    (26 Ordner, 4 Dateien, Materialliste) und die Baustellenanlage als PDF hochgeladen.
+  - „Egger Test“ hat nachträglich `sharepoint_struktur = 'bvh-neu'`.
+  - Im Ordner „1404050-2605 Egger Test/01-Baustellenmanagement“ liegt die falsch
+    abgelegte „1404050-2606 Baustellenanlage 2026-10-19.pdf“. Die muss jemand von Hand
+    löschen.
+
 ## 2026-10-19 · Hinweise nur für die Zuständigen (Elias Winkler)
 
 - **Wunsch 1:** Das Büro hat das Recht für Stundenberichte nicht mehr, sah aber weiter
