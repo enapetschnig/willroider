@@ -1,5 +1,32 @@
 # Journal
 
+## 2026-10-19 · Doppelte Registrierungen verhindern (Johannes Maurer)
+
+- **Wunsch:** „Kann das sein, wenn sich einer falsch anmeldet, dass sich dann ein
+  Mitarbeiter anlegt? Falls ja, ausschalten bzw. so machen, dass kein Problem entsteht.“
+- **Befund:**
+  - Eine falsche ANMELDUNG legt nie ein Konto an (SMS mit `shouldCreateUser: false`, ein
+    falsches Passwort scheitert einfach).
+  - Neu entsteht nur etwas über „Registrieren“. Fischer (angelegt mit Handynummer) hat
+    sich am 16.10. mit E-Mail neu registriert.
+  - Die „Ohne Namen“-Anmeldung (abbund@) war bereits bereinigt; abbund ist jetzt ein
+    aktives, von Hand angelegtes Konto.
+- **Umsetzung** (`20261019130000_doppelte_registrierung.sql`, eingespielt):
+  - `registrierung_pruefen(vorname, nachname)`, auch ohne Anmeldung aufrufbar. Liefert
+    nur „schon angelegt“ und die Art der Anmeldung (telefon/email), keine Daten. Das
+    Formular ruft sie vor `signUp` auf und schickt die Person zur richtigen Anmeldung.
+  - Falsches E-Mail-Passwort: Hinweis „Bist du mit deiner Handynummer angelegt? … bitte
+    nicht neu registrieren“.
+  - `doppelte_anmeldung_entfernen(id)`: nur mit `mitarbeiter.edit`, nur für nie
+    freigeschaltete Konten ohne Stunden, Dokumente oder Unterschriften. In der
+    Mitarbeiterliste steht beim Doppelt-Hinweis „Doppelte Anmeldung löschen“, und
+    „Freischalten“ fragt bei Doppelten nach.
+  - Getestet (zurückgerollt): Prüfung als anon, Fischer gibt „telefon“; Löschen als Büro
+    abgelehnt; Löschen des echten, aktiven Fischer abgelehnt; Löschen der
+    Doppel-Anmeldung als Maurer geht, das Original bleibt aktiv.
+- **Fischer selbst:** Die Doppel-Anmeldung ist NICHT gelöscht. Das macht Johannes mit dem
+  neuen Knopf, oder Christoph gibt es frei.
+
 ## 2026-10-19 · Neue Baustelle → Ordner: so, dass es immer funktioniert (Christoph)
 
 - **Vorgabe:** „Ich will, dass das immer funktioniert.“

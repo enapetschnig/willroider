@@ -207,10 +207,16 @@ export default function Auth() {
     });
     setLoading(false);
     if (error || !data.user) {
+      // Wer hier scheitert, ist oft mit der Handynummer angelegt — und
+      // registrierte sich dann neu (Vorfall Fischer, 16.10.2026).
+      const falsch = /invalid login credentials/i.test(error?.message ?? "");
       toast({
         variant: "destructive",
         title: "Fehler beim Anmelden",
-        description: error?.message ?? "Unbekannter Fehler",
+        description: falsch
+          ? "E-Mail oder Passwort stimmt nicht. Bist du mit deiner Handynummer angelegt? Dann oben auf „Telefon“ wechseln. Sonst „Passwort vergessen?“ — bitte nicht neu registrieren."
+          : error?.message ?? "Unbekannter Fehler",
+        duration: 12000,
       });
       return;
     }
@@ -222,10 +228,33 @@ export default function Auth() {
     e.preventDefault();
     setLoading(true);
     const formData = new FormData(e.currentTarget);
-    const vorname = formData.get("vorname") as string;
-    const nachname = formData.get("nachname") as string;
-    const email = formData.get("email") as string;
+    const vorname = String(formData.get("vorname") ?? "").trim();
+    const nachname = String(formData.get("nachname") ?? "").trim();
+    const email = String(formData.get("email") ?? "").trim();
     const password = formData.get("password") as string;
+
+    // Gibt es die Person schon? Dann NICHT neu registrieren, sondern zur
+    // richtigen Anmeldung schicken (Wunsch J. Maurer, 19.10.2026 — sonst
+    // entsteht ein zweites Konto wie bei Matthias Fischer).
+    const { data: pruef } = await (supabase as any).rpc("registrierung_pruefen", {
+      p_vorname: vorname,
+      p_nachname: nachname,
+    });
+    if (pruef?.schon_angelegt) {
+      setLoading(false);
+      const perTelefon = pruef.anmeldung === "telefon";
+      toast({
+        variant: "destructive",
+        title: `${vorname}, du bist schon angelegt`,
+        description: perTelefon
+          ? "Bitte nicht neu registrieren. Melde dich mit deiner Handynummer an — du bekommst einen Code per SMS. Klappt das nicht, melde dich im Büro."
+          : "Bitte nicht neu registrieren. Melde dich mit deiner E-Mail-Adresse an oder setze über „Passwort vergessen?“ ein neues Passwort. Klappt das nicht, melde dich im Büro.",
+        duration: 20000,
+      });
+      if (perTelefon) setTab("telefon");
+      else setEmailMode("login");
+      return;
+    }
 
     const { error } = await supabase.auth.signUp({
       email,

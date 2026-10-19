@@ -306,6 +306,40 @@ export default function Mitarbeiter() {
     }
   };
 
+  /** Freischalten — bei einer erkannten Doppel-Anmeldung erst nachfragen. */
+  const freischaltenOderFragen = (p: Profile) => {
+    const d = doppelVon(p);
+    if (
+      d &&
+      !window.confirm(
+        `${p.vorname} ${p.nachname} gibt es schon als „${d.vorname} ${d.nachname}“. Wenn du freischaltest, steht die Person doppelt drin.\n\nTrotzdem freischalten?`,
+      )
+    )
+      return;
+    toggleActive(p);
+  };
+
+  /** Doppelte, nie freigeschaltete Anmeldung ohne Daten entfernen (Wunsch J. Maurer, 19.10.2026). */
+  const doppelteEntfernen = async (p: Profile) => {
+    const d = doppelVon(p);
+    if (
+      !window.confirm(
+        `Doppelte Anmeldung von ${p.vorname} ${p.nachname}${p.email ? ` (${p.email})` : ""} löschen?\n\nDas bestehende Konto${d ? ` „${d.vorname} ${d.nachname}“` : ""} bleibt unverändert.`,
+      )
+    )
+      return;
+    const { error } = await (supabase as any).rpc("doppelte_anmeldung_entfernen", { _user_id: p.id });
+    if (error) {
+      toast({ variant: "destructive", title: "Nicht gelöscht", description: error.message });
+      return;
+    }
+    toast({
+      title: "Doppelte Anmeldung gelöscht",
+      description: d ? `${d.vorname} ${d.nachname} meldet sich mit dem bestehenden Konto an.` : undefined,
+    });
+    load();
+  };
+
   const openDelete = (p: Profile) => {
     setDeletingProfile(p);
     setDeleteConfirmText("");
@@ -759,6 +793,15 @@ export default function Mitarbeiter() {
                         {doppelVon(p) && (
                           <div className="text-[11px] text-amber-800">
                             Gibt es schon als {doppelVon(p)!.vorname} {doppelVon(p)!.nachname} — nicht freischalten, sonst doppelt.
+                            {darfMaBearbeiten && (
+                              <button
+                                type="button"
+                                onClick={() => doppelteEntfernen(p)}
+                                className="ml-1.5 underline font-medium hover:text-red-700"
+                              >
+                                Doppelte Anmeldung löschen
+                              </button>
+                            )}
                           </div>
                         )}
                         <div className="text-xs text-muted-foreground truncate">{p.email}</div>
@@ -806,7 +849,7 @@ export default function Mitarbeiter() {
                           variant={p.is_active ? "outline" : "default"}
                           size="sm"
                           className="flex-1 h-10"
-                          onClick={() => toggleActive(p)}
+                          onClick={() => freischaltenOderFragen(p)}
                         >
                           {p.is_active
                             ? "Archivieren"
@@ -889,6 +932,15 @@ export default function Mitarbeiter() {
                           {doppelVon(p) && (
                             <div className="text-[11px] text-amber-800">
                               Gibt es schon als {doppelVon(p)!.vorname} {doppelVon(p)!.nachname} — nicht freischalten, sonst doppelt.
+                              {darfMaBearbeiten && (
+                                <button
+                                  type="button"
+                                  onClick={() => doppelteEntfernen(p)}
+                                  className="ml-1.5 underline font-medium hover:text-red-700"
+                                >
+                                  Doppelte Anmeldung löschen
+                                </button>
+                              )}
                             </div>
                           )}
                           <div className="text-xs text-muted-foreground">
@@ -946,7 +998,7 @@ export default function Mitarbeiter() {
                             <Button
                               variant={p.is_active ? "outline" : "default"}
                               size="sm"
-                              onClick={() => toggleActive(p)}
+                              onClick={() => freischaltenOderFragen(p)}
                             >
                               {p.is_active
                             ? "Archivieren"
