@@ -1,5 +1,22 @@
 # Journal
 
+## 2026-10-19 · Doppelkonto Fischer zusammengeführt, Knopf „Zusammenführen“
+
+- **Christoph:** „Welches ist aktiv, kann man das nicht zusammenführen?“
+- **Aktiv:** „Matthias Franz Fischer“, Pers.-Nr. 512, angelegt 25.06., Handy-Login, heute
+  10:18 angemeldet, 85 Stundentage, Partie Hallegger. Das Doppel „Matthias Fischer“
+  (matthias.fischer@outlook.at, 16.10.) war nie freigeschaltet und hatte keine Daten.
+- **Zusammengeführt:**
+  - Schutzregeln geprüft und Doppel gelöscht.
+  - Beim aktiven Konto die E-Mail über die Admin-Schnittstelle als Anmeldung eingetragen
+    (`email_confirm`, die Identität ist mitgezogen). Profil-Adresse ebenso.
+  - Handynummer und Passwort unverändert. Für die E-Mail-Anmeldung einmal „Passwort
+    vergessen?“, oder er bleibt bei der SMS.
+- **Mitarbeiterliste:** Aus „Doppelte Anmeldung löschen“ wird „Zusammenführen“.
+  Doppel entfernen (`doppelte_anmeldung_entfernen`), dann bei Platzhalter-Adresse
+  (`…@willroider.invalid`) die neue E-Mail über `admin-update-email` als Anmeldung
+  eintragen.
+
 ## 2026-10-19 · Doppelte Registrierungen verhindern (Johannes Maurer)
 
 - **Wunsch:** „Kann das sein, wenn sich einer falsch anmeldet, dass sich dann ein

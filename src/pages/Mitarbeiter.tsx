@@ -319,23 +319,53 @@ export default function Mitarbeiter() {
     toggleActive(p);
   };
 
-  /** Doppelte, nie freigeschaltete Anmeldung ohne Daten entfernen (Wunsch J. Maurer, 19.10.2026). */
-  const doppelteEntfernen = async (p: Profile) => {
+  /**
+   * Doppelte Anmeldung mit dem bestehenden Konto zusammenführen (Christoph,
+   * 19.10.2026, Fall Fischer): Das bestehende Konto behält alle Stunden und
+   * Daten. Hat es nur eine Platzhalter-Adresse (…@willroider.invalid), wird
+   * die E-Mail der doppelten Anmeldung dort als zusätzliche Anmeldung
+   * eingetragen — Handynummer und Passwort bleiben, wie sie sind. Danach
+   * wird die doppelte (nie freigeschaltete, datenlose) Anmeldung gelöscht.
+   */
+  const zusammenfuehren = async (p: Profile) => {
     const d = doppelVon(p);
+    if (!d) return;
+    const neueMail = (p.email ?? "").trim().toLowerCase();
+    const platzhalter = !d.email || /@willroider\.invalid$/i.test(d.email);
+    const mailUebernehmen = platzhalter && !!neueMail;
     if (
       !window.confirm(
-        `Doppelte Anmeldung von ${p.vorname} ${p.nachname}${p.email ? ` (${p.email})` : ""} löschen?\n\nDas bestehende Konto${d ? ` „${d.vorname} ${d.nachname}“` : ""} bleibt unverändert.`,
+        `„${p.vorname} ${p.nachname}“ mit dem bestehenden Konto „${d.vorname} ${d.nachname}“ zusammenführen?\n\n` +
+          `• Das bestehende Konto bleibt mit allen Stunden und Daten.\n` +
+          (mailUebernehmen ? `• ${neueMail} wird dort als zusätzliche Anmeldung eingetragen (Handynummer bleibt).\n` : "") +
+          `• Die doppelte Anmeldung wird gelöscht.`,
       )
     )
       return;
     const { error } = await (supabase as any).rpc("doppelte_anmeldung_entfernen", { _user_id: p.id });
     if (error) {
-      toast({ variant: "destructive", title: "Nicht gelöscht", description: error.message });
+      toast({ variant: "destructive", title: "Nicht zusammengeführt", description: error.message });
       return;
     }
+    if (mailUebernehmen) {
+      const { data, error: e2 } = await supabase.functions.invoke("admin-update-email", {
+        body: { profile_id: d.id, email: neueMail, auch_login: true },
+      });
+      if (e2 || (data as any)?.error) {
+        toast({
+          variant: "destructive",
+          title: "Doppelte Anmeldung gelöscht, E-Mail nicht übernommen",
+          description: `${(data as any)?.error ?? e2?.message ?? ""} — bitte bei ${d.vorname} ${d.nachname} im Bearbeiten-Dialog eintragen.`,
+        });
+        load();
+        return;
+      }
+    }
     toast({
-      title: "Doppelte Anmeldung gelöscht",
-      description: d ? `${d.vorname} ${d.nachname} meldet sich mit dem bestehenden Konto an.` : undefined,
+      title: "Zusammengeführt",
+      description: mailUebernehmen
+        ? `${d.vorname} ${d.nachname} meldet sich jetzt mit Handynummer oder ${neueMail} an.`
+        : `${d.vorname} ${d.nachname} meldet sich mit dem bestehenden Konto an.`,
     });
     load();
   };
@@ -796,10 +826,10 @@ export default function Mitarbeiter() {
                             {darfMaBearbeiten && (
                               <button
                                 type="button"
-                                onClick={() => doppelteEntfernen(p)}
+                                onClick={() => zusammenfuehren(p)}
                                 className="ml-1.5 underline font-medium hover:text-red-700"
                               >
-                                Doppelte Anmeldung löschen
+                                Zusammenführen
                               </button>
                             )}
                           </div>
@@ -935,10 +965,10 @@ export default function Mitarbeiter() {
                               {darfMaBearbeiten && (
                                 <button
                                   type="button"
-                                  onClick={() => doppelteEntfernen(p)}
+                                  onClick={() => zusammenfuehren(p)}
                                   className="ml-1.5 underline font-medium hover:text-red-700"
                                 >
-                                  Doppelte Anmeldung löschen
+                                  Zusammenführen
                                 </button>
                               )}
                             </div>
