@@ -3,9 +3,10 @@
  * für genau einen Mitarbeiter an genau einem Datum. Wird im
  * Baustellenstundenbericht beim Tap auf eine Tages-Spalte geöffnet.
  *
- * Bewusst NICHT im Dialog: Zulagen, Fahrt/Taggeld, Kilometergeld. Bestehende
- * Werte für diese Felder werden unverändert mitgespeichert, damit nichts
- * verloren geht.
+ * Zulagen können hier seit 19.10.2026 ergänzt werden (Wunsch E. Winkler:
+ * „auch bei der Admin-Freigabeliste"). Bewusst NICHT im Dialog: Fahrt/
+ * Taggeld, Kilometergeld — bestehende Werte werden unverändert
+ * mitgespeichert, damit nichts verloren geht.
  */
 
 import { Fragment, useEffect, useMemo, useState } from "react";
@@ -20,6 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Check, Loader2, Plus } from "lucide-react";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
@@ -31,7 +33,7 @@ import {
   type SaveZulage,
   type SaveFahrt,
 } from "@/hooks/useStundenTag";
-import { useTaetigkeitenStamm } from "@/hooks/useStammdatenStunden";
+import { useTaetigkeitenStamm, useZulagenTypen } from "@/hooks/useStammdatenStunden";
 import { StatusButtonsLeiste } from "@/components/stunden/StatusButtonsLeiste";
 import { ArtSection } from "@/components/stunden/ArtSection";
 import {
@@ -94,6 +96,9 @@ export function TagBearbeitenDialog({
   const [eintraege, setEintraege] = useState<EintragRow[]>([]);
   const [arbeitsbeginn, setArbeitsbeginn] = useState<string>("");
   const [anmerkung, setAnmerkung] = useState<string>("");
+  const { data: zulagenTypen = [] } = useZulagenTypen();
+  /** Gewählte Zulagen: Typ → Stunden (leer = ohne Stundenangabe) + Notiz. */
+  const [zulagen, setZulagen] = useState<Map<string, { stunden: string; notiz: string | null }>>(new Map());
 
   // Beim Öffnen: lokalen Form-State aus dem Tag (oder leer) befüllen
   useEffect(() => {
@@ -101,7 +106,22 @@ export function TagBearbeitenDialog({
     setEintraege(rowsAusTag(tag));
     setArbeitsbeginn(tag?.tag.arbeitsbeginn?.slice(0, 5) ?? "");
     setAnmerkung(tag?.tag.anmerkung ?? "");
+    setZulagen(
+      new Map(
+        (tag?.zulagen ?? []).map((z) => [
+          z.zulagen_typ_id,
+          { stunden: z.stunden != null ? String(z.stunden) : "", notiz: z.notiz ?? null },
+        ]),
+      ),
+    );
   }, [open, tag]);
+  const toggleZulage = (id: string) =>
+    setZulagen((m) => {
+      const n = new Map(m);
+      if (n.has(id)) n.delete(id);
+      else n.set(id, { stunden: "", notiz: null });
+      return n;
+    });
 
   const aktiveArten = useMemo(() => {
     const s = new Set<TagStatus>();
@@ -216,12 +236,12 @@ export function TagBearbeitenDialog({
           };
         });
 
-      // Zulagen + Fahrt unverändert übernehmen, damit nichts verloren geht
-      const zulagen: SaveZulage[] = (tag?.zulagen ?? []).map((z) => ({
-        zulagen_typ_id: z.zulagen_typ_id,
-        stunden: z.stunden != null ? Number(z.stunden) : null,
-        notiz: z.notiz ?? null,
+      const zulagenSave: SaveZulage[] = Array.from(zulagen.entries()).map(([id, z]) => ({
+        zulagen_typ_id: id,
+        stunden: z.stunden.trim() ? Number(z.stunden.replace(",", ".")) : null,
+        notiz: z.notiz,
       }));
+      // Fahrt unverändert übernehmen, damit nichts verloren geht
       const fahrt: SaveFahrt | null = tag?.fahrt
         ? {
             fahrtgeld_eur: Number(tag.fahrt.fahrtgeld_eur ?? 0),
@@ -244,7 +264,7 @@ export function TagBearbeitenDialog({
         arbeitsbeginn: arbeitsbeginn || null,
         anmerkung: anmerkung.trim() || null,
         taetigkeiten,
-        zulagen,
+        zulagen: zulagenSave,
         fahrt,
       });
       toast({ title: "Tag gespeichert" });
@@ -390,6 +410,47 @@ export function TagBearbeitenDialog({
             </Fragment>
             );
           })}
+
+          {zulagenTypen.length > 0 && (
+            <div className="space-y-2 border-t pt-3">
+              <Label className="text-xs">Zulagen</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {zulagenTypen.map((z) => {
+                  const aktiv = zulagen.has(z.id);
+                  return (
+                    <button
+                      key={z.id}
+                      type="button"
+                      onClick={() => toggleZulage(z.id)}
+                      className={`text-xs rounded-full border px-3 py-1.5 ${
+                        aktiv ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted"
+                      }`}
+                    >
+                      {z.bezeichnung}
+                    </button>
+                  );
+                })}
+              </div>
+              {Array.from(zulagen.entries()).map(([id, z]) => {
+                const typ = zulagenTypen.find((t) => t.id === id);
+                return (
+                  <div key={id} className="flex items-center gap-2 text-xs">
+                    <span className="flex-1 truncate">{typ?.bezeichnung ?? "Zulage"}</span>
+                    <Input
+                      inputMode="decimal"
+                      placeholder="Stunden"
+                      value={z.stunden}
+                      onChange={(e) =>
+                        setZulagen((m) => new Map(m).set(id, { ...z, stunden: e.target.value }))
+                      }
+                      className="h-8 w-24 text-xs"
+                    />
+                    <span className="text-muted-foreground">h</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           <div className="space-y-1 border-t pt-3">
             <Label className="text-xs">Anmerkung (optional)</Label>

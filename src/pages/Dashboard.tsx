@@ -34,6 +34,7 @@ import { TaetigkeitsberichtHintCard } from "@/components/dashboard/Taetigkeitsbe
 import { PushHinweisCard } from "@/components/dashboard/PushHinweisCard";
 import { UnterschriftenCard } from "@/components/dashboard/UnterschriftenCard";
 import { TagesplanPreview } from "@/components/TagesplanPreview";
+import { findeDoppelkonto } from "@/lib/doppelkonto";
 import {
   Dialog,
   DialogContent,
@@ -104,6 +105,8 @@ export default function Dashboard() {
   const [aktiveBaustellen, setAktiveBaustellen] = useState<Baustelle[]>([]);
   const [pendingProfiles, setPendingProfiles] = useState<PendingProfile[]>([]);
   const [pendingCount, setPendingCount] = useState<number>(0);
+  /** Aktive Mitarbeiter — für den Doppelkonto-Hinweis bei neuen Anmeldungen. */
+  const [aktivePersonen, setAktivePersonen] = useState<{ id: string; vorname: string; nachname: string }[]>([]);
   const [feedbackNeu, setFeedbackNeu] = useState<number>(0);
   const [offeneAntraege, setOffeneAntraege] = useState<
     { id: string; von: string; bis: string; name: string }[]
@@ -112,6 +115,7 @@ export default function Dashboard() {
   const [offeneUnterschriften, setOffeneUnterschriften] = useState<
     {
       evaluierung_id: string;
+      baustelle_id: string;
       bvh_name: string;
       mitarbeiter_id: string;
       evaluierung_titel: string | null;
@@ -331,6 +335,13 @@ export default function Dashboard() {
         .limit(5);
       setPendingProfiles((data as PendingProfile[]) ?? []);
       setPendingCount(count ?? 0);
+      if ((count ?? 0) > 0) {
+        const { data: aktive } = await supabase
+          .from("profiles")
+          .select("id, vorname, nachname")
+          .eq("is_active", true);
+        setAktivePersonen((aktive as any[]) ?? []);
+      }
     };
     loadPending();
     const ch = supabase
@@ -433,7 +444,7 @@ export default function Dashboard() {
       // wer bloß zugeteilt, aber noch nicht dran ist, taucht hier nicht auf.
       const { data } = await supabase
         .from("v_unterweisung_faellig" as any)
-        .select("evaluierung_id, bvh_name, mitarbeiter_id, evaluierung_titel, faellig_am")
+        .select("evaluierung_id, baustelle_id, bvh_name, mitarbeiter_id, evaluierung_titel, faellig_am")
         .or(`bauleiter_id.eq.${user.id},polier_id.eq.${user.id}`);
       const unique = ((data as any[]) ?? []).map((r) => ({
         ...r,
@@ -587,6 +598,14 @@ export default function Dashboard() {
                         {`${p.vorname} ${p.nachname}`.trim() || "Ohne Namen"}
                       </strong>
                       <span className="text-muted-foreground">· {relTime(p.created_at)}</span>
+                      {(() => {
+                        const d = findeDoppelkonto(p as any, aktivePersonen);
+                        return d ? (
+                          <span className="text-amber-800" title="Nicht freischalten — die Person gibt es schon. Anmeldung ausblenden und mit dem bestehenden Konto anmelden lassen.">
+                            · gibt es schon als {d.vorname} {d.nachname}
+                          </span>
+                        ) : null;
+                      })()}
                       <button
                         type="button"
                         onClick={() => anmeldungAusblenden(p.id)}
@@ -605,7 +624,7 @@ export default function Dashboard() {
                   )}
                 </div>
               </div>
-              <Link to="/mitarbeiter" className="shrink-0 hidden sm:block">
+              <Link to="/mitarbeiter?neu=1" className="shrink-0 hidden sm:block">
                 <Button className="bg-amber-600 hover:bg-amber-700 text-white shadow-md">
                   Jetzt freischalten
                   <ArrowRight className="h-4 w-4 ml-1.5" />
@@ -613,7 +632,7 @@ export default function Dashboard() {
               </Link>
             </div>
             {/* Mobile-CTA breit unten */}
-            <Link to="/mitarbeiter" className="sm:hidden block mt-3">
+            <Link to="/mitarbeiter?neu=1" className="sm:hidden block mt-3">
               <Button className="w-full h-11 bg-amber-600 hover:bg-amber-700 text-white shadow-md">
                 Jetzt freischalten
                 <ArrowRight className="h-4 w-4 ml-1.5" />
@@ -747,6 +766,9 @@ export default function Dashboard() {
 
       {/* Offene Unterschriften — Polier/Bauleiter */}
       {offeneUnterschriften.length > 0 && (() => {
+        // Nur eine Baustelle betroffen → gleich dorthin statt zur Gesamtliste.
+        const bstIds = Array.from(new Set(offeneUnterschriften.map((u) => u.baustelle_id)));
+        const unterweisungZiel = bstIds.length === 1 ? `/baustellen/${bstIds[0]}?tab=eval` : "/evaluierung";
         // evaluierung_datum trägt hier die Fälligkeit (siehe Laden oben)
         const jetzt = Date.now();
         const eskaliert = offeneUnterschriften.some(
@@ -809,20 +831,23 @@ export default function Dashboard() {
                         (u) => u.bvh_name === bvh
                       ).length;
                       return (
-                        <span
+                        // Antippen → direkt in die Baustelle, Reiter Unterweisung
+                        // (Wunsch J. Maurer: nur dorthin, wo etwas zu tun ist).
+                        <Link
                           key={bvh}
-                          className={`inline-flex items-center gap-1.5 bg-white rounded-full px-2.5 py-1 text-xs shadow-sm border ${
+                          to={`/baustellen/${offeneUnterschriften.find((u) => u.bvh_name === bvh)?.baustelle_id}?tab=eval`}
+                          className={`inline-flex items-center gap-1.5 bg-white rounded-full px-2.5 py-1 text-xs shadow-sm border hover:bg-muted ${
                             eskaliert ? "border-red-200" : "border-amber-200"
                           }`}
                         >
                           <strong>{bvh}</strong>
                           <span className="text-muted-foreground">· {count}</span>
-                        </span>
+                        </Link>
                       );
                     })}
                 </div>
               </div>
-              <Link to="/evaluierung" className="shrink-0 hidden sm:block">
+              <Link to={unterweisungZiel} className="shrink-0 hidden sm:block">
                 <Button
                   className={`${
                     eskaliert
@@ -835,7 +860,7 @@ export default function Dashboard() {
                 </Button>
               </Link>
             </div>
-            <Link to="/evaluierung" className="sm:hidden block mt-3">
+            <Link to={unterweisungZiel} className="sm:hidden block mt-3">
               <Button
                 className={`w-full h-11 ${
                   eskaliert

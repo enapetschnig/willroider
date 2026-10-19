@@ -273,20 +273,35 @@ export function useTagesplanung(datum: string) {
           return (a.baustelle?.bvh_name ?? "").localeCompare(b.baustelle?.bvh_name ?? "");
         });
 
+      // Abwesende der Kollegen: Mitarbeiter dürfen fremde Stunden und
+      // Urlaubsanträge nicht lesen. Für freigegebene Tage liefert die
+      // Datenbank die Abwesenden wie am Aushang (tagesplan_abwesende,
+      // Wunsch E. Winkler 19.10.2026) — zusammengeführt, doppelte fallen
+      // unten weg.
+      const { data: abwRpc } = await (supabase as any).rpc("tagesplan_abwesende", { p_datum: datum });
+      const tageAlle = [
+        ...((tageRaw ?? []) as any[]),
+        ...(((abwRpc ?? []) as any[]).filter((r) => r.quelle === "tag")),
+      ];
+      const antraegeAlle = [
+        ...((antragRaw ?? []) as any[]),
+        ...(((abwRpc ?? []) as any[]).filter((r) => r.quelle === "antrag")),
+      ];
+
       // Abwesende: stunden_tage + genehmigte urlaubsantraege (deduped).
       // Personen außerhalb der Tagesplanung (Büro/Bauleitung, in_tagesplanung
       // = false) werden hier nicht gelistet — sie sind nie eingeteilt.
       const inPlanung = gehoertInPlanung;
       const abwesendIds = new Set<string>();
       const abwesende: AbwesenheitDetail[] = [];
-      (tageRaw ?? []).forEach((t: any) => {
+      tageAlle.forEach((t: any) => {
         if (abwesendIds.has(t.mitarbeiter_id)) return;
         const ma = mitarbeiter.get(t.mitarbeiter_id);
         if (!ma || !inPlanung(t.mitarbeiter_id)) return;
         abwesendIds.add(t.mitarbeiter_id);
         abwesende.push({ ma, status: t.tag_status as TagStatus });
       });
-      (antragRaw ?? []).forEach((a: any) => {
+      antraegeAlle.forEach((a: any) => {
         if (abwesendIds.has(a.mitarbeiter_id)) return;
         const ma = mitarbeiter.get(a.mitarbeiter_id);
         if (!ma || !inPlanung(a.mitarbeiter_id)) return;

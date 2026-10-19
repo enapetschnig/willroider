@@ -1,5 +1,47 @@
 # Journal
 
+## 2026-10-19 · Tagesplan für alle, Zulagen für alle (Elias Winkler)
+
+- **Wunsch (sofort):** Jeder soll den kompletten Tagesplan sehen, nicht nur die eigenen
+  Baustellen. Alle Mitarbeiter sollen Zulagen eintragen können, auch in der
+  „Admin-Freigabeliste“.
+- **Tagesplan** (`20261019100000_tagesplan_fuer_alle.sql`, eingespielt):
+  - Ist ein Tag freigegeben (`tagesplanung_freigaben.freigegeben_am`), darf jeder
+    Angemeldete dessen Einteilungen lesen: `darf_einteilung_sehen` und
+    `einteilung_ma_select`.
+  - Neu `tagesplan_abwesende(datum)` (security definer): Abwesende wie am Aushang, ohne
+    dass Mitarbeiter fremde Stunden oder Anträge lesen dürfen. `useTagesplanung` führt
+    das zusammen.
+  - Als normaler Mitarbeiter simuliert: 19.10. mit 8 Baustellen, 31 Leuten und 4
+    Abwesenden sichtbar.
+  - Mein Tag: „Ganzen Tagesplan ansehen“ auch ohne eigene Einteilung.
+- **Zulagen:**
+  - Nur 4 von 48 Mitarbeitern hatten Zulagen zugeteilt, alle anderen sahen den Bereich
+    nicht. Jetzt gilt: keine Zuteilung = alle aktiven Zulagen. Eine bewusste Zuteilung
+    bleibt bestehen (eigene Erfassung, Mehrfach-Erfassung, Speichern).
+  - `TagBearbeitenDialog` (Tag bearbeiten im Baustellenstundenbericht): Zulagen lassen
+    sich antippen und mit Stunden versehen.
+
+## 2026-10-19 · Dashboard: direkt dorthin, wo etwas zu tun ist (Johannes Maurer)
+
+- **Wunsch:** „Fischer ist freigeschaltet, steht aber noch da … im Dashboard muss ich
+  danach immer noch suchen, besser nur zu denen, wo es ein Problem gibt bzw. eine
+  Freigabe erfordert.“
+- **Fischer:**
+  - Das ist ein Doppelkonto. „Matthias Franz Fischer“ (aktiv seit Juni, Anmeldung per
+    Telefonnummer, nie eingeloggt) hat sich am 16.10. zusätzlich mit
+    matthias.fischer@outlook.at registriert.
+  - Neu `lib/doppelkonto.ts`: Dashboard und Mitarbeiter-Seite zeigen bei solchen
+    Anmeldungen „gibt es schon als …“.
+- **Ziele der Hinweise:**
+  - Anmeldungen → `/mitarbeiter?neu=1` (nur neue Anmeldungen, im Archiv).
+  - Berichte: bei einem direkt in den Bericht, sonst Liste mit Status, Art und ab dem
+    ältesten Datum.
+  - Stundenbericht: bei einem direkt hinein.
+  - Unterweisungen: eine Baustelle → direkt in deren Reiter Unterweisung. Die
+    Baustellen-Chips sind anklickbar.
+  - Urlaub zeigte die offenen Anträge schon oben.
+
 ## 2026-10-19 · Mein Tag: Stunden mit Baustelle und „Ändern“ (Bua Sirnitzer)
 
 - **Wunsch:** „Übersicht der Stunden sollte besser dargestellt sein mit Baustellen-Name.

@@ -386,7 +386,14 @@ export default function Stunden() {
     bereich: "baustelle",
   });
   const { data: zulagenTypen = [] } = useZulagenTypen();
-  const { data: erlaubteZulagenIds = [] } = useMitarbeiterZulagen(primaryUserId);
+  const { data: zugeteilteZulagenIds = [] } = useMitarbeiterZulagen(primaryUserId);
+  // Wunsch E. Winkler (19.10.2026): Alle sollen Zulagen eintragen können.
+  // Nur 4 von 48 hatten welche zugeteilt — alle anderen sahen den Bereich gar
+  // nicht. Keine Zuteilung heißt jetzt: alle aktiven Zulagen. Wo das Büro
+  // bewusst zugeteilt hat, bleibt es bei dieser Auswahl.
+  const alleZulagenIds = useMemo(() => zulagenTypen.map((z) => z.id), [zulagenTypen]);
+  const erlaubteZulagenIds =
+    zugeteilteZulagenIds.length > 0 ? zugeteilteZulagenIds : alleZulagenIds;
 
   const { data: erlaubteZulagenUnion = [] } = useQuery({
     queryKey: ["mitarbeiter_zulagen_union", Array.from(forUserIds)],
@@ -395,14 +402,18 @@ export default function Stunden() {
       if (ids.length === 0) return [];
       const { data } = await supabase
         .from("mitarbeiter_zulagen")
-        .select("zulagen_typ_id")
+        .select("mitarbeiter_id, zulagen_typ_id")
         .in("mitarbeiter_id", ids);
-      return Array.from(new Set((data ?? []).map((r: any) => r.zulagen_typ_id)));
+      const rows = (data ?? []) as { mitarbeiter_id: string; zulagen_typ_id: string }[];
+      // Jemand ohne Zuteilung dabei → er darf alle, also alle anbieten.
+      const mitZuteilung = new Set(rows.map((r) => r.mitarbeiter_id));
+      if (ids.some((id) => !mitZuteilung.has(id))) return null;
+      return Array.from(new Set(rows.map((r) => r.zulagen_typ_id)));
     },
     enabled: forUserIds.size > 0,
   });
   const verfuegbareZulagenIds =
-    forUserIds.size > 1 ? erlaubteZulagenUnion : erlaubteZulagenIds;
+    forUserIds.size > 1 ? (erlaubteZulagenUnion ?? alleZulagenIds) : erlaubteZulagenIds;
   const { data: limits } = useArbeitszeitLimits();
   const { sollPerMa } = useSollHoursForDayBulk(Array.from(forUserIds), date);
 
@@ -974,9 +985,8 @@ export default function Stunden() {
             .from("mitarbeiter_zulagen")
             .select("zulagen_typ_id")
             .eq("mitarbeiter_id", uid);
-          erlaubteZulagenForUid = new Set(
-            (zRows ?? []).map((r: any) => r.zulagen_typ_id),
-          );
+          const zugeteilt = (zRows ?? []).map((r: any) => r.zulagen_typ_id as string);
+          erlaubteZulagenForUid = new Set(zugeteilt.length > 0 ? zugeteilt : alleZulagenIds);
         }
         const zulagen: SaveZulage[] = Array.from(form.zulagenSelected.entries())
           .filter(([typId]) => erlaubteZulagenForUid.has(typId))

@@ -96,7 +96,14 @@ export function StundenBerichtHintCard() {
                 Unterschrieben — bitte prüfen &amp; bestätigen
               </div>
             </div>
-            <Link to="/stundenberichte?status=unterschrieben">
+            {/* Ein Bericht → gleich öffnen (Wunsch J. Maurer, 19.10.2026). */}
+            <Link
+              to={
+                kontrollCount === 1 && kontrolle.data?.[0]
+                  ? `/stundenbericht/${kontrolle.data[0].id}`
+                  : "/stundenberichte?status=unterschrieben"
+              }
+            >
               <Button size="sm" className="bg-blue-700 hover:bg-blue-800">
                 Prüfen <ChevronRight className="h-3.5 w-3.5 ml-1" />
               </Button>

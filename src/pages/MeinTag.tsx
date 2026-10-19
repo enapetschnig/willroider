@@ -229,9 +229,32 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
     );
   }
 
-  // Wenn weder heute noch ein letzter freigegebener Tag eine Einteilung
-  // liefert, zeigen wir gar nichts — der MA sieht nur Begrüßung + Vorschau.
-  if (!data) return null;
+  // Keine eigene Einteilung: trotzdem den ganzen Tagesplan anbieten —
+  // jeder soll sehen, wer wo ist (Wunsch E. Winkler, 19.10.2026).
+  if (!data) {
+    return (
+      <Card>
+        <CardContent className="p-4 flex items-center justify-between gap-2 flex-wrap">
+          <div className="text-sm text-muted-foreground">Heute keine eigene Einteilung.</div>
+          <button
+            type="button"
+            onClick={() => setPlanOpen(true)}
+            className="inline-flex items-center gap-1.5 text-sm bg-background border rounded-md px-3 py-1.5 hover:bg-muted"
+          >
+            <FileText className="h-4 w-4" /> Ganzen Tagesplan ansehen
+          </button>
+        </CardContent>
+        <Dialog open={planOpen} onOpenChange={setPlanOpen}>
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Tagesplan</DialogTitle>
+            </DialogHeader>
+            <TagesplanPreview datum={today} />
+          </DialogContent>
+        </Dialog>
+      </Card>
+    );
+  }
 
   const fotoUpload = async () => {
     if (!data.baustelle) return;
@@ -360,7 +383,7 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
                 onClick={() => setPlanOpen(true)}
                 className="inline-flex items-center gap-1.5 text-sm bg-background border rounded-md px-3 py-1.5 hover:bg-muted"
               >
-                <FileText className="h-4 w-4" /> Tagesplan ansehen
+                <FileText className="h-4 w-4" /> Ganzen Tagesplan ansehen
               </button>
               <button
                 type="button"
@@ -373,8 +396,17 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
 
           </>
         ) : (
+          <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => setPlanOpen(true)}
+            className="inline-flex items-center gap-1.5 text-sm bg-background border rounded-md px-3 py-1.5 hover:bg-muted"
+          >
+            <FileText className="h-4 w-4" /> Ganzen Tagesplan ansehen
+          </button>
           <div className="text-sm text-muted-foreground italic">
             Heute hast du keine Baustellen-Einteilung. Falls du in der Halle/Werkstatt eingeteilt bist, wird das hier nicht angezeigt — wechsle auf „Halle" oder frag im Büro nach, wenn du unsicher bist.
+          </div>
           </div>
         )}
       </CardContent>

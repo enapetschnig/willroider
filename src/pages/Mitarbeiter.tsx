@@ -38,6 +38,7 @@ import {
   type Visibility,
 } from "@/lib/baustellenOrdner";
 import { NewMitarbeiterDialog, type CredentialsResult } from "@/components/admin/NewMitarbeiterDialog";
+import { findeDoppelkonto } from "@/lib/doppelkonto";
 import { CredentialsResultDialog } from "@/components/admin/CredentialsResultDialog";
 import {
   useZulagenTypen,
@@ -147,6 +148,13 @@ export default function Mitarbeiter() {
     setParams(next, { replace: true });
   };
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const istNeueAnmeldung = (p: Profile) => !p.is_active && (p as any).je_freigeschaltet === false;
+  const listeProfiles = profiles.filter(
+    (p) => p.is_active !== zeigeArchiv && (!nurNeue || istNeueAnmeldung(p)),
+  );
+  /** Hinweis, wenn es die neue Anmeldung schon als aktiven Mitarbeiter gibt. */
+  const doppelVon = (p: Profile) =>
+    istNeueAnmeldung(p) ? findeDoppelkonto(p as any, profiles.filter((x) => x.is_active) as any[]) : null;
   const [partien, setPartien] = useState<Partie[]>([]);
   const [rollenListe, setRollenListe] = useState<RolleRow[]>([]);
   /** user_id → rollen.id (Quelle der Wahrheit für Berechtigungen). */
@@ -165,7 +173,10 @@ export default function Mitarbeiter() {
   const ziffern = (s: unknown) => String(s ?? "").replace(/\D/g, "");
   // Archiv: Deaktivierte verschwinden aus der Hauptliste und lassen sich
   // dort mit einem Klick wiederherstellen.
-  const [zeigeArchiv, setZeigeArchiv] = useState(false);
+  // „Jetzt freischalten" im Dashboard → /mitarbeiter?neu=1: nur die neuen
+  // Anmeldungen, nicht die ganze Liste (Wunsch J. Maurer, 19.10.2026).
+  const [nurNeue, setNurNeue] = useState(() => params.get("neu") === "1");
+  const [zeigeArchiv, setZeigeArchiv] = useState(() => params.get("neu") === "1");
   /** Schalter „Bauleiter" — steuert, ob das Farbfeld überhaupt erscheint. */
   const [istBauleiter, setIstBauleiter] = useState(false);
   const [editingSensitive, setEditingSensitive] = useState<
@@ -684,19 +695,36 @@ export default function Mitarbeiter() {
               <Button
                 variant={!zeigeArchiv ? "default" : "outline"}
                 size="sm"
-                onClick={() => setZeigeArchiv(false)}
+                onClick={() => {
+                  setZeigeArchiv(false);
+                  setNurNeue(false);
+                }}
               >
                 Aktive ({profiles.filter((p) => p.is_active).length})
               </Button>
               <Button
                 variant={zeigeArchiv ? "default" : "outline"}
                 size="sm"
-                onClick={() => setZeigeArchiv(true)}
+                onClick={() => {
+                  setZeigeArchiv(true);
+                  setNurNeue(false);
+                }}
               >
                 Archiv ({profiles.filter((p) => !p.is_active).length})
               </Button>
               {profiles.filter((p) => !p.is_active && p.je_freigeschaltet === false).length > 0 && (
-                <span className="text-xs text-muted-foreground">
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    setZeigeArchiv(true);
+                    setNurNeue((v) => !v);
+                  }}
+                  className={`text-xs cursor-pointer rounded-full px-2 py-0.5 ${
+                    nurNeue ? "bg-amber-100 text-amber-900 font-medium" : "text-muted-foreground hover:underline"
+                  }`}
+                  title={nurNeue ? "Wieder alle zeigen" : "Nur die neuen Anmeldungen zeigen"}
+                >
                   · {profiles.filter((p) => !p.is_active && p.je_freigeschaltet === false).length} neue
                   Anmeldung wartet
                 </span>
@@ -710,7 +738,7 @@ export default function Mitarbeiter() {
 
           {/* Mobile: cards */}
           <div className="md:hidden space-y-2">
-            {profiles.filter((p) => p.is_active !== zeigeArchiv).map((p) => {
+            {listeProfiles.map((p) => {
               const partie = partien.find((x) => x.id === p.partie_id);
               return (
                 <Card key={p.id}>
@@ -720,6 +748,11 @@ export default function Mitarbeiter() {
                         <div className="font-semibold text-sm">
                           {p.nachname} {p.vorname}
                         </div>
+                        {doppelVon(p) && (
+                          <div className="text-[11px] text-amber-800">
+                            Gibt es schon als {doppelVon(p)!.vorname} {doppelVon(p)!.nachname} — nicht freischalten, sonst doppelt.
+                          </div>
+                        )}
                         <div className="text-xs text-muted-foreground truncate">{p.email}</div>
                         <div className="text-[10px] text-muted-foreground">
                           {p.pers_nr ? `Pers.-Nr. ${p.pers_nr}` : ""}
@@ -810,7 +843,7 @@ export default function Mitarbeiter() {
                 </Card>
               );
             })}
-            {profiles.filter((p) => p.is_active !== zeigeArchiv).length === 0 && (
+            {listeProfiles.length === 0 && (
               <Card>
                 <CardContent className="p-6 text-center text-sm text-muted-foreground">
                   {zeigeArchiv ? "Archiv ist leer." : "Noch keine Mitarbeiter."}
@@ -835,7 +868,7 @@ export default function Mitarbeiter() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {profiles.filter((p) => p.is_active !== zeigeArchiv).map((p) => {
+                  {listeProfiles.map((p) => {
                     const partie = partien.find((x) => x.id === p.partie_id);
                     return (
                       <TableRow key={p.id}>
@@ -843,6 +876,11 @@ export default function Mitarbeiter() {
                           <div className="font-medium">
                             {p.nachname} {p.vorname}
                           </div>
+                          {doppelVon(p) && (
+                            <div className="text-[11px] text-amber-800">
+                              Gibt es schon als {doppelVon(p)!.vorname} {doppelVon(p)!.nachname} — nicht freischalten, sonst doppelt.
+                            </div>
+                          )}
                           <div className="text-xs text-muted-foreground">
                             {p.is_partieleiter ? "Partieleiter" : ""}
                             {p.kran_berechtigung ? (p.is_partieleiter ? " · " : "") + "Kran" : ""}
