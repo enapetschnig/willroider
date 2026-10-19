@@ -1,5 +1,18 @@
 # Journal
 
+## 2026-10-19 · Mein Tag: Stunden mit Baustelle und „Ändern“ (Bua Sirnitzer)
+
+- **Wunsch:** „Übersicht der Stunden sollte besser dargestellt sein mit Baustellen-Name.
+  Es sollte auch hier eine Funktion zum Ändern geben.“ Auf dem Screenshot war die
+  Kopfzeile der Karte am Handy zerquetscht, die Zeilen zeigten nur „Baustelle“.
+- **Umsetzung:**
+  - `MeineStundenListe` zeigt je Tag eine zweite Zeile mit den Baustellennamen
+    (sonst Firma/Urlaub …). Das gilt auf Mein Tag und in der Stundenerfassung.
+  - Knopf „Ändern“ bei eigenen Tagen, solange das Büro sie nicht freigegeben hat.
+    Er führt auf `/stunden?datum=JJJJ-MM-TT`, die Erfassung öffnet genau diesen Tag.
+  - Kopfzeile „Meine Stunden“: Titel und Monat links, Ist und Soll rechts, jeweils
+    zweizeilig.
+
 ## 2026-10-18 · Jahresplanung: „Zur Baustelle“ (Eckart Egger)
 
 - **Wunsch:** In der Jahresplanung beim Klick auf eine Baustelle mit einem Knopf direkt

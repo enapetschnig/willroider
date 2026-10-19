@@ -136,20 +136,25 @@ export function MeineStundenCard() {
           onClick={() => setOffen((v) => !v)}
           className="w-full flex items-center justify-between gap-2"
         >
-          <span className="flex items-center gap-2 text-sm font-semibold">
-            <Clock className="h-4 w-4 text-primary" />
-            Meine Stunden
-            <span className="text-xs font-normal text-muted-foreground">{label}</span>
-          </span>
-          <span className="flex items-center gap-2">
-            <span className="text-sm font-bold tabular-nums">
-              {fmtStunden(eigeneIst)}
+          {/* Am Handy zweizeilig statt gequetscht (Wunsch B. Sirnitzer). */}
+          <span className="flex items-center gap-2 min-w-0 text-left">
+            <Clock className="h-4 w-4 text-primary shrink-0" />
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold leading-tight">Meine Stunden</span>
+              <span className="block text-[11px] text-muted-foreground leading-tight">{label}</span>
             </span>
-            {soll != null && (
-              <span className="text-xs text-muted-foreground tabular-nums">
-                / Soll {fmtStunden(soll)}
+          </span>
+          <span className="flex items-center gap-2 shrink-0">
+            <span className="text-right leading-tight">
+              <span className="block text-sm font-bold tabular-nums whitespace-nowrap">
+                {fmtStunden(eigeneIst)}
               </span>
-            )}
+              {soll != null && (
+                <span className="block text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">
+                  Soll {fmtStunden(soll)}
+                </span>
+              )}
+            </span>
             {offen ? (
               <ChevronUp className="h-4 w-4 text-muted-foreground" />
             ) : (
@@ -201,6 +206,7 @@ export function MeineStundenCard() {
                 tage={tage}
                 maxAnzahl={zeigePartie ? 20 : 10}
                 nameFuer={zeigePartie ? (id) => namen.get(id) ?? null : undefined}
+                aendernFuer={user?.id ?? null}
               />
             )}
 

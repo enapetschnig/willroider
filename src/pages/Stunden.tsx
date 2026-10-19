@@ -148,6 +148,12 @@ export default function Stunden() {
 
   const [searchParams] = useSearchParams();
   const baustelleParam = searchParams.get("baustelle");
+  // „Ändern" aus Mein Tag: /stunden?datum=JJJJ-MM-TT öffnet genau diesen Tag
+  // (Wunsch B. Sirnitzer, 19.10.2026).
+  const datumParam = searchParams.get("datum");
+  useEffect(() => {
+    if (datumParam && /^\d{4}-\d{2}-\d{2}$/.test(datumParam)) setDate(datumParam);
+  }, [datumParam]);
 
   // ─── Der Plan des Tages ─────────────────────────────────────────────
   //
@@ -1296,6 +1302,7 @@ export default function Stunden() {
                 tage={tageList}
                 maxAnzahl={5}
                 onDelete={onDeleteTag}
+                aendernFuer={user?.id ?? null}
               />
             </div>
           </CardContent>
