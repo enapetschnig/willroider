@@ -1,5 +1,20 @@
 # Journal
 
+## 2026-10-19 · Absturz Verwaltung → Mitarbeiter (Johannes Maurer)
+
+- **Fehler:** „ReferenceError: Cannot access 'de' before initialization … at Array.filter“
+  beim Öffnen von Mitarbeiter & Partien.
+- **Ursache:** Meine Änderung von heute (Doppelkonto/„nur neue Anmeldungen“).
+  `listeProfiles = profiles.filter(… zeigeArchiv … nurNeue …)` stand direkt unter
+  `profiles`, aber vor `zeigeArchiv`/`nurNeue`. `filter` läuft beim Rendern sofort, das
+  ergibt einen Zugriff auf eine noch nicht angelegte Variable. TypeScript meldet das nicht,
+  weil der Zugriff in einer Pfeilfunktion steckt.
+- **Behoben:** Berechnung nach die beiden States verschoben.
+- **Gegenprobe:** Alle heute geänderten Dateien mit `no-use-before-define` geprüft (ESLint
+  über die API, nur diese Regel), ohne weitere Treffer im Render-Pfad. Die übrigen
+  Meldungen in Arbeitsplanung/Jahresplanung/Dokumente liegen in Klick-Handlern und sind
+  älter.
+
 ## 2026-10-19 · Fehler: neue Baustelle mit fremdem Ordner verknüpft (S. Egger)
 
 - **Meldung per Mail:** „In der App steht OneDrive verknüpft, aber in meinem Ordner sehe

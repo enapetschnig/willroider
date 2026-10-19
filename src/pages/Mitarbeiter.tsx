@@ -152,13 +152,6 @@ export default function Mitarbeiter() {
     setParams(next, { replace: true });
   };
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const istNeueAnmeldung = (p: Profile) => !p.is_active && (p as any).je_freigeschaltet === false;
-  const listeProfiles = profiles.filter(
-    (p) => p.is_active !== zeigeArchiv && (!nurNeue || istNeueAnmeldung(p)),
-  );
-  /** Hinweis, wenn es die neue Anmeldung schon als aktiven Mitarbeiter gibt. */
-  const doppelVon = (p: Profile) =>
-    istNeueAnmeldung(p) ? findeDoppelkonto(p as any, profiles.filter((x) => x.is_active) as any[]) : null;
   const [partien, setPartien] = useState<Partie[]>([]);
   const [rollenListe, setRollenListe] = useState<RolleRow[]>([]);
   /** user_id → rollen.id (Quelle der Wahrheit für Berechtigungen). */
@@ -181,6 +174,17 @@ export default function Mitarbeiter() {
   // Anmeldungen, nicht die ganze Liste (Wunsch J. Maurer, 19.10.2026).
   const [nurNeue, setNurNeue] = useState(() => params.get("neu") === "1");
   const [zeigeArchiv, setZeigeArchiv] = useState(() => params.get("neu") === "1");
+  // ACHTUNG Reihenfolge: erst NACH profiles, nurNeue und zeigeArchiv
+  // berechnen. Vorher stand das direkt unter profiles — beim Anzeigen lief
+  // filter() sofort und griff auf das noch nicht angelegte zeigeArchiv zu
+  // („Cannot access … before initialization", Absturz 19.10. J. Maurer).
+  const istNeueAnmeldung = (p: Profile) => !p.is_active && (p as any).je_freigeschaltet === false;
+  const listeProfiles = profiles.filter(
+    (p) => p.is_active !== zeigeArchiv && (!nurNeue || istNeueAnmeldung(p)),
+  );
+  /** Hinweis, wenn es die neue Anmeldung schon als aktiven Mitarbeiter gibt. */
+  const doppelVon = (p: Profile) =>
+    istNeueAnmeldung(p) ? findeDoppelkonto(p as any, profiles.filter((x) => x.is_active) as any[]) : null;
   /** Schalter „Bauleiter" — steuert, ob das Farbfeld überhaupt erscheint. */
   const [istBauleiter, setIstBauleiter] = useState(false);
   const [editingSensitive, setEditingSensitive] = useState<
