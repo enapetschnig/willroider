@@ -102,6 +102,9 @@ type HeuteEintrag = {
 export default function Dashboard() {
   const { toast } = useToast();
   const { user, profile, isAdmin, hasPermission } = useAuth();
+  // Neue Anmeldungen sehen und freischalten nur, wer Mitarbeiter bearbeiten
+  // darf — Maurer und Pließnig, nicht das Büro (Wunsch E. Winkler, 19.10.2026).
+  const darfFreischalten = hasPermission("mitarbeiter.edit");
   const [aktiveBaustellen, setAktiveBaustellen] = useState<Baustelle[]>([]);
   const [pendingProfiles, setPendingProfiles] = useState<PendingProfile[]>([]);
   const [pendingCount, setPendingCount] = useState<number>(0);
@@ -322,7 +325,7 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!darfFreischalten) return;
     const loadPending = async () => {
       // Nur echte, noch nie freigeschaltete Selbst-Registrierungen —
       // ein deaktivierter Bestands-MA (je_freigeschaltet=true) zählt NICHT.
@@ -355,7 +358,7 @@ export default function Dashboard() {
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [isAdmin]);
+  }, [darfFreischalten]);
 
   useEffect(() => {
     if (!hasPermission("urlaub.genehmigen")) return;
@@ -565,7 +568,7 @@ export default function Dashboard() {
       <UnterschriftenCard />
 
       {/* Neue-Anmeldungen-Banner (Admin) — bewusst ganz oben, vor dem Greeting */}
-      {isAdmin && pendingCount > 0 && (
+      {darfFreischalten && pendingCount > 0 && (
         <Card className="border-2 border-amber-500 bg-gradient-to-r from-amber-50 to-amber-100 shadow-md ring-2 ring-amber-500/20">
           <CardContent className="p-4 sm:p-5">
             <div className="flex items-start gap-3 sm:gap-4">

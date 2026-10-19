@@ -22,10 +22,14 @@ export function BerichteHintCard() {
   useEffect(() => {
     if (!user || !canReview) return;
     (async () => {
+      // Erinnern nur den Bauleiter der Baustelle (Wunsch E. Winkler,
+      // 19.10.2026). Ansehen und freigeben kann weiterhin jeder Bauleiter
+      // jeden Bericht — über die Berichte-Liste.
       const { data } = await supabase
         .from("berichte")
-        .select("id, typ, datum")
+        .select("id, typ, datum, baustellen!inner(bauleiter_id)")
         .eq("status", "eingereicht")
+        .eq("baustellen.bauleiter_id", user.id)
         .order("datum");
       setOffen((data as { id: string; typ: string; datum: string }[]) ?? []);
     })();

@@ -130,6 +130,10 @@ export default function Mitarbeiter() {
   const canManageRights = hasPermission("system.manage_permissions");
   const [rechteFuer, setRechteFuer] = useState<Profile | null>(null);
   const canDeleteMa = hasPermission("mitarbeiter.delete");
+  // Freischalten / Archivieren nur mit „Mitarbeiter bearbeiten" (Maurer,
+  // Pließnig) — nicht das Büro (Wunsch E. Winkler, 19.10.2026). Die
+  // Datenbank prüft dasselbe (profiles_freischalten_pruefen).
+  const darfMaBearbeiten = hasPermission("mitarbeiter.edit");
   const [params, setParams] = useSearchParams();
   // WICHTIG: eigener Parameter "sub" — NICHT "tab", der gehört der äußeren
   // Verwaltung (/admin?tab=…). Die Kollision machte beim Klick auf "Partien"
@@ -793,18 +797,20 @@ export default function Mitarbeiter() {
                       </select>
                     </div>
                     <div className="flex gap-2 pt-1">
-                      <Button
-                        variant={p.is_active ? "outline" : "default"}
-                        size="sm"
-                        className="flex-1 h-10"
-                        onClick={() => toggleActive(p)}
-                      >
-                        {p.is_active
-                          ? "Archivieren"
-                          : p.je_freigeschaltet
-                            ? "Wiederherstellen"
-                            : "Freischalten"}
-                      </Button>
+                      {darfMaBearbeiten && (
+                        <Button
+                          variant={p.is_active ? "outline" : "default"}
+                          size="sm"
+                          className="flex-1 h-10"
+                          onClick={() => toggleActive(p)}
+                        >
+                          {p.is_active
+                            ? "Archivieren"
+                            : p.je_freigeschaltet
+                              ? "Wiederherstellen"
+                              : "Freischalten"}
+                        </Button>
+                      )}
                       <Button
                         variant="outline"
                         size="sm"
@@ -932,17 +938,19 @@ export default function Mitarbeiter() {
                           )}
                         </TableCell>
                         <TableCell className="text-right space-x-1">
-                          <Button
-                            variant={p.is_active ? "outline" : "default"}
-                            size="sm"
-                            onClick={() => toggleActive(p)}
-                          >
-                            {p.is_active
-                          ? "Archivieren"
-                          : p.je_freigeschaltet
-                            ? "Wiederherstellen"
-                            : "Freischalten"}
-                          </Button>
+                          {darfMaBearbeiten && (
+                            <Button
+                              variant={p.is_active ? "outline" : "default"}
+                              size="sm"
+                              onClick={() => toggleActive(p)}
+                            >
+                              {p.is_active
+                            ? "Archivieren"
+                            : p.je_freigeschaltet
+                              ? "Wiederherstellen"
+                              : "Freischalten"}
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"

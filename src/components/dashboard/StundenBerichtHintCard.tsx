@@ -19,7 +19,10 @@ function monatLabel(jahr: number, monat: number): string {
 }
 
 export function StundenBerichtHintCard() {
-  const { user, profile, canReview } = useAuth();
+  const { user, profile, hasPermission } = useAuth();
+  // Kontrolle nur, wer Stundenberichte bestätigen darf (Wunsch E. Winkler,
+  // 19.10.2026: das Büro hat das Recht nicht mehr, sah den Hinweis aber noch).
+  const darfKontrollieren = hasPermission("stunden.bsb.bestaetigen");
   // Angestellte führen den Tätigkeitsbericht, keinen Baustellenstundenbericht
   // (N. Gwenger 01.10.) — die Kontroll-Karte fürs Büro bleibt.
   const istAngestellter = (profile as any)?.zeiterfassung_typ === "angestellter";
@@ -31,7 +34,7 @@ export function StundenBerichtHintCard() {
   });
   const kontrolle = useStundenBerichteList({
     status: "unterschrieben",
-    enabled: !!user && canReview,
+    enabled: !!user && darfKontrollieren,
   });
 
   const meinOffen = istAngestellter ? undefined : meine.data?.[0];
@@ -83,7 +86,7 @@ export function StundenBerichtHintCard() {
         </Card>
       )}
 
-      {canReview && kontrollCount > 0 && (
+      {darfKontrollieren && kontrollCount > 0 && (
         <Card className="border-blue-300 bg-blue-50">
           <CardContent className="p-4 flex items-center gap-3">
             <FileCheck2 className="h-8 w-8 text-blue-700 shrink-0" />

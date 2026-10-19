@@ -1,5 +1,22 @@
 # Journal
 
+## 2026-10-19 · Hinweise nur für die Zuständigen (Elias Winkler)
+
+- **Wunsch 1:** Das Büro hat das Recht für Stundenberichte nicht mehr, sah aber weiter
+  „Stundenberichte warten auf Kontrolle“. Neue Anmeldungen sollen nur Admins (Maurer,
+  Pließnig) sehen und freischalten.
+  - Dashboard-Hinweis Stundenbericht jetzt an `stunden.bsb.bestaetigen` gebunden. Die
+    Push-Erinnerung prüfte das schon.
+  - Anmelde-Hinweis und Freischalten/Archivieren an `mitarbeiter.edit` gebunden (Maurer
+    und Pließnig ja, Büro nein).
+  - Datenbank: Trigger `profiles_freischalten_pruefen` lässt `is_active` /
+    `je_freigeschaltet` nur mit diesem Recht ändern (oder serverseitig ohne Benutzer).
+    Getestet: Büro abgelehnt, Maurer erlaubt (zurückgerollt).
+  - Der weiter angezeigte „Fischer“ ist das Doppelkonto (siehe unten).
+- **Wunsch 2:** Die Erinnerung „Bericht wartet auf Freigabe“ bekommt nur der Bauleiter
+  der Baustelle (`baustellen.bauleiter_id`). Ansehen und freigeben kann weiter jeder
+  Bauleiter jeden Bericht.
+
 ## 2026-10-19 · Tagesplan für alle, Zulagen für alle (Elias Winkler)
 
 - **Wunsch (sofort):** Jeder soll den kompletten Tagesplan sehen, nicht nur die eigenen
