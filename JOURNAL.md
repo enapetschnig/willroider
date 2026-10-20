@@ -1,5 +1,23 @@
 # Journal
 
+## 2026-10-20 · Neue Ordnerstruktur für alle Bauleiter freigeschaltet
+
+- **Anlass:** Sebastian Egger (Mail): „Jetzt passt alles super. Ist das für die anderen
+  auch schon so eingerichtet? Wenn nein, für alle freischalten.“ Christoph hat zugestimmt.
+- **Umsetzung:** `app_settings.sharepoint_neue_struktur` =
+  `{ alle: true, ab: "2026-10-20" }`. Alle 6 aktiven Bauleiter haben ein Team.
+  Für sie gilt jetzt dasselbe wie für Sebastian:
+  - Ordner „<KS> <BVH>“ nach Vorlage mit ausgefüllter Materialliste
+  - Berichte und Evaluierungen als PDF in 00-Baustelle
+  - Baustellenanlage als PDF
+- **„ab“ = 20.10.:** Baustellen, die andere vor heute angelegt haben, bekommen keinen
+  nachträglichen Auftrag und damit keinen zweiten Ordner.
+- **Getestet (zurückgerollt):** Neue Ausführung von Maurer bzw. Eckart Egger ergibt je 1
+  Auftrag, eine Planung keinen.
+- **Hinweis für die Bauleiter:** Ordner für neue Baustellen nicht mehr selbst anlegen. Ein
+  von Hand angelegter Ordner wird nur verknüpft, wenn sein Name mit genau der
+  Kostenstelle beginnt.
+
 ## 2026-10-19 · Doppelkonto Fischer zusammengeführt, Knopf „Zusammenführen“
 
 - **Christoph:** „Welches ist aktiv, kann man das nicht zusammenführen?“
