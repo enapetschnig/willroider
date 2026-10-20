@@ -34,7 +34,13 @@ export function AdminZaKonten() {
 
   const load = async () => {
     const [{ data: ps }, { data: sal }] = await Promise.all([
-      supabase.from("profiles").select("*").eq("is_active", true).order("nachname"),
+      supabase
+        .from("profiles")
+        .select("*")
+        .eq("is_active", true)
+        // Leasing Personal ist nicht bei Willroider angestellt (20.10.2026).
+        .or("zeiterfassung_typ.is.null,zeiterfassung_typ.neq.leasing")
+        .order("nachname"),
       supabase.from("v_za_saldo" as any).select("*"),
     ]);
     setProfiles((ps as Profile[]) ?? []);

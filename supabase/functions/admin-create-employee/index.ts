@@ -54,6 +54,10 @@ interface CreateEmployeeRequest {
   // Einladung
   send_sms_invite?: boolean;                          // alt — entspricht invite_kanal 'sms'
   invite_kanal?: 'sms' | 'email' | 'beide' | 'keine'; // hat Vorrang vor send_sms_invite
+  // Leasing Personal (Kundenwunsch 20.10.2026): KEIN Zugang zur App —
+  // Platzhalter-Adresse, kein Anmeldeweg, keine Einladung, kein Stundenbericht.
+  leasing?: boolean;
+  leasing_firma?: string | null;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -103,11 +107,14 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'Body ist kein gültiges JSON' }, 400);
   }
 
+  const leasing = body.leasing === true;
   const vorname = (body.vorname ?? '').trim();
   const nachname = (body.nachname ?? '').trim();
-  const emailInput = (body.email ?? '').trim().toLowerCase();
-  const eintrittsdatum = (body.eintrittsdatum ?? '').trim();
-  const rolle = body.rolle as AppRole;
+  // Leasing: nie eine echte Adresse am Anmeldekonto — sonst gäbe es einen
+  // Anmeldeweg (Passwort vergessen). Die Telefonnummer kommt nur ins Profil.
+  const emailInput = leasing ? '' : (body.email ?? '').trim().toLowerCase();
+  const eintrittsdatum = ((body.eintrittsdatum ?? '').trim() || (leasing ? new Date().toISOString().slice(0, 10) : ''));
+  const rolle = (leasing ? 'mitarbeiter' : body.rolle) as AppRole;
 
   if (!vorname || !nachname) return jsonResponse({ error: 'Vorname und Nachname sind Pflicht' }, 400);
   if (emailInput && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput)) {
@@ -116,8 +123,9 @@ Deno.serve(async (req) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(eintrittsdatum)) return jsonResponse({ error: 'Eintrittsdatum ungültig (YYYY-MM-DD)' }, 400);
   if (!ALLOWED_ROLES.includes(rolle)) return jsonResponse({ error: 'Ungültige Rolle' }, 400);
 
-  const kanal: 'sms' | 'email' | 'beide' | 'keine' =
-    body.invite_kanal === 'sms' ||
+  const kanal: 'sms' | 'email' | 'beide' | 'keine' = leasing
+    ? 'keine'
+    : body.invite_kanal === 'sms' ||
     body.invite_kanal === 'email' ||
     body.invite_kanal === 'beide' ||
     body.invite_kanal === 'keine'
@@ -144,7 +152,8 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'Für die E-Mail-Einladung ist eine E-Mail-Adresse Pflicht.' }, 400);
   }
   // Ohne beides gäbe es kein Konto, mit dem man sich anmelden kann.
-  if (!telefonE164 && !emailInput) {
+  // (Leasing Personal soll genau das: keinen Anmeldeweg.)
+  if (!leasing && !telefonE164 && !emailInput) {
     return jsonResponse({
       error: 'Mindestens Telefonnummer oder E-Mail-Adresse angeben — sonst gibt es keinen Anmeldeweg.',
     }, 400);
@@ -154,6 +163,23 @@ Deno.serve(async (req) => {
     ALLOWED_AZ_MODELLE.includes(body.arbeitszeitmodell as Arbeitszeitmodell)
       ? (body.arbeitszeitmodell as Arbeitszeitmodell)
       : 'zimmerei_sommer';
+
+  // ─── Leasing: dieselbe Person nicht zweimal anlegen ────────────────────
+  if (leasing) {
+    const norm = (t: unknown) => String(t ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const { data: gleich } = await supabase
+      .from('profiles')
+      .select('id, vorname, nachname, is_active, zeiterfassung_typ')
+      .ilike('nachname', nachname);
+    const treffer = (gleich ?? []).find((p: any) => norm(p.vorname) === norm(vorname));
+    if (treffer) {
+      return jsonResponse({
+        error: `${vorname} ${nachname} gibt es schon` +
+          ((treffer as any).zeiterfassung_typ === 'leasing' ? ' im Leasing Personal' : ' als Mitarbeiter') +
+          ((treffer as any).is_active ? '' : ' (archiviert — bitte wiederherstellen)') + '.',
+      }, 409);
+    }
+  }
 
   // ─── Doppelte Kontaktdaten VOR dem Anlegen abfangen ────────────────────
   // createUser sagt bei einer belegten Nummer nur „phone already registered".
@@ -184,13 +210,19 @@ Deno.serve(async (req) => {
   }
 
   // ─── Auth-User erstellen ───────────────────────────────────────────────
-  const initialPassword = generateSimplePassword();
+  const initialPassword = leasing
+    // Niemand kennt es, niemand braucht es: lang und zufällig.
+    ? Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => b.toString(16).padStart(2, '0')).join('')
+    : generateSimplePassword();
 
   const createParams: any = {
     password: initialPassword,
-    user_metadata: { vorname, nachname, admin_created: true },
+    user_metadata: { vorname, nachname, admin_created: true, ...(leasing ? { leasing: true } : {}) },
   };
-  if (telefonE164) {
+  if (leasing) {
+    createParams.email = `leasing-${crypto.randomUUID().slice(0, 12)}@willroider.invalid`;
+    createParams.email_confirm = true;
+  } else if (telefonE164) {
     createParams.phone = telefonE164;
     createParams.phone_confirm = true;
   }
@@ -238,6 +270,11 @@ Deno.serve(async (req) => {
   // handle_new_user-Trigger gesetzte Standard-Partie „Werkvorfertigung".
   if (body.partie_id) profileUpdate.partie_id = body.partie_id;
   if (emailInput) profileUpdate.email = emailInput;
+  if (leasing) {
+    profileUpdate.zeiterfassung_typ = 'leasing';
+    profileUpdate.leasing_firma = (body.leasing_firma ?? '').trim() || null;
+    profileUpdate.email = null; // Platzhalter nicht anzeigen
+  }
 
   const { error: profileErr } = await supabase
     .from('profiles')
@@ -260,7 +297,7 @@ Deno.serve(async (req) => {
     eintrittsdatum,
     beschaeftigungsgrad: body.beschaeftigungsgrad ?? 1.0,
     tagesnorm_stunden: body.tagesnorm_stunden ?? 8.0,
-    urlaub_jahresanspruch_tage: body.urlaub_jahresanspruch_tage ?? 25,
+    urlaub_jahresanspruch_tage: leasing ? 0 : (body.urlaub_jahresanspruch_tage ?? 25),
     arbeitszeitmodell,
   });
   if (kontenErr) return rollbackAndFail(`Konto-Settings: ${kontenErr.message}`);
@@ -409,7 +446,8 @@ Deno.serve(async (req) => {
     user_id: newUserId,
     telefon: telefonE164,
     email: emailInput || null,
-    initial_password: initialPassword,
+    leasing,
+    initial_password: leasing ? null : initialPassword,
     magic_link: magicLink,
     sms_status: smsStatus,
     sms_error: smsError,

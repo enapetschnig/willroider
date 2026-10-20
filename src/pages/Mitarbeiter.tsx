@@ -39,6 +39,7 @@ import {
 } from "@/lib/baustellenOrdner";
 import { NewMitarbeiterDialog, type CredentialsResult } from "@/components/admin/NewMitarbeiterDialog";
 import { findeDoppelkonto } from "@/lib/doppelkonto";
+import { LeasingPersonalTab } from "@/components/admin/LeasingPersonalTab";
 import { CredentialsResultDialog } from "@/components/admin/CredentialsResultDialog";
 import {
   useZulagenTypen,
@@ -141,7 +142,13 @@ export default function Mitarbeiter() {
   // Seite ("weißer Bildschirm").
   const subParam = params.get("sub") ?? params.get("tab"); // tab: Alt-Links
   const initialTab =
-    subParam === "partien" ? "partien" : subParam === "ordner" ? "ordner" : "mitarbeiter";
+    subParam === "partien"
+      ? "partien"
+      : subParam === "ordner"
+        ? "ordner"
+        : subParam === "leasing"
+          ? "leasing"
+          : "mitarbeiter";
   const [tab, setTab] = useState(initialTab);
 
   const onTabChange = (v: string) => {
@@ -179,7 +186,11 @@ export default function Mitarbeiter() {
   // filter() sofort und griff auf das noch nicht angelegte zeigeArchiv zu
   // („Cannot access … before initialization", Absturz 19.10. J. Maurer).
   const istNeueAnmeldung = (p: Profile) => !p.is_active && (p as any).je_freigeschaltet === false;
-  const listeProfiles = profiles.filter(
+  // Leasing Personal hat einen eigenen Reiter (Kundenwunsch 20.10.2026).
+  const istLeasing = (p: Profile) => (p as any).zeiterfassung_typ === "leasing";
+  const stammProfiles = profiles.filter((p) => !istLeasing(p));
+  const leasingProfiles = profiles.filter(istLeasing);
+  const listeProfiles = stammProfiles.filter(
     (p) => p.is_active !== zeigeArchiv && (!nurNeue || istNeueAnmeldung(p)),
   );
   /** Hinweis, wenn es die neue Anmeldung schon als aktiven Mitarbeiter gibt. */
@@ -332,7 +343,8 @@ export default function Mitarbeiter() {
     if (!d) return;
     const neueMail = (p.email ?? "").trim().toLowerCase();
     const platzhalter = !d.email || /@willroider\.invalid$/i.test(d.email);
-    const mailUebernehmen = platzhalter && !!neueMail;
+    // Leasing Personal bekommt nie einen Anmeldeweg.
+    const mailUebernehmen = platzhalter && !!neueMail && (d as any).zeiterfassung_typ !== "leasing";
     if (
       !window.confirm(
         `„${p.vorname} ${p.nachname}“ mit dem bestehenden Konto „${d.vorname} ${d.nachname}“ zusammenführen?\n\n` +
@@ -507,7 +519,11 @@ export default function Mitarbeiter() {
       zeiterfassung_typ:
         (fd.get("zeiterfassung_typ") as string) === "angestellter"
           ? "angestellter"
-          : "bauarbeiter",
+          : (fd.get("zeiterfassung_typ") as string) === "leasing"
+            ? "leasing"
+            : "bauarbeiter",
+      leasing_firma:
+        (fd.get("zeiterfassung_typ") as string) === "leasing" ? str("leasing_firma") : null,
       partie_id: (fd.get("partie_id") as string) || null,
       is_partieleiter: fd.get("is_partieleiter") === "on",
       ist_bauleiter: fd.get("ist_bauleiter") === "on",
@@ -756,7 +772,8 @@ export default function Mitarbeiter() {
 
       <Tabs value={tab} onValueChange={onTabChange}>
         <TabsList>
-          <TabsTrigger value="mitarbeiter">Mitarbeiter ({profiles.length})</TabsTrigger>
+          <TabsTrigger value="mitarbeiter">Mitarbeiter ({stammProfiles.length})</TabsTrigger>
+          <TabsTrigger value="leasing">Leasing Personal ({leasingProfiles.length})</TabsTrigger>
           <TabsTrigger value="partien">Partien ({partien.length})</TabsTrigger>
           <TabsTrigger value="ordner">Ordner-Sichtbarkeit</TabsTrigger>
         </TabsList>
@@ -772,7 +789,7 @@ export default function Mitarbeiter() {
                   setNurNeue(false);
                 }}
               >
-                Aktive ({profiles.filter((p) => p.is_active).length})
+                Aktive ({stammProfiles.filter((p) => p.is_active).length})
               </Button>
               <Button
                 variant={zeigeArchiv ? "default" : "outline"}
@@ -782,9 +799,9 @@ export default function Mitarbeiter() {
                   setNurNeue(false);
                 }}
               >
-                Archiv ({profiles.filter((p) => !p.is_active).length})
+                Archiv ({stammProfiles.filter((p) => !p.is_active).length})
               </Button>
-              {profiles.filter((p) => !p.is_active && p.je_freigeschaltet === false).length > 0 && (
+              {stammProfiles.filter((p) => !p.is_active && p.je_freigeschaltet === false).length > 0 && (
                 <span
                   role="button"
                   tabIndex={0}
@@ -797,7 +814,7 @@ export default function Mitarbeiter() {
                   }`}
                   title={nurNeue ? "Wieder alle zeigen" : "Nur die neuen Anmeldungen zeigen"}
                 >
-                  · {profiles.filter((p) => !p.is_active && p.je_freigeschaltet === false).length} neue
+                  · {stammProfiles.filter((p) => !p.is_active && p.je_freigeschaltet === false).length} neue
                   Anmeldung wartet
                 </span>
               )}
@@ -1082,6 +1099,18 @@ export default function Mitarbeiter() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="leasing">
+          <LeasingPersonalTab
+            personen={leasingProfiles}
+            partien={partien}
+            darfBearbeiten={darfMaBearbeiten}
+            onPartie={(id, partieId) => setPartie(id, partieId)}
+            onBearbeiten={(p) => openEdit(p)}
+            onAktivUmschalten={(p) => toggleActive(p)}
+            onNeu={() => load()}
+          />
         </TabsContent>
 
         <TabsContent value="partien">
@@ -1559,6 +1588,11 @@ export default function Mitarbeiter() {
                           titel: "Angestellter",
                           text: "Tätigkeitsbericht — Kostenstelle × Tag, Periode 21.–20.",
                         },
+                        {
+                          wert: "leasing",
+                          titel: "Leasing Personal",
+                          text: "Kein Zugang zur App — der Polier schreibt die Stunden, kein Stundenbericht",
+                        },
                       ].map((o) => (
                         <label
                           key={o.wert}
@@ -1581,6 +1615,16 @@ export default function Mitarbeiter() {
                           </span>
                         </label>
                       ))}
+                    </div>
+                    {/* Verleihfirma — nur für Leasing Personal gespeichert */}
+                    <div className="mt-2 space-y-1">
+                      <Label className="text-xs">Leasing-Firma (nur bei Leasing Personal, optional)</Label>
+                      <Input
+                        name="leasing_firma"
+                        defaultValue={(editing as any).leasing_firma ?? ""}
+                        placeholder="z. B. Trenkwalder"
+                        className="h-9"
+                      />
                     </div>
                   </div>
                 </div>

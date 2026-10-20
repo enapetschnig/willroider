@@ -1,5 +1,37 @@
 # Journal
 
+## 2026-10-20 · Leasing Personal (Kundenmail)
+
+- **Wunsch:** In „Mitarbeiter & Partien“ ein Reiter „Leasing Personal“. Die Leute sollen
+  einteilbar und Partien zuteilbar sein, der Polier schreibt ihre Stunden. Kein Zugang
+  zur App.
+- **Christophs Vorgaben:** Kein Stundenbericht. Prüfung in der Stundenauswertung,
+  Leasing-Firma optional.
+- **Datenbank** (`20261020100000_leasing_personal.sql`, eingespielt):
+  - `zeiterfassung_typ` erlaubt jetzt 'leasing'. Neue Spalte `profiles.leasing_firma`.
+  - `stunden_bericht_erzeugen` nimmt Leasing aus.
+  - `registrierung_pruefen` meldet bei Leasing „im Büro melden“.
+- **admin-create-employee** (`leasing: true`):
+  - Platzhalter-Adresse `leasing-…@willroider.invalid` und ein zufälliges 48-stelliges
+    Passwort.
+  - Keine Einladung, Telefon nur im Profil (nicht am Anmeldekonto).
+  - Rolle immer Mitarbeiter, kein Urlaubsanspruch, Doppelt-Schutz über den Namen.
+- **App:**
+  - Reiter „Leasing Personal (n)“ (`LeasingPersonalTab`): Liste nach Firma, Partie-Auswahl,
+    Bearbeiten, Archivieren nur mit `mitarbeiter.edit`, „Neues Leasing Personal“.
+  - Die Mitarbeiter-Liste zeigt kein Leasing mehr.
+  - Bearbeiten-Dialog: dritte Art „Leasing Personal“ plus Feld Leasing-Firma. Vorher wäre
+    beim Speichern alles außer „angestellter“ zu „bauarbeiter“ geworden.
+  - Aus Zugang senden, Urlaubs-Konten, ZA-Konten und Lohnzettel herausgenommen.
+  - Stundenauswertung: Filter „Personal: Eigenes / Leasing“ mit Summe der gearbeiteten
+    Stunden je Leasing-Firma. Leasing-Zeilen zeigen bei Soll und Differenz „—“.
+  - „Zusammenführen“ gibt Leasing nie eine Anmelde-E-Mail.
+- **Automatisch ohne Änderung:** Tagesplanung, Arbeitsplanung, Partien und Stunden durch
+  den Polier laufen über dieselben Profilfelder.
+- **Nicht getestet:** Das Anlegen über die Funktion selbst (braucht einen angemeldeten
+  Admin). DB-Teil geprüft: Check-Regel, Spalte und leere E-Mail per zurückgerolltem
+  Update.
+
 ## 2026-10-20 · Neue Ordnerstruktur für alle Bauleiter freigeschaltet
 
 - **Anlass:** Sebastian Egger (Mail): „Jetzt passt alles super. Ist das für die anderen

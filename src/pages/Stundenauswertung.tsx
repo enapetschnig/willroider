@@ -165,6 +165,9 @@ export default function Stundenauswertung() {
   /** Maschinen-/Halle-Baustellen — deren Stunden geben kein Taggeld. */
   const [maschinenIds, setMaschinenIds] = useState<Set<string>>(new Set());
   const [partieFilter, setPartieFilter] = useState<string>("");
+  // Leasing Personal (20.10.2026): kein Stundenbericht — das Büro prüft die
+  // Stunden hier, gefiltert und als Summe je Leasing-Firma.
+  const [artFilter, setArtFilter] = useState<"" | "stamm" | "leasing">("");
   const [ansicht, setAnsicht] = useState<
     "uebersicht" | "raster" | "baustellen"
   >("uebersicht");
@@ -205,6 +208,10 @@ export default function Stundenauswertung() {
   const memberIds = isAdmin
     ? members
         .filter((m) => !partieFilter || m.partie_id === partieFilter)
+        .filter((m) => {
+          const leasing = (m as any).zeiterfassung_typ === "leasing";
+          return !artFilter || (artFilter === "leasing" ? leasing : !leasing);
+        })
         .map((m) => m.id)
     : user
     ? [user.id]
@@ -602,6 +609,20 @@ export default function Stundenauswertung() {
                 </select>
               </div>
             )}
+            {isAdmin && members.some((m) => (m as any).zeiterfassung_typ === "leasing") && (
+              <div className="flex items-center gap-2">
+                <Label className="text-xs">Personal</Label>
+                <select
+                  value={artFilter}
+                  onChange={(e) => setArtFilter(e.target.value as "" | "stamm" | "leasing")}
+                  className="h-9 rounded-md border bg-background px-2 text-sm"
+                >
+                  <option value="">— alle —</option>
+                  <option value="stamm">Eigenes Personal</option>
+                  <option value="leasing">Leasing</option>
+                </select>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <Button size="sm" variant="outline" onClick={exportPdfAlle} disabled={byMa.length === 0}>
                 <FileText className="h-4 w-4 mr-1.5" /> Alle Stundenzettel (PDF)
@@ -638,6 +659,41 @@ export default function Stundenauswertung() {
           Baustellen
         </Button>
       </div>
+
+      {/* Leasing: gearbeitete Stunden je Leasing-Firma (zur Prüfung der Rechnung) */}
+      {artFilter === "leasing" && !isLoading && (() => {
+        const jeFirma = new Map<string, { stunden: number; personen: number }>();
+        for (const r of byMa) {
+          const firma = ((r.ma as any)?.leasing_firma as string | null) || "ohne Leasing-Firma";
+          const stunden = r.list
+            .filter((t) => t.tag.tag_status === "baustelle" || t.tag.tag_status === "firma")
+            .reduce((a, t) => a + Number(t.tag.netto_stunden ?? 0), 0);
+          const e = jeFirma.get(firma) ?? { stunden: 0, personen: 0 };
+          jeFirma.set(firma, { stunden: e.stunden + stunden, personen: e.personen + 1 });
+        }
+        const zeilen = [...jeFirma.entries()].sort((a, b) => a[0].localeCompare(b[0], "de"));
+        return (
+          <Card>
+            <CardContent className="p-3">
+              <div className="text-sm font-semibold mb-2">Leasing — gearbeitete Stunden je Firma</div>
+              {zeilen.length === 0 ? (
+                <div className="text-xs text-muted-foreground italic">Keine Leasing-Stunden im Zeitraum.</div>
+              ) : (
+                <div className="space-y-1">
+                  {zeilen.map(([firma, w]) => (
+                    <div key={firma} className="flex items-center justify-between text-sm">
+                      <span>
+                        {firma} <span className="text-xs text-muted-foreground">· {w.personen} Person{w.personen === 1 ? "" : "en"}</span>
+                      </span>
+                      <span className="tabular-nums font-semibold">{fmtH(w.stunden)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* MA-Übersicht */}
       {ansicht === "uebersicht" &&
@@ -686,24 +742,33 @@ export default function Stundenauswertung() {
                         </TableCell>
                         <TableCell className="font-medium">
                           {r.ma!.nachname} {r.ma!.vorname}
+                          {(r.ma as any)?.zeiterfassung_typ === "leasing" && (
+                            <Badge variant="outline" className="ml-1.5 text-[9px]">Leasing</Badge>
+                          )}
                           <div className="text-[10px] text-muted-foreground">
                             {r.list.length} Tag{r.list.length === 1 ? "" : "e"}
+                            {(r.ma as any)?.leasing_firma ? ` · ${(r.ma as any).leasing_firma}` : ""}
                           </div>
                         </TableCell>
+                        {/* Leasing hat kein Zeitkonto bei Willroider → kein Soll, keine Differenz */}
                         <TableCell className="text-right tabular-nums">
-                          {fmtH(r.soll)}
+                          {(r.ma as any)?.zeiterfassung_typ === "leasing" ? "—" : fmtH(r.soll)}
                         </TableCell>
                         <TableCell className="text-right tabular-nums font-semibold">
                           {fmtH(r.ist)}
                         </TableCell>
-                        <TableCell
-                          className={`text-right tabular-nums font-bold ${
-                            r.diff > 0 ? "text-emerald-700" : r.diff < 0 ? "text-amber-700" : ""
-                          }`}
-                        >
-                          {r.diff > 0 ? "+" : ""}
-                          {fmtHNum(r.diff)} h
-                        </TableCell>
+                        {(r.ma as any)?.zeiterfassung_typ === "leasing" ? (
+                          <TableCell className="text-right text-muted-foreground">—</TableCell>
+                        ) : (
+                          <TableCell
+                            className={`text-right tabular-nums font-bold ${
+                              r.diff > 0 ? "text-emerald-700" : r.diff < 0 ? "text-amber-700" : ""
+                            }`}
+                          >
+                            {r.diff > 0 ? "+" : ""}
+                            {fmtHNum(r.diff)} h
+                          </TableCell>
+                        )}
                         <TableCell className="text-right">
                           <Button
                             size="sm"

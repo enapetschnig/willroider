@@ -55,6 +55,8 @@ export function AdminZugangVerschicken() {
       .from("profiles")
       .select("id, vorname, nachname, telefon, email, angelegt_manuell")
       .eq("is_active", true)
+      // Leasing Personal: kein App-Zugang, nicht bei Willroider angestellt (20.10.2026).
+      .or("zeiterfassung_typ.is.null,zeiterfassung_typ.neq.leasing")
       .order("nachname");
     if (profErr) {
       // Ohne diesen Check zeigte ein Query-Fehler "Keine Mitarbeiter

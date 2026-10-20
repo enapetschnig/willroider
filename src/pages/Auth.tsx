@@ -246,7 +246,9 @@ export default function Auth() {
       toast({
         variant: "destructive",
         title: `${vorname}, du bist schon angelegt`,
-        description: perTelefon
+        description: pruef.anmeldung === "keine"
+          ? "Bitte nicht neu registrieren — für dich ist kein Zugang zur App vorgesehen. Bitte im Büro melden."
+          : perTelefon
           ? "Bitte nicht neu registrieren. Melde dich mit deiner Handynummer an — du bekommst einen Code per SMS. Klappt das nicht, melde dich im Büro."
           : "Bitte nicht neu registrieren. Melde dich mit deiner E-Mail-Adresse an oder setze über „Passwort vergessen?“ ein neues Passwort. Klappt das nicht, melde dich im Büro.",
         duration: 20000,
