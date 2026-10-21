@@ -90,6 +90,30 @@ export default function StundenBerichteListe() {
   const { data: offeneBerichte = [] } = useStundenBerichteList({
     status: ["offen", "unterschrieben", "bestaetigt"],
   });
+  // Filter für die offenen Berichte (Wunsch J. Maurer, 21.10.2026: „hier
+  // sollte eine Monatsauswahl möglich sein" — 129 Einträge in einer Liste).
+  const [offenPeriode, setOffenPeriode] = useState<string>("");
+  const [offenWer, setOffenWer] = useState<"" | "buero" | "ma">("");
+  const [offenAlle, setOffenAlle] = useState(false);
+  const offenPerioden = useMemo(() => {
+    const m = new Map<string, { jahr: number; monat: number; teil: number; n: number }>();
+    for (const b of offeneBerichte) {
+      const k = `${b.jahr}-${String(b.monat).padStart(2, "0")}-${b.teil}`;
+      const e = m.get(k) ?? { jahr: b.jahr, monat: b.monat, teil: b.teil, n: 0 };
+      e.n++;
+      m.set(k, e);
+    }
+    return [...m.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  }, [offeneBerichte]);
+  const offenGefiltert = useMemo(
+    () =>
+      offeneBerichte.filter(
+        (b) =>
+          (!offenPeriode || `${b.jahr}-${String(b.monat).padStart(2, "0")}-${b.teil}` === offenPeriode) &&
+          (!offenWer || (offenWer === "ma" ? b.status === "offen" : b.status !== "offen")),
+      ),
+    [offeneBerichte, offenPeriode, offenWer],
+  );
   const aktionen = useStundenBerichtAktionen();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [versendenOpen, setVersendenOpen] = useState(false);
@@ -174,54 +198,6 @@ export default function StundenBerichteListe() {
     <div className="space-y-4 max-w-3xl mx-auto">
       <PageHeader title="Baustellenstundenberichte" />
 
-      {/* Permanenter „Noch zu bearbeiten"-Block — zeigt monatsübergreifend
-          alle Berichte im Status unterschrieben/bestaetigt. Damit bleiben
-          alte Berichte nicht in Vormonaten unsichtbar. */}
-      {offeneBerichte.length > 0 && (
-        <Card className="border-amber-300 bg-amber-50/60">
-          <CardContent className="p-3 space-y-2">
-            <div className="flex items-center gap-1.5 text-sm font-semibold text-amber-900">
-              <AlertCircle className="h-4 w-4" />
-              {offeneBerichte.length} Bericht
-              {offeneBerichte.length === 1 ? "" : "e"} warten auf Bearbeitung
-            </div>
-            <div className="divide-y divide-amber-200/70">
-              {offeneBerichte.map((b) => {
-                const badge = STATUS_BADGE[b.status];
-                return (
-                  <button
-                    key={b.id}
-                    type="button"
-                    onClick={() => navigate(`/stundenbericht/${b.id}`)}
-                    className="w-full flex items-center gap-2 py-1.5 text-left hover:bg-amber-100/60 rounded px-1"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">
-                        {b.mitarbeiter
-                          ? `${b.mitarbeiter.nachname ?? ""} ${b.mitarbeiter.vorname ?? ""}`.trim()
-                          : "—"}
-                        <span className="ml-2 text-xs text-muted-foreground font-normal">
-                          {periodeLabelKurz(b.jahr, b.monat, b.teil)}
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-muted-foreground">
-                        {b.unterschrieben_am
-                          ? `Unterschrieben am ${fmtTag(b.unterschrieben_am)}`
-                          : "Wartet auf Mitarbeiter-Unterschrift"}
-                      </div>
-                    </div>
-                    <Badge variant="outline" className={`${badge.cls} text-[10px]`}>
-                      {badge.label}
-                    </Badge>
-                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                  </button>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Periodenauswahl + Erzeugen */}
       <Card>
         <CardContent className="p-4 space-y-3">
@@ -277,6 +253,101 @@ export default function StundenBerichteListe() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Permanenter „Noch zu bearbeiten"-Block — zeigt monatsübergreifend
+          alle Berichte im Status unterschrieben/bestaetigt. Damit bleiben
+          alte Berichte nicht in Vormonaten unsichtbar. */}
+      {offeneBerichte.length > 0 && (
+        <Card className="border-amber-300 bg-amber-50/60">
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-center gap-1.5 text-sm font-semibold text-amber-900">
+              <AlertCircle className="h-4 w-4" />
+              {offeneBerichte.length} Bericht
+              {offeneBerichte.length === 1 ? "" : "e"} warten auf Bearbeitung
+            </div>
+            {/* Monat/Teil und Stand wählen */}
+            <div className="flex flex-wrap gap-1.5">
+              <Button
+                size="sm"
+                variant={!offenPeriode ? "default" : "outline"}
+                className="h-7 px-2 text-xs"
+                onClick={() => setOffenPeriode("")}
+              >
+                Alle Monate ({offeneBerichte.length})
+              </Button>
+              {offenPerioden.map(([k, p]) => (
+                <Button
+                  key={k}
+                  size="sm"
+                  variant={offenPeriode === k ? "default" : "outline"}
+                  className="h-7 px-2 text-xs"
+                  onClick={() => setOffenPeriode(k)}
+                >
+                  {periodeLabelKurz(p.jahr, p.monat, p.teil)} ({p.n})
+                </Button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {([
+                ["", "Alle"],
+                ["buero", "Wartet auf Büro"],
+                ["ma", "Mitarbeiter unterschreibt noch"],
+              ] as const).map(([w, label]) => (
+                <Button
+                  key={w}
+                  size="sm"
+                  variant={offenWer === w ? "secondary" : "ghost"}
+                  className="h-7 px-2 text-xs"
+                  onClick={() => setOffenWer(w)}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+            <div className="divide-y divide-amber-200/70">
+              {offenGefiltert.length === 0 && (
+                <div className="text-xs text-muted-foreground italic py-2">Keine Berichte in dieser Auswahl.</div>
+              )}
+              {(offenAlle ? offenGefiltert : offenGefiltert.slice(0, 15)).map((b) => {
+                const badge = STATUS_BADGE[b.status];
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => navigate(`/stundenbericht/${b.id}`)}
+                    className="w-full flex items-center gap-2 py-1.5 text-left hover:bg-amber-100/60 rounded px-1"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">
+                        {b.mitarbeiter
+                          ? `${b.mitarbeiter.nachname ?? ""} ${b.mitarbeiter.vorname ?? ""}`.trim()
+                          : "—"}
+                        <span className="ml-2 text-xs text-muted-foreground font-normal">
+                          {periodeLabelKurz(b.jahr, b.monat, b.teil)}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {b.unterschrieben_am
+                          ? `Unterschrieben am ${fmtTag(b.unterschrieben_am)}`
+                          : "Wartet auf Mitarbeiter-Unterschrift"}
+                      </div>
+                    </div>
+                    <Badge variant="outline" className={`${badge.cls} text-[10px]`}>
+                      {badge.label}
+                    </Badge>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                  </button>
+                );
+              })}
+            </div>
+            {!offenAlle && offenGefiltert.length > 15 && (
+              <Button variant="ghost" size="sm" className="w-full h-8 text-xs" onClick={() => setOffenAlle(true)}>
+                Alle {offenGefiltert.length} anzeigen
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Bulk-Aktion */}
       {selected.size > 0 && (

@@ -25,6 +25,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { edgeFunctionErrorMessage } from "@/lib/edgeError";
 import { archivDownloadUrl } from "@/lib/berichtArchiv";
+import { periodeFuer } from "@/lib/taetigkeitsbericht";
+import { makeFahrtenbuchPdf } from "@/lib/taetigkeitsberichtPdf";
+import { useSearchParams } from "react-router-dom";
 import { Archive, Cloud, CloudOff, Download, Loader2, Mail, CheckCircle2, AlertTriangle } from "lucide-react";
 
 type Zeile = {
@@ -55,9 +58,14 @@ const fmt = (iso: string | null) =>
 export default function BerichteArchiv() {
   const { toast } = useToast();
   const heute = new Date();
-  const [art, setArt] = useState<"taetigkeitsbericht" | "stundenbericht">("taetigkeitsbericht");
-  const [jahr, setJahr] = useState(heute.getFullYear());
-  const [monat, setMonat] = useState(heute.getMonth() + 1);
+  // Aus „Tätigkeitsberichte freigeben → Gesammelt versenden" kommt man mit
+  // ?art=…&jahr=…&monat=… direkt in die richtige Periode (J. Maurer, 21.10.2026).
+  const [params] = useSearchParams();
+  const [art, setArt] = useState<"taetigkeitsbericht" | "stundenbericht">(
+    params.get("art") === "stundenbericht" ? "stundenbericht" : "taetigkeitsbericht",
+  );
+  const [jahr, setJahr] = useState(Number(params.get("jahr")) || heute.getFullYear());
+  const [monat, setMonat] = useState(Number(params.get("monat")) || heute.getMonth() + 1);
   const [teil, setTeil] = useState<0 | 1 | 2>(0);
   const [zeilen, setZeilen] = useState<Zeile[]>([]);
   const [laden, setLaden] = useState(true);
@@ -72,6 +80,10 @@ export default function BerichteArchiv() {
   const [betreff, setBetreff] = useState("");
   const [text, setText] = useState("");
   const [sende, setSende] = useState(false);
+  // Mitschicken (Wunsch J. Maurer, 21.10.2026): Kilometerberichte
+  // (Fahrtenbuch der Angestellten) und Krankmeldungen der Periode.
+  const [mitFahrtenbuch, setMitFahrtenbuch] = useState(true);
+  const [mitKrank, setMitKrank] = useState(true);
 
   const load = useCallback(async () => {
     setLaden(true);
@@ -168,17 +180,68 @@ export default function BerichteArchiv() {
     setMailOffen(true);
   };
 
+  /** Fahrtenbuch-PDF je gewähltem Tätigkeitsbericht — wie beim Drucken
+   *  im Tätigkeitsbericht, aus denselben Daten der Periode (21.–20.). */
+  const fahrtenbuchAnhaenge = async (): Promise<{ filename: string; content: string }[]> => {
+    const aus: { filename: string; content: string }[] = [];
+    for (const z of zeilen.filter((x) => ausgewaehlt.has(x.id) && x.art === "taetigkeitsbericht")) {
+      const periode = periodeFuer(z.jahr, z.monat);
+      const [{ data: fahrten }, { data: prof }] = await Promise.all([
+        (supabase as any)
+          .from("fahrtenbuch_eintraege")
+          .select("*")
+          .eq("mitarbeiter_id", z.mitarbeiter_id)
+          .gte("datum", periode.von)
+          .lte("datum", periode.bis)
+          .order("datum")
+          .order("abfahrt", { ascending: true, nullsFirst: false })
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("profiles")
+          .select("vorname, nachname, fahrtenbuch_kennzeichen")
+          .eq("id", z.mitarbeiter_id)
+          .maybeSingle(),
+      ]);
+      if (!fahrten || (fahrten as any[]).length === 0) continue;
+      const p = prof as { vorname?: string; nachname?: string; fahrtenbuch_kennzeichen?: string | null } | null;
+      const name = `${p?.vorname ?? ""} ${p?.nachname ?? ""}`.trim();
+      const doc = makeFahrtenbuchPdf({
+        name,
+        kennzeichen: p?.fahrtenbuch_kennzeichen ?? "",
+        periode,
+        fahrten: fahrten as any,
+      });
+      aus.push({
+        filename: `Fahrtenbuch ${z.jahr}-${String(z.monat).padStart(2, "0")} ${name}.pdf`,
+        content: (doc.output("datauristring") as string).split(",")[1],
+      });
+    }
+    return aus;
+  };
+
   const senden = async () => {
     setSende(true);
     try {
+      const extra = mitFahrtenbuch ? await fahrtenbuchAnhaenge() : [];
       const { data, error } = await supabase.functions.invoke("archiv-versenden", {
-        body: { archiv_ids: Array.from(ausgewaehlt), empfaenger: empfaenger.trim(), betreff, text },
+        body: {
+          archiv_ids: Array.from(ausgewaehlt),
+          empfaenger: empfaenger.trim(),
+          betreff,
+          text,
+          extra_anhaenge: extra,
+          mit_krankmeldungen: mitKrank,
+        },
       });
       if (error) throw new Error(await edgeFunctionErrorMessage(error));
       if (!data?.ok) throw new Error(data?.fehler ?? "Versand fehlgeschlagen");
       toast({
         title: `${data.anzahl} Bericht${data.anzahl === 1 ? "" : "e"} versendet`,
-        description: `an ${data.empfaenger}${data.als_links ? " (als Download-Links, weil zu groß für den Anhang)" : ""}`,
+        description:
+          `an ${data.empfaenger}` +
+          (data.fahrtenbuecher ? ` · ${data.fahrtenbuecher} Fahrtenbuch` : "") +
+          (data.krankmeldungen ? ` · ${data.krankmeldungen} Krankmeldung${data.krankmeldungen === 1 ? "" : "en"}` : "") +
+          (data.als_links ? " (als Download-Links, weil zu groß für den Anhang)" : ""),
       });
       setMailOffen(false);
       void load();
@@ -375,6 +438,19 @@ export default function BerichteArchiv() {
             <div>
               <Label className="text-xs">Text</Label>
               <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} />
+            </div>
+            <div className="space-y-2 rounded-lg border p-2.5">
+              <div className="text-xs font-medium">Mitschicken</div>
+              {zeilen.some((z) => ausgewaehlt.has(z.id) && z.art === "taetigkeitsbericht") && (
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox checked={mitFahrtenbuch} onCheckedChange={(v) => setMitFahrtenbuch(v === true)} />
+                  Kilometerberichte (Fahrtenbuch der Periode)
+                </label>
+              )}
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox checked={mitKrank} onCheckedChange={(v) => setMitKrank(v === true)} />
+                Krankmeldungen der Periode
+              </label>
             </div>
           </div>
           <DialogFooter className="flex-row gap-2">

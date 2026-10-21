@@ -325,10 +325,17 @@ export function FahrtenbuchTab({
   async function neu() {
     setBusy("neu");
     try {
-      // Vorbelegung: heute, wenn es in der Periode liegt — sonst Periodenstart.
+      // Vorbelegung: heute, wenn es in der Periode liegt. Liegt heute schon
+      // NACH der Periode (Nachtragen am 21.), das Periodenende — sonst landete
+      // die neue Zeile ganz oben statt unten (Wunsch E. Egger, 21.10.2026).
       // Lokales Datum, nicht UTC — sonst ist es nach 22 Uhr schon „morgen".
       const heute = localIso();
-      const datum = heute >= periode.von && heute <= periode.bis ? heute : periode.von;
+      const datum =
+        heute >= periode.von && heute <= periode.bis
+          ? heute
+          : heute > periode.bis
+            ? periode.bis
+            : periode.von;
       // Abfahrts-Stand mit dem letzten bekannten Ankunfts-Stand vorbelegen.
       const letzterStand = [...fahrten].reverse().find((f) => f.km_ende != null)?.km_ende ?? null;
       // Kennzeichen und Abfahrtsort aus der vorigen Fahrt — ist die Periode

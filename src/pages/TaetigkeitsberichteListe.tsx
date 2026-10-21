@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronLeft, ChevronRight, CheckCircle2, Clock, Eye, Loader2, LockOpen, PenLine, AlertCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight, CheckCircle2, Clock, Eye, Loader2, LockOpen, PenLine, AlertCircle, Mail } from "lucide-react";
 import { localIso } from "@/lib/dateFmt";
 import { freigabeAb, freigabeFaellig, periodeVonDatum, periodeVerschieben, periodeTitel, type Periode } from "@/lib/taetigkeitsbericht";
 
@@ -153,6 +153,18 @@ export default function TaetigkeitsberichteListe() {
             </span>
             <Button variant="outline" size="sm" onClick={() => setPeriode((p) => periodeVerschieben(p, 1))}>
               <ChevronRight className="h-4 w-4" />
+            </Button>
+            {/* Gesammelt als PDF versenden — das macht das Berichte-Archiv
+                (Wunsch J. Maurer, 21.10.2026: dort war es schwer zu finden). */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                navigate(`/berichte-archiv?art=taetigkeitsbericht&jahr=${periode.jahr}&monat=${periode.monat}`)
+              }
+            >
+              <Mail className="h-4 w-4 mr-1.5" />
+              Gesammelt versenden
             </Button>
           </>
         }

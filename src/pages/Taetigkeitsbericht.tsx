@@ -167,7 +167,9 @@ export default function Taetigkeitsbericht() {
       .gte("datum", periode.von)
       .lte("datum", periode.bis)
       .order("datum")
-      .order("abfahrt", { ascending: true, nullsFirst: true })
+      // Ohne Uhrzeit NACH den Fahrten mit Uhrzeit — eine neue Fahrt steht
+      // dann unten (Wunsch E. Egger, 21.10.2026).
+      .order("abfahrt", { ascending: true, nullsFirst: false })
       // Gleicher Tag ohne Uhrzeit: in Eingabe-Reihenfolge — die „vorige
       // Fahrt" (Kennzeichen/Abfahrtsort vorbelegen) ist dann die unterste.
       .order("created_at", { ascending: true });

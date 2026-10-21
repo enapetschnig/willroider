@@ -1,5 +1,29 @@
 # Journal
 
+## 2026-10-21 · Vier Wünsche: Fahrtenbuch, Stundenberichte, Archiv-Versand
+
+- **E. Egger, „neue Fahrt landet oben“:** Am 21. (nach der Periode) bekam eine neue Fahrt
+  den Periodenstart (21.) als Datum. Jetzt das Periodenende. Außerdem stehen Fahrten ohne
+  Uhrzeit innerhalb eines Tages nach denen mit Uhrzeit (`nullsFirst: false`), also unten.
+- **J. Maurer, Stundenberichte „Monatsauswahl“:** Die Auswahl gab es, sie stand aber unter
+  129 offenen Berichten. Monat/Teil steht jetzt oben. Die offenen Berichte lassen sich
+  nach Monat/Teil (Knöpfe mit Anzahl) und „Wartet auf Büro / Mitarbeiter unterschreibt
+  noch“ filtern und sind auf 15 Zeilen eingeklappt.
+- **J. Maurer, Tätigkeitsberichte „gesammelt per PDF senden“:** Das Archiv kann das schon
+  (er hat es selbst bemerkt). Auf „Tätigkeitsberichte freigeben“ gibt es jetzt den Knopf
+  „Gesammelt versenden“. Er öffnet das Berichte-Archiv mit derselben Periode, das Archiv
+  liest dafür `?art&jahr&monat`.
+- **J. Maurer, Archiv-Versand „Kilometerberichte und Krankmeldungen mitschicken“:**
+  - Im Versenden-Dialog „Mitschicken“ mit „Kilometerberichte (Fahrtenbuch)“ und
+    „Krankmeldungen“, beide standardmäßig an.
+  - Fahrtenbuch-PDF je gewähltem Tätigkeitsbericht im Browser (`makeFahrtenbuchPdf`,
+    wie beim Drucken), als `extra_anhaenge` übergeben.
+  - `archiv-versenden` hängt die Krankmeldungen mit Datei (`ma_dokumente`) an, die in die
+    Periode fallen: Tätigkeitsbericht 21.–20., Stundenbericht Teil I/II. Jede nur einmal.
+    Bei Übergröße als Link.
+  - Per SQL nachgestellt: Sebastian Egger Sept–Okt ergibt seine Krankmeldung
+    30.09.–02.10.
+
 ## 2026-10-20 · Leasing Personal (Kundenmail)
 
 - **Wunsch:** In „Mitarbeiter & Partien“ ein Reiter „Leasing Personal“. Die Leute sollen
