@@ -16,13 +16,17 @@ import type { Database } from "@/integrations/supabase/types";
 import { localIso } from "@/lib/dateFmt";
 import { neueOrdnerstrukturFuer, sharePointNachAnlegen } from "@/lib/sharepoint";
 import { makeBaustellenanlagePdf } from "@/lib/baustellenanlagePdf";
+import { orteZurPlz } from "@/lib/plzOrt";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 
+/** Teams-Kanal „Leistungsstand" (Wunsch J. Maurer, 21.10.2026). */
+const LEISTUNGSSTAND = "582a7247.willroider.at@emea.teams.ms";
 /** Feste Empfänger der Baustellenmeldung — im Formular abwählbar/ergänzbar. */
-const FESTE_EMPFAENGER = ["schneider@willroider.at", "maurer@willroider.at"];
-const MAURER = "maurer@willroider.at";
+const FESTE_EMPFAENGER = [LEISTUNGSSTAND, "schneider@willroider.at", "maurer@willroider.at"];
+/** Anzeigenamen statt kryptischer Adressen. */
+const EMPFAENGER_NAME: Record<string, string> = { [LEISTUNGSSTAND]: "Leistungsstand (Teams)" };
 
 const MAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -146,6 +150,89 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
   // Bei der Übernahme bekommt die Ausführung eine NEUE Kostenstelle.
   const [kostenstelle, setKostenstelle] = useState(uebernahme ? "" : (initial?.kostenstelle ?? ""));
 
+  // PLZ → Ort (Wunsch J. Maurer, 21.10.2026): Vorschläge zur PLZ, und ist
+  // der Ort noch leer, gleich den ersten eintragen.
+  const [orteBauherr, setOrteBauherr] = useState<string[]>([]);
+  const [orteBaustelle, setOrteBaustelle] = useState<string[]>([]);
+  // Zuletzt automatisch eingetragener Ort — der darf bei neuer PLZ ersetzt
+  // werden, ein von Hand getippter nicht.
+  const autoOrt = useRef({ bauherr: "", baustelle: "" });
+  useEffect(() => {
+    let aktiv = true;
+    void orteZurPlz(bauherrPlz).then((o) => {
+      if (!aktiv) return;
+      setOrteBauherr(o);
+      if (!o[0]) return;
+      setBauherrOrt((cur) => {
+        if (cur.trim() && cur !== autoOrt.current.bauherr) return cur;
+        autoOrt.current.bauherr = o[0];
+        return o[0];
+      });
+    });
+    return () => {
+      aktiv = false;
+    };
+  }, [bauherrPlz]);
+  useEffect(() => {
+    let aktiv = true;
+    void orteZurPlz(plz).then((o) => {
+      if (!aktiv) return;
+      setOrteBaustelle(o);
+      if (!o[0]) return;
+      setOrt((cur) => {
+        if (cur.trim() && cur !== autoOrt.current.baustelle) return cur;
+        autoOrt.current.baustelle = o[0];
+        return o[0];
+      });
+    });
+    return () => {
+      aktiv = false;
+    };
+  }, [plz]);
+
+  // „Baustellenanschrift wie Wohnanschrift Bauherr" — solange angehakt,
+  // laufen die Felder mit.
+  const [gleicheAdresse, setGleicheAdresse] = useState<boolean>(
+    !!initial?.baustellen_adresse &&
+      initial.baustellen_adresse === initial?.bauherr_adresse &&
+      (initial?.plz ?? "") === ((initial as any)?.bauherr_plz ?? "") &&
+      (initial?.ort ?? "") === ((initial as any)?.bauherr_ort ?? ""),
+  );
+  useEffect(() => {
+    if (!gleicheAdresse) return;
+    setAdresse(bauherrAdresse);
+    setPlz(bauherrPlz);
+    setOrt(bauherrOrt);
+  }, [gleicheAdresse, bauherrAdresse, bauherrPlz, bauherrOrt]);
+
+  // Nächste freie EIGENE Kostenstelle (1404xxx ohne Sammel-/Planungs-/
+  // interne Nummern) als Vorschlag — Wunsch J. Maurer, 21.10.2026.
+  const [naechsteEigeneKst, setNaechsteEigeneKst] = useState<string | null>(null);
+  useEffect(() => {
+    if (!istNeu || art !== "ausfuehrung") return;
+    let aktiv = true;
+    void supabase
+      .from("baustellen")
+      .select("kostenstelle")
+      .like("kostenstelle", "1404%")
+      .then(({ data }) => {
+        if (!aktiv) return;
+        let max = 0;
+        for (const r of (data as { kostenstelle: string | null }[]) ?? []) {
+          const k = (r.kostenstelle ?? "").trim();
+          // Laufender Bereich 1404000–1404799; 14048xx/14049xx sind intern
+          // (Planung 1404895, Zimmerei Allgemein 1404899), 14040x0 Sammel.
+          if (!/^1404[0-7]\d\d$/.test(k) || SAMMEL_KST.includes(k)) continue;
+          max = Math.max(max, Number(k));
+        }
+        setNaechsteEigeneKst(max ? String(max + 1) : null);
+      });
+    return () => {
+      aktiv = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [art]);
+
   /** Nächste freie Nummer für eine Sammel-Kostenstelle vergeben.
    *  Format: <Basis>-<JJ><NN>, z.B. 1404030-2603 (Jahr 26, laufende Nr. 03). */
   const vergebeNaechsteKst = async (basis: string) => {
@@ -179,16 +266,17 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** Wer die Meldung standardmäßig bekommt (J. Maurer 23.09.2026):
-   *  Planung → niemand, Sammel-Kostenstellen 1404020–1404070 → nur Maurer,
-   *  sonst Schneider und Maurer. Abwählen/Zuschalten von Hand bleibt möglich;
-   *  erst wenn die Regel wechselt (Art oder Kostenstelle), wird neu vorbelegt. */
-  const meldungsRegel: "keine" | "nur_maurer" | "beide" =
-    art === "planung"
-      ? "keine"
-      : SAMMEL_KST.some((basis) => kostenstelle.trim().startsWith(basis))
-        ? "nur_maurer"
-        : "beide";
+  /** Wer die Meldung standardmäßig bekommt (J. Maurer 21.10.2026):
+   *  Planung (1404895) und Sammel-Kostenstellen 1404020–1404070 → nur der
+   *  Teams-Kanal „Leistungsstand", sonst Leistungsstand, Schneider und Maurer.
+   *  Schneider/Maurer stehen immer zum Anhaken da; erst wenn die Regel
+   *  wechselt (Art oder Kostenstelle), wird neu vorbelegt. */
+  const meldungsRegel: "nur_teams" | "alle" =
+    art === "planung" ||
+    kostenstelle.trim().startsWith(PLANUNG_KST) ||
+    SAMMEL_KST.some((basis) => kostenstelle.trim().startsWith(basis))
+      ? "nur_teams"
+      : "alle";
   const letzteRegel = useRef<string | null>(null);
   useEffect(() => {
     if (letzteRegel.current === meldungsRegel) return;
@@ -196,7 +284,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
     setEmpfaengerListe((l) =>
       l.map((e) =>
         FESTE_EMPFAENGER.includes(e.mail)
-          ? { ...e, aktiv: meldungsRegel === "beide" || (meldungsRegel === "nur_maurer" && e.mail === MAURER) }
+          ? { ...e, aktiv: meldungsRegel === "alle" || e.mail === LEISTUNGSSTAND }
           : e,
       ),
     );
@@ -633,11 +721,16 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
           </Field>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Field label="PLZ">
-              <Input value={bauherrPlz} onChange={(e) => setBauherrPlz(e.target.value)} />
+              <Input inputMode="numeric" value={bauherrPlz} onChange={(e) => setBauherrPlz(e.target.value)} />
             </Field>
             <div className="sm:col-span-2">
               <Field label="Ort">
-                <Input value={bauherrOrt} onChange={(e) => setBauherrOrt(e.target.value)} />
+                <Input list="orte-bauherr" value={bauherrOrt} onChange={(e) => setBauherrOrt(e.target.value)} />
+                <datalist id="orte-bauherr">
+                  {orteBauherr.map((o) => (
+                    <option key={o} value={o} />
+                  ))}
+                </datalist>
               </Field>
             </div>
           </div>
@@ -648,20 +741,35 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Baustellenanschrift{stern}
           </div>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={gleicheAdresse}
+              onChange={(e) => setGleicheAdresse(e.target.checked)}
+            />
+            Gleich wie Wohnanschrift Bauherr
+          </label>
           <Field label="Straße, Hausnummer">
             <Input
               value={adresse}
               onChange={(e) => setAdresse(e.target.value)}
               placeholder="Straße, Hausnummer"
+              disabled={gleicheAdresse}
             />
           </Field>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Field label="PLZ">
-              <Input value={plz} onChange={(e) => setPlz(e.target.value)} />
+              <Input inputMode="numeric" value={plz} onChange={(e) => setPlz(e.target.value)} disabled={gleicheAdresse} />
             </Field>
             <div className="sm:col-span-2">
               <Field label="Ort">
-                <Input value={ort} onChange={(e) => setOrt(e.target.value)} />
+                <Input list="orte-baustelle" value={ort} onChange={(e) => setOrt(e.target.value)} disabled={gleicheAdresse} />
+                <datalist id="orte-baustelle">
+                  {orteBaustelle.map((o) => (
+                    <option key={o} value={o} />
+                  ))}
+                </datalist>
               </Field>
             </div>
           </div>
@@ -726,6 +834,16 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
           {/* Sammel-Kostenstellen: Knopf vergibt automatisch die nächste
               freie Nummer im Format <Basis>-<JJ><NN> (z.B. 1404030-2603). */}
           <div className="flex flex-wrap gap-1.5 mt-1.5">
+            {art === "ausfuehrung" && istNeu && naechsteEigeneKst && (
+              <button
+                type="button"
+                onClick={() => setKostenstelle(naechsteEigeneKst)}
+                className="text-[11px] px-2 py-1 rounded border border-primary bg-primary/10 text-primary hover:bg-primary/20 font-mono"
+                title="Nächste freie eigene Kostenstelle übernehmen"
+              >
+                Nächste eigene: {naechsteEigeneKst}
+              </button>
+            )}
             {(art === "planung" ? [PLANUNG_KST] : SAMMEL_KST).map((basis) => (
               <button
                 key={basis}
@@ -807,11 +925,10 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
             <Mail className="h-4 w-4 text-primary" />
             Baustellenmeldung per Mail senden an
           </div>
-          {meldungsRegel !== "beide" && (
+          {meldungsRegel === "nur_teams" && (
             <div className="text-[11px] text-muted-foreground">
-              {meldungsRegel === "keine"
-                ? "Bei einer Planung geht keine Meldung raus — bei Bedarf eine Adresse antippen."
-                : "Sammel-Kostenstelle: die Meldung geht nur an Johannes Maurer."}
+              {art === "planung" ? "Planung" : "Sammel-Kostenstelle"}: die Meldung geht nur an den
+              Teams-Kanal „Leistungsstand“ — Schneider oder Maurer bei Bedarf antippen.
             </div>
           )}
           <div className="flex flex-wrap gap-1.5">
@@ -835,7 +952,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
                     }
                     title={e.aktiv ? "Nicht senden an diese Adresse" : "Wieder aktivieren"}
                   >
-                    {e.mail}
+                    <span title={e.mail}>{EMPFAENGER_NAME[e.mail] ?? e.mail}</span>
                   </button>
                   {!fest && (
                     <button

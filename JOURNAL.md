@@ -1,5 +1,27 @@
 # Journal
 
+## 2026-10-21 · Baustellenmeldung (Teams, PLZ, gleiche Adresse, Kostenstelle) und Partie im Bericht
+
+- **J. Maurer, Empfänger „Leistungsstand“:** Die Teams-Adresse
+  `582a7247.willroider.at@emea.teams.ms` ist ein fester Empfänger mit dem Namen
+  „Leistungsstand (Teams)“. Bei Planung (1404895) und den Sammel-Kostenstellen
+  1404020–1404070 ist nur Teams angehakt, sonst Teams, Schneider und Maurer. Schneider und
+  Maurer bleiben immer zum Anhaken da. Vorher bekam die Planung gar nichts und die
+  Sammel-Kostenstellen nur Maurer.
+- **J. Maurer, Baustellenmeldung:**
+  - Ort aus der PLZ (`lib/plzOrt.ts`): zuerst Orte, die in der App zu dieser PLZ schon
+    stehen (die häufigsten zuerst), dann zippopotam.us. Ist das Feld leer, wird der erste
+    Ort eingetragen, die anderen stehen als Vorschlag im Feld. Ein automatisch
+    eingetragener Ort wird bei neuer PLZ ersetzt, ein von Hand getippter nicht.
+  - Haken „Gleich wie Wohnanschrift Bauherr“: Solange er gesetzt ist, übernimmt die
+    Baustellenanschrift Straße, PLZ und Ort vom Bauherrn.
+  - Knopf „Nächste eigene: …“: höchste Kostenstelle `^1404[0-7]\d\d$` ohne die
+    Sammel-Kostenstellen plus 1. Stand jetzt ist das 1404557. Interne Nummern wie 14048xx
+    (Planung, Zimmerei Allgemein) zählen nicht.
+- **D. Tauchhammer, Bericht „Partie auswählen“:** Beim Hinzufügen gibt es jetzt die Gruppe
+  „Ganze Partie“. Sie fügt alle aktiven Mitglieder der Partie samt Partieleiter ein, die
+  noch nicht im Bericht stehen. Bei jeder Partie steht dabei, wie viele noch fehlen.
+
 ## 2026-10-21 · Vier Wünsche: Fahrtenbuch, Stundenberichte, Archiv-Versand
 
 - **E. Egger, „neue Fahrt landet oben“:** Am 21. (nach der Periode) bekam eine neue Fahrt

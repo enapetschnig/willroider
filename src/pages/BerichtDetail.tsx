@@ -690,26 +690,55 @@ function MitarbeiterEditor({
   const { toast } = useToast();
   const [adding, setAdding] = useState(false);
   const [newId, setNewId] = useState("");
+  const [partien, setPartien] = useState<{ id: string; name: string; partieleiter_id: string | null }[]>([]);
+
+  useEffect(() => {
+    if (!adding || partien.length) return;
+    void supabase
+      .from("partien")
+      .select("id, name, partieleiter_id")
+      .order("name")
+      .then(({ data }) => setPartien((data as typeof partien) ?? []));
+  }, [adding, partien.length]);
 
   const profileById = new Map(profiles.map((p) => [p.id, p]));
   const verfuegbar = profiles.filter(
     (p) => !mitarbeiter.some((m) => m.mitarbeiter_id === p.id),
   );
+  /** Wer noch fehlt, wenn man die ganze Partie nimmt (Partieleiter zuerst). */
+  const fehlendeAusPartie = (partieId: string) => {
+    const pa = partien.find((x) => x.id === partieId);
+    return verfuegbar
+      .filter((p) => p.partie_id === partieId || p.id === pa?.partieleiter_id)
+      .sort((a, b) => Number(b.id === pa?.partieleiter_id) - Number(a.id === pa?.partieleiter_id));
+  };
 
+  /** Einzelne Person („p:<id>") oder ganze Partie („partie:<id>",
+   *  Wunsch D. Tauchhammer 21.10.2026). */
   const add = async () => {
     if (!newId) return;
+    const ids = newId.startsWith("partie:")
+      ? fehlendeAusPartie(newId.slice(7)).map((p) => p.id)
+      : [newId.slice(2)];
+    if (ids.length === 0) {
+      toast({ title: "Schon alle drin", description: "Die ganze Partie steht bereits im Bericht." });
+      return;
+    }
     const maxPos = mitarbeiter.reduce((m, x) => Math.max(m, x.position), 0);
-    const { error } = await supabase.from("bericht_mitarbeiter").insert({
-      bericht_id: berichtId,
-      mitarbeiter_id: newId,
-      position: maxPos + 1,
-      stunden_netto: 0,
-      aus_zeiterfassung: false,
-    });
+    const { error } = await supabase.from("bericht_mitarbeiter").insert(
+      ids.map((mitarbeiterId, i) => ({
+        bericht_id: berichtId,
+        mitarbeiter_id: mitarbeiterId,
+        position: maxPos + 1 + i,
+        stunden_netto: 0,
+        aus_zeiterfassung: false,
+      })),
+    );
     if (error) {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
       return;
     }
+    if (ids.length > 1) toast({ title: `${ids.length} Mitarbeiter hinzugefügt` });
     setNewId("");
     setAdding(false);
     onChange();
@@ -760,12 +789,26 @@ function MitarbeiterEditor({
               onChange={(e) => setNewId(e.target.value)}
               className="h-9 flex-1 rounded-md border bg-background px-2 text-sm"
             >
-              <option value="">— Mitarbeiter wählen —</option>
-              {verfuegbar.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.nachname} {p.vorname}
-                </option>
-              ))}
+              <option value="">— Mitarbeiter oder Partie wählen —</option>
+              {partien.some((pa) => fehlendeAusPartie(pa.id).length > 0) && (
+                <optgroup label="Ganze Partie">
+                  {partien.map((pa) => {
+                    const n = fehlendeAusPartie(pa.id).length;
+                    return n > 0 ? (
+                      <option key={pa.id} value={`partie:${pa.id}`}>
+                        Partie {pa.name} ({n})
+                      </option>
+                    ) : null;
+                  })}
+                </optgroup>
+              )}
+              <optgroup label="Einzeln">
+                {verfuegbar.map((p) => (
+                  <option key={p.id} value={`p:${p.id}`}>
+                    {p.nachname} {p.vorname}
+                  </option>
+                ))}
+              </optgroup>
             </select>
             <Button size="sm" onClick={add} disabled={!newId}>
               Hinzufügen
