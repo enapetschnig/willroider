@@ -1,5 +1,18 @@
 # Journal
 
+## 2026-10-22 · Nachprüfung der drei Wünsche
+
+- Nachgerechnet:
+  - Tätigkeitsbericht-Summen mit dem echten Code (esbuild-Bündel): Köstenberger Aug–Sep
+    29 h, ohne eigenes Soll 161 h.
+  - `soll_woche_von` als `authenticated` liefert ihr Muster, sonst `null`.
+  - `tages_soll` nutzt nur `stunden_tag_recompute`.
+  - Der `has_permission`-Parameter heißt `_schluessel`, Johannes ist Admin.
+- Korrekturen:
+  - „Passt — weiter“ auch bei Berichten, die schon bestätigt, aber noch nicht versendet sind.
+  - Wochen-Soll für eine Person ohne Einstellungs-Zeile: Das Modell kommt aus dem
+    Zeiterfassungs-Typ, nicht vom Standard „zimmerei_sommer“.
+
 ## 2026-10-22 · Stundenberichte nacheinander prüfen, erinnern, Download; Wochen-Soll je Person
 
 - **J. Maurer, „alle nacheinander alphabetisch prüfen, danach versenden, Download bei beiden“:**

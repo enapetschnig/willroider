@@ -69,11 +69,14 @@ const wochenSollText = (ws: WochenSoll) => {
 function WochenSollDialog({
   person,
   wert,
+  ohneZeile,
   onClose,
   onSaved,
 }: {
   person: Profile;
   wert: WochenSoll | null;
+  /** Noch keine Einstellungs-Zeile? Dann das Modell passend zur Person mitgeben. */
+  ohneZeile: boolean;
   onClose: () => void;
   onSaved: (ws: WochenSoll | null) => void;
 }) {
@@ -91,7 +94,17 @@ function WochenSollDialog({
     setSpeichert(true);
     const { error } = await supabase
       .from("profile_konten_settings")
-      .upsert({ profile_id: person.id, soll_woche: ws } as any, { onConflict: "profile_id" });
+      .upsert(
+        {
+          profile_id: person.id,
+          soll_woche: ws,
+          // Sonst stünde eine Angestellte ohne Zeile auf dem Arbeiter-Kalender.
+          ...(ohneZeile
+            ? { arbeitszeitmodell: (person as any).zeiterfassung_typ === "angestellter" ? "angestellter" : "zimmerei_sommer" }
+            : {}),
+        } as any,
+        { onConflict: "profile_id" },
+      );
     setSpeichert(false);
     if (error) {
       toast({ variant: "destructive", title: "Nicht gespeichert", description: error.message });
@@ -175,6 +188,7 @@ export function AdminEinstellungen() {
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [wochenSoll, setWochenSoll] = useState<Record<string, WochenSoll | null>>({});
   const [wsOffen, setWsOffen] = useState<Profile | null>(null);
+  const [mitZeile, setMitZeile] = useState<Set<string>>(new Set());
 
   const load = async () => {
     const [{ data: ps }, { data: pks }] = await Promise.all([
@@ -185,6 +199,7 @@ export function AdminEinstellungen() {
     const ws: Record<string, WochenSoll | null> = {};
     ((pks as PKS[]) ?? []).forEach((x) => (ws[x.profile_id] = istWochenSoll(x.soll_woche) ? x.soll_woche : null));
     setWochenSoll(ws);
+    setMitZeile(new Set(((pks as PKS[]) ?? []).map((x) => x.profile_id)));
     const map: Record<string, Editable> = {};
     ((ps as Profile[]) ?? []).forEach((p) => {
       const s = ((pks as PKS[]) ?? []).find((x) => x.profile_id === p.id);
@@ -480,9 +495,11 @@ export function AdminEinstellungen() {
         <WochenSollDialog
           person={wsOffen}
           wert={wochenSoll[wsOffen.id] ?? null}
+          ohneZeile={!mitZeile.has(wsOffen.id)}
           onClose={() => setWsOffen(null)}
           onSaved={(ws) => {
             setWochenSoll((m) => ({ ...m, [wsOffen.id]: ws }));
+            setMitZeile((m) => new Set(m).add(wsOffen.id));
             setWsOffen(null);
           }}
         />

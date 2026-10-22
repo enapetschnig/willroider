@@ -515,6 +515,10 @@ export default function StundenBericht() {
   const naechster = idx >= 0 && idx < reihe.length - 1 ? reihe[idx + 1] : null;
   const springe = (zielId: string) => navigate(`/stundenbericht/${zielId}`, { replace: true });
   const istVorgemerkt = vorgemerkt.includes(bericht.id);
+  /** Vormerken geht für alles, was noch nicht raus ist — auch schon
+   *  bestätigte (der Sammelversand bestätigt bei Bedarf mit). */
+  const kannVormerken =
+    isAdmin && (bericht.status === "unterschrieben" || bericht.status === "bestaetigt");
   const passtWeiter = () => {
     setVorgemerkt((v) => (v.includes(bericht.id) ? v : [...v, bericht.id]));
     if (naechster) springe(naechster.id);
@@ -658,7 +662,7 @@ export default function StundenBericht() {
               </label>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              {kannBestaetigen &&
+              {kannVormerken &&
                 (istVorgemerkt ? (
                   <Button
                     size="sm"
@@ -676,13 +680,13 @@ export default function StundenBericht() {
                   </Button>
                 ))}
               {vorgemerktOffen.length > 0 && (
-                <Button size="sm" variant={kannBestaetigen && !istVorgemerkt ? "outline" : "default"} className="h-9" onClick={vorgemerkteVersenden}>
+                <Button size="sm" variant={kannVormerken && !istVorgemerkt ? "outline" : "default"} className="h-9" onClick={vorgemerkteVersenden}>
                   <Mail className="h-4 w-4 mr-1.5" />
                   Vorgemerkte bestätigen &amp; senden ({vorgemerktOffen.length})
                 </Button>
               )}
               <span className="text-[11px] text-muted-foreground">
-                {kannBestaetigen
+                {kannVormerken
                   ? "„Passt“ merkt vor und springt zum Nächsten — am Ende alle mit einer Unterschrift versenden."
                   : "Alphabetisch durch die Berichte dieser Periode blättern."}
               </span>
