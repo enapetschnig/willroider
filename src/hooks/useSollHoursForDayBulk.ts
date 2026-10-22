@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { isoWeekParts, weekdayIndexMonFirst } from "@/lib/stundenTime";
-import { angestelltenSoll } from "@/lib/taetigkeitsbericht";
+import { angestelltenSoll, istWochenSoll, sollAusWoche } from "@/lib/taetigkeitsbericht";
 
 /**
  * Bulk-Variante von useSollHoursForDay: berechnet Soll-Arbeitsstunden für
@@ -27,7 +27,7 @@ export function useSollHoursForDayBulk(
 
       const { data: settings } = await supabase
         .from("profile_konten_settings")
-        .select("profile_id, arbeitszeitmodell, tagesnorm_stunden, beschaeftigungsgrad")
+        .select("profile_id, arbeitszeitmodell, tagesnorm_stunden, beschaeftigungsgrad, soll_woche" as "*")
         .in("profile_id", mitarbeiterIds);
 
       const settingsMap = new Map<string, any>();
@@ -72,6 +72,11 @@ export function useSollHoursForDayBulk(
         const grad = Number(s?.beschaeftigungsgrad ?? 1);
 
         let hours = 0;
+        if (istWochenSoll(s?.soll_woche)) {
+          // Eigenes Wochen-Soll (z. B. geringfügig) — absolut, ohne Grad.
+          result.set(id, sollAusWoche(date, s.soll_woche));
+          continue;
+        }
         if (modell === "zimmerei_sommer") {
           // Fallback bei fehlender Kalenderwoche: Tagesnorm Mo–Fr.
           hours = kalenderTagesStunden != null

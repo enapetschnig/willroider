@@ -1,5 +1,45 @@
 # Journal
 
+## 2026-10-22 · Stundenberichte nacheinander prüfen, erinnern, Download; Wochen-Soll je Person
+
+- **J. Maurer, „alle nacheinander alphabetisch prüfen, danach versenden, Download bei beiden“:**
+  - Stundenbericht: Prüf-Leiste mit ‹ ›, Auswahl „3/25 · Name — Stand“ und dem Haken
+    „nur Wartet auf Büro“. Sie läuft alphabetisch durch alle Berichte derselben Periode und
+    springt mit `replace`, „Zurück“ führt also direkt in die Liste.
+  - „Passt — weiter“ merkt den Bericht vor (sessionStorage `bsb-vorgemerkt`) und öffnet den
+    nächsten. „Vorgemerkte bestätigen & senden (n)“ braucht eine Unterschrift und schickt
+    eine Mail mit allen (BsbVersendenDialog mit mehreren IDs).
+  - Liste: „Nacheinander prüfen“ in der Periode und im Block der offenen Berichte (startet
+    beim ersten Wartenden alphabetisch), „Alle herunterladen (ZIP)“, „Herunterladen“ bei
+    den markierten und oben „Gesammelt versenden / Download“ ins Berichte-Archiv (mit `teil`).
+  - Stundenbericht: neuer Knopf „PDF herunterladen“ (vorher nur „ansehen“).
+  - Berichte-Archiv: „Herunterladen (ZIP)“ für die markierten, gilt für beide Arten
+    (`lib/zipDownload.ts`, jszip jetzt direkte Abhängigkeit).
+  - Tätigkeitsbericht: ‹ › neben der Personenauswahl.
+- **J. Maurer, „Mitarbeiter mit einer Nachricht nochmals erinnern“:**
+  `StundenberichtErinnernDialog`. Je Person geht eine Nachricht mit allen offenen Perioden
+  raus, dazu ein eigener Zusatz. Erreichbar über die Glocke je Zeile, „Alle n erinnern“ und
+  im Bericht. Angezeigt wird „erinnert am“ aus `benachrichtigungen_log`
+  (`bsb_unterschrift`/`bsb_erinnerung`).
+  - `push-senden` hat neu `sms_ersatz`: ohne Push-Gerät geht eine SMS über Twilio
+    (`sendeSms` in `_shared/sms.ts`). Nur 9 von 33 Leuten haben Push, 25 nur eine
+    Platzhalter-Mail.
+  - Mail-Ersatz überspringt `@….invalid`.
+  - Erinnern dürfen außer Admins auch Leute mit `stunden.bsb.bestaetigen`.
+  - Getestet ohne echten Versand (unbekannte ID → „keiner“).
+- **J. Maurer, Köstenberger geringfügig, „andere Sollstunden“:**
+  - Neue Spalte `profile_konten_settings.soll_woche` = `{woche:[Mo..So], gerade_kw?:[…]}`.
+    Sie geht dem Arbeitszeit-Modell vor und gilt absolut, ohne Beschäftigungsgrad.
+  - Gepflegt wird sie in Verwaltung → Arbeitszeit, Spalte „Eigenes Wochen-Soll“.
+  - Wirkt im Tätigkeitsbericht (RPC `soll_woche_von`, auch für Freigeber ohne
+    Admin-Recht), in `tagesSoll`/`periodeSoll`, in den Soll-Hooks, in MeineStunden, in der
+    Stundenauswertung und in SQL `tages_soll`.
+  - Köstenberger laut Muster: Mo–Mi 2 h, Do 1 h (ungerade KW) bzw. 1,5 h (gerade KW),
+    ergibt 29 h für Aug–Sep, wie im Muster.
+  - Nebenbei: `tages_soll` kennt jetzt das Modell `angestellter` (8,5/5). Vorher fiel es auf
+    den Arbeiter-Kalender, ein Urlaubstag zog im Sommer nur 0,94 Tage ab.
+  - In der Modell-Auswahl fehlte „Angestellter“, jetzt ist es drin.
+
 ## 2026-10-21 · Baustellenmeldung (Teams, PLZ, gleiche Adresse, Kostenstelle) und Partie im Bericht
 
 - **J. Maurer, Empfänger „Leistungsstand“:** Die Teams-Adresse

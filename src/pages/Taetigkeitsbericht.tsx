@@ -34,8 +34,10 @@ import { useStundenTageList, useSaveStundenTag, useDeleteStundenTag, type SaveEi
 import { localIso } from "@/lib/dateFmt";
 import { archiviereBericht } from "@/lib/berichtArchiv";
 import {
-  ANGESTELLTEN_SOLL,
   TB_FARBEN,
+  angestelltenSoll,
+  istWochenSoll,
+  type WochenSoll,
   UEBERSTUNDEN_GRENZE,
   UEBERSTUNDEN_WARNUNG,
   WOCHENTAG_KURZ,
@@ -323,6 +325,20 @@ export default function Taetigkeitsbericht() {
     return out;
   }, [tageList]);
 
+  /** Eigenes Wochen-Soll der Person (z. B. geringfügig) — sonst 8,5/5. */
+  const [wochenSoll, setWochenSoll] = useState<{ ma: string; ws: WochenSoll | null } | null>(null);
+  useEffect(() => {
+    if (!zielMa) return;
+    let aktiv = true;
+    void (supabase as any).rpc("soll_woche_von", { p_uid: zielMa }).then(({ data }: { data: unknown }) => {
+      if (aktiv) setWochenSoll({ ma: zielMa, ws: istWochenSoll(data) ? data : null });
+    });
+    return () => {
+      aktiv = false;
+    };
+  }, [zielMa]);
+  const wsAktiv = wochenSoll?.ma === zielMa ? wochenSoll.ws : null;
+
   /** Abwesenheiten. Urlaub ist hier BEARBEITBAR (eigene Zeile in der
    *  Tabelle); Krankheit kommt aus der Krankmeldung, Feiertag aus dem
    *  Kalender, Sonderurlaub aus dem Stamm. */
@@ -334,7 +350,7 @@ export default function Taetigkeitsbericht() {
       krankheit: leer(),
       feiertag: leer(),
     };
-    const sollVon = (iso: string) => ANGESTELLTEN_SOLL[wochentagIndex(iso)];
+    const sollVon = (iso: string) => angestelltenSoll(iso, wsAktiv);
 
     for (const iso of periode.tage) {
       const info = tagesBeschriftung(iso);
@@ -372,7 +388,7 @@ export default function Taetigkeitsbericht() {
       if (sonderStd > 0) out.sonderurlaub[iso] = r2(sonderStd);
     }
     return out;
-  }, [tageList, periode.tage, zeilenStamm]);
+  }, [tageList, periode.tage, zeilenStamm, wsAktiv]);
 
   // Wechselt die Person oder die Periode, fängt die Zeilenliste bei null an.
   // Vorher blieben Kostenstellen aus fremden Berichten stehen (Änderungswunsch
@@ -409,8 +425,8 @@ export default function Taetigkeitsbericht() {
   }, [sichtbar, zeilenStamm]);
 
   const summen = useMemo(
-    () => berechneSummen(periode.tage, zellen, sonder),
-    [periode.tage, zellen, sonder],
+    () => berechneSummen(periode.tage, zellen, sonder, wsAktiv),
+    [periode.tage, zellen, sonder, wsAktiv],
   );
 
   /** Taggeld aus stunden_fahrt; Kilometer aus dem FAHRTENBUCH — die alte
@@ -967,6 +983,21 @@ export default function Taetigkeitsbericht() {
         {(darfFremde || darfFreigeben) && angestellte.length > 0 && (
           <div className="flex items-center gap-2 text-sm">
             <Users className="h-4 w-4 text-muted-foreground" />
+            {/* Alphabetisch vor/zurück — nacheinander prüfen ohne Liste
+                (Wunsch J. Maurer, 22.10.2026). */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 w-9 p-0"
+              aria-label="Vorherige Person"
+              disabled={angestellte.findIndex((a) => a.id === zielMa) <= 0}
+              onClick={() => {
+                const i = angestellte.findIndex((a) => a.id === zielMa);
+                if (i > 0) setMaId(angestellte[i - 1].id);
+              }}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
             <select
               className="h-9 rounded-md border bg-background px-2 text-sm"
               value={zielMa}
@@ -978,6 +1009,22 @@ export default function Taetigkeitsbericht() {
                 </option>
               ))}
             </select>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 w-9 p-0"
+              aria-label="Nächste Person"
+              disabled={(() => {
+                const i = angestellte.findIndex((a) => a.id === zielMa);
+                return i < 0 || i >= angestellte.length - 1;
+              })()}
+              onClick={() => {
+                const i = angestellte.findIndex((a) => a.id === zielMa);
+                if (i >= 0 && i < angestellte.length - 1) setMaId(angestellte[i + 1].id);
+              }}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
           </div>
         )}
       </div>

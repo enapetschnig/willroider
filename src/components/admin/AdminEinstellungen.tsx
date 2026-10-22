@@ -5,6 +5,14 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Settings, Save } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { istWochenSoll, type WochenSoll } from "@/lib/taetigkeitsbericht";
 import type {
   Database,
   UrlaubModell,
@@ -39,11 +47,134 @@ const DEFAULT: Omit<Editable, "profile_id"> = {
   arbeitszeitmodell: "zimmerei_sommer",
 };
 
+const TAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+const zahl = (n: number) => String(n).replace(".", ",");
+/** Kurzanzeige: „2 · 2 · 2 · 1/1,5 · 0 = 7,25 h/Wo" */
+const wochenSollText = (ws: WochenSoll) => {
+  const tag = (i: number) => {
+    const a = Number(ws.woche[i] ?? 0);
+    const b = ws.gerade_kw ? Number(ws.gerade_kw[i] ?? 0) : a;
+    return a === b ? zahl(a) : `${zahl(a)}/${zahl(b)}`;
+  };
+  const summe = (w: number[]) => w.reduce((x, y) => x + (Number(y) || 0), 0);
+  const schnitt = ws.gerade_kw ? (summe(ws.woche) + summe(ws.gerade_kw)) / 2 : summe(ws.woche);
+  return `${[0, 1, 2, 3, 4].map(tag).join(" · ")} = ${zahl(Math.round(schnitt * 100) / 100)} h/Wo`;
+};
+
+/**
+ * Eigenes Wochen-Soll (Wunsch J. Maurer 22.10.2026, geringfügig
+ * Beschäftigte): Stunden je Wochentag, auf Wunsch in geraden
+ * Kalenderwochen anders. Geht dem Arbeitszeit-Modell vor.
+ */
+function WochenSollDialog({
+  person,
+  wert,
+  onClose,
+  onSaved,
+}: {
+  person: Profile;
+  wert: WochenSoll | null;
+  onClose: () => void;
+  onSaved: (ws: WochenSoll | null) => void;
+}) {
+  const { toast } = useToast();
+  const leer = ["", "", "", "", "", "", ""];
+  const [woche, setWoche] = useState<string[]>(wert ? wert.woche.map((n) => zahl(Number(n) || 0)) : leer);
+  const [abwechselnd, setAbwechselnd] = useState(!!wert?.gerade_kw);
+  const [gerade, setGerade] = useState<string[]>(
+    wert?.gerade_kw ? wert.gerade_kw.map((n) => zahl(Number(n) || 0)) : wert ? wert.woche.map((n) => zahl(Number(n) || 0)) : leer,
+  );
+  const [speichert, setSpeichert] = useState(false);
+  const zuZahlen = (a: string[]) => a.map((v) => Math.max(0, Number(String(v).replace(",", ".")) || 0));
+
+  const speichern = async (ws: WochenSoll | null) => {
+    setSpeichert(true);
+    const { error } = await supabase
+      .from("profile_konten_settings")
+      .upsert({ profile_id: person.id, soll_woche: ws } as any, { onConflict: "profile_id" });
+    setSpeichert(false);
+    if (error) {
+      toast({ variant: "destructive", title: "Nicht gespeichert", description: error.message });
+      return;
+    }
+    toast({ title: ws ? "Wochen-Soll gespeichert" : "Wochen-Soll entfernt" });
+    onSaved(ws);
+  };
+
+  const zeile = (werte: string[], setzen: (w: string[]) => void) => (
+    <div className="grid grid-cols-7 gap-1">
+      {TAGE.map((t, i) => (
+        <div key={t} className="space-y-0.5">
+          <div className="text-[10px] text-center text-muted-foreground">{t}</div>
+          <Input
+            inputMode="decimal"
+            value={werte[i]}
+            onChange={(e) => setzen(werte.map((v, j) => (j === i ? e.target.value : v)))}
+            className="h-8 px-1 text-center text-xs"
+            placeholder="0"
+          />
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && !speichert && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            Wochen-Soll · {person.vorname} {person.nachname}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Für Teilzeit oder geringfügig Beschäftigte: Sollstunden je Wochentag. Gilt im
+            Tätigkeitsbericht, in der Auswertung und beim Urlaub statt des Arbeitszeit-Modells.
+          </p>
+          <div className="space-y-1">
+            <div className="text-xs font-medium">{abwechselnd ? "Ungerade Kalenderwochen" : "Jede Woche"}</div>
+            {zeile(woche, setWoche)}
+          </div>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" className="h-4 w-4" checked={abwechselnd} onChange={(e) => setAbwechselnd(e.target.checked)} />
+            In geraden Kalenderwochen anders
+          </label>
+          {abwechselnd && (
+            <div className="space-y-1">
+              <div className="text-xs font-medium">Gerade Kalenderwochen</div>
+              {zeile(gerade, setGerade)}
+            </div>
+          )}
+        </div>
+        <DialogFooter className="gap-2 sm:justify-between">
+          {wert ? (
+            <Button variant="ghost" onClick={() => speichern(null)} disabled={speichert}>
+              Entfernen (wieder Modell)
+            </Button>
+          ) : (
+            <span />
+          )}
+          <Button
+            onClick={() =>
+              speichern({ woche: zuZahlen(woche), ...(abwechselnd ? { gerade_kw: zuZahlen(gerade) } : {}) })
+            }
+            disabled={speichert}
+          >
+            Speichern
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function AdminEinstellungen() {
   const { toast } = useToast();
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [rows, setRows] = useState<Record<string, Editable>>({});
   const [dirty, setDirty] = useState<Set<string>>(new Set());
+  const [wochenSoll, setWochenSoll] = useState<Record<string, WochenSoll | null>>({});
+  const [wsOffen, setWsOffen] = useState<Profile | null>(null);
 
   const load = async () => {
     const [{ data: ps }, { data: pks }] = await Promise.all([
@@ -51,6 +182,9 @@ export function AdminEinstellungen() {
       supabase.from("profile_konten_settings").select("*"),
     ]);
     setProfiles((ps as Profile[]) ?? []);
+    const ws: Record<string, WochenSoll | null> = {};
+    ((pks as PKS[]) ?? []).forEach((x) => (ws[x.profile_id] = istWochenSoll(x.soll_woche) ? x.soll_woche : null));
+    setWochenSoll(ws);
     const map: Record<string, Editable> = {};
     ((ps as Profile[]) ?? []).forEach((p) => {
       const s = ((pks as PKS[]) ?? []).find((x) => x.profile_id === p.id);
@@ -188,6 +322,7 @@ export function AdminEinstellungen() {
                 <th className="px-2 py-2">Stichtag T/M</th>
                 <th className="px-2 py-2">ZA-Faktor</th>
                 <th className="px-2 py-2">Arbeitszeit-Modell</th>
+                <th className="px-2 py-2">Eigenes Wochen-Soll</th>
                 <th className="px-2 py-2"></th>
               </tr>
             </thead>
@@ -307,9 +442,21 @@ export function AdminEinstellungen() {
                         className="h-8 w-[150px] rounded-md border bg-background px-1.5 text-xs"
                       >
                         <option value="zimmerei_sommer">Wechsel L/K</option>
+                        <option value="angestellter">Angestellter (8,5 Mo–Do, 5 Fr)</option>
                         <option value="fix_40h">Fix 40 h Mo–Fr</option>
                         <option value="individuell">Individuell (Tagesnorm)</option>
                       </select>
+                    </td>
+                    <td className="px-2 py-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 px-2 text-xs font-normal whitespace-nowrap"
+                        onClick={() => setWsOffen(p)}
+                        title="Sollstunden je Wochentag (z. B. geringfügig)"
+                      >
+                        {wochenSoll[p.id] ? wochenSollText(wochenSoll[p.id]!) : "— festlegen"}
+                      </Button>
                     </td>
                     <td className="px-2 py-1">
                       <Button
@@ -328,6 +475,18 @@ export function AdminEinstellungen() {
           </table>
         </CardContent>
       </Card>
+
+      {wsOffen && (
+        <WochenSollDialog
+          person={wsOffen}
+          wert={wochenSoll[wsOffen.id] ?? null}
+          onClose={() => setWsOffen(null)}
+          onSaved={(ws) => {
+            setWochenSoll((m) => ({ ...m, [wsOffen.id]: ws }));
+            setWsOffen(null);
+          }}
+        />
+      )}
     </div>
   );
 }

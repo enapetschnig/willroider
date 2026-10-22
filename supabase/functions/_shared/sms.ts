@@ -1,7 +1,6 @@
-// Gemeinsame Helper für SMS-Einladung (Twilio).
-// Wird von admin-create-employee + send-invitation Edge-Functions importiert.
-//
-// Bewusst minimal: ein Modul = drei Funktionen. Kein State, keine I/O.
+// Gemeinsame Helper für SMS (Twilio).
+// Einladung: admin-create-employee + send-invitation (nur Text bauen).
+// Versand: sendeSms — für Erinnerungen ohne Push (_shared/push.ts).
 
 /** AT-Phone-Normalisierung — Spiegel von src/lib/phone.ts.
  *  Akzeptiert 0664 1234567, +43 664 …, 0043 664 …, 664 …
@@ -24,6 +23,25 @@ export function normalizeAtPhone(input: string | null | undefined): string | nul
   }
   if (/^\d{5,14}$/.test(cleaned)) return `+43${cleaned}`;
   return null;
+}
+
+/** Eine SMS über Twilio (dieselben Secrets wie Einladung und Anmelde-Code). */
+export async function sendeSms(an: string, text: string): Promise<{ ok: boolean; error?: string }> {
+  const sid = Deno.env.get('TWILIO_ACCOUNT_SID');
+  const token = Deno.env.get('TWILIO_AUTH_TOKEN');
+  const von = Deno.env.get('TWILIO_PHONE_NUMBER');
+  if (!sid || !token || !von) return { ok: false, error: 'Twilio nicht konfiguriert' };
+  const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${btoa(`${sid}:${token}`)}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ To: an, From: von, Body: text }),
+  });
+  if (res.ok) return { ok: true };
+  const d = await res.json().catch(() => ({}));
+  return { ok: false, error: String((d as { message?: string })?.message ?? res.status) };
 }
 
 /** Lesbares Initial-Passwort. Ausgeschlossen: l, o, I, O, 0, 1 — Verwechslungsgefahr in SMS. */

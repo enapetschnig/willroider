@@ -1,10 +1,12 @@
-// Web-Push an alle Geräte einer Person — mit E-Mail als Ersatz, wenn kein
-// Gerät angemeldet ist. Genutzt von push-senden (Einzelversand, Test) und
-// erinnerungen (Cron). Jeder Versand landet in benachrichtigungen_log.
+// Web-Push an alle Geräte einer Person — mit SMS bzw. E-Mail als Ersatz,
+// wenn kein Gerät angemeldet ist. Genutzt von push-senden (Einzelversand,
+// Test, Erinnern aus der Verwaltung) und erinnerungen (Cron). Jeder Versand
+// landet in benachrichtigungen_log.
 
 import webpush from "npm:web-push@3.6.7";
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.79.0";
 import { sendeMail } from "./mail.ts";
+import { normalizeAtPhone, sendeSms } from "./sms.ts";
 
 export type Nachricht = {
   titel: string;
@@ -38,8 +40,8 @@ export async function sendeAnPerson(
   sb: SupabaseClient,
   userId: string,
   n: Nachricht,
-  opts: { mailErsatz?: boolean } = {},
-): Promise<{ kanal: "push" | "mail" | "keiner"; geraete: number; fehler: string[] }> {
+  opts: { mailErsatz?: boolean; smsErsatz?: boolean } = {},
+): Promise<{ kanal: "push" | "sms" | "mail" | "keiner"; geraete: number; fehler: string[] }> {
   const fehler: string[] = [];
   let geraete = 0;
 
@@ -84,12 +86,32 @@ export async function sendeAnPerson(
     }
   }
 
-  let kanal: "push" | "mail" | "keiner" = geraete > 0 ? "push" : "keiner";
+  let kanal: "push" | "sms" | "mail" | "keiner" = geraete > 0 ? "push" : "keiner";
+
+  // Ohne Push: SMS (die meisten Bauarbeiter melden sich nur per Telefon an
+  // und haben eine Platzhalter-Adresse) — nur wenn ausdrücklich gewünscht,
+  // weil jede SMS kostet (Erinnern aus der Verwaltung, nicht der Cron).
+  if (kanal === "keiner" && opts.smsErsatz) {
+    const { data: p } = await sb.from("profiles").select("telefon").eq("id", userId).maybeSingle();
+    let nummer = normalizeAtPhone((p as { telefon?: string | null } | null)?.telefon);
+    if (!nummer) {
+      const { data: u } = await sb.auth.admin.getUserById(userId);
+      nummer = normalizeAtPhone(u?.user?.phone ? `+${u.user.phone.replace(/^\+/, "")}` : null);
+    }
+    if (nummer) {
+      const url = Deno.env.get("APP_URL") ?? "https://www.willroider.app";
+      const link = n.url ? `${url.replace(/\/$/, "")}${n.url}` : url;
+      const r = await sendeSms(nummer, `${n.titel}\n${n.text}\n\n${link}`);
+      if (r.ok) kanal = "sms";
+      else fehler.push(`SMS: ${r.error}`);
+    }
+  }
 
   if (kanal === "keiner" && opts.mailErsatz) {
     const { data: p } = await sb.from("profiles").select("email, vorname").eq("id", userId).maybeSingle();
     const mail = (p as { email?: string | null } | null)?.email;
-    if (mail) {
+    // Platzhalter (…@willroider.invalid bei Telefon-Anmeldung) gibt es nicht.
+    if (mail && !/\.invalid$/i.test(mail.trim())) {
       const url = Deno.env.get("APP_URL") ?? "https://www.willroider.app";
       const link = n.url ? `${url.replace(/\/$/, "")}${n.url}` : url;
       const r = await sendeMail({

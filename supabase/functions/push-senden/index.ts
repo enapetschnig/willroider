@@ -2,6 +2,8 @@
 //
 //   { an_mich: true, titel?, text? }             → Testnachricht an die eigenen Geräte
 //   { user_ids: [...], titel, text, url?, art? } → Verwaltung / Cron (Sync-Geheimnis)
+//     mail_ersatz / sms_ersatz: ohne Push-Gerät per SMS bzw. Mail
+//     (Erinnern aus „Stundenberichte", Wunsch J. Maurer 22.10.2026)
 //
 // Versand selbst: _shared/push.ts (Push auf jedes Gerät, Protokoll).
 
@@ -40,7 +42,11 @@ Deno.serve(async (req) => {
     if (u?.user) {
       userId = u.user.id;
       const { data: a } = await alsUser.rpc("is_admin_role", { _user_id: u.user.id });
-      admin = a === true;
+      // Wer Stundenberichte bestätigt, darf an die Unterschrift erinnern.
+      const { data: b } = a === true
+        ? { data: true }
+        : await alsUser.rpc("has_permission", { _user_id: u.user.id, _schluessel: "stunden.bsb.bestaetigen" });
+      admin = a === true || b === true;
     }
   }
   if (!system && !userId) return json({ ok: false, fehler: "Nicht angemeldet" }, 401);
@@ -77,7 +83,7 @@ Deno.serve(async (req) => {
       url: typeof body.url === "string" ? body.url : undefined,
       art: typeof body.art === "string" ? body.art : "manuell",
       bezug: typeof body.bezug === "string" ? body.bezug : null,
-    }, { mailErsatz: body.mail_ersatz === true });
+    }, { mailErsatz: body.mail_ersatz === true, smsErsatz: body.sms_ersatz === true });
   }
   return json({ ok: true, ergebnis });
 });

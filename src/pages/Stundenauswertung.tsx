@@ -243,6 +243,7 @@ export default function Stundenauswertung() {
         beschaeftigungsgrad: number;
         za_faktor: number;
         modell: ArbeitszeitModell;
+        wochenSoll?: unknown;
       }
     >
   >(new Map());
@@ -252,7 +253,7 @@ export default function Stundenauswertung() {
       const { data } = await supabase
         .from("profile_konten_settings")
         .select(
-          "profile_id, tagesnorm_stunden, beschaeftigungsgrad, za_faktor, arbeitszeitmodell",
+          "profile_id, tagesnorm_stunden, beschaeftigungsgrad, za_faktor, arbeitszeitmodell, soll_woche",
         )
         .in("profile_id", memberIds);
       const map = new Map<
@@ -262,6 +263,7 @@ export default function Stundenauswertung() {
           beschaeftigungsgrad: number;
           za_faktor: number;
           modell: ArbeitszeitModell;
+          wochenSoll?: unknown;
         }
       >();
       (data ?? []).forEach((r: any) => {
@@ -270,6 +272,7 @@ export default function Stundenauswertung() {
           beschaeftigungsgrad: Number(r.beschaeftigungsgrad ?? 1),
           za_faktor: Number(r.za_faktor ?? 1),
           modell: (r.arbeitszeitmodell ?? "zimmerei_sommer") as ArbeitszeitModell,
+          wochenSoll: r.soll_woche ?? null,
         });
       });
       setPks(map);
@@ -317,7 +320,8 @@ export default function Stundenauswertung() {
         const zaFaktor = setting?.za_faktor ?? 1;
         const modell = setting?.modell ?? "zimmerei_sommer";
         // Soll: kalenderbasiert (L/K-Wochen) über die gewählte Periode.
-        const soll = periodeSoll(from, to, kalender, modell, tagesnorm, beschgrad);
+        const ws = setting?.wochenSoll;
+        const soll = periodeSoll(from, to, kalender, modell, tagesnorm, beschgrad, ws);
         // Ist: gearbeitete Tage = Netto; Abwesenheit (Urlaub/Krank/SW/
         // Feiertag) wird mit dem Tages-Soll gutgeschrieben → kein Minus für
         // Abwesenheit, egal was als Stundenzahl erfasst wurde.
@@ -328,7 +332,7 @@ export default function Stundenauswertung() {
             a +
             (worked
               ? Number(t.tag.netto_stunden)
-              : tagesSoll(t.tag.datum, kalender, modell, tagesnorm, beschgrad))
+              : tagesSoll(t.tag.datum, kalender, modell, tagesnorm, beschgrad, ws))
           );
         }, 0);
         // Differenz = ZA-wirksame Differenz (× za_faktor) — identisch zu dem,

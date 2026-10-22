@@ -643,6 +643,8 @@ export type Database = {
           urlaub_stichtag_monat: number | null;
           za_faktor: number;
           arbeitszeitmodell: ArbeitszeitModell;
+          /** Eigenes Wochen-Soll {woche:[Mo..So], gerade_kw?:[Mo..So]} — geht dem Modell vor. */
+          soll_woche: Json | null;
           created_at: string;
           updated_at: string;
         };

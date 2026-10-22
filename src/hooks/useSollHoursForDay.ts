@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { isoWeekParts, weekdayIndexMonFirst } from "@/lib/stundenTime";
-import { angestelltenSoll } from "@/lib/taetigkeitsbericht";
+import { angestelltenSoll, istWochenSoll, sollAusWoche } from "@/lib/taetigkeitsbericht";
 
 interface SollResult {
   /** Soll-Arbeitsstunden für (Mitarbeiter, Tag) gemäß Modell. Bei 0 ist es ein freier Tag. */
@@ -43,7 +43,7 @@ export function useSollHoursForDay(
       // 1. Settings laden
       const { data: settings } = await supabase
         .from("profile_konten_settings")
-        .select("arbeitszeitmodell, tagesnorm_stunden, beschaeftigungsgrad")
+        .select("arbeitszeitmodell, tagesnorm_stunden, beschaeftigungsgrad, soll_woche" as "*")
         .eq("profile_id", mitarbeiterId)
         .maybeSingle();
 
@@ -62,7 +62,11 @@ export function useSollHoursForDay(
       let hours = 0;
       let usedSource: SollResult["source"] = modell;
 
-      if (modell === "zimmerei_sommer") {
+      const ws = (settings as any)?.soll_woche;
+      if (istWochenSoll(ws)) {
+        // Eigenes Wochen-Soll (z. B. geringfügig) — absolut, ohne Grad.
+        hours = sollAusWoche(date, ws);
+      } else if (modell === "zimmerei_sommer") {
         const { jahr, kw } = isoWeekParts(d);
         const { data: kal } = await supabase
           .from("arbeitszeitkalender")
@@ -97,7 +101,7 @@ export function useSollHoursForDay(
         hours = isWorkday ? tagesnorm : 0;
       }
 
-      hours = hours * grad;
+      if (!istWochenSoll(ws)) hours = hours * grad;
 
       if (!cancelled) {
         setSollHours(hours);

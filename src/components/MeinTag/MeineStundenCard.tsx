@@ -91,7 +91,7 @@ export function MeineStundenCard() {
       const [{ data: settings }, kalender] = await Promise.all([
         supabase
           .from("profile_konten_settings")
-          .select("arbeitszeitmodell, tagesnorm_stunden, beschaeftigungsgrad")
+          .select("arbeitszeitmodell, tagesnorm_stunden, beschaeftigungsgrad, soll_woche" as "*")
           .eq("profile_id", user.id)
           .maybeSingle(),
         ladeKalenderMap(new Date().getFullYear()) as Promise<Map<string, TagessollKalender>>,
@@ -106,6 +106,7 @@ export function MeineStundenCard() {
           (s?.arbeitszeitmodell ?? "zimmerei_sommer") as ArbeitszeitModell,
           Number(s?.tagesnorm_stunden ?? 8),
           Number(s?.beschaeftigungsgrad ?? 1),
+          s?.soll_woche,
         ),
       );
     })();

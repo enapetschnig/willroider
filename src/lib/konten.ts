@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { feiertagAt } from "@/lib/feiertage";
-import { ANGESTELLTEN_SOLL } from "@/lib/taetigkeitsbericht";
+import { ANGESTELLTEN_SOLL, istWochenSoll, sollAusWoche } from "@/lib/taetigkeitsbericht";
 import { localIso } from "@/lib/dateFmt";
 
 export function fmtTage(v: number | null | undefined): string {
@@ -113,8 +113,11 @@ export function tagesSoll(
   kalender: Map<string, TagessollKalender>,
   modell: ArbeitszeitModell,
   tagesnorm: number,
-  beschaeftigungsgrad: number
+  beschaeftigungsgrad: number,
+  /** Eigenes Wochen-Soll (profile_konten_settings.soll_woche) — geht vor. */
+  wochenSoll?: unknown,
 ): number {
+  if (istWochenSoll(wochenSoll)) return sollAusWoche(isoDate, wochenSoll);
   const d = new Date(isoDate + "T00:00:00");
   const dow = d.getDay(); // 0=So, 1=Mo, …, 6=Sa
   if (modell === "fix_40h") {
@@ -154,7 +157,8 @@ export function monatsSoll(
   kalender: Map<string, TagessollKalender>,
   modell: ArbeitszeitModell,
   tagesnorm: number,
-  beschaeftigungsgrad: number
+  beschaeftigungsgrad: number,
+  wochenSoll?: unknown,
 ): number {
   let total = 0;
   const start = new Date(year, monthOneBased - 1, 1);
@@ -165,7 +169,8 @@ export function monatsSoll(
       kalender,
       modell,
       tagesnorm,
-      beschaeftigungsgrad
+      beschaeftigungsgrad,
+      wochenSoll,
     );
   }
   return total;
@@ -182,13 +187,14 @@ export function periodeSoll(
   kalender: Map<string, TagessollKalender>,
   modell: ArbeitszeitModell,
   tagesnorm: number,
-  beschaeftigungsgrad: number
+  beschaeftigungsgrad: number,
+  wochenSoll?: unknown,
 ): number {
   let total = 0;
   const d = new Date(fromIso + "T00:00:00");
   const end = new Date(toIso + "T00:00:00");
   while (d <= end) {
-    total += tagesSoll(localIso(d), kalender, modell, tagesnorm, beschaeftigungsgrad);
+    total += tagesSoll(localIso(d), kalender, modell, tagesnorm, beschaeftigungsgrad, wochenSoll);
     d.setDate(d.getDate() + 1);
   }
   return total;

@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Sparkles, ChevronRight, Mail, AlertCircle } from "lucide-react";
+import { Loader2, Sparkles, ChevronRight, Mail, AlertCircle, BellRing, Download, ListChecks, Archive } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { StundenBerichtStatus } from "@/integrations/supabase/types";
 import {
@@ -29,6 +29,13 @@ import {
 } from "@/hooks/useStundenBericht";
 import { BsbVersendenDialog } from "@/components/BsbVersendenDialog";
 import { UnterschriftDialog } from "@/components/UnterschriftDialog";
+import {
+  StundenberichtErinnernDialog,
+  useLetzteErinnerung,
+  type ErinnerBericht,
+} from "@/components/StundenberichtErinnernDialog";
+import { buildBerichtPdf } from "@/lib/bsbPdfHelper";
+import { zipHerunterladen } from "@/lib/zipDownload";
 
 const STATUS_BADGE: Record<StundenBerichtStatus, { label: string; cls: string }> = {
   offen: {
@@ -121,6 +128,15 @@ export default function StundenBerichteListe() {
   // und ins PDF/an die RPC durchgereicht (Bestätigung = Unterschrift).
   const [bueroSignOpen, setBueroSignOpen] = useState(false);
   const [bueroSignature, setBueroSignature] = useState<string | null>(null);
+  // An die Unterschrift erinnern (Wunsch J. Maurer, 22.10.2026)
+  const [erinnern, setErinnern] = useState<ErinnerBericht[] | null>(null);
+  const offeneMa = useMemo(
+    () => offeneBerichte.filter((b) => b.status === "offen").map((b) => b.mitarbeiter_id),
+    [offeneBerichte],
+  );
+  const { letzte: letzteErinnerung, vermerken: erinnerungVermerken } = useLetzteErinnerung(offeneMa);
+  const zuErinnern = offenGefiltert.filter((b) => b.status === "offen");
+  const [zipBusy, setZipBusy] = useState(false);
 
   // Sortierung: nach Status (offen → unterschrieben → bestaetigt → versendet),
   // innerhalb nach Mitarbeiter-Nachname.
@@ -164,6 +180,45 @@ export default function StundenBerichteListe() {
     year: "numeric",
   })} · ${teil === 1 ? "Teil I (1.–16.)" : "Teil II (17.–Ende)"}`;
 
+  const nameVon = (b: (typeof berichte)[number]) =>
+    `${b.mitarbeiter?.nachname ?? ""} ${b.mitarbeiter?.vorname ?? ""}`.trim();
+
+  /** „Nacheinander prüfen" (Wunsch J. Maurer, 22.10.2026): den ersten
+   *  wartenden Bericht alphabetisch öffnen — dort geht es mit „Passt — weiter"
+   *  durch die ganze Periode, ohne zurück in die Liste. */
+  const pruefenStarten = (kandidaten: typeof berichte) => {
+    const erster = kandidaten
+      .filter((b) => b.status === "unterschrieben" || b.status === "bestaetigt")
+      .sort(
+        (a, b) =>
+          a.jahr - b.jahr || a.monat - b.monat || a.teil - b.teil || nameVon(a).localeCompare(nameVon(b), "de-AT"),
+      )[0];
+    if (erster) navigate(`/stundenbericht/${erster.id}`);
+    else toast({ title: "Nichts zu prüfen", description: "Kein Bericht wartet auf das Büro." });
+  };
+
+  /** Markierte — oder ohne Auswahl alle der Periode — als ZIP. */
+  const zipLaden = async () => {
+    const liste = selected.size > 0 ? berichte.filter((b) => selected.has(b.id)) : berichte;
+    if (liste.length === 0) return;
+    setZipBusy(true);
+    try {
+      const dateien: { name: string; inhalt: Blob }[] = [];
+      for (const b of liste) {
+        const { doc, fileName } = await buildBerichtPdf(b.id);
+        dateien.push({ name: fileName, inhalt: doc.output("blob") });
+      }
+      await zipHerunterladen(
+        dateien,
+        `Stundenberichte ${jahr}-${String(monat).padStart(2, "0")} Teil ${teil === 1 ? "I" : "II"}`,
+      );
+    } catch (e) {
+      toast({ variant: "destructive", title: "Download fehlgeschlagen", description: (e as Error).message });
+    } finally {
+      setZipBusy(false);
+    }
+  };
+
   const erzeugen = async () => {
     if (
       !window.confirm(
@@ -196,7 +251,21 @@ export default function StundenBerichteListe() {
 
   return (
     <div className="space-y-4 max-w-3xl mx-auto">
-      <PageHeader title="Baustellenstundenberichte" />
+      <PageHeader
+        title="Baustellenstundenberichte"
+        actions={
+          // Gesammelt versenden/herunterladen wie bei den Tätigkeitsberichten:
+          // im Berichte-Archiv mit derselben Periode.
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => navigate(`/berichte-archiv?art=stundenbericht&jahr=${jahr}&monat=${monat}&teil=${teil}`)}
+          >
+            <Archive className="h-4 w-4 mr-1.5" />
+            Gesammelt versenden / Download
+          </Button>
+        }
+      />
 
       {/* Periodenauswahl + Erzeugen */}
       <Card>
@@ -304,18 +373,35 @@ export default function StundenBerichteListe() {
                 </Button>
               ))}
             </div>
+            <div className="flex flex-wrap gap-1.5">
+              {offenGefiltert.some((b) => b.status !== "offen") && (
+                <Button size="sm" className="h-8 text-xs" onClick={() => pruefenStarten(offenGefiltert)}>
+                  <ListChecks className="h-3.5 w-3.5 mr-1.5" />
+                  Nacheinander prüfen
+                </Button>
+              )}
+              {zuErinnern.length > 0 && (
+                <Button size="sm" variant="outline" className="h-8 text-xs bg-background" onClick={() => setErinnern(zuErinnern)}>
+                  <BellRing className="h-3.5 w-3.5 mr-1.5" />
+                  {new Set(zuErinnern.map((b) => b.mitarbeiter_id)).size === 1
+                    ? "Mitarbeiter erinnern"
+                    : `Alle ${new Set(zuErinnern.map((b) => b.mitarbeiter_id)).size} erinnern`}
+                </Button>
+              )}
+            </div>
             <div className="divide-y divide-amber-200/70">
               {offenGefiltert.length === 0 && (
                 <div className="text-xs text-muted-foreground italic py-2">Keine Berichte in dieser Auswahl.</div>
               )}
               {(offenAlle ? offenGefiltert : offenGefiltert.slice(0, 15)).map((b) => {
                 const badge = STATUS_BADGE[b.status];
+                const erinnert = b.status === "offen" ? letzteErinnerung[b.mitarbeiter_id] : undefined;
                 return (
+                  <div key={b.id} className="flex items-center gap-1">
                   <button
-                    key={b.id}
                     type="button"
                     onClick={() => navigate(`/stundenbericht/${b.id}`)}
-                    className="w-full flex items-center gap-2 py-1.5 text-left hover:bg-amber-100/60 rounded px-1"
+                    className="flex-1 min-w-0 flex items-center gap-2 py-1.5 text-left hover:bg-amber-100/60 rounded px-1"
                   >
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium truncate">
@@ -330,6 +416,7 @@ export default function StundenBerichteListe() {
                         {b.unterschrieben_am
                           ? `Unterschrieben am ${fmtTag(b.unterschrieben_am)}`
                           : "Wartet auf Mitarbeiter-Unterschrift"}
+                        {erinnert ? ` · erinnert am ${fmtTag(erinnert)}` : ""}
                       </div>
                     </div>
                     <Badge variant="outline" className={`${badge.cls} text-[10px]`}>
@@ -337,6 +424,21 @@ export default function StundenBerichteListe() {
                     </Badge>
                     <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
                   </button>
+                  {b.status === "offen" ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 w-8 p-0 shrink-0"
+                      onClick={() => setErinnern([b])}
+                      title="An die Unterschrift erinnern"
+                      aria-label="An die Unterschrift erinnern"
+                    >
+                      <BellRing className="h-4 w-4" />
+                    </Button>
+                  ) : (
+                    <span className="w-8 shrink-0" />
+                  )}
+                  </div>
                 );
               })}
             </div>
@@ -365,6 +467,10 @@ export default function StundenBerichteListe() {
               >
                 Auswahl löschen
               </Button>
+              <Button variant="outline" size="sm" onClick={zipLaden} disabled={zipBusy}>
+                {zipBusy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
+                Herunterladen
+              </Button>
               <Button size="sm" onClick={() => setBueroSignOpen(true)}>
                 <Mail className="h-3.5 w-3.5 mr-1.5" />
                 Markierte ans Büro senden
@@ -375,6 +481,21 @@ export default function StundenBerichteListe() {
       )}
 
       {/* Liste */}
+      {berichte.length > 0 && selected.size === 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="text-sm font-semibold mr-auto">{periodeLabel}</div>
+          {berichte.some((b) => b.status === "unterschrieben" || b.status === "bestaetigt") && (
+            <Button size="sm" onClick={() => pruefenStarten(berichte)}>
+              <ListChecks className="h-4 w-4 mr-1.5" />
+              Nacheinander prüfen
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={zipLaden} disabled={zipBusy}>
+            {zipBusy ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Download className="h-4 w-4 mr-1.5" />}
+            Alle herunterladen ({berichte.length})
+          </Button>
+        </div>
+      )}
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
@@ -492,6 +613,13 @@ export default function StundenBerichteListe() {
           setSelected(new Set());
           setBueroSignature(null);
         }}
+      />
+
+      <StundenberichtErinnernDialog
+        open={!!erinnern}
+        onOpenChange={(o) => !o && setErinnern(null)}
+        berichte={erinnern ?? []}
+        onGesendet={erinnerungVermerken}
       />
     </div>
   );

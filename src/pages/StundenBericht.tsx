@@ -8,7 +8,7 @@
  * mehr möglich; vor dem Abschicken nochmal genau kontrollieren.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/PageHeader";
@@ -20,8 +20,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import {
   ChevronLeft,
+  ChevronRight,
   ChevronDown,
   Loader2,
+  Download,
+  BellRing,
+  Check,
   PenLine,
   CheckCircle2,
   AlertTriangle,
@@ -35,9 +39,11 @@ import { fmtHNum } from "@/lib/zeiterfassung";
 import { useStundenTageList, type StundenTagFull } from "@/hooks/useStundenTag";
 import {
   useStundenBericht,
+  useStundenBerichteList,
   useStundenBerichtAktionen,
   logBerichtAenderung,
 } from "@/hooks/useStundenBericht";
+import { StundenberichtErinnernDialog, useLetzteErinnerung } from "@/components/StundenberichtErinnernDialog";
 import { geaenderteTage, type BerichtSnapshot } from "@/lib/stundenBerichtDiff";
 import { TagBearbeitenDialog } from "@/components/TagBearbeitenDialog";
 import { UnterschriftDialog } from "@/components/UnterschriftDialog";
@@ -74,6 +80,34 @@ const ART_ORDER: Record<TagStatus, number> = {
   krank: 4,
   schlechtwetter: 5,
   feiertag: 6,
+};
+
+/** Kurzform für die Auswahl in der Prüf-Leiste. */
+const STATUS_KURZ: Record<StundenBerichtStatus, string> = {
+  offen: "MA unterschreibt noch",
+  unterschrieben: "wartet auf Büro",
+  bestaetigt: "bestätigt, nicht versendet",
+  versendet: "versendet",
+};
+
+/** Beim Durchprüfen „Passt" markierte Berichte — überlebt das Hin- und
+ *  Herspringen und einen Abstecher in die Liste (nur in diesem Tab). */
+const VORMERK_KEY = "bsb-vorgemerkt";
+const NUR_WARTENDE_KEY = "bsb-pruefen-nur-wartende";
+const ladeSession = <T,>(key: string, ersatz: T): T => {
+  try {
+    const v = sessionStorage.getItem(key);
+    return v ? (JSON.parse(v) as T) : ersatz;
+  } catch {
+    return ersatz;
+  }
+};
+const speichereSession = (key: string, wert: unknown) => {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(wert));
+  } catch {
+    /* privater Modus — dann eben nur bis zum Neuladen */
+  }
 };
 
 const STATUS_BADGE: Record<
@@ -211,6 +245,44 @@ export default function StundenBericht() {
    *  der Versand-Dialog soll mit dieser Signatur an die RPC. */
   const [bueroSignature, setBueroSignature] = useState<string | null>(null);
   const [bueroSignOpen, setBueroSignOpen] = useState(false);
+  /** Mehrere auf einmal versenden (vorgemerkte) — null = nur dieser Bericht. */
+  const [versandIds, setVersandIds] = useState<string[] | null>(null);
+  const [downloadBusy, setDownloadBusy] = useState(false);
+  const [erinnernOffen, setErinnernOffen] = useState(false);
+
+  // ─── Prüf-Leiste (Wunsch J. Maurer, 22.10.2026) ──────────────────────
+  // Alle Berichte derselben Periode alphabetisch nacheinander prüfen, ohne
+  // zurück in die Liste; „Passt" merkt vor, am Ende alle auf einmal mit
+  // einer Unterschrift bestätigen und versenden.
+  const { data: periodeBerichte = [] } = useStundenBerichteList({
+    jahr: bericht?.jahr,
+    monat: bericht?.monat,
+    teil: bericht?.teil,
+    enabled: !!bericht && isAdmin,
+  });
+  const [nurWartende, setNurWartende] = useState<boolean>(() => ladeSession(NUR_WARTENDE_KEY, true));
+  const [vorgemerkt, setVorgemerkt] = useState<string[]>(() => ladeSession(VORMERK_KEY, [] as string[]));
+  useEffect(() => speichereSession(VORMERK_KEY, vorgemerkt), [vorgemerkt]);
+  useEffect(() => speichereSession(NUR_WARTENDE_KEY, nurWartende), [nurWartende]);
+  const reihe = useMemo(() => {
+    const name = (b: (typeof periodeBerichte)[number]) =>
+      `${b.mitarbeiter?.nachname ?? ""} ${b.mitarbeiter?.vorname ?? ""}`.trim();
+    return [...periodeBerichte]
+      .filter(
+        (b) => !nurWartende || b.status === "unterschrieben" || b.status === "bestaetigt" || b.id === id,
+      )
+      .sort((a, b) => name(a).localeCompare(name(b), "de-AT"));
+  }, [periodeBerichte, nurWartende, id]);
+  const vorgemerktOffen = periodeBerichte.filter(
+    (b) => vorgemerkt.includes(b.id) && (b.status === "unterschrieben" || b.status === "bestaetigt"),
+  );
+  // Neuer Bericht in der Reihe: oben anfangen.
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [id]);
+  const { letzte: letzteErinnerung, vermerken: erinnerungVermerken } = useLetzteErinnerung(
+    bericht?.status === "offen" && isAdmin ? [bericht.mitarbeiter_id] : [],
+  );
 
   const geaendert = useMemo(
     () => geaenderteTage(bericht?.snapshot as BerichtSnapshot | undefined, tage),
@@ -430,7 +502,39 @@ export default function StundenBericht() {
    *  Büro-/Maurer-Users sammeln, dann Versand-Dialog öffnen. Die
    *  Signatur wird mit dem Versand zur RPC durchgereicht. */
   const handleBestaetigen = () => {
+    setVersandIds(null);
     setBueroSignOpen(true);
+  };
+  const vorgemerkteVersenden = () => {
+    setVersandIds(vorgemerktOffen.map((b) => b.id));
+    setBueroSignOpen(true);
+  };
+
+  const idx = reihe.findIndex((b) => b.id === bericht.id);
+  const vorher = idx > 0 ? reihe[idx - 1] : null;
+  const naechster = idx >= 0 && idx < reihe.length - 1 ? reihe[idx + 1] : null;
+  const springe = (zielId: string) => navigate(`/stundenbericht/${zielId}`, { replace: true });
+  const istVorgemerkt = vorgemerkt.includes(bericht.id);
+  const passtWeiter = () => {
+    setVorgemerkt((v) => (v.includes(bericht.id) ? v : [...v, bericht.id]));
+    if (naechster) springe(naechster.id);
+    else
+      toast({
+        title: "Das war der letzte",
+        description: "Jetzt „Vorgemerkte bestätigen & senden“ — eine Unterschrift für alle.",
+      });
+  };
+
+  const handleDownload = async () => {
+    setDownloadBusy(true);
+    try {
+      const { doc, fileName } = await buildBerichtPdf(bericht.id);
+      doc.save(fileName);
+    } catch (e) {
+      toast({ variant: "destructive", title: "PDF-Fehler", description: (e as Error).message });
+    } finally {
+      setDownloadBusy(false);
+    }
   };
 
   const handleBueroUnterschrift = (dataUrl: string) => {
@@ -504,6 +608,89 @@ export default function StundenBericht() {
         <PageHeader title="Baustellenstundenbericht" />
       </div>
 
+      {isAdmin && reihe.length > 0 && (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 w-9 p-0"
+                disabled={!vorher}
+                onClick={() => vorher && springe(vorher.id)}
+                aria-label="Vorheriger Bericht"
+                title={vorher ? `${vorher.mitarbeiter?.nachname ?? ""} ${vorher.mitarbeiter?.vorname ?? ""}` : undefined}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <select
+                className="h-9 flex-1 min-w-[12rem] rounded-md border bg-background px-2 text-sm"
+                value={bericht.id}
+                onChange={(e) => springe(e.target.value)}
+                aria-label="Bericht wählen"
+              >
+                {reihe.map((b, i) => (
+                  <option key={b.id} value={b.id}>
+                    {i + 1}/{reihe.length} · {b.mitarbeiter?.nachname ?? ""} {b.mitarbeiter?.vorname ?? ""}
+                    {vorgemerkt.includes(b.id) ? " ✓" : ""} — {STATUS_KURZ[b.status]}
+                  </option>
+                ))}
+              </select>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 w-9 p-0"
+                disabled={!naechster}
+                onClick={() => naechster && springe(naechster.id)}
+                aria-label="Nächster Bericht"
+                title={naechster ? `${naechster.mitarbeiter?.nachname ?? ""} ${naechster.mitarbeiter?.vorname ?? ""}` : undefined}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5"
+                  checked={nurWartende}
+                  onChange={(e) => setNurWartende(e.target.checked)}
+                />
+                nur „Wartet auf Büro“
+              </label>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {kannBestaetigen &&
+                (istVorgemerkt ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-9 border-emerald-400 text-emerald-800"
+                    onClick={() => setVorgemerkt((v) => v.filter((x) => x !== bericht.id))}
+                    title="Vormerkung zurücknehmen"
+                  >
+                    <Check className="h-4 w-4 mr-1.5" /> Passt — vorgemerkt
+                  </Button>
+                ) : (
+                  <Button size="sm" className="h-9" onClick={passtWeiter}>
+                    <Check className="h-4 w-4 mr-1.5" /> Passt{naechster ? " — weiter" : ""}
+                    {naechster && <ChevronRight className="h-4 w-4 ml-0.5" />}
+                  </Button>
+                ))}
+              {vorgemerktOffen.length > 0 && (
+                <Button size="sm" variant={kannBestaetigen && !istVorgemerkt ? "outline" : "default"} className="h-9" onClick={vorgemerkteVersenden}>
+                  <Mail className="h-4 w-4 mr-1.5" />
+                  Vorgemerkte bestätigen &amp; senden ({vorgemerktOffen.length})
+                </Button>
+              )}
+              <span className="text-[11px] text-muted-foreground">
+                {kannBestaetigen
+                  ? "„Passt“ merkt vor und springt zum Nächsten — am Ende alle mit einer Unterschrift versenden."
+                  : "Alphabetisch durch die Berichte dieser Periode blättern."}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Kopf */}
       <Card>
         <CardContent className="p-4 space-y-3">
@@ -514,9 +701,21 @@ export default function StundenBericht() {
               </div>
               <div className="text-sm text-muted-foreground">{maName}</div>
             </div>
-            <Badge variant="outline" className={badge.cls}>
-              {badge.label}
-            </Badge>
+            <div className="flex flex-col items-end gap-1.5">
+              <Badge variant="outline" className={badge.cls}>
+                {badge.label}
+              </Badge>
+              {isAdmin && bericht.status === "offen" && (
+                <Button size="sm" variant="outline" className="h-8" onClick={() => setErinnernOffen(true)}>
+                  <BellRing className="h-3.5 w-3.5 mr-1.5" /> An Unterschrift erinnern
+                </Button>
+              )}
+              {isAdmin && bericht.status === "offen" && letzteErinnerung[bericht.mitarbeiter_id] && (
+                <span className="text-[11px] text-muted-foreground">
+                  zuletzt erinnert am {fmtTs(letzteErinnerung[bericht.mitarbeiter_id])}
+                </span>
+              )}
+            </div>
           </div>
           {(bericht.unterschrieben_am ||
             bericht.bestaetigt_am ||
@@ -1041,6 +1240,10 @@ export default function StundenBericht() {
           )}
           PDF ansehen
         </Button>
+        <Button variant="outline" onClick={handleDownload} disabled={downloadBusy} className="min-w-[140px]">
+          {downloadBusy ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Download className="h-4 w-4 mr-1.5" />}
+          PDF herunterladen
+        </Button>
         {kannUnterschreiben && (
           <Button onClick={() => setSignOpen(true)} className="flex-1 min-w-[200px] h-12">
             <PenLine className="h-4 w-4 mr-1.5" />
@@ -1059,7 +1262,10 @@ export default function StundenBericht() {
         {kannReVersenden && (
           <Button
             variant="outline"
-            onClick={() => setVersendenOpen(true)}
+            onClick={() => {
+              setVersandIds(null);
+              setVersendenOpen(true);
+            }}
             className="min-w-[180px] h-12"
           >
             <Mail className="h-4 w-4 mr-1.5" />
@@ -1096,26 +1302,35 @@ export default function StundenBericht() {
           {kannReVersenden && (
             <Button
               variant="outline"
-              onClick={() => setVersendenOpen(true)}
+              onClick={() => {
+                setVersandIds(null);
+                setVersendenOpen(true);
+              }}
               className="w-full h-11 text-base font-semibold"
             >
               <Mail className="h-5 w-5 mr-2" />
               Ans Büro senden
             </Button>
           )}
-          <Button
-            variant="outline"
-            onClick={handlePdf}
-            disabled={pdfBusy}
-            className="w-full h-10"
-          >
-            {pdfBusy ? (
-              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-            ) : (
-              <FileText className="h-4 w-4 mr-1.5" />
-            )}
-            PDF ansehen
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={handlePdf}
+              disabled={pdfBusy}
+              className="flex-1 h-10"
+            >
+              {pdfBusy ? (
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              ) : (
+                <FileText className="h-4 w-4 mr-1.5" />
+              )}
+              PDF ansehen
+            </Button>
+            <Button variant="outline" onClick={handleDownload} disabled={downloadBusy} className="flex-1 h-10">
+              {downloadBusy ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Download className="h-4 w-4 mr-1.5" />}
+              Herunterladen
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -1157,12 +1372,23 @@ export default function StundenBericht() {
           setVersendenOpen(o);
           if (!o) setBueroSignature(null);
         }}
-        berichtIds={[bericht.id]}
+        berichtIds={versandIds ?? [bericht.id]}
         bueroSignature={bueroSignature}
         onSent={() => {
+          const raus = versandIds ?? [bericht.id];
           setBueroSignature(null);
-          qc.invalidateQueries({ queryKey: ["stunden_bericht", bericht.id] });
+          setVersandIds(null);
+          setVorgemerkt((v) => v.filter((x) => !raus.includes(x)));
+          qc.invalidateQueries({ queryKey: ["stunden_bericht"] });
+          qc.invalidateQueries({ queryKey: ["stunden_berichte"] });
         }}
+      />
+
+      <StundenberichtErinnernDialog
+        open={erinnernOffen}
+        onOpenChange={setErinnernOffen}
+        berichte={bericht.status === "offen" ? [bericht] : []}
+        onGesendet={erinnerungVermerken}
       />
     </div>
   );

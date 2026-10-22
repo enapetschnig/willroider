@@ -175,8 +175,35 @@ export function tagSpaltenFarbe(isoDatum: string): string | undefined {
  * dazu, wodurch DELTA null wird. Urlaub, Krankheit und Feiertag zählen also
  * als geleistete Zeit gegen das volle Soll.
  */
-export function angestelltenSoll(isoDatum: string): number {
+export function angestelltenSoll(isoDatum: string, wochenSoll?: WochenSoll | null): number {
+  if (wochenSoll) return sollAusWoche(isoDatum, wochenSoll);
   return ANGESTELLTEN_SOLL[wochentagIndex(isoDatum)];
+}
+
+/**
+ * Eigenes Wochen-Soll einer Person (profile_konten_settings.soll_woche),
+ * z. B. geringfügig Beschäftigte (Wunsch J. Maurer 22.10.2026). Je Tag
+ * Mo–So; `gerade_kw` gilt — wenn gesetzt — in geraden Kalenderwochen.
+ * Geht dem Arbeitszeitmodell vor, ohne Beschäftigungsgrad. Spiegel der
+ * SQL-Funktion tages_soll.
+ */
+export type WochenSoll = { woche: number[]; gerade_kw?: number[] | null };
+
+export function istWochenSoll(v: unknown): v is WochenSoll {
+  return !!v && typeof v === "object" && Array.isArray((v as WochenSoll).woche);
+}
+
+/** ISO-Kalenderwoche (Mo–So, KW 1 enthält den ersten Donnerstag). */
+export function isoKw(isoDatum: string): number {
+  const d = new Date(`${isoDatum}T00:00:00`);
+  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7)); // Donnerstag dieser Woche
+  const jan4 = new Date(d.getFullYear(), 0, 4);
+  return 1 + Math.round(((d.getTime() - jan4.getTime()) / 86400000 - 3 + ((jan4.getDay() + 6) % 7)) / 7);
+}
+
+export function sollAusWoche(isoDatum: string, ws: WochenSoll): number {
+  const woche = ws.gerade_kw && isoKw(isoDatum) % 2 === 0 ? ws.gerade_kw : ws.woche;
+  return Number(woche?.[wochentagIndex(isoDatum)] ?? 0) || 0;
 }
 
 /** Beschriftung über der Tagesspalte: gesetzlicher Feiertag oder 24./31.12. */
@@ -298,6 +325,7 @@ export function berechneSummen(
   tage: string[],
   zellen: Record<string, Record<string, number>>,
   sonder: Record<string, Record<string, number>>,
+  wochenSoll?: WochenSoll | null,
 ): BerichtSummen {
   const zwischensumme: Record<string, number> = {};
   const stundensumme: Record<string, number> = {};
@@ -313,7 +341,7 @@ export function berechneSummen(
     for (const art of Object.values(sonder)) abw += art[t] ?? 0;
     stundensumme[t] = r2(zs + abw);
 
-    soll[t] = angestelltenSoll(t);
+    soll[t] = angestelltenSoll(t, wochenSoll);
     delta[t] = r2(stundensumme[t] - soll[t]);
   }
 

@@ -25,6 +25,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { edgeFunctionErrorMessage } from "@/lib/edgeError";
 import { archivDownloadUrl } from "@/lib/berichtArchiv";
+import { zipHerunterladen } from "@/lib/zipDownload";
 import { periodeFuer } from "@/lib/taetigkeitsbericht";
 import { makeFahrtenbuchPdf } from "@/lib/taetigkeitsberichtPdf";
 import { useSearchParams } from "react-router-dom";
@@ -66,7 +67,10 @@ export default function BerichteArchiv() {
   );
   const [jahr, setJahr] = useState(Number(params.get("jahr")) || heute.getFullYear());
   const [monat, setMonat] = useState(Number(params.get("monat")) || heute.getMonth() + 1);
-  const [teil, setTeil] = useState<0 | 1 | 2>(0);
+  const [teil, setTeil] = useState<0 | 1 | 2>(() => {
+    const t = Number(params.get("teil"));
+    return t === 1 || t === 2 ? t : 0;
+  });
   const [zeilen, setZeilen] = useState<Zeile[]>([]);
   const [laden, setLaden] = useState(true);
   const [ausgewaehlt, setAusgewaehlt] = useState<Set<string>>(new Set());
@@ -170,6 +174,31 @@ export default function BerichteArchiv() {
     art === "taetigkeitsbericht"
       ? `${MONATE[(monat + 10) % 12]} - ${MONATE[monat - 1]} ${jahr}`
       : `${MONATE[monat - 1]} ${jahr}${teil ? ` · Teil ${teil === 1 ? "I" : "II"}` : ""}`;
+
+  /** Markierte als eine ZIP (Wunsch J. Maurer, 22.10.2026). */
+  const [zipBusy, setZipBusy] = useState(false);
+  const zipLaden = async () => {
+    const liste = neueste.filter((z) => ausgewaehlt.has(z.id));
+    if (liste.length === 0) return;
+    setZipBusy(true);
+    try {
+      const dateien = await Promise.all(
+        liste.map(async (z) => {
+          const { data, error } = await supabase.storage.from("berichte-archiv").download(z.storage_pfad);
+          if (error || !data) throw error ?? new Error(`${z.dateiname} nicht gefunden`);
+          return { name: z.dateiname, inhalt: data };
+        }),
+      );
+      await zipHerunterladen(
+        dateien,
+        `${art === "taetigkeitsbericht" ? "Tätigkeitsberichte" : "Stundenberichte"} ${periodeText}`,
+      );
+    } catch (e) {
+      toast({ variant: "destructive", title: "Download fehlgeschlagen", description: (e as Error).message });
+    } finally {
+      setZipBusy(false);
+    }
+  };
 
   const mailOeffnen = () => {
     const n = ausgewaehlt.size;
@@ -334,6 +363,10 @@ export default function BerichteArchiv() {
             <div className="ml-auto flex gap-2">
               <Button variant="outline" size="sm" onClick={() => setAusgewaehlt(new Set())}>
                 Auswahl löschen
+              </Button>
+              <Button variant="outline" size="sm" onClick={zipLaden} disabled={zipBusy}>
+                {zipBusy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
+                Herunterladen (ZIP)
               </Button>
               <Button size="sm" onClick={mailOeffnen}>
                 <Mail className="h-3.5 w-3.5 mr-1.5" /> Gesammelt per Mail senden

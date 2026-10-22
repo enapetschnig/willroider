@@ -164,7 +164,7 @@ export default function TaetigkeitsberichteListe() {
               }
             >
               <Mail className="h-4 w-4 mr-1.5" />
-              Gesammelt versenden
+              Gesammelt versenden / Download
             </Button>
           </>
         }
