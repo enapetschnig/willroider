@@ -49,7 +49,7 @@ import { TagBearbeitenDialog } from "@/components/TagBearbeitenDialog";
 import { UnterschriftDialog } from "@/components/UnterschriftDialog";
 import { BsbVersendenDialog } from "@/components/BsbVersendenDialog";
 import { useZulagenTypen } from "@/hooks/useStammdatenStunden";
-import { aggregiereFahrtgeld, aggregiereZulagen } from "@/lib/stundenAggregation";
+import { aggregiereFahrtgeld, aggregiereZulagen, zusatzZeilenJeTag } from "@/lib/stundenAggregation";
 import { buildBerichtPdf } from "@/lib/bsbPdfHelper";
 import { archiviereBericht } from "@/lib/berichtArchiv";
 
@@ -90,10 +90,13 @@ const STATUS_KURZ: Record<StundenBerichtStatus, string> = {
   versendet: "versendet",
 };
 
-/** Beim Durchprüfen „Passt" markierte Berichte — überlebt das Hin- und
- *  Herspringen und einen Abstecher in die Liste (nur in diesem Tab). */
-const VORMERK_KEY = "bsb-vorgemerkt";
-const NUR_WARTENDE_KEY = "bsb-pruefen-nur-wartende";
+/** Welche Berichte die Prüf-Leiste durchgeht (bleibt im Tab gemerkt). */
+type ReiheUmfang = "wartend_alle" | "wartend_periode" | "periode";
+const REIHE_KEY = "bsb-pruefen-reihe";
+const MONAT_KURZ = ["Jän", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+/** Büro-Unterschrift: einmal geleistet, gilt sie für weitere Bestätigungen
+ *  in diesem Tab — nicht bei jedem Bericht neu unterschreiben. */
+let gemerkteBueroUnterschrift: string | null = null;
 const ladeSession = <T,>(key: string, ersatz: T): T => {
   try {
     const v = sessionStorage.getItem(key);
@@ -245,7 +248,7 @@ export default function StundenBericht() {
    *  der Versand-Dialog soll mit dieser Signatur an die RPC. */
   const [bueroSignature, setBueroSignature] = useState<string | null>(null);
   const [bueroSignOpen, setBueroSignOpen] = useState(false);
-  /** Mehrere auf einmal versenden (vorgemerkte) — null = nur dieser Bericht. */
+  /** Mehrere auf einmal versenden (alle bestätigten) — null = nur dieser Bericht. */
   const [versandIds, setVersandIds] = useState<string[] | null>(null);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [erinnernOffen, setErinnernOffen] = useState(false);
@@ -254,28 +257,39 @@ export default function StundenBericht() {
   // Alle Berichte derselben Periode alphabetisch nacheinander prüfen, ohne
   // zurück in die Liste; „Passt" merkt vor, am Ende alle auf einmal mit
   // einer Unterschrift bestätigen und versenden.
+  // 23.10.: Die Reihe lief nur innerhalb EINER Periode und blieb am Ende
+  // stehen („da hakt es") — jetzt standardmäßig über alle Monate.
   const { data: periodeBerichte = [] } = useStundenBerichteList({
     jahr: bericht?.jahr,
     monat: bericht?.monat,
     teil: bericht?.teil,
     enabled: !!bericht && isAdmin,
   });
-  const [nurWartende, setNurWartende] = useState<boolean>(() => ladeSession(NUR_WARTENDE_KEY, true));
-  const [vorgemerkt, setVorgemerkt] = useState<string[]>(() => ladeSession(VORMERK_KEY, [] as string[]));
-  useEffect(() => speichereSession(VORMERK_KEY, vorgemerkt), [vorgemerkt]);
-  useEffect(() => speichereSession(NUR_WARTENDE_KEY, nurWartende), [nurWartende]);
+  const { data: wartendeAlle = [] } = useStundenBerichteList({
+    status: ["unterschrieben", "bestaetigt"],
+    enabled: !!bericht && isAdmin,
+  });
+  const [umfang, setUmfang] = useState<ReiheUmfang>(() => ladeSession<ReiheUmfang>(REIHE_KEY, "wartend_alle"));
+  useEffect(() => speichereSession(REIHE_KEY, umfang), [umfang]);
   const reihe = useMemo(() => {
     const name = (b: (typeof periodeBerichte)[number]) =>
       `${b.mitarbeiter?.nachname ?? ""} ${b.mitarbeiter?.vorname ?? ""}`.trim();
-    return [...periodeBerichte]
-      .filter(
-        (b) => !nurWartende || b.status === "unterschrieben" || b.status === "bestaetigt" || b.id === id,
-      )
-      .sort((a, b) => name(a).localeCompare(name(b), "de-AT"));
-  }, [periodeBerichte, nurWartende, id]);
-  const vorgemerktOffen = periodeBerichte.filter(
-    (b) => vorgemerkt.includes(b.id) && (b.status === "unterschrieben" || b.status === "bestaetigt"),
-  );
+    const wartet = (b: (typeof periodeBerichte)[number]) =>
+      b.status === "unterschrieben" || b.status === "bestaetigt" || b.id === id;
+    let liste =
+      umfang === "wartend_alle"
+        ? [...wartendeAlle]
+        : periodeBerichte.filter((b) => umfang === "periode" || wartet(b));
+    // Der gerade offene Bericht gehört immer dazu (auch frisch versendet).
+    if (bericht && !liste.some((b) => b.id === bericht.id)) liste = [...liste, bericht];
+    // Älteste Periode zuerst, darin alphabetisch.
+    return liste.sort(
+      (a, b) =>
+        a.jahr - b.jahr || a.monat - b.monat || a.teil - b.teil || name(a).localeCompare(name(b), "de-AT"),
+    );
+  }, [periodeBerichte, wartendeAlle, umfang, id, bericht]);
+  /** Bestätigt, aber noch nicht raus — in der aktuellen Reihe. */
+  const bestaetigtOffen = reihe.filter((b) => b.status === "bestaetigt");
   // Neuer Bericht in der Reihe: oben anfangen.
   useEffect(() => {
     window.scrollTo({ top: 0 });
@@ -371,6 +385,8 @@ export default function StundenBericht() {
     [tage, zulagenTypen],
   );
   const fahrtgeldAgg = useMemo(() => aggregiereFahrtgeld(tage), [tage]);
+  /** Fahrgeld + Zulagen je Tag als Zeilen unter der Summe (J. Maurer 23.10.). */
+  const zusatzZeilen = useMemo(() => zusatzZeilenJeTag(tage, zulagenTypen), [tage, zulagenTypen]);
 
   /** Kompakte Versand-Vorschau: Stunden pro Baustelle + Gesamtsumme. Nur
    *  Arbeit (Baustelle/Firma) wird summiert — Abwesenheiten zählen nicht. */
@@ -501,33 +517,62 @@ export default function StundenBericht() {
   /** Klick auf „Bestätigen & ans Büro senden" — zuerst Unterschrift des
    *  Büro-/Maurer-Users sammeln, dann Versand-Dialog öffnen. Die
    *  Signatur wird mit dem Versand zur RPC durchgereicht. */
-  const handleBestaetigen = () => {
-    setVersandIds(null);
-    setBueroSignOpen(true);
-  };
-  const vorgemerkteVersenden = () => {
-    setVersandIds(vorgemerktOffen.map((b) => b.id));
-    setBueroSignOpen(true);
-  };
-
   const idx = reihe.findIndex((b) => b.id === bericht.id);
   const vorher = idx > 0 ? reihe[idx - 1] : null;
   const naechster = idx >= 0 && idx < reihe.length - 1 ? reihe[idx + 1] : null;
   const springe = (zielId: string) => navigate(`/stundenbericht/${zielId}`, { replace: true });
-  const istVorgemerkt = vorgemerkt.includes(bericht.id);
-  /** Vormerken geht für alles, was noch nicht raus ist — auch schon
-   *  bestätigte (der Sammelversand bestätigt bei Bedarf mit). */
-  const kannVormerken =
-    isAdmin && (bericht.status === "unterschrieben" || bericht.status === "bestaetigt");
-  const passtWeiter = () => {
-    setVorgemerkt((v) => (v.includes(bericht.id) ? v : [...v, bericht.id]));
-    if (naechster) springe(naechster.id);
-    else
-      toast({
-        title: "Das war der letzte",
-        description: "Jetzt „Vorgemerkte bestätigen & senden“ — eine Unterschrift für alle.",
+  /** Zweck der Büro-Unterschrift: nur bestätigen oder (bestätigen +) senden. */
+  const [signZweck, setSignZweck] = useState<"bestaetigen" | "senden">("senden");
+  const [bestaetigtBusy, setBestaetigtBusy] = useState(false);
+
+  /** Nur bestätigen (Wunsch J. Maurer 23.10.: getrennt vom Versand). */
+  const bestaetigeJetzt = async (unterschrift: string) => {
+    setBestaetigtBusy(true);
+    try {
+      const { error } = await (supabase as any).rpc("stunden_bericht_bestaetigen", {
+        p_id: bericht.id,
+        p_unterschrift: unterschrift,
       });
+      if (error) throw error;
+      gemerkteBueroUnterschrift = unterschrift;
+      await qc.invalidateQueries({ queryKey: ["stunden_bericht"] });
+      await qc.invalidateQueries({ queryKey: ["stunden_berichte"] });
+      toast({
+        title: "Bestätigt",
+        description: naechster ? "Weiter zum nächsten Bericht." : "Versenden geht über „Ans Büro senden“.",
+      });
+      if (naechster) springe(naechster.id);
+    } catch (e) {
+      toast({ variant: "destructive", title: "Nicht bestätigt", description: (e as Error).message });
+    } finally {
+      setBestaetigtBusy(false);
+    }
   };
+  const handleNurBestaetigen = () => {
+    if (gemerkteBueroUnterschrift) {
+      void bestaetigeJetzt(gemerkteBueroUnterschrift);
+      return;
+    }
+    setSignZweck("bestaetigen");
+    setBueroSignOpen(true);
+  };
+  /** Ans Büro senden: unterschriebene brauchen die Büro-Unterschrift
+   *  (wird dabei mitbestätigt), bestätigte gehen direkt. */
+  const handleBestaetigen = () => {
+    setVersandIds(null);
+    if (bericht.status === "bestaetigt") {
+      setVersendenOpen(true);
+      return;
+    }
+    setSignZweck("senden");
+    setBueroSignOpen(true);
+  };
+  const bestaetigteVersenden = () => {
+    setVersandIds(bestaetigtOffen.map((b) => b.id));
+    setBueroSignature(null);
+    setVersendenOpen(true);
+  };
+
 
   const handleDownload = async () => {
     setDownloadBusy(true);
@@ -542,8 +587,13 @@ export default function StundenBericht() {
   };
 
   const handleBueroUnterschrift = (dataUrl: string) => {
-    setBueroSignature(dataUrl);
     setBueroSignOpen(false);
+    if (signZweck === "bestaetigen") {
+      void bestaetigeJetzt(dataUrl);
+      return;
+    }
+    gemerkteBueroUnterschrift = dataUrl;
+    setBueroSignature(dataUrl);
     setVersendenOpen(true);
   };
 
@@ -636,7 +686,9 @@ export default function StundenBericht() {
                 {reihe.map((b, i) => (
                   <option key={b.id} value={b.id}>
                     {i + 1}/{reihe.length} · {b.mitarbeiter?.nachname ?? ""} {b.mitarbeiter?.vorname ?? ""}
-                    {vorgemerkt.includes(b.id) ? " ✓" : ""} — {STATUS_KURZ[b.status]}
+                    {umfang === "wartend_alle" ? ` (${MONAT_KURZ[b.monat - 1]} ${b.teil === 1 ? "I" : "II"})` : ""}
+                    {" — "}
+                    {STATUS_KURZ[b.status]}
                   </option>
                 ))}
               </select>
@@ -651,44 +703,35 @@ export default function StundenBericht() {
               >
                 <ChevronRight className="h-4 w-4" />
               </Button>
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="h-3.5 w-3.5"
-                  checked={nurWartende}
-                  onChange={(e) => setNurWartende(e.target.checked)}
-                />
-                nur „Wartet auf Büro“
-              </label>
+              <select
+                className="h-9 rounded-md border bg-background px-2 text-xs"
+                value={umfang}
+                onChange={(e) => setUmfang(e.target.value as ReiheUmfang)}
+                aria-label="Welche Berichte"
+              >
+                <option value="wartend_alle">Alle wartenden (alle Monate)</option>
+                <option value="wartend_periode">Wartende dieser Periode</option>
+                <option value="periode">Alle dieser Periode</option>
+              </select>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              {kannVormerken &&
-                (istVorgemerkt ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-9 border-emerald-400 text-emerald-800"
-                    onClick={() => setVorgemerkt((v) => v.filter((x) => x !== bericht.id))}
-                    title="Vormerkung zurücknehmen"
-                  >
-                    <Check className="h-4 w-4 mr-1.5" /> Passt — vorgemerkt
-                  </Button>
-                ) : (
-                  <Button size="sm" className="h-9" onClick={passtWeiter}>
-                    <Check className="h-4 w-4 mr-1.5" /> Passt{naechster ? " — weiter" : ""}
-                    {naechster && <ChevronRight className="h-4 w-4 ml-0.5" />}
-                  </Button>
-                ))}
-              {vorgemerktOffen.length > 0 && (
-                <Button size="sm" variant={kannVormerken && !istVorgemerkt ? "outline" : "default"} className="h-9" onClick={vorgemerkteVersenden}>
+              {kannBestaetigen && (
+                <Button size="sm" className="h-9" onClick={handleNurBestaetigen} disabled={bestaetigtBusy}>
+                  {bestaetigtBusy ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Check className="h-4 w-4 mr-1.5" />}
+                  Bestätigen{naechster ? " — weiter" : ""}
+                  {naechster && <ChevronRight className="h-4 w-4 ml-0.5" />}
+                </Button>
+              )}
+              {bestaetigtOffen.length > 0 && (
+                <Button size="sm" variant={kannBestaetigen ? "outline" : "default"} className="h-9" onClick={bestaetigteVersenden}>
                   <Mail className="h-4 w-4 mr-1.5" />
-                  Vorgemerkte bestätigen &amp; senden ({vorgemerktOffen.length})
+                  Bestätigte ans Büro senden ({bestaetigtOffen.length})
                 </Button>
               )}
               <span className="text-[11px] text-muted-foreground">
-                {kannVormerken
-                  ? "„Passt“ merkt vor und springt zum Nächsten — am Ende alle mit einer Unterschrift versenden."
-                  : "Alphabetisch durch die Berichte dieser Periode blättern."}
+                {kannBestaetigen
+                  ? "„Bestätigen“ springt gleich zum Nächsten (unterschreiben nur beim ersten Mal). Am Ende alle Bestätigten in einer Mail senden."
+                  : "Älteste Periode zuerst, darin alphabetisch."}
               </span>
             </div>
           </CardContent>
@@ -1083,6 +1126,26 @@ export default function StundenBericht() {
                     </td>
                   </tr>
                 )}
+                {zusatzZeilen.map((z) => (
+                  <tr key={`z:${z.label}`} className="border-t">
+                    <td className="sticky left-0 bg-card px-2 py-1 border-r z-10 italic">{z.label}</td>
+                    {periodeTage.map((d) => {
+                      const v = z.perDay.get(d.iso);
+                      return (
+                        <td
+                          key={d.iso}
+                          onClick={() => openTag(d.iso)}
+                          className={`border text-center tabular-nums text-[11px] ${
+                            editierbar ? "cursor-pointer hover:bg-primary/5" : ""
+                          } ${d.frei ? "bg-muted-foreground/5" : ""}`}
+                        >
+                          {v === undefined ? "" : v > 0 ? fmtHNum(v) : "✓"}
+                        </td>
+                      );
+                    })}
+                    <td className="border px-2 text-right tabular-nums">{z.summe > 0 ? fmtHNum(z.summe) : ""}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -1256,21 +1319,19 @@ export default function StundenBericht() {
         )}
         {kannBestaetigen && (
           <Button
-            onClick={handleBestaetigen}
-            className="flex-1 min-w-[200px] h-12"
+            onClick={handleNurBestaetigen}
+            disabled={bestaetigtBusy}
+            className="flex-1 min-w-[180px] h-12"
           >
-            <Mail className="h-4 w-4 mr-1.5" />
-            Bestätigen &amp; ans Büro senden
+            <Check className="h-4 w-4 mr-1.5" />
+            Bestätigen
           </Button>
         )}
-        {kannReVersenden && (
+        {(kannBestaetigen || kannReVersenden) && (
           <Button
-            variant="outline"
-            onClick={() => {
-              setVersandIds(null);
-              setVersendenOpen(true);
-            }}
-            className="min-w-[180px] h-12"
+            variant={kannReVersenden ? "default" : "outline"}
+            onClick={handleBestaetigen}
+            className="flex-1 min-w-[180px] h-12"
           >
             <Mail className="h-4 w-4 mr-1.5" />
             Ans Büro senden
@@ -1296,20 +1357,18 @@ export default function StundenBericht() {
           )}
           {kannBestaetigen && (
             <Button
-              onClick={handleBestaetigen}
+              onClick={handleNurBestaetigen}
+              disabled={bestaetigtBusy}
               className="w-full h-12 text-base font-semibold"
             >
-              <Mail className="h-5 w-5 mr-2" />
-              Bestätigen &amp; ans Büro senden
+              <Check className="h-5 w-5 mr-2" />
+              Bestätigen
             </Button>
           )}
-          {kannReVersenden && (
+          {(kannBestaetigen || kannReVersenden) && (
             <Button
-              variant="outline"
-              onClick={() => {
-                setVersandIds(null);
-                setVersendenOpen(true);
-              }}
+              variant={kannReVersenden ? "default" : "outline"}
+              onClick={handleBestaetigen}
               className="w-full h-11 text-base font-semibold"
             >
               <Mail className="h-5 w-5 mr-2" />
@@ -1379,10 +1438,8 @@ export default function StundenBericht() {
         berichtIds={versandIds ?? [bericht.id]}
         bueroSignature={bueroSignature}
         onSent={() => {
-          const raus = versandIds ?? [bericht.id];
           setBueroSignature(null);
           setVersandIds(null);
-          setVorgemerkt((v) => v.filter((x) => !raus.includes(x)));
           qc.invalidateQueries({ queryKey: ["stunden_bericht"] });
           qc.invalidateQueries({ queryKey: ["stunden_berichte"] });
         }}

@@ -210,6 +210,39 @@ export function aggregiereFahrtgeld(tage: StundenTagFull[]): {
   return { tage: anzahl, stunden: Math.round(summe * 10) / 10 };
 }
 
+/**
+ * Fahrgeld und jede Zulage als eigene Zeile mit Stunden je Tag — für den
+ * Baustellenstundenbericht unter der Summe (Wunsch J. Maurer 23.10.2026:
+ * „Fahrgeld muss eine Tabellenzeile darunter sein und jedem Tag zugeordnet").
+ * Reihenfolge: Fahrgeld zuerst, dann Zulagen alphabetisch.
+ */
+export function zusatzZeilenJeTag(
+  tage: StundenTagFull[],
+  typen: ZulagenTypName[],
+): { label: string; perDay: Map<string, number>; summe: number }[] {
+  const nameById = new Map(typen.map((t) => [t.id, t.bezeichnung]));
+  const fahrt = new Map<string, number>();
+  const zul = new Map<string, Map<string, number>>();
+  for (const t of tage) {
+    const f = fahrtgeldStundenFuerTag(t);
+    if (f > 0) fahrt.set(t.tag.datum, (fahrt.get(t.tag.datum) ?? 0) + f);
+    for (const z of t.zulagen) {
+      const bez = nameById.get(z.zulagen_typ_id) ?? "Zulage";
+      const m = zul.get(bez) ?? new Map<string, number>();
+      // Zulage ohne Stundenangabe zählt als „ja" (1) — angezeigt als ✓.
+      m.set(t.tag.datum, (m.get(t.tag.datum) ?? 0) + (Number(z.stunden ?? 0) || 0));
+      zul.set(bez, m);
+    }
+  }
+  const sum = (m: Map<string, number>) => Math.round([...m.values()].reduce((a, v) => a + v, 0) * 100) / 100;
+  const out: { label: string; perDay: Map<string, number>; summe: number }[] = [];
+  if (fahrt.size > 0) out.push({ label: "Fahrgeld", perDay: fahrt, summe: sum(fahrt) });
+  [...zul.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0], "de"))
+    .forEach(([label, m]) => out.push({ label, perDay: m, summe: sum(m) }));
+  return out;
+}
+
 /** Formatiert eine Tätigkeits-Liste eines Tages als kompakten Inline-Text:
  *  `"Holzbau 4.5h, Dämmarbeit 4.5h"`. */
 export function fmtTaetigkeitenInline(

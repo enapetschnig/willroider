@@ -186,7 +186,12 @@ export default function StundenBerichteListe() {
   /** „Nacheinander prüfen" (Wunsch J. Maurer, 22.10.2026): den ersten
    *  wartenden Bericht alphabetisch öffnen — dort geht es mit „Passt — weiter"
    *  durch die ganze Periode, ohne zurück in die Liste. */
-  const pruefenStarten = (kandidaten: typeof berichte) => {
+  const pruefenStarten = (kandidaten: typeof berichte, umfang: "wartend_alle" | "wartend_periode") => {
+    try {
+      sessionStorage.setItem("bsb-pruefen-reihe", JSON.stringify(umfang));
+    } catch {
+      /* egal */
+    }
     const erster = kandidaten
       .filter((b) => b.status === "unterschrieben" || b.status === "bestaetigt")
       .sort(
@@ -375,7 +380,7 @@ export default function StundenBerichteListe() {
             </div>
             <div className="flex flex-wrap gap-1.5">
               {offenGefiltert.some((b) => b.status !== "offen") && (
-                <Button size="sm" className="h-8 text-xs" onClick={() => pruefenStarten(offenGefiltert)}>
+                <Button size="sm" className="h-8 text-xs" onClick={() => pruefenStarten(offenGefiltert, offenPeriode ? "wartend_periode" : "wartend_alle")}>
                   <ListChecks className="h-3.5 w-3.5 mr-1.5" />
                   Nacheinander prüfen
                 </Button>
@@ -485,7 +490,7 @@ export default function StundenBerichteListe() {
         <div className="flex items-center gap-2 flex-wrap">
           <div className="text-sm font-semibold mr-auto">{periodeLabel}</div>
           {berichte.some((b) => b.status === "unterschrieben" || b.status === "bestaetigt") && (
-            <Button size="sm" onClick={() => pruefenStarten(berichte)}>
+            <Button size="sm" onClick={() => pruefenStarten(berichte, "wartend_periode")}>
               <ListChecks className="h-4 w-4 mr-1.5" />
               Nacheinander prüfen
             </Button>

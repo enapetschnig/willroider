@@ -35,6 +35,8 @@ export interface BsbPdfInput {
   summenZeile: string[]; // Tages-Summen
   summeGesamt: string;
   zulagen: string[];
+  /** Fahrgeld/Zulagen als Zeilen je Tag unter der Summe. */
+  zusatzZeilen?: { label: string; zellen: string[]; summe: string }[];
   unterschrift: string | null; // Base64-PNG
   unterschriebenAm: string | null;
   bestaetigtAm: string | null;
@@ -144,10 +146,12 @@ export async function makeBaustellenstundenberichtPdf(
     r.summe,
   ]);
   body.push(["", "Summe", ...input.summenZeile, input.summeGesamt]);
+  const summenRowIndex = body.length - 1;
+  const zusatz = input.zusatzZeilen ?? [];
+  zusatz.forEach((z) => body.push(["", z.label, ...z.zellen, z.summe]));
 
   const dayColStart = 2;
   const lastCol = dayColStart + input.tage.length;
-  const summenRowIndex = body.length - 1;
 
   autoTable(doc, {
     startY: 31,
@@ -184,6 +188,9 @@ export async function makeBaustellenstundenberichtPdf(
           data.cell.styles.fillColor = markerFarbe;
         }
       }
+      if (data.section === "body" && data.row.index > summenRowIndex && c === 1) {
+        data.cell.styles.fontStyle = "italic";
+      }
       if (data.section === "body" && data.row.index === summenRowIndex) {
         data.cell.styles.fontStyle = "bold";
         if (!(c >= dayColStart && c < lastCol && input.geaendert.has(input.tageIso[c - dayColStart]))) {
@@ -197,6 +204,8 @@ export async function makeBaustellenstundenberichtPdf(
   let y = doc.lastAutoTable.finalY + 5;
 
   // ─── Zulagen ───────────────────────────────────────────────────────────
+  // Stehen sie als Zeilen in der Tabelle, entfällt die Textzeile.
+  if (zusatz.length === 0) {
   doc.setFontSize(8);
   doc.setTextColor(30, 30, 30);
   doc.setFont("helvetica", "bold");
@@ -208,6 +217,7 @@ export async function makeBaustellenstundenberichtPdf(
     y,
   );
   y += 6;
+  }
 
   // ─── Legende ───────────────────────────────────────────────────────────
   doc.setFontSize(7);

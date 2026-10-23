@@ -1,5 +1,28 @@
 # Journal
 
+## 2026-10-23 · Stundenbericht: Bestätigen/Senden getrennt, Prüf-Reihe über alle Monate, Fahrgeld/Zulagen je Tag
+
+- **J. Maurer, „Bestätigen und ans Büro senden trennen“:**
+  - Zwei Knöpfe: „Bestätigen“ (nur Status `bestaetigt`) und „Ans Büro senden“ (bei
+    unterschriebenen Berichten wie bisher mit Bestätigung).
+  - Die RPC `stunden_bericht_bestaetigen(p_id, p_unterschrift)` speichert jetzt die
+    Büro-Unterschrift. Sie kommt beim späteren Versand ins PDF.
+  - Die Büro-Unterschrift gilt nach dem ersten Mal für weitere Bestätigungen im selben Tab
+    (Modul-Variable, nicht gespeichert).
+- **J. Maurer, „nacheinander prüfen – da hakt es“:**
+  - Die Reihe lief nur innerhalb einer Periode und stand am Ende still, z. B. Aug T II
+    „1/2“ statt aller Wartenden.
+  - Jetzt ist standardmäßig „Alle wartenden (alle Monate)“ eingestellt: älteste Periode
+    zuerst, darin alphabetisch. Wählbar sind auch „Wartende dieser Periode“ und „Alle dieser
+    Periode“. Die Liste setzt die Wahl passend zum Filter.
+  - Statt „Passt/Vormerken“: „Bestätigen — weiter“ springt zum Nächsten. „Bestätigte ans
+    Büro senden (n)“ schickt alle bestätigten Berichte der Reihe in einer Mail.
+- **J. Maurer, „Fahrgeld als Tabellenzeile je Tag, auch Zulagen“:** `zusatzZeilenJeTag` in
+  `stundenAggregation.ts`. Unter der Summe stehen Zeilen für Fahrgeld und jede Zulage mit
+  Stunden je Tag und Summe. Das gilt am Bildschirm und im PDF. Die Textzeile „Zulagen etc.“
+  entfällt dann. Eine Zulage ohne Stunden zeigt ✓ am Bildschirm und „x“ im PDF.
+  Krankheit/Schlechtwetter stehen wie bisher als eigene Zeilen (K/SW).
+
 ## 2026-10-22 · Nachprüfung der drei Wünsche
 
 - Nachgerechnet:
