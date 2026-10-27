@@ -1,5 +1,9 @@
 # Journal
 
+## 2026-10-27 — Köstenberger: Wochen-Soll jede Woche 7,5 h (J. Maurer)
+
+- Migration `20261027110000_soll_woche_koestenberger.sql`: `soll_woche` = `{"woche":[2,2,2,1.5,0,0,0]}` (kein Wechsel gerade/ungerade KW mehr). Geprüft: tages_soll KW 44 und 45 je 7,5 h.
+
 ## 2026-10-27 — Evaluierung erst unterschreiben, dann an die Baustelle; Drag & Drop beim Änderungswunsch (J. Maurer)
 
 - Migration `20261027100000_evaluierung_freigabe.sql`: `evaluierungen.durchgefuehrt_unterschrift/_von/_am`, `freigegeben_am` (Vorgabe now(); Bestand = created_at). `unterweisung_setzen` trägt den Anleger als Vortragenden ein und legt UNFREIGEGEBEN an; die Trigger `pflicht_unterweisung_zuteilen/nachholen` teilen Unfreigegebenes niemandem zu. Neue RPC `evaluierung_freigeben(p_id, p_unterschrift, p_vortragender)` speichert Unterschrift + Vortragenden und verteilt sofort (`pflicht_unterweisung_verteilen`). `vortragender_id` default auth.uid(); fehlende per baustellen.created_by nachgetragen.
