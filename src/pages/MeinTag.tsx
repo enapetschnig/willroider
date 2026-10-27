@@ -245,7 +245,7 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
           </button>
         </CardContent>
         <Dialog open={planOpen} onOpenChange={setPlanOpen}>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-3xl w-[calc(100vw-1rem)] sm:w-full max-h-[92vh] overflow-y-auto p-3 sm:p-6">
             <DialogHeader>
               <DialogTitle>Tagesplan</DialogTitle>
             </DialogHeader>
@@ -413,7 +413,7 @@ function HeuteEinteilungCard({ userId }: { userId: string }) {
 
       {/* Tagesplan-Vorschau im Word-Layout — live aus der Tagesplanung */}
       <Dialog open={planOpen} onOpenChange={setPlanOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl w-[calc(100vw-1rem)] sm:w-full max-h-[92vh] overflow-y-auto p-3 sm:p-6">
           <DialogHeader>
             <DialogTitle>Tagesplan</DialogTitle>
           </DialogHeader>

@@ -5,6 +5,11 @@
  * aber als reine Webseite (keine PDF-Blobs) — funktioniert damit sofort und
  * zuverlässig auf jedem Gerät/Betriebssystem. Daten kommen live aus
  * useTagesplanung, sind also immer synchron mit dem aktuellen Stand.
+ *
+ * Am Handy (schmaler als sm) statt der 4-spaltigen Tabelle eine Karte je
+ * Baustelle untereinander (Wunsch J. Maurer 26.10.2026: „Tagesplangröße an
+ * Handyformat anpassen, nur wenn es am Handy angesehen wird"). Am PC bleibt
+ * das Word-Layout unverändert.
  */
 
 import { Loader2 } from "lucide-react";
@@ -77,13 +82,13 @@ export function TagesplanPreview({ datum }: { datum: string }) {
 
   return (
     <div
-      className="bg-white p-4 sm:p-6 border mx-auto"
+      className="bg-white p-2.5 sm:p-6 border mx-auto"
       style={{ fontFamily: '"Times New Roman", Times, serif', maxWidth: "210mm" }}
     >
       {/* Titel-Box */}
-      <div className="border-2 border-black py-2 px-4 text-center mb-4">
+      <div className="border-2 border-black py-1.5 sm:py-2 px-3 sm:px-4 text-center mb-3 sm:mb-4">
         <div
-          className="text-xl font-bold"
+          className="text-lg sm:text-xl font-bold"
           style={{ fontStyle: "italic", textDecoration: "underline" }}
         >
           Arbeitseinteilung Zimmerei
@@ -92,13 +97,57 @@ export function TagesplanPreview({ datum }: { datum: string }) {
 
       {/* Datum */}
       <div className="text-center mb-3">
-        <span className="text-lg font-bold" style={{ textDecoration: "underline" }}>
+        <span className="text-base sm:text-lg font-bold" style={{ textDecoration: "underline" }}>
           {fmtHeaderDatum(datum)}
         </span>
       </div>
 
-      {/* Tabelle */}
-      <table style={{ width: "100%", borderCollapse: "collapse", border: cellBorder }}>
+      {/* Handy: eine Karte je Baustelle */}
+      <div className="sm:hidden space-y-2">
+        {einteilungen.map((e) => {
+          const leute = e.mitarbeiter.filter((m) => m.profil);
+          return (
+            <div key={e.einteilung.id} style={{ border: cellBorder, padding: "8px 10px" }}>
+              <div className="flex items-baseline justify-between gap-2">
+                <div style={{ fontWeight: "bold", textDecoration: "underline" }}>
+                  {e.baustelle ? e.baustelle.bvh_name : <span style={{ fontStyle: "italic", color: "#777" }}>(intern)</span>}
+                </div>
+                {e.baustelle?.kostenstelle && (
+                  <div style={{ fontSize: "0.78em", fontStyle: "italic", whiteSpace: "nowrap" }}>
+                    {e.baustelle.kostenstelle}
+                  </div>
+                )}
+              </div>
+              {e.fahrzeuge.length > 0 && (
+                <div style={{ fontSize: "0.9em", marginTop: 3 }}>
+                  <span style={{ fontStyle: "italic" }}>Fahrz.: </span>
+                  <strong>{e.fahrzeuge.map((f) => f.kennzeichen).join(", ")}</strong>
+                </div>
+              )}
+              {e.einteilung.taetigkeit && (
+                <div style={{ fontSize: "0.9em", fontStyle: "italic", whiteSpace: "pre-line", marginTop: 3 }}>
+                  {e.einteilung.taetigkeit}
+                </div>
+              )}
+              <div style={{ fontSize: "0.92em", marginTop: 4, borderTop: "1px dotted #999", paddingTop: 4 }}>
+                {leute.length > 0 ? (
+                  leute.map((m) => `${(m.profil as Profile).nachname} ${(m.profil as Profile).vorname}`).join(" · ")
+                ) : (
+                  <span style={{ fontStyle: "italic", color: "#777" }}>—</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        {einteilungen.length === 0 && (
+          <div style={{ border: cellBorder, padding: "8px 10px", textAlign: "center", color: "#777" }}>
+            Noch keine Einteilungen für diesen Tag.
+          </div>
+        )}
+      </div>
+
+      {/* Tabelle (ab Tablet/PC) */}
+      <table className="hidden sm:table" style={{ width: "100%", borderCollapse: "collapse", border: cellBorder }}>
         <thead>
           <tr>
             <th style={thStyle()}>
@@ -203,7 +252,7 @@ export function TagesplanPreview({ datum }: { datum: string }) {
           border: cellBorder,
           padding: "10px 12px",
           fontSize: "0.92em",
-          marginTop: 16,
+          marginTop: 12,
         }}
       >
         <div
@@ -217,24 +266,24 @@ export function TagesplanPreview({ datum }: { datum: string }) {
           Sonderfälle:
         </div>
         <div className="space-y-1.5">
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row sm:gap-2">
             <span style={{ fontWeight: "bold", minWidth: 110 }}>Urlaub / ZA:</span>
             <span>{renderAbw(urlaub)}</span>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row sm:gap-2">
             <span style={{ fontWeight: "bold", minWidth: 110 }}>Krank:</span>
             <span>{renderAbw(krank)}</span>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row sm:gap-2">
             <span style={{ fontWeight: "bold", minWidth: 110 }}>Schlechtwetter:</span>
             <span>{renderAbw(sw)}</span>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row sm:gap-2">
             <span style={{ fontWeight: "bold", minWidth: 110 }}>Berufsschule:</span>
             <span>{renderAbw(schule)}</span>
           </div>
           {polierschule.length > 0 && (
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row sm:gap-2">
               <span style={{ fontWeight: "bold", minWidth: 110 }}>Polierschule:</span>
               <span>{renderAbw(polierschule)}</span>
             </div>

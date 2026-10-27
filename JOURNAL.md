@@ -1,5 +1,13 @@
 # Journal
 
+## 2026-10-27 · Tagesplan am Handy
+
+- **J. Maurer, „Tagesplangröße an Handyformat anpassen, nur am Handy“:** `TagesplanPreview`
+  zeigt unter `sm` (< 640 px) eine Karte je Baustelle untereinander statt der 4-spaltigen
+  Tabelle. Jede Karte enthält BVH + KS, Fahrzeug, Tätigkeit und die Mitarbeiter. Die
+  Sonderfälle stehen untereinander. Ab Tablet/PC bleibt das Word-Layout unverändert. Die
+  Dialoge in Dashboard/MeinTag sind am Handy fast bildschirmbreit und haben weniger Rand.
+
 ## 2026-10-23 · Stundenbericht: Bestätigen/Senden getrennt, Prüf-Reihe über alle Monate, Fahrgeld/Zulagen je Tag
 
 - **J. Maurer, „Bestätigen und ans Büro senden trennen“:**
