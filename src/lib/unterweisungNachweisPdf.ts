@@ -96,7 +96,7 @@ export async function erstelleUnterweisungNachweisPdf(
 ): Promise<{ doc: jsPDF; dateiname: string }> {
   const { data: ev, error } = await supabase
     .from("evaluierungen")
-    .select("id, baustelle_id, datum, typ, vortragender_id, checkliste, notizen")
+    .select("id, baustelle_id, datum, typ, vortragender_id, checkliste, notizen, durchgefuehrt_unterschrift, durchgefuehrt_am")
     .eq("id", evaluierungId)
     .maybeSingle();
   if (error || !ev) throw new Error("Unterweisung nicht gefunden.");
@@ -205,6 +205,8 @@ export async function erstelleUnterweisungNachweisPdf(
     notizen: e.notizen ?? "",
     unterschriften: unterschrieben,
     offen,
+    durchgefuehrtUnterschrift: e.durchgefuehrt_unterschrift ?? null,
+    durchgefuehrtAm: e.durchgefuehrt_am ? datumAT(e.durchgefuehrt_am) : "",
   });
   return { doc, dateiname: `Unterweisung-${kurz}-${e.datum}.pdf` };
 }
@@ -227,6 +229,9 @@ export interface UnterweisungNachweisInput {
   unterschriften: Unterschrift[];
   /** Zugeteilt, aber noch nicht unterschrieben. */
   offen: string[];
+  /** Unterschrift „Evaluierung durchgeführt“ (Anleger/Vortragender). */
+  durchgefuehrtUnterschrift?: string | null;
+  durchgefuehrtAm?: string;
 }
 
 export async function makeUnterweisungNachweisPdf(input: UnterweisungNachweisInput): Promise<jsPDF> {
@@ -434,7 +439,16 @@ export async function makeUnterweisungNachweisPdf(input: UnterweisungNachweisInp
   doc.text("Evaluierung durchgeführt:", m, y);
   y += 8;
   doc.setFontSize(9);
-  zeile("Datum:", input.datum, m, halb);
+  zeile("Datum:", input.durchgefuehrtAm || input.datum, m, halb);
+  if (input.durchgefuehrtUnterschrift) {
+    try {
+      const u = input.durchgefuehrtUnterschrift;
+      const url = u.startsWith("data:") ? u : `data:image/png;base64,${u}`;
+      doc.addImage(url, "PNG", m + innen / 2 + 3, y - 13, 40, 13, undefined, "FAST");
+    } catch {
+      /* ohne Bild */
+    }
+  }
   doc.setDrawColor(...SCHWARZ);
   doc.setLineWidth(0.3);
   doc.line(m + innen / 2 + 3, y + 1.2, pageW - m, y + 1.2);

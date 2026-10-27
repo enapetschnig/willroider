@@ -61,7 +61,9 @@ const SAMMEL_KST = [
 
 interface Props {
   initial?: Partial<Baustelle> | null;
-  onSaved?: (id: string) => void;
+  /** evaluierungUnterschreiben: neue Unterweisung wartet auf die
+   *  Unterschrift des Anlegers (geht erst danach an die Baustelle). */
+  onSaved?: (id: string, info?: { evaluierungUnterschreiben?: boolean }) => void;
   onCancel?: () => void;
   /** „uebernahme": aus der Planung `initial` wird eine NEUE Ausführung —
    *  Daten vorbelegt, neue Kostenstelle, Stunden bleiben auf der Planung. */
@@ -397,6 +399,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
 
     let id = uebernahme ? undefined : initial?.id;
     let savedRow: Baustelle | null = null;
+    let evaluierungUnterschreiben = false;
     if (id) {
       const { data, error } = await supabase
         .from("baustellen")
@@ -430,6 +433,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
           p_baustelle: id,
           p_typ: evaluierungTyp,
         });
+        if (!evErr) evaluierungUnterschreiben = true;
         if (evErr) {
           toast({
             variant: "destructive",
@@ -620,7 +624,13 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
     }
 
     setSaving(false);
-    onSaved?.(id!);
+    if (evaluierungUnterschreiben) {
+      toast({
+        title: "Evaluierung bitte unterschreiben",
+        description: "Erst mit deiner Unterschrift geht sie an die Mitarbeiter der Baustelle.",
+      });
+    }
+    onSaved?.(id!, { evaluierungUnterschreiben });
   };
 
   // Schritt 1 bei neuen Baustellen: Planung oder Ausführung

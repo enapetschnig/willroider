@@ -45,6 +45,7 @@ import { UnterweisungTablet } from "@/components/UnterweisungTablet";
 import { UnterweisungNachweis } from "@/components/UnterweisungNachweis";
 import { SharePointOrdnerCard } from "@/components/baustelle/SharePointOrdnerCard";
 import { nachweisAblegenWennFertig } from "@/lib/nachweisAblage";
+import { EvaluierungFreigabe } from "@/components/evaluierung/EvaluierungFreigabe";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Termin = Database["public"]["Tables"]["baustellen_termine"]["Row"];
@@ -282,7 +283,7 @@ export default function BaustelleDetail() {
     toast({
       title: "Unterweisung hinterlegt",
       description:
-        "Wer auf diese Baustelle eingeteilt wird, bekommt sie automatisch — fällig am Einsatztag um 08:00.",
+        "Bitte Vortragenden eintragen und unterschreiben — erst dann geht sie an die Eingeteilten.",
     });
     load();
   };
@@ -291,7 +292,9 @@ export default function BaustelleDetail() {
     load();
   }, [id]);
 
-  const gegenId: string | null = (b as any)?.in_ausfuehrung_id ?? (b as any)?.aus_planung_id ?? null;
+  const pflichtEv = evals.find((e) => e.id === b?.pflicht_evaluierung_id) ?? null;
+
+  const gegenId: string | null =(b as any)?.in_ausfuehrung_id ?? (b as any)?.aus_planung_id ?? null;
   useEffect(() => {
     if (!gegenId) {
       setGegenstueck(null);
@@ -953,8 +956,11 @@ export default function BaustelleDetail() {
                 <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
                   Unterweisung dieser Baustelle
                 </div>
-                {b.pflicht_evaluierung_id ? (
+                {b.pflicht_evaluierung_id && pflichtEv && !pflichtEv.freigegeben_am ? (
+                  <EvaluierungFreigabe ev={pflichtEv} onFertig={load} />
+                ) : b.pflicht_evaluierung_id ? (
                   <div className="space-y-3">
+                    {pflichtEv && <EvaluierungFreigabe ev={pflichtEv} onFertig={load} />}
                     <div className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded p-2">
                       Hinterlegt. Wer über den Tagesplan hierher eingeteilt wird, bekommt sie
                       automatisch — fällig am Einsatztag um 08:00, Nachzügler 30 Minuten nach
@@ -1179,9 +1185,12 @@ export default function BaustelleDetail() {
               initial={b}
               modus="uebernahme"
               onCancel={() => setUebernahmeOffen(false)}
-              onSaved={(neueId) => {
+              onSaved={(neueId, info) => {
                 setUebernahmeOffen(false);
-                navigate(`/baustellen/${neueId}`);
+                if (info?.evaluierungUnterschreiben) {
+                  setActiveTab("eval");
+                  navigate(`/baustellen/${neueId}?tab=eval`);
+                } else navigate(`/baustellen/${neueId}`);
               }}
             />
           )}

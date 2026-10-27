@@ -409,9 +409,11 @@ export default function Baustellen() {
           <BaustellenmeldungForm
             vorwahl={tab === "planung" ? "planung" : undefined}
             onCancel={() => setDialogOpen(false)}
-            onSaved={() => {
+            onSaved={(neueId, info) => {
               setDialogOpen(false);
-              load();
+              // Neue Evaluierung gleich zum Unterschreiben öffnen
+              if (info?.evaluierungUnterschreiben) navigate(`/baustellen/${neueId}?tab=eval`);
+              else load();
             }}
           />
         </DialogContent>
@@ -427,9 +429,10 @@ export default function Baustellen() {
               initial={uebernahmeVon}
               modus="uebernahme"
               onCancel={() => setUebernahmeVon(null)}
-              onSaved={() => {
+              onSaved={(neueId, info) => {
                 setUebernahmeVon(null);
-                load();
+                if (info?.evaluierungUnterschreiben) navigate(`/baustellen/${neueId}?tab=eval`);
+                else load();
               }}
             />
           )}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import { BildMarkierenDialog } from "@/components/BildMarkierenDialog";
 import { datenUrlZuBlob } from "@/lib/bildschirmfoto";
 import { useLocation } from "react-router-dom";
@@ -117,6 +117,8 @@ export function FeedbackDialog({
   const [busy, setBusy] = useState(false);
   /** Optionaler Datei-/Screenshot-Anhang (max. 10 MB). */
   const [anhang, setAnhang] = useState<File | null>(null);
+  /** Datei wird gerade über den Dialog gezogen (Drag & Drop). */
+  const [ziehtDatei, setZiehtDatei] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   /** Das automatische Bildschirmfoto — im Dialog markier- und entfernbar. */
   const [foto, setFoto] = useState<string | null>(null);
@@ -242,6 +244,28 @@ export function FeedbackDialog({
     setAnhang(f);
   };
 
+  // Drag & Drop + Einfügen (Strg+V) — Wunsch J. Maurer 27.10.2026.
+  const hatDateien = (dt: DataTransfer | null) => !!dt && Array.from(dt.types).includes("Files");
+  const dateiZiehen = (e: DragEvent) => {
+    if (ansicht !== "neu" || !hatDateien(e.dataTransfer)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    if (!ziehtDatei) setZiehtDatei(true);
+  };
+  const dateiLosgelassen = (e: DragEvent) => {
+    if (ansicht !== "neu" || !hatDateien(e.dataTransfer)) return;
+    e.preventDefault();
+    setZiehtDatei(false);
+    waehleAnhang(e.dataTransfer.files?.[0] ?? null);
+  };
+  const dateiEingefuegt = (e: ClipboardEvent) => {
+    if (ansicht !== "neu") return;
+    const f = e.clipboardData?.files?.[0];
+    if (!f) return; // normaler Text bleibt normales Einfügen
+    e.preventDefault();
+    waehleAnhang(f);
+  };
+
   const closeDialog = (v: boolean) => {
     if (!v) {
       if (aufnahme === "recording") stopAufnahme();
@@ -358,7 +382,16 @@ export function FeedbackDialog({
 
   return (
     <Dialog open={open} onOpenChange={closeDialog}>
-      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent
+        className="sm:max-w-md max-h-[90vh] overflow-y-auto"
+        onDragOver={dateiZiehen}
+        onDragEnter={dateiZiehen}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setZiehtDatei(false);
+        }}
+        onDrop={dateiLosgelassen}
+        onPaste={dateiEingefuegt}
+      >
         <DialogHeader>
           <DialogTitle>Änderungswunsch</DialogTitle>
           <DialogDescription>
@@ -582,14 +615,24 @@ export function FeedbackDialog({
                 </button>
               </div>
             ) : (
-              <Button
+              <button
                 type="button"
-                variant="outline"
-                className="w-full gap-2"
                 onClick={() => fileInputRef.current?.click()}
+                className={
+                  "w-full rounded-md border-2 border-dashed px-3 py-3 text-sm transition-colors " +
+                  (ziehtDatei
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-input hover:bg-muted")
+                }
               >
-                <Paperclip className="h-4 w-4" /> Datei oder Screenshot anheften
-              </Button>
+                <span className="flex items-center justify-center gap-2 font-medium">
+                  <Paperclip className="h-4 w-4" />
+                  {ziehtDatei ? "Hier loslassen" : "Datei oder Screenshot anheften"}
+                </span>
+                <span className="hidden sm:block text-xs text-muted-foreground mt-0.5">
+                  oder hierher ziehen · Screenshot mit Strg+V einfügen
+                </span>
+              </button>
             )}
           </div>
 

@@ -3006,10 +3006,11 @@ export default function Arbeitsplanung() {
               setDialogOpen(false);
               setEditing(null);
             }}
-            onSaved={() => {
+            onSaved={(neueId, info) => {
               setDialogOpen(false);
               setEditing(null);
-              load();
+              if (info?.evaluierungUnterschreiben) navigate(`/baustellen/${neueId}?tab=eval`);
+              else load();
             }}
           />
         </DialogContent>

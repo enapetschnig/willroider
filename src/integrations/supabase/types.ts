@@ -437,6 +437,10 @@ export type Database = {
           notizen: string | null;
           created_at: string;
           updated_at: string;
+          durchgefuehrt_unterschrift: string | null;
+          durchgefuehrt_von: string | null;
+          durchgefuehrt_am: string | null;
+          freigegeben_am: string | null;
         };
         Insert: Partial<Database['public']['Tables']['evaluierungen']['Row']> & {
           baustelle_id: string;

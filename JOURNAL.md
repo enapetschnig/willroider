@@ -1,5 +1,12 @@
 # Journal
 
+## 2026-10-27 — Evaluierung erst unterschreiben, dann an die Baustelle; Drag & Drop beim Änderungswunsch (J. Maurer)
+
+- Migration `20261027100000_evaluierung_freigabe.sql`: `evaluierungen.durchgefuehrt_unterschrift/_von/_am`, `freigegeben_am` (Vorgabe now(); Bestand = created_at). `unterweisung_setzen` trägt den Anleger als Vortragenden ein und legt UNFREIGEGEBEN an; die Trigger `pflicht_unterweisung_zuteilen/nachholen` teilen Unfreigegebenes niemandem zu. Neue RPC `evaluierung_freigeben(p_id, p_unterschrift, p_vortragender)` speichert Unterschrift + Vortragenden und verteilt sofort (`pflicht_unterweisung_verteilen`). `vortragender_id` default auth.uid(); fehlende per baustellen.created_by nachgetragen.
+- `EvaluierungFreigabe.tsx` im Reiter Evaluierung der Baustelle (Vortragender-Auswahl + Unterschrift); nach dem Anlegen einer Ausführung springt die App direkt dorthin. Unterschrift erscheint im Unterweisungsnachweis-PDF bei „Evaluierung durchgeführt“.
+- FeedbackDialog: Datei per Drag & Drop in den Dialog ziehen oder Screenshot mit Strg+V einfügen.
+- Getestet: Ablauf per SQL in zurückgerollter Transaktion (vorher 0 Zuteilungen, auch nach neuer Einteilung; nach Freigabe 12). UI nicht im Browser getestet.
+
 ## 2026-10-27 · Tagesplan am Handy
 
 - **J. Maurer, „Tagesplangröße an Handyformat anpassen, nur am Handy“:** `TagesplanPreview`
