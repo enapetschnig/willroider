@@ -1462,13 +1462,6 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         </div>
       )}
 
-      {currentFolder === "root" && verknuepft && (
-        <div className="text-[11px] text-muted-foreground px-1 flex items-center gap-1.5">
-          <Cloud className="h-3.5 w-3.5 text-sky-600" />
-          Ordner wie in SharePoint — genau so, wie sie der Bauleiter angelegt hat.
-        </div>
-      )}
-
       {currentFolder === "root" && (
         <div className="text-[11px] text-muted-foreground -mt-1 px-1">
           Klicke auf einen Ordner, um die Inhalte zu sehen — oder ziehe Dateien

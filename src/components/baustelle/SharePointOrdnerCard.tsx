@@ -6,8 +6,9 @@
  * zuletzt abgeglichen wurde. Vorschläge lassen sich bestätigen, fehlende
  * Zuordnungen von Hand setzen.
  *
- * Ordner werden in SharePoint nicht angelegt — die Verknüpfung mit einem
- * vorhandenen Ordner passiert hier von Hand. Gelöscht, überschrieben oder
+ * Fehlt der Ordner, kann er hier nach Vorlage angelegt werden; bei Ordnern
+ * der neuen Struktur lassen sich fehlende Unterordner nachlegen (Wunsch
+ * E. Winkler 28.10.2026). Gelöscht, überschrieben oder
  * umbenannt wird dort nie. „Verknüpfung lösen" trennt nur die Verbindung
  * in der App; der Ordner in SharePoint bleibt unberührt.
  */
@@ -18,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { SharePointVerknuepfenDialog } from "@/components/baustelle/SharePointVerknuepfenDialog";
+import { neueOrdnerstrukturFuer, sharePointNachAnlegen } from "@/lib/sharepoint";
 import {
   Cloud,
   CloudOff,
@@ -29,6 +31,7 @@ import {
   Search,
   Check,
   X,
+  FolderPlus,
 } from "lucide-react";
 
 type Status = {
@@ -76,6 +79,9 @@ export function SharePointOrdnerCard({
   const [laden, setLaden] = useState(true);
   const [arbeitet, setArbeitet] = useState(false);
   const [sucheOffen, setSucheOffen] = useState(false);
+  /** Ordner nach der neuen Vorlage (bvh-neu)? Bzw. darf die App ihn so anlegen? */
+  const [struktur, setStruktur] = useState<string | null>(null);
+  const [darfAnlegen, setDarfAnlegen] = useState(false);
 
   const laden_ = useCallback(async () => {
     setLaden(true);
@@ -85,6 +91,16 @@ export function SharePointOrdnerCard({
       .eq("baustelle_id", baustelleId)
       .maybeSingle();
     setStatus((data as Status) ?? null);
+    const { data: b } = await supabase
+      .from("baustellen")
+      .select("bauleiter_id, art, sharepoint_struktur")
+      .eq("id", baustelleId)
+      .maybeSingle();
+    const bb = (b as { bauleiter_id?: string | null; art?: string | null; sharepoint_struktur?: string | null } | null) ?? null;
+    setStruktur(bb?.sharepoint_struktur ?? null);
+    setDarfAnlegen(
+      (bb?.art ?? "ausfuehrung") === "ausfuehrung" && (await neueOrdnerstrukturFuer(bb?.bauleiter_id ?? null)),
+    );
     setLaden(false);
   }, [baustelleId]);
 
@@ -163,6 +179,53 @@ export function SharePointOrdnerCard({
     void laden_();
   };
 
+  /** Fehlt der Ordner: jetzt nach Vorlage anlegen (oder passenden verknüpfen). */
+  const anlegen = async () => {
+    setArbeitet(true);
+    const r = await sharePointNachAnlegen(baustelleId);
+    setArbeitet(false);
+    if (r?.angelegt || r?.schon_da) {
+      toast({
+        title: r.angelegt ? "Ordnerstruktur angelegt" : "Vorhandenen Ordner verknüpft",
+        description: r.pfad,
+      });
+    } else {
+      toast({
+        variant: "destructive",
+        title: "Nicht angelegt",
+        description: r?.hinweis ?? r?.fehler ?? "Unbekannter Fehler",
+      });
+    }
+    void laden_();
+  };
+
+  /** Ordner ist da: fehlende Unterordner/Dateien der Vorlage nachlegen. */
+  const ergaenzen = async () => {
+    setArbeitet(true);
+    const { data, error } = await supabase.functions.invoke("sharepoint-schreiben", {
+      body: { modus: "ordner", baustelle_id: baustelleId, vorlage_ergaenzen: true },
+    });
+    if (error || !data?.ok) {
+      setArbeitet(false);
+      toast({
+        variant: "destructive",
+        title: "Nicht ergänzt",
+        description: error?.message ?? data?.fehler ?? "Unbekannter Fehler",
+      });
+      return;
+    }
+    const e = data.ergaenzt as { ordner: number; dateien: number; materialliste: string | null } | undefined;
+    const n = (e?.ordner ?? 0) + (e?.dateien ?? 0) + (e?.materialliste ? 1 : 0);
+    toast({
+      title: n > 0 ? "Ordnerstruktur ergänzt" : "Ordnerstruktur ist vollständig",
+      description:
+        n > 0
+          ? `${e?.ordner ?? 0} Ordner, ${(e?.dateien ?? 0) + (e?.materialliste ? 1 : 0)} Dateien nachgelegt.`
+          : "Es hat nichts gefehlt.",
+    });
+    await abgleichen(true);
+  };
+
   const variantenText = useMemo(() => {
     const v = status?.sharepoint_variante;
     if (!v) return "Ordner ohne die übliche Unterteilung — alles landet in 92-Sonstiges.";
@@ -231,6 +294,17 @@ export function SharePointOrdnerCard({
                     )}
                     Jetzt abgleichen
                   </Button>
+                  {struktur === "bvh-neu" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8"
+                      disabled={arbeitet}
+                      onClick={ergaenzen}
+                    >
+                      <FolderPlus className="h-3.5 w-3.5 mr-1.5" /> Ordnerstruktur ergänzen
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"
@@ -282,15 +356,31 @@ export function SharePointOrdnerCard({
         ) : (
           <div className="text-sm text-muted-foreground flex items-center gap-2">
             <CloudOff className="h-4 w-4 shrink-0" />
-            Noch kein Ordner verknüpft. Der Ordner wird wie gewohnt in SharePoint angelegt und
-            hier ausgewählt.
+            {darfAnlegen
+              ? "Noch kein Ordner verknüpft. Die App kann ihn jetzt nach Vorlage anlegen."
+              : "Noch kein Ordner verknüpft. Vorhandenen Ordner in SharePoint auswählen."}
           </div>
         )}
 
         {darfAendern && !status.verknuepft && (
-          <div className="pt-1">
-            <Button size="sm" className="h-8" onClick={() => setSucheOffen(true)}>
-              <Link2 className="h-3.5 w-3.5 mr-1.5" /> Mit OneDrive verknüpfen
+          <div className="pt-1 flex flex-wrap gap-2">
+            {darfAnlegen && (
+              <Button size="sm" className="h-8" disabled={arbeitet} onClick={anlegen}>
+                {arbeitet ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <FolderPlus className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                Ordnerstruktur anlegen
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant={darfAnlegen ? "outline" : "default"}
+              className="h-8"
+              onClick={() => setSucheOffen(true)}
+            >
+              <Link2 className="h-3.5 w-3.5 mr-1.5" /> Vorhandenen Ordner verknüpfen
             </Button>
           </div>
         )}

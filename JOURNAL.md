@@ -1,5 +1,12 @@
 # Journal
 
+## 2026-10-28 — SharePoint: Ordnerstruktur von Hand anlegen/ergänzen (E. Winkler)
+
+- `SharePointOrdnerCard.tsx` (Reiter Team): ohne Ordner Knopf „Ordnerstruktur anlegen“ (sharePointNachAnlegen, nur wenn die neue Struktur für den Bauleiter gilt) neben „Vorhandenen Ordner verknüpfen“; bei verknüpften bvh-neu-Ordnern „Ordnerstruktur ergänzen“.
+- `sharepoint-schreiben` (v18): `modus: "ordner"` + `vorlage_ergaenzen: true` ruft bei verknüpften bvh-neu-Ordnern `vorlageEinrichten` auf — legt nur Fehlendes an, ersetzt nie.
+- `BaustelleDokumente.tsx`: Hinweis „Ordner wie in SharePoint — genau so, wie sie der Bauleiter angelegt hat.“ entfernt.
+- Nicht end-to-end getestet: Datenbank nahm zu der Zeit keine neuen direkten Verbindungen an (53300, max 60), App/REST/Storage liefen normal.
+
 ## 2026-10-28 — Tagesplan am Handy: Tablet-Ansicht, zoombar statt Karten (J. Maurer)
 
 - `TagesplanPreview.tsx`: Karten-Ansicht vom 27.10. wieder entfernt (passte nicht). Neuer `HandyZoom`-Rahmen: unter 640 px wird das Blatt in 760 px Breite gesetzt, per CSS `zoom` auf Bildschirmbreite eingepasst; Zwei-Finger-Zoom (nicht-passiver touchmove, touch-action pan-x/pan-y) und +/−/Einpassen bis 3-fach, Verschieben per Scrollen. Ab 640 px unverändert.
