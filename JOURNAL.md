@@ -1,5 +1,10 @@
 # Journal
 
+## 2026-10-28 — Tagesplan am Handy: Tablet-Ansicht, zoombar statt Karten (J. Maurer)
+
+- `TagesplanPreview.tsx`: Karten-Ansicht vom 27.10. wieder entfernt (passte nicht). Neuer `HandyZoom`-Rahmen: unter 640 px wird das Blatt in 760 px Breite gesetzt, per CSS `zoom` auf Bildschirmbreite eingepasst; Zwei-Finger-Zoom (nicht-passiver touchmove, touch-action pan-x/pan-y) und +/−/Einpassen bis 3-fach, Verschieben per Scrollen. Ab 640 px unverändert.
+- Nicht auf einem echten Handy getestet.
+
 ## 2026-10-27 — Köstenberger: Wochen-Soll jede Woche 7,5 h (J. Maurer)
 
 - Migration `20261027110000_soll_woche_koestenberger.sql`: `soll_woche` = `{"woche":[2,2,2,1.5,0,0,0]}` (kein Wechsel gerade/ungerade KW mehr). Geprüft: tages_soll KW 44 und 45 je 7,5 h.

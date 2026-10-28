@@ -6,13 +6,15 @@
  * zuverlässig auf jedem Gerät/Betriebssystem. Daten kommen live aus
  * useTagesplanung, sind also immer synchron mit dem aktuellen Stand.
  *
- * Am Handy (schmaler als sm) statt der 4-spaltigen Tabelle eine Karte je
- * Baustelle untereinander (Wunsch J. Maurer 26.10.2026: „Tagesplangröße an
- * Handyformat anpassen, nur wenn es am Handy angesehen wird"). Am PC bleibt
- * das Word-Layout unverändert.
+ * Am Handy (schmaler als 640 px) wird dasselbe Blatt wie am Tablet gezeigt,
+ * auf Bildschirmbreite verkleinert und zoombar — mit zwei Fingern oder
+ * über +/− (Wunsch J. Maurer 28.10.2026: „soll so aussehen wie in der
+ * Ansicht am Tablet aber zum Zoomen“; die Karten-Ansicht vom 27.10. passte
+ * nicht). Am PC/Tablet bleibt alles wie gehabt.
  */
 
-import { Loader2 } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Loader2, Maximize2, Minus, Plus } from "lucide-react";
 import { useTagesplanung } from "@/hooks/useTagesplanung";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -41,6 +43,117 @@ function shortDate(iso: string): string {
 }
 
 const cellBorder = "1px solid black";
+
+/** Breite, in der das Blatt am Handy gesetzt wird — wie am Tablet. */
+const BLATT_BREITE = 760;
+const MAX_ZOOM = 3;
+
+/**
+ * Am Handy: Inhalt in Tablet-Breite setzen, auf die verfügbare Breite
+ * einpassen und zoombar machen. Ab 640 px Breite reicht der Platz, dann
+ * wird nichts verändert.
+ */
+function HandyZoom({ children }: { children: ReactNode }) {
+  // Messen am immer vorhandenen Rahmen — so stimmt die Breite auch nach
+  // dem Drehen des Handys.
+  const rahmenRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [breite, setBreite] = useState(0);
+  const [faktor, setFaktor] = useState(1); // 1 = eingepasst
+  const faktorRef = useRef(1);
+  faktorRef.current = faktor;
+  const pinch = useRef<{ abstand: number; faktor: number } | null>(null);
+
+  useEffect(() => {
+    const el = rahmenRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setBreite(el.clientWidth));
+    ro.observe(el);
+    setBreite(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+
+  const handy = breite > 0 && breite < 640;
+  const einpassen = handy ? breite / BLATT_BREITE : 1;
+  const maxFaktor = MAX_ZOOM / einpassen;
+
+  // Zwei-Finger-Zoom. Nicht-passiver Listener, damit der Browser nicht
+  // zusätzlich die ganze Seite zoomt.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !handy) return;
+    const abstand = (t: TouchList) =>
+      Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const start = (e: TouchEvent) => {
+      if (e.touches.length === 2) pinch.current = { abstand: abstand(e.touches), faktor: faktorRef.current };
+    };
+    const bewegen = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || !pinch.current) return;
+      e.preventDefault();
+      const p = pinch.current;
+      setFaktor(Math.min(maxFaktor, Math.max(1, (p.faktor * abstand(e.touches)) / p.abstand)));
+    };
+    const ende = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinch.current = null;
+    };
+    el.addEventListener("touchstart", start, { passive: true });
+    el.addEventListener("touchmove", bewegen, { passive: false });
+    el.addEventListener("touchend", ende);
+    el.addEventListener("touchcancel", ende);
+    return () => {
+      el.removeEventListener("touchstart", start);
+      el.removeEventListener("touchmove", bewegen);
+      el.removeEventListener("touchend", ende);
+      el.removeEventListener("touchcancel", ende);
+    };
+  }, [handy, maxFaktor]);
+
+  const knopf =
+    "h-9 w-9 flex items-center justify-center rounded-full border bg-background shadow-sm active:bg-muted disabled:opacity-40";
+  return (
+    <div ref={rahmenRef}>
+      {!handy ? (
+        children
+      ) : (
+        <>
+          <div ref={scrollRef} className="overflow-auto" style={{ maxHeight: "72vh", touchAction: "pan-x pan-y" }}>
+            <div style={{ width: BLATT_BREITE, zoom: einpassen * faktor } as CSSProperties}>{children}</div>
+          </div>
+          <div className="flex items-center justify-end gap-1.5 pt-2">
+            <span className="mr-auto text-xs text-muted-foreground">Mit zwei Fingern zoomen</span>
+            <button
+              type="button"
+              className={knopf}
+              aria-label="Verkleinern"
+              disabled={faktor <= 1}
+              onClick={() => setFaktor((f) => Math.max(1, f / 1.4))}
+            >
+              <Minus className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className={knopf}
+              aria-label="Einpassen"
+              disabled={faktor === 1}
+              onClick={() => setFaktor(1)}
+            >
+              <Maximize2 className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className={knopf}
+              aria-label="Vergrößern"
+              disabled={faktor >= maxFaktor}
+              onClick={() => setFaktor((f) => Math.min(maxFaktor, f * 1.4))}
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 export function TagesplanPreview({ datum }: { datum: string }) {
   const { data: plan, isLoading } = useTagesplanung(datum);
@@ -81,14 +194,15 @@ export function TagesplanPreview({ datum }: { datum: string }) {
   };
 
   return (
+    <HandyZoom>
     <div
-      className="bg-white p-2.5 sm:p-6 border mx-auto"
+      className="bg-white p-6 border mx-auto"
       style={{ fontFamily: '"Times New Roman", Times, serif', maxWidth: "210mm" }}
     >
       {/* Titel-Box */}
-      <div className="border-2 border-black py-1.5 sm:py-2 px-3 sm:px-4 text-center mb-3 sm:mb-4">
+      <div className="border-2 border-black py-2 px-4 text-center mb-4">
         <div
-          className="text-lg sm:text-xl font-bold"
+          className="text-xl font-bold"
           style={{ fontStyle: "italic", textDecoration: "underline" }}
         >
           Arbeitseinteilung Zimmerei
@@ -97,57 +211,13 @@ export function TagesplanPreview({ datum }: { datum: string }) {
 
       {/* Datum */}
       <div className="text-center mb-3">
-        <span className="text-base sm:text-lg font-bold" style={{ textDecoration: "underline" }}>
+        <span className="text-lg font-bold" style={{ textDecoration: "underline" }}>
           {fmtHeaderDatum(datum)}
         </span>
       </div>
 
-      {/* Handy: eine Karte je Baustelle */}
-      <div className="sm:hidden space-y-2">
-        {einteilungen.map((e) => {
-          const leute = e.mitarbeiter.filter((m) => m.profil);
-          return (
-            <div key={e.einteilung.id} style={{ border: cellBorder, padding: "8px 10px" }}>
-              <div className="flex items-baseline justify-between gap-2">
-                <div style={{ fontWeight: "bold", textDecoration: "underline" }}>
-                  {e.baustelle ? e.baustelle.bvh_name : <span style={{ fontStyle: "italic", color: "#777" }}>(intern)</span>}
-                </div>
-                {e.baustelle?.kostenstelle && (
-                  <div style={{ fontSize: "0.78em", fontStyle: "italic", whiteSpace: "nowrap" }}>
-                    {e.baustelle.kostenstelle}
-                  </div>
-                )}
-              </div>
-              {e.fahrzeuge.length > 0 && (
-                <div style={{ fontSize: "0.9em", marginTop: 3 }}>
-                  <span style={{ fontStyle: "italic" }}>Fahrz.: </span>
-                  <strong>{e.fahrzeuge.map((f) => f.kennzeichen).join(", ")}</strong>
-                </div>
-              )}
-              {e.einteilung.taetigkeit && (
-                <div style={{ fontSize: "0.9em", fontStyle: "italic", whiteSpace: "pre-line", marginTop: 3 }}>
-                  {e.einteilung.taetigkeit}
-                </div>
-              )}
-              <div style={{ fontSize: "0.92em", marginTop: 4, borderTop: "1px dotted #999", paddingTop: 4 }}>
-                {leute.length > 0 ? (
-                  leute.map((m) => `${(m.profil as Profile).nachname} ${(m.profil as Profile).vorname}`).join(" · ")
-                ) : (
-                  <span style={{ fontStyle: "italic", color: "#777" }}>—</span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-        {einteilungen.length === 0 && (
-          <div style={{ border: cellBorder, padding: "8px 10px", textAlign: "center", color: "#777" }}>
-            Noch keine Einteilungen für diesen Tag.
-          </div>
-        )}
-      </div>
-
-      {/* Tabelle (ab Tablet/PC) */}
-      <table className="hidden sm:table" style={{ width: "100%", borderCollapse: "collapse", border: cellBorder }}>
+      {/* Tabelle */}
+      <table style={{ width: "100%", borderCollapse: "collapse", border: cellBorder }}>
         <thead>
           <tr>
             <th style={thStyle()}>
@@ -266,24 +336,24 @@ export function TagesplanPreview({ datum }: { datum: string }) {
           Sonderfälle:
         </div>
         <div className="space-y-1.5">
-          <div className="flex flex-col sm:flex-row sm:gap-2">
+          <div className="flex gap-2">
             <span style={{ fontWeight: "bold", minWidth: 110 }}>Urlaub / ZA:</span>
             <span>{renderAbw(urlaub)}</span>
           </div>
-          <div className="flex flex-col sm:flex-row sm:gap-2">
+          <div className="flex gap-2">
             <span style={{ fontWeight: "bold", minWidth: 110 }}>Krank:</span>
             <span>{renderAbw(krank)}</span>
           </div>
-          <div className="flex flex-col sm:flex-row sm:gap-2">
+          <div className="flex gap-2">
             <span style={{ fontWeight: "bold", minWidth: 110 }}>Schlechtwetter:</span>
             <span>{renderAbw(sw)}</span>
           </div>
-          <div className="flex flex-col sm:flex-row sm:gap-2">
+          <div className="flex gap-2">
             <span style={{ fontWeight: "bold", minWidth: 110 }}>Berufsschule:</span>
             <span>{renderAbw(schule)}</span>
           </div>
           {polierschule.length > 0 && (
-            <div className="flex flex-col sm:flex-row sm:gap-2">
+            <div className="flex gap-2">
               <span style={{ fontWeight: "bold", minWidth: 110 }}>Polierschule:</span>
               <span>{renderAbw(polierschule)}</span>
             </div>
@@ -299,6 +369,7 @@ export function TagesplanPreview({ datum }: { datum: string }) {
         </div>
       </div>
     </div>
+    </HandyZoom>
   );
 }
 
