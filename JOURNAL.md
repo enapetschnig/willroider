@@ -1,5 +1,10 @@
 # Journal
 
+## 2026-10-29 — Absturz beim Öffnen eines Stundenberichts behoben (L. Schuller)
+
+- `StundenBericht.tsx`: `signZweck`/`bestaetigtBusy` (useState) standen seit d6a9fd0 (23.10.) hinter den frühen Returns (isLoading/!bericht) → React #310 „Rendered more hooks“ beim ersten Laden, Seite stürzte ab („Hoppla“). Nach oben zu den übrigen Hooks verschoben.
+- rules-of-hooks über alle 255 Dateien: 0 Verstöße. Künftig vor jedem Commit mitprüfen.
+
 ## 2026-10-28 — SharePoint: Ordnerstruktur von Hand anlegen/ergänzen (E. Winkler)
 
 - `SharePointOrdnerCard.tsx` (Reiter Team): ohne Ordner Knopf „Ordnerstruktur anlegen“ (sharePointNachAnlegen, nur wenn die neue Struktur für den Bauleiter gilt) neben „Vorhandenen Ordner verknüpfen“; bei verknüpften bvh-neu-Ordnern „Ordnerstruktur ergänzen“.

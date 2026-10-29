@@ -252,6 +252,9 @@ export default function StundenBericht() {
   const [versandIds, setVersandIds] = useState<string[] | null>(null);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [erinnernOffen, setErinnernOffen] = useState(false);
+  /** Zweck der Büro-Unterschrift: nur bestätigen oder (bestätigen +) senden. */
+  const [signZweck, setSignZweck] = useState<"bestaetigen" | "senden">("senden");
+  const [bestaetigtBusy, setBestaetigtBusy] = useState(false);
 
   // ─── Prüf-Leiste (Wunsch J. Maurer, 22.10.2026) ──────────────────────
   // Alle Berichte derselben Periode alphabetisch nacheinander prüfen, ohne
@@ -521,9 +524,6 @@ export default function StundenBericht() {
   const vorher = idx > 0 ? reihe[idx - 1] : null;
   const naechster = idx >= 0 && idx < reihe.length - 1 ? reihe[idx + 1] : null;
   const springe = (zielId: string) => navigate(`/stundenbericht/${zielId}`, { replace: true });
-  /** Zweck der Büro-Unterschrift: nur bestätigen oder (bestätigen +) senden. */
-  const [signZweck, setSignZweck] = useState<"bestaetigen" | "senden">("senden");
-  const [bestaetigtBusy, setBestaetigtBusy] = useState(false);
 
   /** Nur bestätigen (Wunsch J. Maurer 23.10.: getrennt vom Versand). */
   const bestaetigeJetzt = async (unterschrift: string) => {
