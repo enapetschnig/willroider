@@ -48,8 +48,13 @@ paths:
 - **Nächster Einsatz** auf der Startseite (B. Sirnitzer, 18.09.): nächster freigegebener Tag, auch Fr→Mo.
 - **Tagesplan am Handy** (J. Maurer, 26.–30.10.: „soll so aussehen wie in der Ansicht am Tablet aber zum
   zoomen“): Karten-Ansicht wurde verworfen. `HandyZoom` in `TagesplanPreview.tsx`: unter 640 px dasselbe
-  Blatt (760 px) per CSS `zoom` eingepasst; Zwei-Finger-Zoom um den Fingerpunkt, Doppeltippen, − / ⤢ / +;
-  ab 640 px unverändert. **Fallstrick (30.10.):** `DialogContent` ist ein CSS-Grid, Grid-Kinder haben
+  Blatt (760 px), eingepasst; Zwei-Finger-Zoom um den Fingerpunkt, Doppeltippen, − / ⤢ / + (gleiten 200 ms);
+  ab 640 px unverändert. **Nur `transform: scale`, kein CSS `zoom`** (Christoph 30.10.: „es ruckelt noch so
+  wenn man hinzoomt“): `zoom` setzte bei jeder Fingerbewegung die ganze Tabelle neu (45 Layouts, 0,48 s
+  Haupt-Thread je Geste bei 4× Drossel, 0,94 s bei 8×); jetzt während der Geste nur transform auf eigener
+  Ebene (0 Layouts, 0,05 s), Endstand danach scharf. Fenster bleibt so hoch wie das eingepasste Blatt — wuchs es
+  beim Zoomen, zentrierte sich der Dialog neu und das Blatt rutschte unter dem Finger weg.
+  **Fallstrick (30.10.):** `DialogContent` ist ein CSS-Grid, Grid-Kinder haben
   `min-width: auto` — das breite Blatt blähte den gemessenen Rahmen auf (448 statt 296 px), Blatt rechts
   abgeschnitten, Zoom-Knöpfe außerhalb des Bildschirms. Darum misst `HandyZoom` am Rahmen mit
   `minWidth: 0` + `contain: "inline-size"`. Christoph (30.10.): „muss glaube ich mal selber drüber schauen
@@ -59,5 +64,10 @@ paths:
   CDP `Input.dispatchTouchEvent`. Ohne Login: Wegwerf-Seite unter Vite mit der echten `DialogContent`-Klasse
   und vorbefülltem react-query-Cache (`setQueryData(["tagesplan", datum], plan)`), per `.git/info/exclude`
   ausgeschlossen und danach gelöscht — echte Namen nie committen (Repo öffentlich). Echtes iPhone/Safari
-  nicht getestet (Safari-`gesture*`-Ereignisse werden vorsorglich abgefangen).
+  nicht getestet (Safari-`gesture*`-Ereignisse werden vorsorglich abgefangen; WebKit startet hier nicht,
+  `libicudata.so.74` fehlt).
+- **Ruckeln messen** (30.10.): echter Dialog über `vite preview` bzw. live, Wegwerfkonto archiviert + Testzugang
+  + Partie „Büro“ (ohne Partie zeigt Mein Tag keinen Tagesplan-Knopf), CPU-Drossel per CDP
+  `Emulation.setCPUThrottlingRate` 4×/8×, Haupt-Thread-Arbeit nur während der Geste per
+  `Performance.getMetrics` (LayoutCount/LayoutDuration). fps allein zeigt am PC nichts — beides lief mit 60 fps.
 - „Standard-Unterweisung anlegen“ in der Tagesplanung → `evaluierung-unterweisung.md`.

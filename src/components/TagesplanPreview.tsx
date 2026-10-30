@@ -13,7 +13,7 @@
  * nicht). Am PC/Tablet bleibt alles wie gehabt.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Loader2, Maximize2, Minus, Plus } from "lucide-react";
 import { useTagesplanung } from "@/hooks/useTagesplanung";
 import type { Database } from "@/integrations/supabase/types";
@@ -59,16 +59,30 @@ const MAX_ZOOM = 3;
  * Blatt den Rahmen sonst mit auf, es wurde auf diese falsche Breite
  * eingepasst — bis 30.10. war das Blatt deshalb rechts abgeschnitten und die
  * Zoom-Knöpfe lagen außerhalb des Bildschirms.
+ *
+ * Vergrößert wird nur per transform: scale. Das Blatt wird einmal in 760 px
+ * gesetzt und nie neu umbrochen; während der Geste verschiebt und skaliert
+ * der Browser nur das fertige Bild, danach wird es scharf neu gezeichnet.
+ * Mit CSS zoom wurde bei jeder Fingerbewegung die ganze Tabelle neu gesetzt
+ * — am Handy ruckelte das (30.10.).
  */
 function HandyZoom({ children }: { children: ReactNode }) {
   const rahmenRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const flaecheRef = useRef<HTMLDivElement>(null);
   const blattRef = useRef<HTMLDivElement>(null);
   const [breite, setBreite] = useState(0);
+  const [hoehe, setHoehe] = useState(0); // Blatthöhe in Originalgröße
   const [faktor, setFaktor] = useState(1); // 1 = eingepasst
-  // Aktueller Stand für die Gesten — während des Ziehens wird direkt am
-  // Blatt gezoomt (flüssig, ohne React-Durchlauf), am Ende übernommen.
-  const live = useRef({ faktor: 1, einpassen: 1 });
+  // Stand für Gesten und Übergänge — läuft an React vorbei, erst der
+  // Endstand wird als faktor übernommen.
+  const live = useRef({
+    faktor: 1,
+    einpassen: 1,
+    hoehe: 0,
+    uhr: 0,
+    ziel: null as { f: number; sl: number; st: number } | null,
+  });
 
   // Vor dem ersten Zeichnen messen, damit das Blatt nicht kurz gequetscht
   // erscheint; danach bei jeder Größenänderung (Handy drehen).
@@ -86,39 +100,95 @@ function HandyZoom({ children }: { children: ReactNode }) {
   // − 2: der 1-px-Rand des Sichtfensters links und rechts
   const einpassen = handy ? (breite - 2) / BLATT_BREITE : 1;
   const maxFaktor = Math.max(1, MAX_ZOOM / einpassen);
+  const z = einpassen * faktor;
   live.current.einpassen = einpassen;
+  live.current.hoehe = hoehe;
 
-  /** Punkt im Sichtfenster → Punkt auf dem Blatt (Originalgröße). */
-  const blattPunkt = (sx: number, sy: number) => {
+  // Höhe des Blatts in Originalgröße — transform ändert offsetHeight nicht.
+  useLayoutEffect(() => {
+    const blatt = blattRef.current;
+    if (!handy || !blatt) return;
+    const messen = () => setHoehe(blatt.offsetHeight);
+    const ro = new ResizeObserver(messen);
+    ro.observe(blatt);
+    messen();
+    return () => ro.disconnect();
+  }, [handy]);
+
+  // Dialog zu, während ein Übergang läuft
+  useEffect(() => () => window.clearTimeout(live.current.uhr), []);
+
+  const begrenzt = (f: number) => Math.min(Math.max(1, MAX_ZOOM / live.current.einpassen), Math.max(1, f));
+
+  /** Scroll-Lage für Zoom f, bei der Blatt-Punkt (bx, by) im Sichtfenster bei (sx, sy) liegt — nie über den Rand. */
+  const lageFuer = (f: number, bx: number, by: number, sx: number, sy: number) => {
     const el = scrollRef.current;
-    const z = live.current.einpassen * live.current.faktor;
-    return el ? { bx: (el.scrollLeft + sx) / z, by: (el.scrollTop + sy) / z } : { bx: 0, by: 0 };
+    const z1 = live.current.einpassen * f;
+    const maxX = el ? Math.max(0, BLATT_BREITE * z1 - el.clientWidth) : 0;
+    const maxY = el ? Math.max(0, live.current.hoehe * z1 - el.clientHeight) : 0;
+    return {
+      sl: Math.min(maxX, Math.max(0, bx * z1 - sx)),
+      st: Math.min(maxY, Math.max(0, by * z1 - sy)),
+    };
   };
 
-  /** Zoom setzen; der Blatt-Punkt (bx, by) landet im Sichtfenster bei (sx, sy). */
-  const anwenden = (f: number, bx: number, by: number, sx: number, sy: number) => {
+  /** Endstand übernehmen: Fläche, Maßstab und Scroll-Lage in einem Zug. */
+  const festlegen = (f: number, sl: number, st: number) => {
+    const l = live.current;
+    window.clearTimeout(l.uhr);
+    l.uhr = 0;
+    l.ziel = null;
+    l.faktor = f;
+    const el = scrollRef.current;
+    const flaeche = flaecheRef.current;
+    const blatt = blattRef.current;
+    if (el && flaeche && blatt) {
+      const z1 = l.einpassen * f;
+      flaeche.style.width = `${BLATT_BREITE * z1}px`;
+      flaeche.style.height = `${l.hoehe * z1}px`;
+      blatt.style.transition = "";
+      blatt.style.willChange = "";
+      blatt.style.transform = `scale(${z1})`;
+      el.scrollLeft = sl;
+      el.scrollTop = st;
+    }
+    setFaktor(f);
+  };
+
+  /** Laufenden Übergang sofort fertigmachen (neue Berührung, schnelles Doppeltippen). */
+  const abschliessen = () => {
+    const ziel = live.current.ziel;
+    if (ziel) festlegen(ziel.f, ziel.sl, ziel.st);
+  };
+
+  /** Sanft zu Zoom f und Scroll-Lage (sl, st) gleiten, danach festlegen. */
+  const gleiten = (f: number, sl: number, st: number, ms = 200) => {
     const el = scrollRef.current;
     const blatt = blattRef.current;
-    const e = live.current.einpassen;
-    const neu = Math.min(Math.max(1, MAX_ZOOM / e), Math.max(1, f));
-    live.current.faktor = neu;
-    if (el && blatt) {
-      const z = e * neu;
-      blatt.style.zoom = String(z);
-      el.scrollLeft = bx * z - sx;
-      el.scrollTop = by * z - sy;
-    }
-    return neu;
+    if (!el || !blatt) return;
+    const l = live.current;
+    window.clearTimeout(l.uhr);
+    l.ziel = { f, sl, st };
+    // Fläche und Scroll bleiben bis zum Schluss stehen; das Bild gleitet
+    // genau dorthin, wo es danach festgelegt wird — kein Sprung.
+    blatt.style.willChange = "transform";
+    blatt.style.transition = `transform ${ms}ms ease-out`;
+    blatt.style.transform = `translate(${el.scrollLeft - sl}px, ${el.scrollTop - st}px) scale(${l.einpassen * f})`;
+    l.uhr = window.setTimeout(() => festlegen(f, sl, st), ms + 30);
   };
 
   /** Knöpfe und Doppeltippen: um einen Punkt (sonst die Mitte) zoomen. */
-  const zoomenUm = (f: number, sx?: number, sy?: number) => {
+  const zoomenUm = (neu: (f: number) => number, sx?: number, sy?: number) => {
     const el = scrollRef.current;
     if (!el) return;
+    abschliessen();
+    const l = live.current;
     const x = sx ?? el.clientWidth / 2;
     const y = sy ?? el.clientHeight / 2;
-    const { bx, by } = blattPunkt(x, y);
-    setFaktor(anwenden(f, bx, by, x, y));
+    const z0 = l.einpassen * l.faktor;
+    const f = begrenzt(neu(l.faktor));
+    const { sl, st } = lageFuer(f, (el.scrollLeft + x) / z0, (el.scrollTop + y) / z0, x, y);
+    gleiten(f, sl, st);
   };
 
   // Gesten. Nicht-passive Listener, damit der Browser nicht zusätzlich die
@@ -126,8 +196,11 @@ function HandyZoom({ children }: { children: ReactNode }) {
   // Verschieben mit einem Finger.
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || !handy) return;
-    let pinch: { abstand: number; faktor: number; bx: number; by: number } | null = null;
+    const blatt = blattRef.current;
+    if (!el || !blatt || !handy) return;
+    let pinch: { bx: number; by: number; abstand: number; faktor: number } | null = null;
+    let ziel = { f: 1, mx: 0, my: 0 };
+    let bild = 0;
     let tipp: { t: number; x: number; y: number; bewegt: boolean } | null = null;
     let letzterTipp: { t: number; x: number; y: number } | null = null;
     const punkt = (t: Touch) => {
@@ -139,10 +212,26 @@ function HandyZoom({ children }: { children: ReactNode }) {
       const b = punkt(l[1]);
       return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)) };
     };
+    // Höchstens einmal pro Bild: nur transform setzen — kein Layout, kein Neuzeichnen.
+    const zeichnen = () => {
+      bild = 0;
+      if (!pinch) return;
+      const z1 = live.current.einpassen * ziel.f;
+      // Blatt-Punkt (bx, by) bleibt unter der Fingermitte.
+      const tx = ziel.mx + el.scrollLeft - z1 * pinch.bx;
+      const ty = ziel.my + el.scrollTop - z1 * pinch.by;
+      blatt.style.transform = `translate(${tx}px, ${ty}px) scale(${z1})`;
+    };
     const start = (e: TouchEvent) => {
+      abschliessen();
       if (e.touches.length === 2) {
         const m = mitte(e.touches);
-        pinch = { abstand: m.d, faktor: live.current.faktor, ...blattPunkt(m.x, m.y) };
+        const l = live.current;
+        const z0 = l.einpassen * l.faktor;
+        pinch = { bx: (el.scrollLeft + m.x) / z0, by: (el.scrollTop + m.y) / z0, abstand: m.d, faktor: l.faktor };
+        ziel = { f: l.faktor, mx: m.x, my: m.y };
+        blatt.style.transition = "";
+        blatt.style.willChange = "transform";
         tipp = null;
       } else if (e.touches.length === 1) {
         const p = punkt(e.touches[0]);
@@ -153,7 +242,8 @@ function HandyZoom({ children }: { children: ReactNode }) {
       if (e.touches.length === 2 && pinch) {
         e.preventDefault();
         const m = mitte(e.touches);
-        anwenden((pinch.faktor * m.d) / pinch.abstand, pinch.bx, pinch.by, m.x, m.y);
+        ziel = { f: begrenzt((pinch.faktor * m.d) / pinch.abstand), mx: m.x, my: m.y };
+        if (!bild) bild = requestAnimationFrame(zeichnen);
       } else if (tipp && e.touches.length === 1) {
         const p = punkt(e.touches[0]);
         if (Math.hypot(p.x - tipp.x, p.y - tipp.y) > 10) tipp.bewegt = true;
@@ -162,10 +252,19 @@ function HandyZoom({ children }: { children: ReactNode }) {
     const ende = (e: TouchEvent) => {
       if (pinch) {
         if (e.touches.length < 2) {
+          cancelAnimationFrame(bild);
+          bild = 0;
+          const p = pinch;
           pinch = null;
           tipp = null;
           letzterTipp = null;
-          setFaktor(live.current.faktor);
+          // Wo das Bild jetzt steht — und wo es stehen darf (nicht über den Rand).
+          const z1 = live.current.einpassen * ziel.f;
+          const lage = lageFuer(ziel.f, p.bx, p.by, ziel.mx, ziel.my);
+          const imRand =
+            Math.abs(lage.sl - (p.bx * z1 - ziel.mx)) < 1 && Math.abs(lage.st - (p.by * z1 - ziel.my)) < 1;
+          if (imRand) festlegen(ziel.f, lage.sl, lage.st);
+          else gleiten(ziel.f, lage.sl, lage.st, 160); // über den Rand gezogen: zurückfedern
         }
         return;
       }
@@ -181,8 +280,7 @@ function HandyZoom({ children }: { children: ReactNode }) {
         // Doppeltippen: auf Originalgröße hinein bzw. wieder einpassen.
         e.preventDefault();
         letzterTipp = null;
-        const l = live.current;
-        zoomenUm(l.faktor > 1.05 ? 1 : Math.max(2, 1 / l.einpassen), t.x, t.y);
+        zoomenUm((f) => (f > 1.05 ? 1 : Math.max(2, 1 / live.current.einpassen)), t.x, t.y);
       } else {
         letzterTipp = { t: jetzt, x: t.x, y: t.y };
       }
@@ -197,6 +295,7 @@ function HandyZoom({ children }: { children: ReactNode }) {
     el.addEventListener("gesturestart", geste, { passive: false });
     el.addEventListener("gesturechange", geste, { passive: false });
     return () => {
+      cancelAnimationFrame(bild);
       el.removeEventListener("touchstart", start);
       el.removeEventListener("touchmove", bewegen);
       el.removeEventListener("touchend", ende);
@@ -219,10 +318,29 @@ function HandyZoom({ children }: { children: ReactNode }) {
           <div
             ref={scrollRef}
             className="overflow-auto rounded-sm border"
-            style={{ maxHeight: "70vh", touchAction: "pan-x pan-y" }}
+            // Fenster so hoch wie das eingepasste Blatt (+ Rand, höchstens 70vh)
+            // und beim Zoomen gleich hoch — sonst wächst der Dialog, zentriert
+            // sich neu und das Blatt rutscht unter dem Finger weg.
+            style={{ height: hoehe * einpassen + 2, maxHeight: "70vh", touchAction: "pan-x pan-y" }}
           >
-            <div ref={blattRef} style={{ width: BLATT_BREITE, zoom: einpassen * faktor } as CSSProperties}>
-              {children}
+            {/* Scroll-Fläche in Zoomgröße; overflow hidden hält sie während der Geste fest. */}
+            <div
+              ref={flaecheRef}
+              style={{ position: "relative", overflow: "hidden", width: BLATT_BREITE * z, height: hoehe * z }}
+            >
+              <div
+                ref={blattRef}
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  width: BLATT_BREITE,
+                  transform: `scale(${z})`,
+                  transformOrigin: "0 0",
+                }}
+              >
+                {children}
+              </div>
             </div>
           </div>
           <div className="flex items-center justify-end gap-2 pt-2">
@@ -234,7 +352,7 @@ function HandyZoom({ children }: { children: ReactNode }) {
               className={knopf}
               aria-label="Verkleinern"
               disabled={faktor <= 1}
-              onClick={() => zoomenUm(faktor / 1.5)}
+              onClick={() => zoomenUm((f) => f / 1.5)}
             >
               <Minus className="h-4 w-4" />
             </button>
@@ -243,7 +361,7 @@ function HandyZoom({ children }: { children: ReactNode }) {
               className={knopf}
               aria-label="Einpassen"
               disabled={faktor === 1}
-              onClick={() => zoomenUm(1)}
+              onClick={() => zoomenUm(() => 1)}
             >
               <Maximize2 className="h-4 w-4" />
             </button>
@@ -252,7 +370,7 @@ function HandyZoom({ children }: { children: ReactNode }) {
               className={knopf}
               aria-label="Vergrößern"
               disabled={faktor >= maxFaktor}
-              onClick={() => zoomenUm(faktor * 1.5)}
+              onClick={() => zoomenUm((f) => f * 1.5)}
             >
               <Plus className="h-4 w-4" />
             </button>

@@ -1,5 +1,11 @@
 # Journal
 
+## 2026-10-30 — Tagesplan am Handy: Zoomen ohne Ruckeln (Christoph)
+
+- Christoph: „es ruckelt noch so wenn man hinzoomt … schau dass das smooth und auf jedem handy funktioniert“. Gemessen im echten Dialog (Wegwerfkonto, `vite preview`, CPU per CDP 4×/8× gedrosselt, `Performance.getMetrics` nur während der Geste): CSS `zoom` setzte bei jeder Fingerbewegung die ganze Tabelle neu — 45 Layouts, 480 ms Haupt-Thread je Geste (8×: 937 ms). fps allein zeigte am PC nichts.
+- `HandyZoom` neu: Blatt einmal in 760 px gesetzt, liegt absolut in einer Fläche in Zoomgröße; während der Geste nur `transform: translate() scale()` auf eigener Ebene (`will-change`), höchstens einmal pro Bild (rAF); am Ende Fläche, Maßstab und Scroll-Lage in einem Zug, `will-change` weg → Schrift wieder scharf. Knöpfe und Doppeltippen gleiten (200 ms), über den Rand gezogen federt zurück (160 ms). Fenster fest so hoch wie das eingepasste Blatt (max. 70vh) — sonst zentriert sich der Dialog beim Zoomen neu und das Blatt rutscht unter dem Finger weg.
+- Ergebnis: 0 Layouts, 46 ms je Geste (8×: 59 ms). Geprüft auf 9 Größen (280 Fold, 320, 360, 390, 393 mit 392,7 px, 412 mit 411,43 px zweifach, 430, 568 quer): überall 0 Layouts, Punkt bleibt unter den Fingern, Doppeltippen hinein/zurück, eingepasst ohne seitliches Scrollen. Bruchteil-Breiten: Blatt steht höchstens 0,3 px über — nur weißer Rand, Linien vollständig. Klein quer: Knöpfe erst nach Scrollen im Dialog. iPhone/Safari nicht prüfbar (WebKit startet hier nicht).
+
 ## 2026-10-30 — Testzugang: Christoph kann sich wieder anmelden, bleibt unsichtbar
 
 - Christoph kam mit richtigem Passwort nicht hinein: Auth-Log 07:43 Anmeldung 200, eine Sekunde später `/logout` durch die App. Ursache: Profil seit 21.10. archiviert (`is_active = false`; wer, steht nicht im Änderungsprotokoll — vermutlich das Büro beim Aufräumen). `Auth.tsx` meldet dann „Konto noch nicht freigeschaltet“.
