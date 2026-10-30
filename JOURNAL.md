@@ -1,5 +1,12 @@
 # Journal
 
+## 2026-10-30 — Testzugang: Christoph kann sich wieder anmelden, bleibt unsichtbar
+
+- Christoph kam mit richtigem Passwort nicht hinein: Auth-Log 07:43 Anmeldung 200, eine Sekunde später `/logout` durch die App. Ursache: Profil seit 21.10. archiviert (`is_active = false`; wer, steht nicht im Änderungsprotokoll — vermutlich das Büro beim Aufräumen). `Auth.tsx` meldet dann „Konto noch nicht freigeschaltet“.
+- Wunsch: „mich sollte man auch in der app nicht sehen ich will nur testen“ → archiviert lassen, neue Tabelle `testzugaenge` (Migration `20261030100000_testzugang.sql`, RLS ohne Policies, nur per SQL) + `hat_testzugang()` (nur für das eigene Konto). `Auth.tsx`, `AuthContext` (Abfrage vor `setProfile`, sonst kurz `/registriert`) und `ProtectedRoute` lassen archivierte Konten mit Testzugang hinein. Christophs Konto eingetragen; Profil sonst unverändert.
+- Verworfen: Ausblenden per RLS auf `profiles` — sein Konto hängt an 31 Einteilungen, 23 Stunden-Tagen, Berichten (Mai–Okt.); leere Namen in Joins wären ein Absturzrisiko.
+- Geprüft: Simulation als Büro-Nutzer (`hat_testzugang()` = false, Tabelle gesperrt); Ende-zu-Ende mit Wegwerfkonto über `vite preview` (Dev-Server scheitert hier an ENOSPC/inotify): archiviert + Testzugang → `/mein-tag`, auch nach Neuladen; ohne → bleibt auf `/auth`. Konto restlos gelöscht (Auth, public, Änderungsprotokoll).
+
 ## 2026-10-30 — Tagesplan am Handy: wirklich eingepasst, Zoom um den Fingerpunkt (J. Maurer)
 
 - Christoph: „das scheint immer noch nicht zu funktionieren“. Im Handy-Chrome (360/390/412 px) mit dem echten Plan vom 30.10. nachgestellt: Blatt rechts abgeschnitten, Zoom-Knöpfe außerhalb des Bildschirms, Dialog horizontal scrollbar (scrollWidth 504 > 342).

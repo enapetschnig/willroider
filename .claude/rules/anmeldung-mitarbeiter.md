@@ -43,6 +43,16 @@ paths:
 - Neue Anmeldungen sehen, freischalten, archivieren nur mit `mitarbeiter.edit` (Maurer, Pließnig) — auch in
   der DB: Trigger `profiles_freischalten_pruefen` für `is_active`/`je_freigeschaltet` (E. Winkler, 19.10.).
 - Testkonten brauchen nach dem Anlegen `je_freigeschaltet = true` **und** `is_active = true`.
+- **Testzugang** (Christoph, 30.10.: „mich sollte man auch in der app nicht sehen ich will nur testen“): Konten in
+  `testzugaenge` (nur per SQL, RLS ohne Policies) dürfen sich anmelden, obwohl archiviert — `hat_testzugang()` in
+  `Auth.tsx` (`finalizeLogin`) und `AuthContext` → `ProtectedRoute`. Archiviert = in keiner Liste, Planung,
+  Erinnerung; `has_permission` prüft `is_active` nicht, die Rechte bleiben. Eingetragen ist Christophs Konto (vom
+  Büro am 21.10. archiviert; „Konto noch nicht freigeschaltet“ kommt auch bei archivierten Konten). **Nicht wieder
+  aktivieren und nicht per RLS ausblenden:** Sein Konto hängt an Einteilungen/Stunden/Berichten von Mai–Oktober,
+  ein unsichtbares Profil ließe dort Namen leer (Absturzgefahr bei Joins).
+- Login-Prüfung mit Wegwerfkonto (30.10.): Admin-API anlegen (`pruef-<ts>@willroider.invalid`), archivieren, im
+  Browser anmelden; Aufräumen = Auth-User löschen **plus** `aenderungsprotokoll`/`rollen_berechtigungen_audit`
+  (die Log-Trigger schreiben beim Anlegen mit), danach alle uuid-Spalten auf Reste prüfen.
 - Rechte je Person (`user_berechtigungen`, `MitarbeiterRechteDialog`) gehen der Rolle vor; Ordner-Ausnahme je
   Person gilt auch für Bauleiter (14.09.).
 - **Einfache Handyansicht** (`einfacheAnsicht` in `AuthContext`): Mitarbeiter starten in Mein Tag, kurzes Menü.
