@@ -4,7 +4,7 @@ import { AppShell } from "./AppShell";
 import { EvaluierungSignatureGate } from "./EvaluierungSignatureGate";
 
 export function ProtectedRoute() {
-  const { loading, user, profile } = useAuth();
+  const { loading, user, profile, testzugang } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -22,7 +22,7 @@ export function ProtectedRoute() {
     return <Navigate to="/auth" replace state={{ from: location }} />;
   }
 
-  if (profile && !profile.is_active) {
+  if (profile && !profile.is_active && !testzugang) {
     return <Navigate to="/registriert" replace />;
   }
 

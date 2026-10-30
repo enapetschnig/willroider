@@ -20,6 +20,8 @@ type AuthContextValue = {
   session: Session | null;
   user: User | null;
   profile: Profile | null;
+  /** Archiviert, aber mit Testzugang (Tabelle testzugaenge) — darf trotzdem hinein. */
+  testzugang: boolean;
   /** Legacy: ENUM-basierte Rolle. Wird automatisch synchron gehalten,
    *  bleibt aber NICHT die primäre Quelle. */
   role: AppRole | null;
@@ -47,6 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [testzugang, setTestzugang] = useState(false);
   const [role, setRole] = useState<AppRole | null>(null);
   const [permissions, setPermissions] = useState<Set<PermissionKey>>(() => new Set());
   const [permissionsLoaded, setPermissionsLoaded] = useState(false);
@@ -98,6 +101,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // das beim Zurückkommen aus der Kamera, und offene Formulare (z. B. die
     // Krankmeldung) verschwanden mitten im Ausfüllen (J. Maurer 29.09.).
     const neuProf = (prof as unknown as Profile) ?? null;
+    // Testzugang nur bei archivierten Konten nachfragen — und VOR dem Setzen
+    // des Profils, sonst schickt ProtectedRoute kurz auf „/registriert“.
+    const test = neuProf && !neuProf.is_active
+      ? (await (supabase.rpc as any)("hat_testzugang")).data === true
+      : false;
+    setTestzugang(test);
     setProfile((alt) => (JSON.stringify(alt) === JSON.stringify(neuProf) ? alt : neuProf));
     setRole((roleData?.role as AppRole) ?? null);
     await loadPermissions();
@@ -115,6 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await loadProfile(s.user.id);
       } else {
         setProfile(null);
+        setTestzugang(false);
         setRole(null);
         setPermissions(new Set());
         setPermissionsLoaded(true);
@@ -168,6 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     await supabase.auth.signOut({ scope: "local" });
     setProfile(null);
+    setTestzugang(false);
     setRole(null);
     setPermissions(new Set());
   };
@@ -228,6 +239,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       user,
       profile,
+      testzugang,
       role,
       loading,
       permissions,
@@ -244,7 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refreshPermissions,
     }),
     [
-      session, user, profile, role, loading,
+      session, user, profile, testzugang, role, loading,
       permissions, permissionsLoaded, hasPermission,
       isAdmin, isPolier, canPlan, canReview, canCreateBaustelle,
       refreshPermissions,

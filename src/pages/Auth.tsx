@@ -88,14 +88,19 @@ export default function Auth() {
     }
 
     if (!profile?.is_active) {
-      await supabase.auth.signOut({ scope: "local" });
-      toast({
-        variant: "destructive",
-        title: "Konto noch nicht freigeschaltet",
-        description:
-          "Ihr Konto wartet auf die Freischaltung durch das Büro / die Bauleitung.",
-      });
-      return;
+      // Archiviert, aber mit Testzugang (nur per SQL vergeben, Tabelle
+      // testzugaenge): darf trotzdem hinein und bleibt sonst unsichtbar.
+      const { data: testzugang } = await (supabase.rpc as any)("hat_testzugang");
+      if (testzugang !== true) {
+        await supabase.auth.signOut({ scope: "local" });
+        toast({
+          variant: "destructive",
+          title: "Konto noch nicht freigeschaltet",
+          description:
+            "Ihr Konto wartet auf die Freischaltung durch das Büro / die Bauleitung.",
+        });
+        return;
+      }
     }
     toast({ title: "Willkommen zurück!" });
     // Zurück zum ursprünglichen Deep-Link (state.from), sonst Startseite
