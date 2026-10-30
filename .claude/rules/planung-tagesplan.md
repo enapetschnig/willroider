@@ -46,7 +46,18 @@ paths:
   Plan (`darf_einteilung_sehen`, `einteilung_ma_select`, `tagesplan_abwesende(datum)` security definer).
   Mein Tag: „Ganzen Tagesplan ansehen“, auch ohne eigene Einteilung.
 - **Nächster Einsatz** auf der Startseite (B. Sirnitzer, 18.09.): nächster freigegebener Tag, auch Fr→Mo.
-- **Tagesplan am Handy** (J. Maurer, 26.–28.10.): Karten-Ansicht wurde verworfen. Jetzt `HandyZoom` in
-  `TagesplanPreview.tsx`: unter 640 px dasselbe Blatt (760 px) per CSS `zoom` eingepasst, Zwei-Finger-Zoom
-  und − / ⤢ / +; ab 640 px unverändert. Nicht auf echtem Handy getestet.
+- **Tagesplan am Handy** (J. Maurer, 26.–30.10.: „soll so aussehen wie in der Ansicht am Tablet aber zum
+  zoomen“): Karten-Ansicht wurde verworfen. `HandyZoom` in `TagesplanPreview.tsx`: unter 640 px dasselbe
+  Blatt (760 px) per CSS `zoom` eingepasst; Zwei-Finger-Zoom um den Fingerpunkt, Doppeltippen, − / ⤢ / +;
+  ab 640 px unverändert. **Fallstrick (30.10.):** `DialogContent` ist ein CSS-Grid, Grid-Kinder haben
+  `min-width: auto` — das breite Blatt blähte den gemessenen Rahmen auf (448 statt 296 px), Blatt rechts
+  abgeschnitten, Zoom-Knöpfe außerhalb des Bildschirms. Darum misst `HandyZoom` am Rahmen mit
+  `minWidth: 0` + `contain: "inline-size"`. Christoph (30.10.): „muss glaube ich mal selber drüber schauen
+  … das scheint immer noch nicht zu funktionieren“ → Handy-Ansichten vor dem Melden selbst rendern:
+- **Handy-Ansicht selbst prüfen** (30.10.): `/usr/bin/google-chrome` headless über `playwright-core` aus dem
+  Repo (`executablePath`, `isMobile`, `hasTouch`, `deviceScaleFactor`; 360/390/412 px), Gesten echt per
+  CDP `Input.dispatchTouchEvent`. Ohne Login: Wegwerf-Seite unter Vite mit der echten `DialogContent`-Klasse
+  und vorbefülltem react-query-Cache (`setQueryData(["tagesplan", datum], plan)`), per `.git/info/exclude`
+  ausgeschlossen und danach gelöscht — echte Namen nie committen (Repo öffentlich). Echtes iPhone/Safari
+  nicht getestet (Safari-`gesture*`-Ereignisse werden vorsorglich abgefangen).
 - „Standard-Unterweisung anlegen“ in der Tagesplanung → `evaluierung-unterweisung.md`.

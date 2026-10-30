@@ -7,13 +7,13 @@
  * useTagesplanung, sind also immer synchron mit dem aktuellen Stand.
  *
  * Am Handy (schmaler als 640 px) wird dasselbe Blatt wie am Tablet gezeigt,
- * auf Bildschirmbreite verkleinert und zoombar — mit zwei Fingern oder
- * über +/− (Wunsch J. Maurer 28.10.2026: „soll so aussehen wie in der
+ * auf Bildschirmbreite verkleinert und zoombar — mit zwei Fingern, doppelt
+ * tippen oder über +/− (Wunsch J. Maurer 28.10.2026: „soll so aussehen wie in der
  * Ansicht am Tablet aber zum Zoomen“; die Karten-Ansicht vom 27.10. passte
  * nicht). Am PC/Tablet bleibt alles wie gehabt.
  */
 
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Loader2, Maximize2, Minus, Plus } from "lucide-react";
 import { useTagesplanung } from "@/hooks/useTagesplanung";
 import type { Database } from "@/integrations/supabase/types";
@@ -46,87 +46,195 @@ const cellBorder = "1px solid black";
 
 /** Breite, in der das Blatt am Handy gesetzt wird — wie am Tablet. */
 const BLATT_BREITE = 760;
+/** Höchste Vergrößerung, gemessen an der Originalgröße des Blatts. */
 const MAX_ZOOM = 3;
 
 /**
  * Am Handy: Inhalt in Tablet-Breite setzen, auf die verfügbare Breite
- * einpassen und zoombar machen. Ab 640 px Breite reicht der Platz, dann
- * wird nichts verändert.
+ * einpassen und zoombar machen — zwei Finger, doppelt tippen oder +/−.
+ * Ab 640 px Breite reicht der Platz, dann wird nichts verändert.
+ *
+ * Gemessen wird am Rahmen, der seine Breite NICHT aus dem Inhalt bezieht
+ * (min-width 0, contain: inline-size). Im Dialog (CSS-Grid) zog das breite
+ * Blatt den Rahmen sonst mit auf, es wurde auf diese falsche Breite
+ * eingepasst — bis 30.10. war das Blatt deshalb rechts abgeschnitten und die
+ * Zoom-Knöpfe lagen außerhalb des Bildschirms.
  */
 function HandyZoom({ children }: { children: ReactNode }) {
-  // Messen am immer vorhandenen Rahmen — so stimmt die Breite auch nach
-  // dem Drehen des Handys.
   const rahmenRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const blattRef = useRef<HTMLDivElement>(null);
   const [breite, setBreite] = useState(0);
   const [faktor, setFaktor] = useState(1); // 1 = eingepasst
-  const faktorRef = useRef(1);
-  faktorRef.current = faktor;
-  const pinch = useRef<{ abstand: number; faktor: number } | null>(null);
+  // Aktueller Stand für die Gesten — während des Ziehens wird direkt am
+  // Blatt gezoomt (flüssig, ohne React-Durchlauf), am Ende übernommen.
+  const live = useRef({ faktor: 1, einpassen: 1 });
 
-  useEffect(() => {
+  // Vor dem ersten Zeichnen messen, damit das Blatt nicht kurz gequetscht
+  // erscheint; danach bei jeder Größenänderung (Handy drehen).
+  useLayoutEffect(() => {
     const el = rahmenRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setBreite(el.clientWidth));
+    const messen = () => setBreite(el.clientWidth);
+    const ro = new ResizeObserver(messen);
     ro.observe(el);
-    setBreite(el.clientWidth);
+    messen();
     return () => ro.disconnect();
   }, []);
 
   const handy = breite > 0 && breite < 640;
-  const einpassen = handy ? breite / BLATT_BREITE : 1;
-  const maxFaktor = MAX_ZOOM / einpassen;
+  // − 2: der 1-px-Rand des Sichtfensters links und rechts
+  const einpassen = handy ? (breite - 2) / BLATT_BREITE : 1;
+  const maxFaktor = Math.max(1, MAX_ZOOM / einpassen);
+  live.current.einpassen = einpassen;
 
-  // Zwei-Finger-Zoom. Nicht-passiver Listener, damit der Browser nicht
-  // zusätzlich die ganze Seite zoomt.
+  /** Punkt im Sichtfenster → Punkt auf dem Blatt (Originalgröße). */
+  const blattPunkt = (sx: number, sy: number) => {
+    const el = scrollRef.current;
+    const z = live.current.einpassen * live.current.faktor;
+    return el ? { bx: (el.scrollLeft + sx) / z, by: (el.scrollTop + sy) / z } : { bx: 0, by: 0 };
+  };
+
+  /** Zoom setzen; der Blatt-Punkt (bx, by) landet im Sichtfenster bei (sx, sy). */
+  const anwenden = (f: number, bx: number, by: number, sx: number, sy: number) => {
+    const el = scrollRef.current;
+    const blatt = blattRef.current;
+    const e = live.current.einpassen;
+    const neu = Math.min(Math.max(1, MAX_ZOOM / e), Math.max(1, f));
+    live.current.faktor = neu;
+    if (el && blatt) {
+      const z = e * neu;
+      blatt.style.zoom = String(z);
+      el.scrollLeft = bx * z - sx;
+      el.scrollTop = by * z - sy;
+    }
+    return neu;
+  };
+
+  /** Knöpfe und Doppeltippen: um einen Punkt (sonst die Mitte) zoomen. */
+  const zoomenUm = (f: number, sx?: number, sy?: number) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const x = sx ?? el.clientWidth / 2;
+    const y = sy ?? el.clientHeight / 2;
+    const { bx, by } = blattPunkt(x, y);
+    setFaktor(anwenden(f, bx, by, x, y));
+  };
+
+  // Gesten. Nicht-passive Listener, damit der Browser nicht zusätzlich die
+  // ganze Seite zoomt; touch-action am Sichtfenster lässt ihm nur das
+  // Verschieben mit einem Finger.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !handy) return;
-    const abstand = (t: TouchList) =>
-      Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    let pinch: { abstand: number; faktor: number; bx: number; by: number } | null = null;
+    let tipp: { t: number; x: number; y: number; bewegt: boolean } | null = null;
+    let letzterTipp: { t: number; x: number; y: number } | null = null;
+    const punkt = (t: Touch) => {
+      const r = el.getBoundingClientRect();
+      return { x: t.clientX - r.left, y: t.clientY - r.top };
+    };
+    const mitte = (l: TouchList) => {
+      const a = punkt(l[0]);
+      const b = punkt(l[1]);
+      return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)) };
+    };
     const start = (e: TouchEvent) => {
-      if (e.touches.length === 2) pinch.current = { abstand: abstand(e.touches), faktor: faktorRef.current };
+      if (e.touches.length === 2) {
+        const m = mitte(e.touches);
+        pinch = { abstand: m.d, faktor: live.current.faktor, ...blattPunkt(m.x, m.y) };
+        tipp = null;
+      } else if (e.touches.length === 1) {
+        const p = punkt(e.touches[0]);
+        tipp = { t: Date.now(), x: p.x, y: p.y, bewegt: false };
+      }
     };
     const bewegen = (e: TouchEvent) => {
-      if (e.touches.length !== 2 || !pinch.current) return;
-      e.preventDefault();
-      const p = pinch.current;
-      setFaktor(Math.min(maxFaktor, Math.max(1, (p.faktor * abstand(e.touches)) / p.abstand)));
+      if (e.touches.length === 2 && pinch) {
+        e.preventDefault();
+        const m = mitte(e.touches);
+        anwenden((pinch.faktor * m.d) / pinch.abstand, pinch.bx, pinch.by, m.x, m.y);
+      } else if (tipp && e.touches.length === 1) {
+        const p = punkt(e.touches[0]);
+        if (Math.hypot(p.x - tipp.x, p.y - tipp.y) > 10) tipp.bewegt = true;
+      }
     };
     const ende = (e: TouchEvent) => {
-      if (e.touches.length < 2) pinch.current = null;
+      if (pinch) {
+        if (e.touches.length < 2) {
+          pinch = null;
+          tipp = null;
+          letzterTipp = null;
+          setFaktor(live.current.faktor);
+        }
+        return;
+      }
+      if (!tipp || e.touches.length > 0) return;
+      const t = tipp;
+      tipp = null;
+      if (t.bewegt || Date.now() - t.t > 300) {
+        letzterTipp = null;
+        return;
+      }
+      const jetzt = Date.now();
+      if (letzterTipp && jetzt - letzterTipp.t < 350 && Math.hypot(t.x - letzterTipp.x, t.y - letzterTipp.y) < 40) {
+        // Doppeltippen: auf Originalgröße hinein bzw. wieder einpassen.
+        e.preventDefault();
+        letzterTipp = null;
+        const l = live.current;
+        zoomenUm(l.faktor > 1.05 ? 1 : Math.max(2, 1 / l.einpassen), t.x, t.y);
+      } else {
+        letzterTipp = { t: jetzt, x: t.x, y: t.y };
+      }
     };
+    // Safari am iPhone meldet das Zwei-Finger-Zoomen zusätzlich als eigene
+    // gesture*-Ereignisse — auch die abfangen, sonst zoomt die Seite mit.
+    const geste = (e: Event) => e.preventDefault();
     el.addEventListener("touchstart", start, { passive: true });
     el.addEventListener("touchmove", bewegen, { passive: false });
-    el.addEventListener("touchend", ende);
+    el.addEventListener("touchend", ende, { passive: false });
     el.addEventListener("touchcancel", ende);
+    el.addEventListener("gesturestart", geste, { passive: false });
+    el.addEventListener("gesturechange", geste, { passive: false });
     return () => {
       el.removeEventListener("touchstart", start);
       el.removeEventListener("touchmove", bewegen);
       el.removeEventListener("touchend", ende);
       el.removeEventListener("touchcancel", ende);
+      el.removeEventListener("gesturestart", geste);
+      el.removeEventListener("gesturechange", geste);
     };
-  }, [handy, maxFaktor]);
+    // Die Hilfsfunktionen lesen nur Refs — neu binden nur, wenn sich das Sichtfenster ändert.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handy]);
 
   const knopf =
-    "h-9 w-9 flex items-center justify-center rounded-full border bg-background shadow-sm active:bg-muted disabled:opacity-40";
+    "h-10 w-10 shrink-0 flex items-center justify-center rounded-full border bg-background shadow-sm active:bg-muted disabled:opacity-40";
   return (
-    <div ref={rahmenRef}>
+    <div ref={rahmenRef} style={{ minWidth: 0, width: "100%", contain: "inline-size" }}>
       {!handy ? (
         children
       ) : (
         <>
-          <div ref={scrollRef} className="overflow-auto" style={{ maxHeight: "72vh", touchAction: "pan-x pan-y" }}>
-            <div style={{ width: BLATT_BREITE, zoom: einpassen * faktor } as CSSProperties}>{children}</div>
+          <div
+            ref={scrollRef}
+            className="overflow-auto rounded-sm border"
+            style={{ maxHeight: "70vh", touchAction: "pan-x pan-y" }}
+          >
+            <div ref={blattRef} style={{ width: BLATT_BREITE, zoom: einpassen * faktor } as CSSProperties}>
+              {children}
+            </div>
           </div>
-          <div className="flex items-center justify-end gap-1.5 pt-2">
-            <span className="mr-auto text-xs text-muted-foreground">Mit zwei Fingern zoomen</span>
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <span className="mr-auto text-xs leading-tight text-muted-foreground">
+              Zoomen: zwei Finger oder doppelt tippen
+            </span>
             <button
               type="button"
               className={knopf}
               aria-label="Verkleinern"
               disabled={faktor <= 1}
-              onClick={() => setFaktor((f) => Math.max(1, f / 1.4))}
+              onClick={() => zoomenUm(faktor / 1.5)}
             >
               <Minus className="h-4 w-4" />
             </button>
@@ -135,7 +243,7 @@ function HandyZoom({ children }: { children: ReactNode }) {
               className={knopf}
               aria-label="Einpassen"
               disabled={faktor === 1}
-              onClick={() => setFaktor(1)}
+              onClick={() => zoomenUm(1)}
             >
               <Maximize2 className="h-4 w-4" />
             </button>
@@ -144,7 +252,7 @@ function HandyZoom({ children }: { children: ReactNode }) {
               className={knopf}
               aria-label="Vergrößern"
               disabled={faktor >= maxFaktor}
-              onClick={() => setFaktor((f) => Math.min(maxFaktor, f * 1.4))}
+              onClick={() => zoomenUm(faktor * 1.5)}
             >
               <Plus className="h-4 w-4" />
             </button>

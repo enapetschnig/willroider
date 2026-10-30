@@ -1,5 +1,12 @@
 # Journal
 
+## 2026-10-30 — Tagesplan am Handy: wirklich eingepasst, Zoom um den Fingerpunkt (J. Maurer)
+
+- Christoph: „das scheint immer noch nicht zu funktionieren“. Im Handy-Chrome (360/390/412 px) mit dem echten Plan vom 30.10. nachgestellt: Blatt rechts abgeschnitten, Zoom-Knöpfe außerhalb des Bildschirms, Dialog horizontal scrollbar (scrollWidth 504 > 342).
+- Ursache: `DialogContent` ist ein CSS-Grid; Grid-Kinder haben `min-width: auto`, das 760-px-Blatt zog den Mess-Rahmen mit auf → auf falsche Breite (448 statt 296 px) eingepasst. Fix in `HandyZoom`: Rahmen mit `minWidth: 0`, `width: 100%`, `contain: inline-size`; Messung per `useLayoutEffect` vor dem ersten Zeichnen; 1-px-Rand des Sichtfensters abgezogen.
+- Zoomen: Zwei-Finger-Zoom setzt `zoom` direkt am Blatt (flüssig) und hält den Punkt unter den Fingern fest; Doppeltippen = Originalgröße an der Stelle bzw. wieder einpassen; +/− zoomen um die Mitte; Knöpfe 40 px, schrumpfen nicht mehr. Safari-`gesturestart/-change` werden abgefangen (iPhone-Seitenzoom).
+- Geprüft mit `/usr/bin/google-chrome` + `playwright-core` (isMobile/hasTouch, echte Touch-Gesten per CDP): eingepasst ohne Überlauf auf allen drei Breiten, Pinch 0,416→1,386 mit derselben Zelle unter den Fingern, Verschieben, Doppeltippen hin/zurück, +/−, keine Seitenfehler. Nicht auf echtem iPhone/Safari getestet.
+
 ## 2026-10-29 — Absturz beim Öffnen eines Stundenberichts behoben (L. Schuller)
 
 - `StundenBericht.tsx`: `signZweck`/`bestaetigtBusy` (useState) standen seit d6a9fd0 (23.10.) hinter den frühen Returns (isLoading/!bericht) → React #310 „Rendered more hooks“ beim ersten Laden, Seite stürzte ab („Hoppla“). Nach oben zu den übrigen Hooks verschoben.
