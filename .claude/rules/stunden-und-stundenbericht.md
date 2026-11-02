@@ -65,6 +65,14 @@ paths:
 - **Fahrgeld/Zulagen als Zeilen je Tag** (J. Maurer, 23.10.): `zusatzZeilenJeTag` in
   `stundenAggregation.ts`, unter der Summe, am Bildschirm (✓) und im PDF („x“, jsPDF hat kein ✓).
   Krankheit/Schlechtwetter weiter als Zeilen K/SW.
+- **BSB-Ausdruck** (J. Maurer, 02.11.): Holzbau-Logo `public/holzbau-willroider-logo.jpg` (nachgebaut aus dem
+  Stadtbaumeister-Logo, ein echtes Holzbau-Logo gab es nirgends), Wochentag unter jeder Tagesnummer, Sonn-/Feiertage
+  grau („Fei“), **kein Eintritt** (Daten falsch), kein „Abgabe am 16. …“. „Σ“ druckt jsPDF als „£“ → „Summe“.
+- **Schlechtwetter gehört zur Baustelle** (J. Maurer, 02.11.: „SW muss der Baustelle zugewiesen sein mit Adresse“):
+  `mitBaustelleArt()` in `zeiterfassungUi.ts` — SW braucht beim Speichern eine Baustelle (vorbelegt mit der des Tages),
+  Bericht zeigt „Schlechtwetter – Name, Adresse, PLZ Ort“ mit KST. SW zählt nicht als Arbeitszeit/Taggeld und ist aus
+  Baustellen-Stunden (BaustelleDetail, Stundenauswertung, Dashboard) ausgenommen. Alt-Einträge: Sicherung
+  `sicherung_20261102_sw_*`.
 - Erinnern an Unterschrift (Glocke, „Alle n erinnern“) → siehe `push-erinnerungen.md`.
 - Fehler 29.10. (L. Schuller): `useState` hinter frühem Return → React #310, Seite stürzte für alle ab.
   Hooks immer vor `if (isLoading) return`.

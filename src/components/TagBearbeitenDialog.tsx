@@ -39,6 +39,7 @@ import { ArtSection } from "@/components/stunden/ArtSection";
 import {
   gruppiereSections,
   istArbeitArt,
+  mitBaustelleArt,
   fehltKostenstelle,
   newKey,
   type EintragRow,
@@ -146,7 +147,8 @@ export function TagBearbeitenDialog({
     return {
       key: newKey(),
       art,
-      baustelle_id: art === "baustelle" ? letzteBaustelle : null,
+      baustelle_id:
+        art === "baustelle" || art === "schlechtwetter" ? letzteBaustelle : null,
       taetigkeit_id: null,
       taetigkeit_freitext: "",
       stunden: 0,
@@ -172,7 +174,7 @@ export function TagBearbeitenDialog({
       {
         key: newKey(),
         art,
-        baustelle_id: istArbeitArt(art) ? baustelle_id : null,
+        baustelle_id: mitBaustelleArt(art) ? baustelle_id : null,
         taetigkeit_id: null,
         taetigkeit_freitext: "",
         stunden: 0,
@@ -206,7 +208,7 @@ export function TagBearbeitenDialog({
       toast({
         variant: "destructive",
         title: "Baustelle bzw. Kostenstelle fehlt",
-        description: "Bitte bei Baustelle/Firma eine Auswahl treffen.",
+        description: "Bitte bei Baustelle/Firma/Schlechtwetter eine Auswahl treffen.",
       });
       return;
     }
@@ -228,7 +230,7 @@ export function TagBearbeitenDialog({
               arbeit && !e.taetigkeit_id
                 ? e.taetigkeit_freitext.trim() || null
                 : null,
-            baustelle_id: arbeit ? e.baustelle_id : null,
+            baustelle_id: mitBaustelleArt(e.art) ? e.baustelle_id : null,
             ziel_baustelle_id: e.art === "baustelle" ? e.ziel_baustelle_id ?? null : null,
             ort: e.art === "baustelle" && e.ort === "firma" ? "firma" : "baustelle",
             stunden: Number(e.stunden),

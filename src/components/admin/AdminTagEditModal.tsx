@@ -48,6 +48,8 @@ const ART_OPTIONS: { value: TagStatus; label: string }[] = [
 ];
 
 const istArbeitArt = (art: TagStatus) => art === "baustelle" || art === "firma";
+/** Schlechtwetter gehört seit 02.11.2026 ebenfalls zu einer Baustelle (J. Maurer). */
+const mitBaustelleArt = (art: TagStatus) => istArbeitArt(art) || art === "schlechtwetter";
 
 interface FormEintrag {
   art: TagStatus;
@@ -162,11 +164,11 @@ export function AdminTagEditModal({
 
   const handleSave = async () => {
     // Keine Arbeitsstunden ohne Baustelle bzw. Kostenstelle (N. Gwenger 08.10.)
-    if (eintraege.some((e) => istArbeitArt(e.art) && e.stunden > 0 && !e.baustelle_id)) {
+    if (eintraege.some((e) => mitBaustelleArt(e.art) && e.stunden > 0 && !e.baustelle_id)) {
       toast({
         variant: "destructive",
         title: "Baustelle bzw. Kostenstelle fehlt",
-        description: "Bitte bei Baustelle/Firma eine Auswahl treffen.",
+        description: "Bitte bei Baustelle/Firma/Schlechtwetter eine Auswahl treffen.",
       });
       return;
     }
@@ -187,7 +189,7 @@ export function AdminTagEditModal({
                 ? e.taetigkeit_freitext.trim() || null
                 : null,
             // Firma-Zeilen tragen seit 08.10. ebenfalls eine Kostenstelle.
-            baustelle_id: arbeit ? e.baustelle_id : null,
+            baustelle_id: mitBaustelleArt(e.art) ? e.baustelle_id : null,
             stunden: Number(e.stunden),
             notiz: e.notiz.trim() || null,
           };
@@ -339,7 +341,7 @@ export function AdminTagEditModal({
 
                     {/* Baustelle bzw. bei Firma die Kostenstelle (interne
                         Kostenstellen nur bei Firma) — N. Gwenger 08.10. */}
-                    {arbeit && (
+                    {mitBaustelleArt(e.art) && (
                       <select
                         value={e.baustelle_id ?? ""}
                         onChange={(ev) =>

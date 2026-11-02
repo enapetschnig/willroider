@@ -1,5 +1,11 @@
 # Journal
 
+## 2026-11-02 — BSB-Ausdruck überarbeitet, Schlechtwetter an der Baustelle (J. Maurer)
+
+- Ausdruck: Logo „Holzbau Willroider“ (aus dem Stadtbaumeister-Logo nachgebaut: JW-Zeichen + „HOLZBAU WILLROIDER“, kein Original auffindbar — Repo, willroider.at), Logo im Format 2:1 statt verzerrt 20×20 über „Pers.-Nr.“, Wochentag je Spalte, Sonn-/Feiertage grau („Fei“), Eintritt weg (Bildschirm + PDF), „Abgabe am 16. …“ weg, „Σ“→„Summe“ (kam als „£“).
+- Schlechtwetter: Baustelle Pflicht in Stunden, Tag bearbeiten, Büro-Korrektur; Zeile „Schlechtwetter – Baustelle, Adresse“ mit KST. Ausgenommen aus Baustellen-Stunden. Migration `20261102100000_schlechtwetter_baustelle.sql`: 9 von 12 Alt-Einträgen eindeutig der Baustelle des Tages zugeordnet, Schnappschüsse mitgezogen (sonst gelb); 3 alte (April/Mai/Juli, ohne Baustelle am Tag) bleiben. Sicherung `sicherung_20261102_sw_taetigkeiten/_berichte`.
+- Probefahrt in der Testumgebung (Arbeiter: SW übernimmt Baustelle, speichert sie; GF: Raster + PDF geprüft).
+
 ## 2026-10-30 — Tagesplan am Handy: Zoomen ohne Ruckeln (Christoph)
 
 - Christoph: „es ruckelt noch so wenn man hinzoomt … schau dass das smooth und auf jedem handy funktioniert“. Gemessen im echten Dialog (Wegwerfkonto, `vite preview`, CPU per CDP 4×/8× gedrosselt, `Performance.getMetrics` nur während der Geste): CSS `zoom` setzte bei jeder Fingerbewegung die ganze Tabelle neu — 45 Layouts, 480 ms Haupt-Thread je Geste (8×: 937 ms). fps allein zeigte am PC nichts.

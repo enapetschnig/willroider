@@ -47,6 +47,7 @@ import {
   STATUS_COLORS,
   STATUS_OPTIONS,
   istArbeitArt,
+  mitBaustelleArt,
   fehltKostenstelle,
   newKey,
   gruppiereSections,
@@ -662,7 +663,9 @@ export default function Stunden() {
               key: newKey(),
               art,
               baustelle_id:
-                art === "baustelle" ? tp?.baustelle_id ?? null : null,
+                art === "baustelle" || art === "schlechtwetter"
+                  ? tp?.baustelle_id ?? null
+                  : null,
               taetigkeit_id: null,
               taetigkeit_freitext:
                 art === "baustelle" ? tp?.taetigkeit ?? "" : "",
@@ -791,8 +794,11 @@ export default function Stunden() {
     return {
       key: newKey(),
       art,
+      // Schlechtwetter gehört zur Baustelle des Tages (J. Maurer 02.11.).
       baustelle_id:
-        art === "baustelle" ? tp?.baustelle_id ?? letzteBaustelle ?? null : null,
+        art === "baustelle" || art === "schlechtwetter"
+          ? tp?.baustelle_id ?? letzteBaustelle ?? null
+          : null,
       taetigkeit_id: null,
       taetigkeit_freitext: art === "baustelle" ? tp?.taetigkeit ?? "" : "",
       stunden: list.length === 0 ? soll : 0,
@@ -826,8 +832,9 @@ export default function Stunden() {
       return;
     }
 
-    // Keine Arbeitsstunden ohne Baustelle bzw. Kostenstelle (Krank, Urlaub,
-    // Schlechtwetter usw. brauchen keine) — N. Gwenger 08.10.
+    // Keine Arbeitsstunden ohne Baustelle bzw. Kostenstelle (Krank, Urlaub
+    // usw. brauchen keine) — N. Gwenger 08.10.; Schlechtwetter braucht seit
+    // 02.11. die Baustelle (J. Maurer).
     const ohneKst = selectedMaList.filter((m) =>
       (form.maEintraege[m.id] ?? []).some(fehltKostenstelle),
     );
@@ -835,7 +842,7 @@ export default function Stunden() {
       toast({
         variant: "destructive",
         title: "Baustelle bzw. Kostenstelle fehlt",
-        description: `Bitte bei Baustelle/Firma auswählen: ${ohneKst
+        description: `Bitte bei Baustelle/Firma/Schlechtwetter auswählen: ${ohneKst
           .map((m) => `${m.vorname} ${m.nachname}`)
           .join(", ")}`,
       });
@@ -956,7 +963,8 @@ export default function Stunden() {
             taetigkeit_freitext:
               arbeit && !r.taetigkeit_id ? r.taetigkeit_freitext.trim() || null : null,
             // Firma-Zeilen tragen seit 08.10. ebenfalls eine Kostenstelle.
-            baustelle_id: arbeit ? r.baustelle_id : null,
+            // Schlechtwetter trägt seit 02.11. ebenfalls die Baustelle.
+            baustelle_id: mitBaustelleArt(r.art) ? r.baustelle_id : null,
             ort: r.art === "baustelle" && r.ort === "firma" ? "firma" : "baustelle",
             stunden: Number(r.stunden),
             notiz: r.notiz.trim() || null,
@@ -1596,7 +1604,7 @@ function MaBlock({
       {
         key: newKey(),
         art,
-        baustelle_id: istArbeitArt(art) ? baustelle_id : null,
+        baustelle_id: mitBaustelleArt(art) ? baustelle_id : null,
         taetigkeit_id: null,
         taetigkeit_freitext: "",
         stunden: 0,

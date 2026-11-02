@@ -120,12 +120,21 @@ export const istArbeitArt = (art: TagStatus) =>
   art === "baustelle" || art === "firma";
 
 /**
- * Arbeits-Zeilen (Baustelle/Firma) ohne Kostenstelle. Ohne Baustelle bzw.
- * Kostenstelle darf nicht gespeichert werden — außer Krank, Urlaub,
- * Schlechtwetter usw. (Änderungswunsch N. Gwenger 08.10.).
+ * Arten, die eine Baustelle tragen: Arbeit (Baustelle/Firma) und seit
+ * 02.11.2026 auch Schlechtwetter — SW gehört zur Baustelle samt Adresse
+ * (J. Maurer). Zählt trotzdem nicht als Arbeitszeit und gibt kein Taggeld.
+ */
+export const mitBaustelleArt = (art: TagStatus) =>
+  istArbeitArt(art) || art === "schlechtwetter";
+
+/**
+ * Arbeits-Zeilen (Baustelle/Firma) und Schlechtwetter ohne Baustelle bzw.
+ * Kostenstelle. Ohne darf nicht gespeichert werden — außer Krank, Urlaub
+ * usw. (N. Gwenger 08.10.; Schlechtwetter J. Maurer 02.11.).
  */
 export const fehltKostenstelle = (r: Pick<EintragRow, "art" | "baustelle_id" | "stunden">) =>
-  istArbeitArt(r.art) && Number(r.stunden) > 0 && !r.baustelle_id;
+  mitBaustelleArt(r.art) && Number(r.stunden) > 0 && !r.baustelle_id;
+
 
 export const newKey = () =>
   typeof crypto !== "undefined" && crypto.randomUUID

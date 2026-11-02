@@ -1,6 +1,6 @@
 /**
  * Baustellenstundenbericht als PDF — Querformat A4, nach der Papier-Vorlage:
- * Firmenkopf · Titel · Monat/Jahr/Eintritt/Austritt · Pers.-Nr./Name ·
+ * Firmenkopf · Titel · Monat/Jahr/Austritt · Pers.-Nr./Name ·
  * Raster Kostenstelle | Baustelle | Tage · Zulagen · Legende ·
  * Unterschriftsfelder.
  *
@@ -26,9 +26,14 @@ export interface BsbPdfInput {
   jahr: number;
   name: string;
   persNr: string;
-  eintritt: string;
   austritt: string;
   tage: number[]; // Tagesnummern für die Kopfzeile
+  /** Wochentag je Spalte („Mo“ … „So“, „Fei“) — unter der Tagesnummer. */
+  wochentage?: string[];
+  /** Sonn- und Feiertage: Spalte grau hinterlegt (J. Maurer 02.11.). */
+  sonnFeiertage?: boolean[];
+  /** Samstage: Spalte leicht grau. */
+  samstage?: boolean[];
   tageIso: string[]; // parallele ISO-Daten (für Gelb-Diff)
   geaendert: Set<string>;
   rows: BsbPdfRow[];
@@ -51,12 +56,15 @@ export interface BsbPdfInput {
 const BURGUNDY: [number, number, number] = [182, 86, 103];
 const GELB: [number, number, number] = [254, 240, 138];
 const GRUEN: [number, number, number] = [187, 247, 208];
+const SONNTAG_GRAU: [number, number, number] = [214, 214, 218];
+const SAMSTAG_GRAU: [number, number, number] = [238, 238, 240];
 
 let _logoCache: string | null = null;
 async function getLogo(): Promise<string | null> {
   if (_logoCache) return _logoCache;
   try {
-    const res = await fetch("/willroider-logo.jpg");
+    // Holzbau-Logo statt Stadtbaumeister (J. Maurer 02.11.), Format 2:1.
+    const res = await fetch("/holzbau-willroider-logo.jpg");
     if (!res.ok) return null;
     const blob = await res.blob();
     const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -83,7 +91,7 @@ export async function makeBaustellenstundenberichtPdf(
   // ─── Kopf ──────────────────────────────────────────────────────────────
   if (logo) {
     try {
-      doc.addImage(logo, "JPEG", margin, 8, 20, 20, undefined, "FAST");
+      doc.addImage(logo, "JPEG", margin, 7, 30, 15, undefined, "FAST");
     } catch {
       /* ignore */
     }
@@ -97,7 +105,7 @@ export async function makeBaustellenstundenberichtPdf(
     "A-9500 Villach, Willroider Straße 13",
     "Tel. (0 42 42) 24 1 82 · office@willroider.at",
   ];
-  adr.forEach((l, i) => doc.text(l, margin + 23, 12 + i * 3.4));
+  adr.forEach((l, i) => doc.text(l, margin + 33, 11 + i * 3.4));
 
   // Titel zentriert
   doc.setFontSize(13);
@@ -107,13 +115,13 @@ export async function makeBaustellenstundenberichtPdf(
     align: "center",
   });
 
-  // Monat/Jahr/Eintritt/Austritt oben rechts
+  // Monat/Jahr/Austritt oben rechts — Eintritt entfernt, die Daten
+  // stimmen nicht (J. Maurer 02.11.)
   doc.setFontSize(8);
   doc.setTextColor(30, 30, 30);
   const boxX = pageW - margin - 52;
   const kv: [string, string][] = [
     ["Monat:", `${input.monat} ${input.jahr}`],
-    ["Eintritt:", input.eintritt || "—"],
     ["Austritt:", input.austritt || "—"],
   ];
   kv.forEach(([k, v], i) => {
@@ -127,17 +135,25 @@ export async function makeBaustellenstundenberichtPdf(
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(30, 30, 30);
-  doc.text("Pers.-Nr.:", margin, 27);
+  doc.text("Pers.-Nr.:", margin, 29);
   doc.setFont("helvetica", "bold");
-  doc.text(input.persNr || "—", margin + 16, 27);
+  doc.text(input.persNr || "—", margin + 16, 29);
   doc.setFont("helvetica", "normal");
-  doc.text("Name:", margin + 40, 27);
+  doc.text("Name:", margin + 40, 29);
   doc.setFont("helvetica", "bold");
-  doc.text(input.name, margin + 53, 27);
+  doc.text(input.name, margin + 53, 29);
 
   // ─── Raster ────────────────────────────────────────────────────────────
   const head = [
-    ["Kostenstelle", "Baustelle", ...input.tage.map(String), "Σ"],
+    [
+      "Kostenstelle",
+      "Baustelle",
+      ...input.tage.map((t, i) =>
+        input.wochentage?.[i] ? `${t}\n${input.wochentage[i]}` : String(t),
+      ),
+      // „Σ“ kennt die PDF-Standardschrift nicht (kam als „£“ heraus).
+      "Summe",
+    ],
   ];
   const body = input.rows.map((r) => [
     r.kostenstelle,
@@ -154,7 +170,7 @@ export async function makeBaustellenstundenberichtPdf(
   const lastCol = dayColStart + input.tage.length;
 
   autoTable(doc, {
-    startY: 31,
+    startY: 33,
     head,
     body,
     theme: "grid",
@@ -183,9 +199,14 @@ export async function makeBaustellenstundenberichtPdf(
       const c = data.column.index;
       const markerFarbe = input.geprueft ? GRUEN : GELB;
       if (c >= dayColStart && c < lastCol) {
-        const iso = input.tageIso[c - dayColStart];
+        const i = c - dayColStart;
+        const iso = input.tageIso[i];
         if (iso && input.geaendert.has(iso)) {
           data.cell.styles.fillColor = markerFarbe;
+        } else if (input.sonnFeiertage?.[i]) {
+          data.cell.styles.fillColor = SONNTAG_GRAU;
+        } else if (input.samstage?.[i]) {
+          data.cell.styles.fillColor = SAMSTAG_GRAU;
         }
       }
       if (data.section === "body" && data.row.index > summenRowIndex && c === 1) {
@@ -193,7 +214,12 @@ export async function makeBaustellenstundenberichtPdf(
       }
       if (data.section === "body" && data.row.index === summenRowIndex) {
         data.cell.styles.fontStyle = "bold";
-        if (!(c >= dayColStart && c < lastCol && input.geaendert.has(input.tageIso[c - dayColStart]))) {
+        const tagSpalte = c >= dayColStart && c < lastCol;
+        const i = c - dayColStart;
+        if (
+          !(tagSpalte && input.geaendert.has(input.tageIso[i])) &&
+          !(tagSpalte && input.sonnFeiertage?.[i])
+        ) {
           data.cell.styles.fillColor = [243, 243, 244];
         }
       }
@@ -223,7 +249,7 @@ export async function makeBaustellenstundenberichtPdf(
   doc.setFontSize(7);
   doc.setTextColor(90, 90, 95);
   doc.text(
-    "ZA = Zeitausgleich    K = Krankenstand    U = Urlaub    F = Feiertag    SW = Schlechtwetter    S = Sozialstunden",
+    "ZA = Zeitausgleich    K = Krankenstand    U = Urlaub    F = Feiertag    SW = Schlechtwetter    S = Sozialstunden    grau = Sonn- und Feiertag (Fei)",
     margin,
     y,
   );
@@ -277,13 +303,7 @@ export async function makeBaustellenstundenberichtPdf(
   doc.line(margin + 2 * colW, y + 15, pageW - margin, y + 15);
   doc.text("Lohnbüro EDV-erfasst am:", margin + 2 * colW, y + 19);
 
-  doc.setFontSize(7);
-  doc.setTextColor(120, 120, 125);
-  doc.text(
-    "Abgabe am 16. bzw. am darauffolgenden Werktag!",
-    margin,
-    y + 25,
-  );
+  // „Abgabe am 16. …“ entfernt — passt für diesen Zettel nicht (J. Maurer 02.11.).
 
   return doc;
 }

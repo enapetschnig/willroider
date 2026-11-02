@@ -18,6 +18,7 @@ import {
 } from "@/lib/baustellenstundenberichtPdf";
 import type { StundenTagFull } from "@/hooks/useStundenTag";
 import type { TagStatus } from "@/integrations/supabase/types";
+import { feiertagAt } from "@/lib/feiertage";
 
 const WD = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 const STATUS_LABEL: Record<TagStatus, string> = {
@@ -48,6 +49,37 @@ const ART_ORDER: Record<TagStatus, number> = {
   schlechtwetter: 5,
   feiertag: 6,
 };
+
+/** Baustelle mit Adresse — so steht Schlechtwetter am Bericht (J. Maurer 02.11.). */
+export interface BaustelleMitAdresse {
+  bvh_name?: string | null;
+  kostenstelle?: string | null;
+  baustellen_adresse?: string | null;
+  plz?: string | null;
+  ort?: string | null;
+}
+
+/** „Schlechtwetter – Nockresort, Maibrunnenweg 25, 9546 Bad Kleinkirchheim“ */
+export function schlechtwetterLabel(b: BaustelleMitAdresse | null | undefined): string {
+  if (!b) return "Schlechtwetter";
+  const ortZeile = [b.plz, b.ort].map((x) => (x ?? "").trim()).filter(Boolean).join(" ");
+  const teile = [b.bvh_name, b.baustellen_adresse, ortZeile]
+    .map((x) => (x ?? "").trim())
+    .filter(Boolean);
+  return teile.length ? `Schlechtwetter – ${teile.join(", ")}` : "Schlechtwetter";
+}
+
+/** Sonn- und Feiertage sind am Bericht hervorgehoben (J. Maurer 02.11.). */
+export function tagInfo(d: Date): { wd: string; frei: boolean; sonnFeiertag: boolean; feiertag: string | null } {
+  const dow = d.getDay();
+  const fei = feiertagAt(localIso(d));
+  return {
+    wd: fei ? "Fei" : WD[dow],
+    frei: dow === 0 || dow === 6 || !!fei,
+    sonnFeiertag: dow === 0 || !!fei,
+    feiertag: fei?.name ?? null,
+  };
+}
 
 interface RasterRow {
   key: string;
@@ -88,16 +120,8 @@ export async function buildBerichtPdf(
   if (bErr) throw bErr;
   const bericht = bRaw as any;
 
-  // 2) Eintrittsdatum aus profile_konten_settings
-  let eintrittsdatum: string | null = null;
-  if (bericht.mitarbeiter_id) {
-    const { data: pks } = await supabase
-      .from("profile_konten_settings")
-      .select("eintrittsdatum")
-      .eq("profile_id", bericht.mitarbeiter_id)
-      .maybeSingle();
-    eintrittsdatum = (pks as any)?.eintrittsdatum ?? null;
-  }
+  // 2) Eintritt steht nicht mehr am Bericht — die Daten stimmen nicht
+  //    (J. Maurer 02.11.).
 
   // 3) Tage + Taetigkeiten + Zulagen + Fahrt
   const { data: tageRaw, error: tErr } = await supabase
@@ -123,7 +147,7 @@ export async function buildBerichtPdf(
   // 4) Baustellen-Map
   const { data: bs } = await supabase
     .from("baustellen")
-    .select("id, bvh_name, kostenstelle, kategorie");
+    .select("id, bvh_name, kostenstelle, kategorie, baustellen_adresse, plz, ort");
   const baustelleMap = new Map(
     ((bs as any[]) ?? []).map((b) => [b.id as string, b]),
   );
@@ -134,17 +158,23 @@ export async function buildBerichtPdf(
     .select("id, bezeichnung");
 
   // 6) Raster aufbauen (Baustelle x Tag)
-  const periodeTage: { iso: string; tag: number; wd: string; frei: boolean }[] =
-    [];
+  const periodeTage: {
+    iso: string;
+    tag: number;
+    wd: string;
+    frei: boolean;
+    sonnFeiertag: boolean;
+  }[] = [];
   const d = new Date(bericht.von_datum + "T00:00:00");
   const end = new Date(bericht.bis_datum + "T00:00:00");
   while (d <= end) {
-    const dow = d.getDay();
+    const info = tagInfo(d);
     periodeTage.push({
       iso: localIso(d),
       tag: d.getDate(),
-      wd: WD[dow],
-      frei: dow === 0 || dow === 6,
+      wd: info.wd,
+      frei: info.frei,
+      sonnFeiertag: info.sonnFeiertag,
     });
     d.setDate(d.getDate() + 1);
   }
@@ -185,6 +215,12 @@ export async function buildBerichtPdf(
       } else if (e.art === "firma") {
         key = "firma";
         label = "Firma";
+      } else if (e.art === "schlechtwetter" && e.baustelle_id) {
+        // Schlechtwetter gehört zur Baustelle, mit Adresse (J. Maurer 02.11.).
+        const b = baustelleMap.get(e.baustelle_id);
+        key = `sw:${e.baustelle_id}`;
+        label = schlechtwetterLabel(b as BaustelleMitAdresse);
+        kst = (b as any)?.kostenstelle ?? "";
       } else {
         key = e.art;
         label = STATUS_LABEL[e.art as TagStatus];
@@ -274,11 +310,11 @@ export async function buildBerichtPdf(
     jahr: bericht.jahr,
     name: maName,
     persNr: bericht.mitarbeiter?.pers_nr ?? "",
-    eintritt: eintrittsdatum
-      ? new Date(eintrittsdatum).toLocaleDateString("de-AT")
-      : "",
     austritt: "",
     tage: periodeTage.map((d) => d.tag),
+    wochentage: periodeTage.map((d) => d.wd),
+    sonnFeiertage: periodeTage.map((d) => d.sonnFeiertag),
+    samstage: periodeTage.map((d) => d.frei && !d.sonnFeiertag),
     tageIso: periodeTage.map((d) => d.iso),
     geaendert,
     geprueft:

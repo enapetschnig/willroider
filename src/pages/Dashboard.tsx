@@ -220,14 +220,14 @@ export default function Dashboard() {
         const { data: stunden } = await supabase
           .from("stunden_taetigkeiten")
           .select(
-            "baustelle_id, stunden, stunden_tag:stunden_tage!inner(mitarbeiter_id, datum)"
+            "art, baustelle_id, stunden, stunden_tag:stunden_tage!inner(mitarbeiter_id, datum)"
           )
           .eq("stunden_tag.mitarbeiter_id", user.id)
           .eq("stunden_tag.datum", datum);
         if (stunden) {
           for (const e of eintraege) {
             e.bereitsGebucht = stunden
-              .filter((r: any) => r.baustelle_id === e.baustelleId)
+              .filter((r: any) => r.baustelle_id === e.baustelleId && r.art !== "schlechtwetter")
               .reduce((s: number, r: any) => s + Number(r.stunden ?? 0), 0);
           }
         }

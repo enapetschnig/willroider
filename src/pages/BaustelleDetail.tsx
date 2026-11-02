@@ -143,7 +143,9 @@ export default function BaustelleDetail() {
         .select(
           "id, stunden, taetigkeit_freitext, baustelle_id, ziel_baustelle_id, taetigkeit:taetigkeiten_stamm(bezeichnung), tag:stunden_tage!inner(datum, status, mitarbeiter_id)",
         )
-        .or(`ziel_baustelle_id.eq.${id},and(baustelle_id.eq.${id},ziel_baustelle_id.is.null)`),
+        .or(`ziel_baustelle_id.eq.${id},and(baustelle_id.eq.${id},ziel_baustelle_id.is.null)`)
+        // Schlechtwetter trägt seit 02.11. die Baustelle, ist aber keine Arbeitszeit.
+        .neq("art", "schlechtwetter"),
       supabase.from("evaluierungen").select("*").eq("baustelle_id", id).order("datum", { ascending: false }),
     ]);
     const baustelle = (bs.data as Baustelle) ?? null;

@@ -56,7 +56,10 @@ export function ArtSection({
   const Icon = STATUS_ICONS[art];
   const arbeit = istArbeitArt(art);
   const istMaschine = kategorie === "maschine";
-  const mitKostenstelle = art === "baustelle" || (art === "firma" && !istMaschine);
+  // Schlechtwetter gehört ebenfalls zu einer Baustelle (J. Maurer 02.11.).
+  const mitKostenstelle =
+    art === "baustelle" ||
+    ((art === "firma" || art === "schlechtwetter") && !istMaschine);
   const sectionBaustelleId = mitKostenstelle ? rows[0]?.baustelle_id ?? null : null;
   const sectionZielId =
     art === "baustelle" ? rows[0]?.ziel_baustelle_id ?? null : null;
@@ -90,7 +93,9 @@ export function ArtSection({
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
               {art === "firma"
                 ? "Bitte Kostenstelle bzw. Baustelle wählen."
-                : "Bitte Baustelle wählen."}
+                : art === "schlechtwetter"
+                  ? "Bitte die Baustelle wählen, auf der Schlechtwetter war."
+                  : "Bitte Baustelle wählen."}
             </p>
           )}
 

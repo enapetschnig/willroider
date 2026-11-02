@@ -394,6 +394,8 @@ export default function Stundenauswertung() {
     // ziel_baustelle_id gewinnt, sonst wie bisher baustelle_id.
     for (const t of tage)
       for (const tt of t.taetigkeiten) {
+        // Schlechtwetter hängt an der Baustelle, ist aber keine Arbeitszeit.
+        if (tt.art === "schlechtwetter") continue;
         const id = (tt as any).ziel_baustelle_id ?? tt.baustelle_id;
         if (id) ids.add(id);
       }
@@ -408,7 +410,7 @@ export default function Stundenauswertung() {
     for (const t of tage) {
       for (const tt of t.taetigkeiten) {
         const zielId = (tt as any).ziel_baustelle_id ?? tt.baustelle_id;
-        if (zielId === selectedBaustelle) {
+        if (zielId === selectedBaustelle && tt.art !== "schlechtwetter") {
           m.set(
             t.tag.mitarbeiter_id,
             (m.get(t.tag.mitarbeiter_id) ?? 0) + Number(tt.stunden ?? 0),

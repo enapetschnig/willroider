@@ -289,7 +289,9 @@ export default function HalleErfassung() {
               arbeit && !e.taetigkeit_id
                 ? e.taetigkeit_freitext.trim() || null
                 : null,
-            baustelle_id: e.art === "baustelle" ? e.baustelle_id : null,
+            // Schlechtwetter behält seine Baustelle (J. Maurer 02.11.).
+            baustelle_id:
+              e.art === "baustelle" || e.art === "schlechtwetter" ? e.baustelle_id : null,
             ziel_baustelle_id:
               e.art === "baustelle" ? e.ziel_baustelle_id ?? null : null,
             stunden: Number(e.stunden),

@@ -50,7 +50,7 @@ import { UnterschriftDialog } from "@/components/UnterschriftDialog";
 import { BsbVersendenDialog } from "@/components/BsbVersendenDialog";
 import { useZulagenTypen } from "@/hooks/useStammdatenStunden";
 import { aggregiereFahrtgeld, aggregiereZulagen, zusatzZeilenJeTag } from "@/lib/stundenAggregation";
-import { buildBerichtPdf } from "@/lib/bsbPdfHelper";
+import { buildBerichtPdf, schlechtwetterLabel, tagInfo } from "@/lib/bsbPdfHelper";
 import { archiviereBericht } from "@/lib/berichtArchiv";
 
 const STATUS_LABEL: Record<TagStatus, string> = {
@@ -135,7 +135,6 @@ const STATUS_BADGE: Record<
   },
 };
 
-const WD = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 
 function fmtTag(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -225,12 +224,22 @@ export default function StundenBericht() {
   });
 
   const { data: baustellen = [] } = useQuery({
-    queryKey: ["baustellen_kostenstelle", "mit_kategorie"],
+    queryKey: ["baustellen_kostenstelle", "mit_kategorie", "mit_adresse"],
     queryFn: async () => {
       const { data } = await supabase
         .from("baustellen")
-        .select("id, bvh_name, kostenstelle, kategorie");
-      return (data as { id: string; bvh_name: string; kostenstelle: string | null; kategorie: string }[]) ?? [];
+        .select("id, bvh_name, kostenstelle, kategorie, baustellen_adresse, plz, ort");
+      return (
+        (data as {
+          id: string;
+          bvh_name: string;
+          kostenstelle: string | null;
+          kategorie: string;
+          baustellen_adresse: string | null;
+          plz: string | null;
+          ort: string | null;
+        }[]) ?? []
+      );
     },
   });
   const baustelleMap = useMemo(
@@ -319,8 +328,9 @@ export default function StundenBericht() {
     const end = new Date(bericht.bis_datum + "T00:00:00");
     while (d <= end) {
       const iso = localIso(d);
-      const dow = d.getDay();
-      out.push({ iso, tag: d.getDate(), wd: WD[dow], frei: dow === 0 || dow === 6 });
+      // Sonn- und Feiertage hervorheben (J. Maurer 02.11.).
+      const info = tagInfo(d);
+      out.push({ iso, tag: d.getDate(), wd: info.wd, frei: info.frei });
       d.setDate(d.getDate() + 1);
     }
     return out;
@@ -362,6 +372,12 @@ export default function StundenBericht() {
         } else if (e.art === "firma") {
           key = "firma";
           label = "Firma";
+        } else if (e.art === "schlechtwetter" && e.baustelle_id) {
+          // Schlechtwetter gehört zur Baustelle, mit Adresse (J. Maurer 02.11.).
+          const b = baustelleMap.get(e.baustelle_id);
+          key = `sw:${e.baustelle_id}`;
+          label = schlechtwetterLabel(b);
+          kst = b?.kostenstelle ?? "";
         } else {
           key = e.art;
           label = STATUS_LABEL[e.art];
@@ -806,18 +822,10 @@ export default function StundenBericht() {
               )}
             </div>
           )}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
             <div>
               <div className="text-muted-foreground">Pers.-Nr.</div>
               <div className="font-medium">{bericht.mitarbeiter?.pers_nr ?? "—"}</div>
-            </div>
-            <div>
-              <div className="text-muted-foreground">Eintritt</div>
-              <div className="font-medium">
-                {bericht.eintrittsdatum
-                  ? new Date(bericht.eintrittsdatum).toLocaleDateString("de-AT")
-                  : "—"}
-              </div>
             </div>
             <div>
               <div className="text-muted-foreground">Austritt</div>
@@ -1025,7 +1033,13 @@ export default function StundenBericht() {
                       }`}
                     >
                       <div className="font-semibold">{d.tag}</div>
-                      <div className="text-[9px] font-normal">{d.wd}</div>
+                      <div
+                        className={`text-[9px] ${
+                          d.wd === "So" || d.wd === "Fei" ? "font-bold text-primary" : "font-normal"
+                        }`}
+                      >
+                        {d.wd}
+                      </div>
                     </th>
                   ))}
                   <th className="px-2 py-1 border text-right">Σ</th>
