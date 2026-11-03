@@ -73,6 +73,9 @@ paths:
   Bericht zeigt „Schlechtwetter – Name, Adresse, PLZ Ort“ mit KST. SW zählt nicht als Arbeitszeit/Taggeld und ist aus
   Baustellen-Stunden (BaustelleDetail, Stundenauswertung, Dashboard) ausgenommen. Alt-Einträge: Sicherung
   `sicherung_20261102_sw_*`.
+  Nachgezogen 03.11. (Gegenprobe): auch Halle/Werk-Erfassung (`ArtSection` mit `kategorie="maschine"` zeigt für SW die
+  echten Baustellen, nicht die Maschinen; Speichern ohne Baustelle gesperrt) und Handy-Karten im Stundenbericht.
+  Neue Erfassungsmasken immer mit prüfen — SW hängt an `mitBaustelleArt`/`fehltKostenstelle`.
 - Erinnern an Unterschrift (Glocke, „Alle n erinnern“) → siehe `push-erinnerungen.md`.
 - Fehler 29.10. (L. Schuller): `useState` hinter frühem Return → React #310, Seite stürzte für alle ab.
   Hooks immer vor `if (isLoading) return`.

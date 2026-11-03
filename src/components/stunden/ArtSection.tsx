@@ -57,9 +57,13 @@ export function ArtSection({
   const arbeit = istArbeitArt(art);
   const istMaschine = kategorie === "maschine";
   // Schlechtwetter gehört ebenfalls zu einer Baustelle (J. Maurer 02.11.).
+  // Auch in der Halle/Werk-Erfassung: SW wählt dort eine echte Baustelle
+  // (nicht die Maschine) — Nachtschicht-Gegenprobe 03.11.
   const mitKostenstelle =
     art === "baustelle" ||
-    ((art === "firma" || art === "schlechtwetter") && !istMaschine);
+    art === "schlechtwetter" ||
+    (art === "firma" && !istMaschine);
+  const swInHalle = istMaschine && art === "schlechtwetter";
   const sectionBaustelleId = mitKostenstelle ? rows[0]?.baustelle_id ?? null : null;
   const sectionZielId =
     art === "baustelle" ? rows[0]?.ziel_baustelle_id ?? null : null;
@@ -83,10 +87,10 @@ export function ArtSection({
       {mitKostenstelle && (
         <div className="p-2.5 border-b bg-background/50">
           <BaustelleCombobox
-            baustellen={baustellen}
+            baustellen={swInHalle ? zielBaustellen ?? [] : baustellen}
             value={sectionBaustelleId ?? ""}
             onChange={(v) => onSectionBaustelle(v || null)}
-            kategorie={art === "firma" ? "firma" : kategorie}
+            kategorie={art === "firma" ? "firma" : swInHalle ? "baustelle" : kategorie}
           />
           {fehlt && (
             <p className="mt-1.5 flex items-center gap-1 text-[11px] font-medium text-destructive">
@@ -103,7 +107,7 @@ export function ArtSection({
               Die Stunden zählen dann auf diese Baustelle — die Maschine
               bleibt oben stehen und sorgt weiterhin dafür, dass es für
               Werkstattarbeit kein Taggeld gibt. */}
-          {istMaschine && zielBaustellen && onSectionZielBaustelle && (
+          {istMaschine && art === "baustelle" && zielBaustellen && onSectionZielBaustelle && (
             <div className="mt-2 space-y-1">
               <span className="text-[11px] font-medium text-muted-foreground">
                 Für welche Baustelle? <span className="font-normal">(optional)</span>

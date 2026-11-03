@@ -1,5 +1,11 @@
 # Journal
 
+## 2026-11-03 — Schlechtwetter-Baustelle nachgezogen (Gegenprobe zu 02.11.)
+
+- Halle/Werk (`/halle`): SW hatte keine Baustellenauswahl (ArtSection mit `kategorie="maschine"`), `addSplit` setzte `baustelle_id=null`, kein Pflicht-Check → jetzt Auswahl der echten Baustellen (ohne „Für welche Baustelle?“), Speichern ohne Baustelle gesperrt.
+- Stundenbericht Handy-Karten: SW zeigt „Schlechtwetter – Name, Adresse, PLZ Ort“ wie Tabelle/PDF.
+- Probefahrt `tests/roboter/2026-11-03-schlechtwetter-halle-handy.spec.ts` (mit altem Code rot, neu grün); alle Roboter-Tests grün auf frischer Testumgebung.
+
 ## 2026-11-02 — BSB-Ausdruck überarbeitet, Schlechtwetter an der Baustelle (J. Maurer)
 
 - Ausdruck: Logo „Holzbau Willroider“ (aus dem Stadtbaumeister-Logo nachgebaut: JW-Zeichen + „HOLZBAU WILLROIDER“, kein Original auffindbar — Repo, willroider.at), Logo im Format 2:1 statt verzerrt 20×20 über „Pers.-Nr.“, Wochentag je Spalte, Sonn-/Feiertage grau („Fei“), Eintritt weg (Bildschirm + PDF), „Abgabe am 16. …“ weg, „Σ“→„Summe“ (kam als „£“).

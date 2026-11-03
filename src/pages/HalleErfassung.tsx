@@ -39,6 +39,7 @@ import { ArtSection } from "@/components/stunden/ArtSection";
 import {
   gruppiereSections,
   istArbeitArt,
+  fehltKostenstelle,
   newKey,
   type EintragRow,
 } from "@/components/stunden/zeiterfassungUi";
@@ -211,7 +212,8 @@ export default function HalleErfassung() {
       {
         key: newKey(),
         art,
-        baustelle_id: art === "baustelle" ? baustelle_id : null,
+        baustelle_id:
+          art === "baustelle" || art === "schlechtwetter" ? baustelle_id : null,
         taetigkeit_id: null,
         taetigkeit_freitext: "",
         stunden: 0,
@@ -266,6 +268,15 @@ export default function HalleErfassung() {
         title: "Tag ist freigegeben",
         description:
           "Dieser Tag wurde vom Büro bereits freigegeben und kann nicht mehr geändert werden.",
+      });
+      return;
+    }
+    // Schlechtwetter braucht die Baustelle (J. Maurer 02.11.), auch hier.
+    if (eintraege.some((e) => e.art === "schlechtwetter" && fehltKostenstelle(e))) {
+      toast({
+        variant: "destructive",
+        title: "Baustelle fehlt",
+        description: "Bitte bei Schlechtwetter die Baustelle wählen.",
       });
       return;
     }

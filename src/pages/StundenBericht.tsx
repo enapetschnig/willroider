@@ -957,10 +957,15 @@ export default function StundenBericht() {
                       const baustelle = e.baustelle_id
                         ? baustelleMap.get(e.baustelle_id)
                         : null;
+                      // Schlechtwetter mit Baustelle und Adresse wie Tabelle/PDF
+                      // (J. Maurer 02.11.).
+                      const istSw = e.art === "schlechtwetter" && !!baustelle;
                       const label =
                         e.art === "baustelle"
                           ? baustelle?.bvh_name ?? "Baustelle"
-                          : STATUS_LABEL[e.art];
+                          : istSw
+                            ? schlechtwetterLabel(baustelle)
+                            : STATUS_LABEL[e.art];
                       const kst = baustelle?.kostenstelle ?? "";
                       return (
                         <div
@@ -968,7 +973,9 @@ export default function StundenBericht() {
                           className="flex items-center gap-2 text-xs border-l-2 border-primary/30 pl-2"
                         >
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium truncate">{label}</div>
+                            <div className={`font-medium ${istSw ? "break-words" : "truncate"}`}>
+                              {label}
+                            </div>
                             {kst && (
                               <div className="text-[10px] text-muted-foreground">
                                 KST {kst}
