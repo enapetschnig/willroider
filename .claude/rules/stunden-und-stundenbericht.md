@@ -76,3 +76,6 @@ paths:
 - Erinnern an Unterschrift (Glocke, „Alle n erinnern“) → siehe `push-erinnerungen.md`.
 - Fehler 29.10. (L. Schuller): `useState` hinter frühem Return → React #310, Seite stürzte für alle ab.
   Hooks immer vor `if (isLoading) return`.
+- „Berichte erzeugen“ (`stunden_bericht_erzeugen`) nur `is_admin_role` → Knopf seit 03.11.2026 nur für Verwaltung sichtbar
+  (Poliere mit `stunden.bsb.bestaetigen` bekamen „nicht berechtigt“). Supabase-Protokolle mit `application_name=mgmt-api`
+  (z. B. „column b.name …“, „TESTERGEBNIS …“) sind eigene Abfragen der KI-Sitzungen, kein App-Fehler.

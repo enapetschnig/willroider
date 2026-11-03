@@ -37,3 +37,5 @@ paths:
 - „Herunterladen (ZIP)“ für markierte Einträge; URL-Parameter `?art&jahr&monat&teil`.
 - Bekannt (23.09.): zwei archivierte TB-PDFs mit leeren Zeilen (Maurer Juli–Aug, Gwenger Sep); neu freigeben
   würde eine zweite Datei erzeugen — nur auf Wunsch.
+- Einreichen (03.11.2026): `berichte_update` hatte kein WITH CHECK → Polier konnte eigenen Entwurf nie einreichen (RLS-Fehler).
+  Jetzt darf der Ersteller `entwurf`→`eingereicht`; freigeben/archivieren bleibt `is_admin_role`.

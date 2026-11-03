@@ -71,3 +71,5 @@ paths:
   `Emulation.setCPUThrottlingRate` 4×/8×, Haupt-Thread-Arbeit nur während der Geste per
   `Performance.getMetrics` (LayoutCount/LayoutDuration). fps allein zeigt am PC nichts — beides lief mit 60 fps.
 - „Standard-Unterweisung anlegen“ in der Tagesplanung → `evaluierung-unterweisung.md`.
+- RLS-Tempo (03.11.2026, Protokoll: Timeout/500 auf `einteilung_mitarbeiter`): Policies rufen Rechte-Funktionen nur noch
+  in `(select …)` bzw. über die Menge `sichtbare_einteilungen(uid)` auf — nie wieder Funktion je Zeile (war 10 s, jetzt 20 ms).

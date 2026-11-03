@@ -20,6 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import { Loader2, Sparkles, ChevronRight, Mail, AlertCircle, BellRing, Download, ListChecks, Archive } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { StundenBerichtStatus } from "@/integrations/supabase/types";
@@ -73,6 +74,10 @@ const fmtTag = (iso: string | null | undefined): string => {
 export default function StundenBerichteListe() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  // „Berichte erzeugen" darf nur die Verwaltung (RPC prüft is_admin_role) —
+  // Poliere mit stunden.bsb.bestaetigen sahen den Knopf und bekamen
+  // „nicht berechtigt" (Supabase-Protokoll 02.11.2026).
+  const { isAdmin } = useAuth();
 
   const now = new Date();
   const [monatIso, setMonatIso] = useState(
@@ -307,6 +312,7 @@ export default function StundenBerichteListe() {
               </div>
             </div>
           </div>
+          {isAdmin && (
           <div className="flex items-center justify-between gap-2 flex-wrap border-t pt-3">
             <div className="text-xs text-muted-foreground">
               Erzeugt die Berichte für alle Mitarbeiter mit Stunden in dieser
@@ -325,6 +331,7 @@ export default function StundenBerichteListe() {
               Berichte erzeugen
             </Button>
           </div>
+          )}
         </CardContent>
       </Card>
 
@@ -531,7 +538,7 @@ export default function StundenBerichteListe() {
                       colSpan={4}
                       className="text-center text-sm text-muted-foreground p-6"
                     >
-                      Keine Berichte für {periodeLabel}. Oben „Berichte erzeugen".
+                      Keine Berichte für {periodeLabel}.{isAdmin && " Oben „Berichte erzeugen“."}
                     </TableCell>
                   </TableRow>
                 )}
