@@ -25,6 +25,20 @@ interface VersendenRequest {
   /** Base64-DataURL einer Büro-Unterschrift; falls gesetzt, wird sie
    *  pro Bericht in der RPC stunden_bericht_versenden mitgespeichert. */
   bueroSignature?: string | null;
+  /** Krankenzettel der Berichts-Perioden mitschicken (J. Maurer, 04.11.2026). */
+  mit_krankmeldungen?: boolean;
+}
+
+/** Resend nimmt bis 40 MB je Mail — darunter bleiben, sonst Links (wie archiv-versenden). */
+const MAX_ANHANG_BYTES = 25 * 1024 * 1024;
+
+function b64(bytes: Uint8Array): string {
+  let s = "";
+  const block = 0x8000;
+  for (let i = 0; i < bytes.length; i += block) {
+    s += String.fromCharCode(...bytes.subarray(i, i + block));
+  }
+  return btoa(s);
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -91,7 +105,7 @@ Deno.serve(async (req) => {
     // nicht gesetzt, und ein Retry erzeugt eine Doppel-Mail beim Büro.
     const { data: berichteRows, error: berichteErr } = await admin
       .from("stunden_berichte")
-      .select("id, status")
+      .select("id, status, mitarbeiter_id, von_datum, bis_datum")
       .in("id", body.berichtIds);
     if (berichteErr) {
       return jsonResponse(
@@ -125,17 +139,65 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Krankenzettel der Perioden aus dem Speicher ma_dokumente.
+    const anhaenge = body.attachments.map((a) => ({
+      filename: a.filename,
+      content: a.contentBase64,
+    }));
+    let anhangBytes = anhaenge.reduce((s, a) => s + Math.floor((a.content.length * 3) / 4), 0);
+    let mailText = body.text;
+    let krankmeldungen = 0;
+    if (body.mit_krankmeldungen) {
+      const gesehen = new Set<string>();
+      const links: string[] = [];
+      for (const b of berichteRows ?? []) {
+        const { data: km, error: kmErr } = await admin
+          .from("krankmeldungen")
+          .select("von, bis, dokument_id, dokumente:dokument_id(storage_path, dateiname), profiles:mitarbeiter_id(vorname, nachname)")
+          .eq("mitarbeiter_id", b.mitarbeiter_id)
+          .lte("von", b.bis_datum)
+          .gte("bis", b.von_datum)
+          .not("dokument_id", "is", null);
+        if (kmErr) {
+          return jsonResponse({ ok: false, error: `Krankenzettel nicht lesbar: ${kmErr.message}` }, 500);
+        }
+        for (const k of (km ?? []) as any[]) {
+          if (!k.dokumente?.storage_path || gesehen.has(k.dokument_id)) continue;
+          gesehen.add(k.dokument_id);
+          const ext = String(k.dokumente.dateiname ?? k.dokumente.storage_path).split(".").pop()?.toLowerCase() ?? "pdf";
+          const wer = `${k.profiles?.vorname ?? ""} ${k.profiles?.nachname ?? ""}`.trim();
+          const zeit = k.von === k.bis ? k.von : `${k.von} bis ${k.bis}`;
+          const name = `Krankmeldung ${wer} ${zeit}.${ext}`.replace(/[\\/:*?"<>|]/g, "-");
+          const { data: datei } = await admin.storage.from("ma_dokumente").download(k.dokumente.storage_path);
+          if (!datei) {
+            return jsonResponse({ ok: false, error: `Krankenzettel fehlt: ${name}` }, 500);
+          }
+          const bytes = new Uint8Array(await datei.arrayBuffer());
+          krankmeldungen++;
+          if (anhangBytes + bytes.length > MAX_ANHANG_BYTES) {
+            const { data: s } = await admin.storage
+              .from("ma_dokumente")
+              .createSignedUrl(k.dokumente.storage_path, 7 * 86400, { download: name });
+            if (s?.signedUrl) links.push(`${name}: ${s.signedUrl}`);
+          } else {
+            anhangBytes += bytes.length;
+            anhaenge.push({ filename: name, content: b64(bytes) });
+          }
+        }
+      }
+      if (links.length > 0) {
+        mailText = `${mailText}\n\nZu groß für den Anhang — Download-Links (7 Tage gültig):\n\n${links.join("\n")}`;
+      }
+    }
+
     // Resend-Payload
     const payload: Record<string, unknown> = {
       from: FROM,
       reply_to: [REPLY_TO],
       to: [body.empfaenger.trim()],
       subject: body.betreff,
-      text: body.text,
-      attachments: body.attachments.map((a) => ({
-        filename: a.filename,
-        content: a.contentBase64,
-      })),
+      text: mailText,
+      attachments: anhaenge,
     };
     if (body.cc && body.cc.trim()) payload.cc = [body.cc.trim()];
     if (body.html) payload.html = body.html;
@@ -178,6 +240,7 @@ Deno.serve(async (req) => {
       resendId: resendJson?.id,
       versendet,
       fehler,
+      krankmeldungen,
     });
   } catch (e) {
     return jsonResponse(

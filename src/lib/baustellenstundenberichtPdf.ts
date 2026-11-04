@@ -60,7 +60,7 @@ const SONNTAG_GRAU: [number, number, number] = [214, 214, 218];
 const SAMSTAG_GRAU: [number, number, number] = [238, 238, 240];
 
 let _logoCache: string | null = null;
-async function getLogo(): Promise<string | null> {
+export async function getLogo(): Promise<string | null> {
   if (_logoCache) return _logoCache;
   try {
     // Holzbau-Logo statt Stadtbaumeister (J. Maurer 02.11.), Format 2:1.

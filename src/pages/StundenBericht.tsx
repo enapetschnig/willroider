@@ -52,6 +52,8 @@ import { useZulagenTypen } from "@/hooks/useStammdatenStunden";
 import { aggregiereFahrtgeld, aggregiereZulagen, zusatzZeilenJeTag } from "@/lib/stundenAggregation";
 import { buildBerichtPdf, schlechtwetterLabel, tagInfo } from "@/lib/bsbPdfHelper";
 import { archiviereBericht } from "@/lib/berichtArchiv";
+import { ladeBeilagen } from "@/lib/berichtBeilagen";
+import { zipHerunterladen } from "@/lib/zipDownload";
 
 const STATUS_LABEL: Record<TagStatus, string> = {
   baustelle: "Baustelle",
@@ -594,7 +596,18 @@ export default function StundenBericht() {
     setDownloadBusy(true);
     try {
       const { doc, fileName } = await buildBerichtPdf(bericht.id);
-      doc.save(fileName);
+      // Fürs Büro kommen Zulagen-Zettel und Krankenzettel mit (J. Maurer, 04.11.2026).
+      const dazu = isAdmin
+        ? await ladeBeilagen({
+            mitarbeiterId: bericht.mitarbeiter_id,
+            von: bericht.von_datum,
+            bis: bericht.bis_datum,
+            berichtId: bericht.id,
+            berichtDatei: fileName,
+          })
+        : [];
+      if (dazu.length === 0) doc.save(fileName);
+      else await zipHerunterladen([{ name: fileName, inhalt: doc.output("blob") }, ...dazu], fileName.replace(/\.pdf$/, ""));
     } catch (e) {
       toast({ variant: "destructive", title: "PDF-Fehler", description: (e as Error).message });
     } finally {

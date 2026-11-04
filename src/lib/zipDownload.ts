@@ -19,10 +19,19 @@ export async function zipHerunterladen(
     zip.file(name, d.inhalt);
   }
   const blob = await zip.generateAsync({ type: "blob" });
-  const url = URL.createObjectURL(blob);
+  dateiHerunterladen(blob, zipName.endsWith(".zip") ? zipName : `${zipName}.zip`);
+}
+
+/**
+ * Datei direkt auf dieser Seite speichern, ohne neues Fenster. Ein Fenster, das
+ * erst nach dem Laden aufgeht, sperren Browser ab dem zweiten Mal; im
+ * Download-Ordner liegt dann immer nur die erste Datei (J. Maurer, 04.11.2026).
+ */
+export function dateiHerunterladen(inhalt: Blob, name: string): void {
+  const url = URL.createObjectURL(inhalt);
   const a = document.createElement("a");
   a.href = url;
-  a.download = zipName.endsWith(".zip") ? zipName : `${zipName}.zip`;
+  a.download = name;
   document.body.appendChild(a);
   a.click();
   a.remove();

@@ -82,3 +82,4 @@ paths:
 - „Berichte erzeugen“ (`stunden_bericht_erzeugen`) nur `is_admin_role` → Knopf seit 03.11.2026 nur für Verwaltung sichtbar
   (Poliere mit `stunden.bsb.bestaetigen` bekamen „nicht berechtigt“). Supabase-Protokolle mit `application_name=mgmt-api`
   (z. B. „column b.name …“, „TESTERGEBNIS …“) sind eigene Abfragen der KI-Sitzungen, kein App-Fehler.
+- Zulagen-Zettel („Aufzeichnung Erschwerniszulage“) und Krankenzettel gehen seit 04.11.2026 mit dem BSB mit → `berichte-archiv.md`.

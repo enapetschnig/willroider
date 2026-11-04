@@ -31,6 +31,8 @@ import { edgeFunctionErrorMessage } from "@/lib/edgeError";
 import { Loader2, Mail, FileText } from "lucide-react";
 import { buildBerichtPdf } from "@/lib/bsbPdfHelper";
 import { archiviereBericht, base64ZuBlob } from "@/lib/berichtArchiv";
+import { ladeZulagenZettel } from "@/lib/erschwerniszulagePdf";
+import { zettelDateiname } from "@/lib/berichtBeilagen";
 
 interface PreparedAttachment {
   berichtId: string;
@@ -56,6 +58,8 @@ export function BsbVersendenDialog({
   bueroSignature?: string | null;
 }) {
   const { toast } = useToast();
+  // Ausgefüllte Zulagen-Zettel: gehen mit der Mail mit (J. Maurer, 04.11.2026).
+  const [zettel, setZettel] = useState<{ filename: string; contentBase64: string }[]>([]);
   const [prepared, setPrepared] = useState<PreparedAttachment[]>([]);
   const [busyBuilding, setBusyBuilding] = useState(false);
   const [empfaenger, setEmpfaenger] = useState("");
@@ -69,6 +73,7 @@ export function BsbVersendenDialog({
   useEffect(() => {
     if (!open) return;
     setPrepared([]);
+    setZettel([]);
     setSending(false);
     let cancelled = false;
     (async () => {
@@ -106,6 +111,35 @@ export function BsbVersendenDialog({
           built.forEach((p) => URL.revokeObjectURL(p.blobUrl));
           return;
         }
+        // Zulagen-Zettel je Bericht, bevor der Dialog freigibt: scheitert einer,
+        // bleibt „Senden“ gesperrt, statt die Mail ohne Zettel loszuschicken.
+        const { data: metas } = await supabase
+          .from("stunden_berichte")
+          .select("id, mitarbeiter_id, von_datum, bis_datum")
+          .in("id", berichtIds);
+        const zettelNeu: { filename: string; contentBase64: string }[] = [];
+        for (const p of built) {
+          const m = (metas as any[] | null)?.find((x) => x.id === p.berichtId);
+          if (!m) continue;
+          const zdoc = await ladeZulagenZettel({
+            mitarbeiterId: m.mitarbeiter_id,
+            von: m.von_datum,
+            bis: m.bis_datum,
+            berichtId: p.berichtId,
+            bueroSignaturOverride: bueroSignature ?? null,
+          });
+          if (zdoc) {
+            zettelNeu.push({
+              filename: zettelDateiname(p.filename),
+              contentBase64: (zdoc.output("datauristring") as string).split(",")[1] ?? "",
+            });
+          }
+        }
+        if (cancelled) {
+          built.forEach((p) => URL.revokeObjectURL(p.blobUrl));
+          return;
+        }
+        setZettel(zettelNeu);
         setPrepared(built);
 
         // Betreff + Body sinnvoll vorbefüllen
@@ -183,10 +217,14 @@ export function BsbVersendenDialog({
             cc: cc.trim() || undefined,
             betreff,
             text: body,
-            attachments: prepared.map((p) => ({
-              filename: p.filename,
-              contentBase64: p.contentBase64,
-            })),
+            attachments: [
+              ...prepared.map((p) => ({
+                filename: p.filename,
+                contentBase64: p.contentBase64,
+              })),
+              ...zettel,
+            ],
+            mit_krankmeldungen: true,
             berichtIds: prepared.map((p) => p.berichtId),
             bueroSignature: bueroSignature ?? undefined,
           },
@@ -404,6 +442,9 @@ export function BsbVersendenDialog({
                   </AccordionItem>
                 ))}
               </Accordion>
+              <div className="text-xs text-muted-foreground">
+                Dazu kommen {zettel.length > 0 ? `${zettel.length} Zulagen-Zettel und ` : ""}die Krankenzettel der Periode, soweit in der App vorhanden.
+              </div>
             </div>
           </div>
         )}

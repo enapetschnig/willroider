@@ -39,3 +39,14 @@ paths:
   würde eine zweite Datei erzeugen — nur auf Wunsch.
 - Einreichen (03.11.2026): `berichte_update` hatte kein WITH CHECK → Polier konnte eigenen Entwurf nie einreichen (RLS-Fehler).
   Jetzt darf der Ersteller `entwurf`→`eingereicht`; freigeben/archivieren bleibt `is_admin_role`.
+- **Download direkt, Zulagen-Zettel, Krankenzettel** (J. Maurer, 04.11.2026: „kommt immer der gleiche … Granitzer … zu den Zulagen brauchen wir den
+  Zettel immer ausgefüllt … plus die Krankenzettel“). Alle 44 Archiv-PDFs waren richtig (Name im PDF = Dateiname). Der Download ging je Klick über
+  ein neues Fenster nach einer Wartezeit; eine Browser-Sperre ließ sich im Test nicht nachstellen, ist aber die wahrscheinlichste Erklärung. Jetzt
+  `dateiHerunterladen` ohne Fenster. Beilagen: `lib/berichtBeilagen.ts`, Zettel `lib/erschwerniszulagePdf.ts`
+  (Vorlage „Aufzeichnung Erschwerniszulage“ aus Chat 04.05.2026, ein Blatt je KW und Zulage, immer frisch aus den Stunden, nicht im Archiv/SharePoint).
+  Gehen mit: Archiv-Zeile und -ZIP, Archiv-Mail (`extra_anhaenge`), Stundenbericht „PDF herunterladen“ und Listen-ZIP (nur Verwaltung), „Ans Büro senden“
+  (`mit_krankmeldungen` in `stundenbericht-versenden`). Hoehenzulage = Punkt m (wie `zulagen.ts`), Schmutz und Abbruch = Punkt d.
+  Fallstricke: `arbeitsbeginn` ist praktisch immer leer → Raster zählt ab 07:00 mit Hinweis am Zettel, maßgeblich ist die Summe. Eine Polier-Unterschrift
+  gibt es nicht und wird nicht nachgestellt: nur sein Name (`partien.partieleiter_id`), dazu die Unterschriften aus dem BSB. Krankmeldungen liest per RLS
+  nur die Verwaltung; Mitarbeiter laden Zettel selten hoch (Mein Tag → Krankmeldung), darum Hinweis „n Krank-Tage ohne Zettel“ in der Zeile. Das Büro kann
+  noch keinen Zettel für einen Mitarbeiter hochladen.

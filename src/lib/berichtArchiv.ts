@@ -92,12 +92,3 @@ export function base64ZuBlob(b64: string, typ = "application/pdf"): Blob {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return new Blob([bytes], { type: typ });
 }
-
-/** Kurzlebiger Download-Link auf eine Archiv-Datei. */
-export async function archivDownloadUrl(storagePfad: string, dateiname: string): Promise<string> {
-  const { data, error } = await supabase.storage
-    .from("berichte-archiv")
-    .createSignedUrl(storagePfad, 120, { download: dateiname });
-  if (error || !data?.signedUrl) throw error ?? new Error("Kein Link");
-  return data.signedUrl;
-}

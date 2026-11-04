@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { dateiHerunterladen } from "@/lib/zipDownload";
 import { Archive, Cloud, CloudOff, Download, Loader2, RefreshCw } from "lucide-react";
 
 type ArchivZeile = {
@@ -60,11 +61,10 @@ export function EinsatzplanArchiv({
   const oeffnen = async (z: ArchivZeile) => {
     setOeffne(z.id);
     try {
-      const { data, error } = await supabase.storage
-        .from("einsatzplaene")
-        .createSignedUrl(z.storage_pfad, 120, { download: z.dateiname });
-      if (error || !data?.signedUrl) throw error ?? new Error("Kein Link");
-      window.open(data.signedUrl, "_blank", "noopener");
+      // Direkt speichern statt neues Fenster: das sperren Browser ab dem zweiten Mal.
+      const { data, error } = await supabase.storage.from("einsatzplaene").download(z.storage_pfad);
+      if (error || !data) throw error ?? new Error("Datei nicht gefunden");
+      dateiHerunterladen(data, z.dateiname);
     } catch (e) {
       toast({ variant: "destructive", title: "Öffnen fehlgeschlagen", description: (e as Error).message });
     } finally {

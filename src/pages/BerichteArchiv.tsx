@@ -24,8 +24,10 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { edgeFunctionErrorMessage } from "@/lib/edgeError";
-import { archivDownloadUrl } from "@/lib/berichtArchiv";
-import { zipHerunterladen } from "@/lib/zipDownload";
+import { dateiHerunterladen, zipHerunterladen } from "@/lib/zipDownload";
+import { archivZeitraum, beilagenUebersicht, ladeBeilagen, zettelDateiname, type BeilagenStand } from "@/lib/berichtBeilagen";
+import { ladeZulagenZettel } from "@/lib/erschwerniszulagePdf";
+import { useAuth } from "@/contexts/AuthContext";
 import { periodeFuer } from "@/lib/taetigkeitsbericht";
 import { makeFahrtenbuchPdf } from "@/lib/taetigkeitsberichtPdf";
 import { useSearchParams } from "react-router-dom";
@@ -49,6 +51,7 @@ type Zeile = {
   erstellt_am: string;
   /** Bericht wurde danach wieder geöffnet — dieses PDF gilt nicht mehr. */
   ueberholt_am: string | null;
+  bericht_id: string | null;
   mitarbeiter: { vorname: string; nachname: string } | null;
 };
 
@@ -58,6 +61,7 @@ const fmt = (iso: string | null) =>
 
 export default function BerichteArchiv() {
   const { toast } = useToast();
+  const { isAdmin } = useAuth();
   const heute = new Date();
   // Aus „Tätigkeitsberichte freigeben → Gesammelt versenden" kommt man mit
   // ?art=…&jahr=…&monat=… direkt in die richtige Periode (J. Maurer, 21.10.2026).
@@ -88,6 +92,9 @@ export default function BerichteArchiv() {
   // (Fahrtenbuch der Angestellten) und Krankmeldungen der Periode.
   const [mitFahrtenbuch, setMitFahrtenbuch] = useState(true);
   const [mitKrank, setMitKrank] = useState(true);
+  // Zulagen-Zettel und Krankenzettel je Zeile (J. Maurer, 04.11.2026).
+  const [mitZettel, setMitZettel] = useState(true);
+  const [beilagen, setBeilagen] = useState<Map<string, BeilagenStand>>(new Map());
 
   const load = useCallback(async () => {
     setLaden(true);
@@ -120,7 +127,15 @@ export default function BerichteArchiv() {
       setSoll({ ist: personen, soll: count ?? 0, text: "Stundenberichte der Periode" });
     }
     setLaden(false);
-  }, [art, jahr, monat, teil]);
+
+    // Hinweise je Zeile — Fehler hier dürfen die Liste nicht aufhalten.
+    beilagenUebersicht(
+      liste.map((z) => ({ schluessel: z.id, mitarbeiterId: z.mitarbeiter_id, ...archivZeitraum(z) })),
+      isAdmin,
+    )
+      .then(setBeilagen)
+      .catch(() => setBeilagen(new Map()));
+  }, [art, jahr, monat, teil, isAdmin]);
 
   useEffect(() => {
     void load();
@@ -159,10 +174,23 @@ export default function BerichteArchiv() {
       return n;
     });
 
+  /** Zulagen-Zettel und Krankenzettel zum Bericht; Krankmeldungen nur für die Verwaltung lesbar. */
+  const beilagenFuer = (z: Zeile) =>
+    ladeBeilagen({
+      mitarbeiterId: z.mitarbeiter_id,
+      ...archivZeitraum(z),
+      berichtId: z.art === "stundenbericht" ? z.bericht_id : null,
+      berichtDatei: z.dateiname,
+    });
+
   const herunterladen = async (z: Zeile) => {
     setBusy(z.id);
     try {
-      window.open(await archivDownloadUrl(z.storage_pfad, z.dateiname), "_blank", "noopener");
+      const { data, error } = await supabase.storage.from("berichte-archiv").download(z.storage_pfad);
+      if (error || !data) throw error ?? new Error(`${z.dateiname} nicht gefunden`);
+      const dazu = await beilagenFuer(z);
+      if (dazu.length === 0) dateiHerunterladen(data, z.dateiname);
+      else await zipHerunterladen([{ name: z.dateiname, inhalt: data }, ...dazu], z.dateiname.replace(/\.pdf$/i, ""));
     } catch (e) {
       toast({ variant: "destructive", title: "Download fehlgeschlagen", description: (e as Error).message });
     } finally {
@@ -186,11 +214,11 @@ export default function BerichteArchiv() {
         liste.map(async (z) => {
           const { data, error } = await supabase.storage.from("berichte-archiv").download(z.storage_pfad);
           if (error || !data) throw error ?? new Error(`${z.dateiname} nicht gefunden`);
-          return { name: z.dateiname, inhalt: data };
+          return [{ name: z.dateiname, inhalt: data as Blob }, ...(await beilagenFuer(z))];
         }),
       );
       await zipHerunterladen(
-        dateien,
+        dateien.flat(),
         `${art === "taetigkeitsbericht" ? "Tätigkeitsberichte" : "Stundenberichte"} ${periodeText}`,
       );
     } catch (e) {
@@ -248,10 +276,31 @@ export default function BerichteArchiv() {
     return aus;
   };
 
+  /** Ausgefüllter Zulagen-Zettel je gewähltem Bericht — frisch aus den Stunden. */
+  const zettelAnhaenge = async (): Promise<{ filename: string; content: string }[]> => {
+    const aus: { filename: string; content: string }[] = [];
+    for (const z of zeilen.filter((x) => ausgewaehlt.has(x.id))) {
+      const doc = await ladeZulagenZettel({
+        mitarbeiterId: z.mitarbeiter_id,
+        ...archivZeitraum(z),
+        berichtId: z.art === "stundenbericht" ? z.bericht_id : null,
+      });
+      if (doc) {
+        aus.push({
+          filename: zettelDateiname(z.dateiname),
+          content: (doc.output("datauristring") as string).split(",")[1],
+        });
+      }
+    }
+    return aus;
+  };
+
   const senden = async () => {
     setSende(true);
     try {
-      const extra = mitFahrtenbuch ? await fahrtenbuchAnhaenge() : [];
+      const fahrten = mitFahrtenbuch ? await fahrtenbuchAnhaenge() : [];
+      const zettel = mitZettel ? await zettelAnhaenge() : [];
+      const extra = [...fahrten, ...zettel];
       const { data, error } = await supabase.functions.invoke("archiv-versenden", {
         body: {
           archiv_ids: Array.from(ausgewaehlt),
@@ -268,7 +317,8 @@ export default function BerichteArchiv() {
         title: `${data.anzahl} Bericht${data.anzahl === 1 ? "" : "e"} versendet`,
         description:
           `an ${data.empfaenger}` +
-          (data.fahrtenbuecher ? ` · ${data.fahrtenbuecher} Fahrtenbuch` : "") +
+          (fahrten.length ? ` · ${fahrten.length} Fahrtenbuch` : "") +
+          (zettel.length ? ` · ${zettel.length} Zulagen-Zettel` : "") +
           (data.krankmeldungen ? ` · ${data.krankmeldungen} Krankmeldung${data.krankmeldungen === 1 ? "" : "en"}` : "") +
           (data.als_links ? " (als Download-Links, weil zu groß für den Anhang)" : ""),
       });
@@ -412,6 +462,31 @@ export default function BerichteArchiv() {
                       {z.dateiname} · abgelegt {fmt(z.erstellt_am)}
                       {z.groesse ? ` · ${Math.round(z.groesse / 1024)} KB` : ""}
                     </div>
+                    {(() => {
+                      const b = beilagen.get(z.id);
+                      if (!b || (!b.zulagen && !b.krankenzettel && !b.krankOhneZettel)) return null;
+                      return (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {b.zulagen && (
+                            <Badge variant="outline" className="text-[10px]">Zulagen-Zettel</Badge>
+                          )}
+                          {b.krankenzettel > 0 && (
+                            <Badge variant="outline" className="text-[10px]">
+                              {b.krankenzettel === 1 ? "Krankenzettel" : `${b.krankenzettel} Krankenzettel`}
+                            </Badge>
+                          )}
+                          {b.krankOhneZettel > 0 && (
+                            <Badge
+                              variant="outline"
+                              className="bg-amber-100 text-amber-900 border-amber-300 text-[10px]"
+                              title="Der Mitarbeiter lädt den Zettel unter Mein Tag → Krankmeldung hoch, dann geht er automatisch mit."
+                            >
+                              {b.krankOhneZettel} Krank-Tag{b.krankOhneZettel === 1 ? "" : "e"} ohne Zettel
+                            </Badge>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                   {z.sharepoint_item_id ? (
                     <Cloud className="h-4 w-4 text-sky-600 shrink-0" aria-label="In SharePoint abgelegt" />
@@ -431,7 +506,7 @@ export default function BerichteArchiv() {
                       nicht versendet
                     </Badge>
                   )}
-                  <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => herunterladen(z)} disabled={busy === z.id} title="PDF öffnen">
+                  <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => herunterladen(z)} disabled={busy === z.id} title="Herunterladen (mit Zulagen-Zettel und Krankenzettel als ZIP)" aria-label={`${z.mitarbeiter?.nachname ?? ""} herunterladen`}>
                     {busy === z.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                   </Button>
                 </div>
@@ -481,9 +556,21 @@ export default function BerichteArchiv() {
                 </label>
               )}
               <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <Checkbox checked={mitKrank} onCheckedChange={(v) => setMitKrank(v === true)} />
-                Krankmeldungen der Periode
+                <Checkbox checked={mitZettel} onCheckedChange={(v) => setMitZettel(v === true)} />
+                Zulagen-Zettel (Aufzeichnung Erschwerniszulage, ausgefüllt)
               </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox checked={mitKrank} onCheckedChange={(v) => setMitKrank(v === true)} />
+                Krankenzettel der Periode
+              </label>
+              {(() => {
+                const fehlen = [...ausgewaehlt].reduce((n, id) => n + (beilagen.get(id)?.krankOhneZettel ?? 0), 0);
+                return fehlen > 0 && mitKrank ? (
+                  <div className="text-xs text-amber-800">
+                    Für {fehlen} Krank-Tag{fehlen === 1 ? "" : "e"} liegt noch kein Zettel in der App — die gehen nicht mit.
+                  </div>
+                ) : null;
+              })()}
             </div>
           </div>
           <DialogFooter className="flex-row gap-2">

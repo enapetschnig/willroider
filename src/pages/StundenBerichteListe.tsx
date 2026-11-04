@@ -36,6 +36,7 @@ import {
   type ErinnerBericht,
 } from "@/components/StundenberichtErinnernDialog";
 import { buildBerichtPdf } from "@/lib/bsbPdfHelper";
+import { ladeBeilagen } from "@/lib/berichtBeilagen";
 import { zipHerunterladen } from "@/lib/zipDownload";
 
 const STATUS_BADGE: Record<StundenBerichtStatus, { label: string; cls: string }> = {
@@ -217,6 +218,18 @@ export default function StundenBerichteListe() {
       for (const b of liste) {
         const { doc, fileName } = await buildBerichtPdf(b.id);
         dateien.push({ name: fileName, inhalt: doc.output("blob") });
+        // Zulagen-Zettel und Krankenzettel gehören dazu (J. Maurer, 04.11.2026).
+        if (isAdmin) {
+          dateien.push(
+            ...(await ladeBeilagen({
+              mitarbeiterId: b.mitarbeiter_id,
+              von: b.von_datum,
+              bis: b.bis_datum,
+              berichtId: b.id,
+              berichtDatei: fileName,
+            })),
+          );
+        }
       }
       await zipHerunterladen(
         dateien,

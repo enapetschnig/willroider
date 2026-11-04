@@ -1,5 +1,12 @@
 # Journal
 
+
+## 2026-11-04 · Archiv: Download direkt, Zulagen-Zettel und Krankenzettel (J. Maurer)
+
+- „Kommt immer der gleiche (Granitzer)“: alle 44 Stundenberichte im Archiv geprüft (Name im PDF = Dateiname, keine gleiche Datei, Download-Links liefern je die eigene). Der alte Download öffnete je Klick ein neues Fenster nach einer Wartezeit. Die Sperre selbst ließ sich im Testbrowser nicht nachstellen; jetzt ohne Fenster, Probefahrt mit drei Downloads hintereinander.
+- Zettel: Scan „Aufzeichnung Erschwerniszulage“ lag nur im Chat vom 04.05. Neu als PDF, ein Blatt je KW und Zulage, gefüllt aus `stunden_zulagen`. Details und Fallstricke → `.claude/rules/berichte-archiv.md`.
+- `stundenbericht-versenden` nimmt `mit_krankmeldungen`; Test `tests/roboter/2026-11-04-archiv-download-zulagen-zettel.spec.ts` (Functions abgefangen, keine echte Mail).
+
 ## 2026-11-03 — Schlechtwetter-Baustelle nachgezogen (Gegenprobe zu 02.11.)
 
 - Halle/Werk (`/halle`): SW hatte keine Baustellenauswahl (ArtSection mit `kategorie="maschine"`), `addSplit` setzte `baustelle_id=null`, kein Pflicht-Check → jetzt Auswahl der echten Baustellen (ohne „Für welche Baustelle?“), Speichern ohne Baustelle gesperrt.
