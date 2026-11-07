@@ -30,7 +30,7 @@ import { CheckCircle2, ChevronLeft, ChevronRight, Loader2, Lock, LockOpen, Pen, 
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { useStundenTageList, useSaveStundenTag, useDeleteStundenTag, type SaveEintrag } from "@/hooks/useStundenTag";
+import { useStundenTageList, useSaveStundenTag, useDeleteStundenTag, ladeStundenTagFull, type SaveEintrag } from "@/hooks/useStundenTag";
 import { localIso } from "@/lib/dateFmt";
 import { archiviereBericht } from "@/lib/berichtArchiv";
 import {
@@ -455,12 +455,27 @@ export default function Taetigkeitsbericht() {
   const saveMut = useSaveStundenTag();
   const deleteMut = useDeleteStundenTag();
 
-  async function speichereZelle(zeile: BerichtZeile, iso: string, wert: number) {
+  // Jede Zelle ersetzt beim Speichern ALLE Zeilen des Tages. Wer schnell von
+  // Zelle zu Zelle springt, darf sich also nicht selbst überholen: Speichern
+  // läuft der Reihe nach und liest den Tag vorher frisch aus der Datenbank.
+  // Aus der Liste (tagByIso) gäbe es sonst ein zweites INSERT auf denselben Tag
+  // (23505, Protokoll 06.11.2026) oder die vorige Zelle ginge still verloren.
+  const speicherReihe = useRef<Promise<void>>(Promise.resolve());
+  function inReihe(arbeit: () => Promise<void>) {
+    speicherReihe.current = speicherReihe.current.then(arbeit, arbeit);
+    return speicherReihe.current;
+  }
+
+  function speichereZelle(zeile: BerichtZeile, iso: string, wert: number) {
+    return inReihe(() => speichereZelleJetzt(zeile, iso, wert));
+  }
+
+  async function speichereZelleJetzt(zeile: BerichtZeile, iso: string, wert: number) {
     if (!zielMa) return;
     const key = `${zeile.key}|${iso}`;
     setBusy(key);
     try {
-      const vorhanden = tagByIso.get(iso);
+      const vorhanden = await ladeStundenTagFull(zielMa, iso);
 
       // Bestehende Einträge übernehmen — nur den eigenen ersetzen. Sonst
       // gingen Halle-/Maschinen-Einträge und Zeilen anderer Kostenstellen
@@ -541,7 +556,7 @@ export default function Taetigkeitsbericht() {
             : null,
         });
       }
-      await refetch();
+      void refetch(); // Liste nur für die Anzeige, hält die Reihe nicht auf
     } catch (e) {
       toast({
         variant: "destructive",
@@ -566,11 +581,15 @@ export default function Taetigkeitsbericht() {
   // Krankheit: gleiche Mechanik ohne Konto — „1,5 Std. Zahnarzt" wird als
   // stundenweiser krank-Eintrag am Tag gespeichert, bestehende Arbeits-
   // stunden bleiben stehen.
-  async function speichereAbwesenheit(iso: string, art: "urlaub" | "krank", wert: number) {
+  function speichereAbwesenheit(iso: string, art: "urlaub" | "krank", wert: number) {
+    return inReihe(() => speichereAbwesenheitJetzt(iso, art, wert));
+  }
+
+  async function speichereAbwesenheitJetzt(iso: string, art: "urlaub" | "krank", wert: number) {
     if (!zielMa) return;
     setBusy(`${art}|${iso}`);
     try {
-      const vorhanden = tagByIso.get(iso);
+      const vorhanden = await ladeStundenTagFull(zielMa, iso);
       const status = vorhanden?.tag.status;
       if (status && status !== "erfasst" && status !== "ma_bestaetigt") {
         toast({
@@ -671,7 +690,7 @@ export default function Taetigkeitsbericht() {
           fahrt: null,
         });
       }
-      await refetch();
+      void refetch(); // Liste nur für die Anzeige, hält die Reihe nicht auf
     } catch (e) {
       toast({
         variant: "destructive",
@@ -689,11 +708,15 @@ export default function Taetigkeitsbericht() {
   // oft es im Monat Taggeld gab. Gespeichert wird in stunden_fahrt
   // (Ganzzahl-Spalten taggeld_kurz/taggeld_lang), taggeld_manuell=true,
   // damit keine Automatik den Wert wieder überschreibt.
-  async function speichereTaggeld(iso: string, feld: "kurz" | "lang", wert: number) {
+  function speichereTaggeld(iso: string, feld: "kurz" | "lang", wert: number) {
+    return inReihe(() => speichereTaggeldJetzt(iso, feld, wert));
+  }
+
+  async function speichereTaggeldJetzt(iso: string, feld: "kurz" | "lang", wert: number) {
     if (!zielMa) return;
     setBusy(`tg-${feld}|${iso}`);
     try {
-      const vorhanden = tagByIso.get(iso);
+      const vorhanden = await ladeStundenTagFull(zielMa, iso);
       const status = vorhanden?.tag.status;
       if (status && status !== "erfasst" && status !== "ma_bestaetigt") {
         toast({
@@ -741,7 +764,7 @@ export default function Taetigkeitsbericht() {
           taggeld_manuell: true,
         },
       });
-      await refetch();
+      void refetch(); // Liste nur für die Anzeige, hält die Reihe nicht auf
     } catch (e) {
       toast({
         variant: "destructive",

@@ -63,6 +63,71 @@ export interface SaveStundenTagInput {
   fahrt: SaveFahrt | null;
 }
 
+const STUNDEN_TAG_SELECT = `*,
+           stunden_taetigkeiten(*),
+           stunden_zulagen(*),
+           stunden_fahrt(*)`;
+
+/** Eine Datenbank-Zeile (mit Kindern) in die Form der App bringen. */
+function zuStundenTagFull(row: any): StundenTagFull {
+  return {
+    tag: {
+      id: row.id,
+      mitarbeiter_id: row.mitarbeiter_id,
+      datum: row.datum,
+      tag_status: row.tag_status,
+      netto_stunden: Number(row.netto_stunden),
+      vm_pause: row.vm_pause,
+      mittag_pause: row.mittag_pause,
+      arbeitsbeginn: row.arbeitsbeginn,
+      anmerkung: row.anmerkung,
+      status: row.status,
+      erfasst_von: row.erfasst_von,
+      bestaetigt_am: row.bestaetigt_am,
+      freigegeben_zm_id: row.freigegeben_zm_id,
+      freigegeben_zm_am: row.freigegeben_zm_am,
+      freigegeben_buero_id: row.freigegeben_buero_id,
+      freigegeben_buero_am: row.freigegeben_buero_am,
+      abgelehnt_grund: row.abgelehnt_grund,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    } as StundenTag,
+    taetigkeiten: ((row.stunden_taetigkeiten ?? []) as StundenTaetigkeit[]).sort(
+      (a, b) => a.position - b.position,
+    ),
+    zulagen: (row.stunden_zulagen ?? []) as StundenZulage[],
+    // stunden_fahrt ist 1:1 (PK = stunden_tag_id) — PostgREST liefert die
+    // Beziehung deshalb als OBJEKT, nicht als Array. Der frühere
+    // [0]-Zugriff ergab immer undefined: Taggeld/Fahrt wurden korrekt
+    // GESPEICHERT, aber nie wieder GELESEN (leer nach Reload, leer im
+    // Tätigkeitsbericht-PDF). Beide Formen abfangen, falls sich das
+    // Verhalten mit einem PostgREST-Update wieder ändert.
+    fahrt: ((Array.isArray(row.stunden_fahrt)
+      ? row.stunden_fahrt[0]
+      : row.stunden_fahrt) ?? null) as StundenFahrt | null,
+  };
+}
+
+/**
+ * Einen Tag direkt aus der Datenbank lesen — für Masken, die pro Eingabe
+ * speichern und alle Zeilen des Tages ersetzen. Die Liste von
+ * useStundenTageList kann dafür zu alt sein (Realtime startet sie laufend neu):
+ * es gäbe ein zweites INSERT (23505) oder die vorige Eingabe ginge verloren.
+ */
+export async function ladeStundenTagFull(
+  mitarbeiterId: string,
+  datum: string,
+): Promise<StundenTagFull | null> {
+  const { data, error } = await supabase
+    .from("stunden_tage")
+    .select(STUNDEN_TAG_SELECT)
+    .eq("mitarbeiter_id", mitarbeiterId)
+    .eq("datum", datum)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? zuStundenTagFull(data) : null;
+}
+
 /** Liste der Stunden-Tage in einem Datums-Bereich (für TagBlocks + Auswertung). */
 export function useStundenTageList(params: {
   fromDate: string;
@@ -75,12 +140,7 @@ export function useStundenTageList(params: {
     queryFn: async () => {
       let q = supabase
         .from("stunden_tage")
-        .select(
-          `*,
-           stunden_taetigkeiten(*),
-           stunden_zulagen(*),
-           stunden_fahrt(*)`,
-        )
+        .select(STUNDEN_TAG_SELECT)
         .gte("datum", params.fromDate)
         .order("datum", { ascending: false });
       if (params.toDate) q = q.lte("datum", params.toDate);
@@ -89,42 +149,7 @@ export function useStundenTageList(params: {
       }
       const { data, error } = await q;
       if (error) throw error;
-      return ((data as any[]) ?? []).map((row) => ({
-        tag: {
-          id: row.id,
-          mitarbeiter_id: row.mitarbeiter_id,
-          datum: row.datum,
-          tag_status: row.tag_status,
-          netto_stunden: Number(row.netto_stunden),
-          vm_pause: row.vm_pause,
-          mittag_pause: row.mittag_pause,
-          arbeitsbeginn: row.arbeitsbeginn,
-          anmerkung: row.anmerkung,
-          status: row.status,
-          erfasst_von: row.erfasst_von,
-          bestaetigt_am: row.bestaetigt_am,
-          freigegeben_zm_id: row.freigegeben_zm_id,
-          freigegeben_zm_am: row.freigegeben_zm_am,
-          freigegeben_buero_id: row.freigegeben_buero_id,
-          freigegeben_buero_am: row.freigegeben_buero_am,
-          abgelehnt_grund: row.abgelehnt_grund,
-          created_at: row.created_at,
-          updated_at: row.updated_at,
-        } as StundenTag,
-        taetigkeiten: ((row.stunden_taetigkeiten ?? []) as StundenTaetigkeit[]).sort(
-          (a, b) => a.position - b.position,
-        ),
-        zulagen: (row.stunden_zulagen ?? []) as StundenZulage[],
-        // stunden_fahrt ist 1:1 (PK = stunden_tag_id) — PostgREST liefert die
-        // Beziehung deshalb als OBJEKT, nicht als Array. Der frühere
-        // [0]-Zugriff ergab immer undefined: Taggeld/Fahrt wurden korrekt
-        // GESPEICHERT, aber nie wieder GELESEN (leer nach Reload, leer im
-        // Tätigkeitsbericht-PDF). Beide Formen abfangen, falls sich das
-        // Verhalten mit einem PostgREST-Update wieder ändert.
-        fahrt: ((Array.isArray(row.stunden_fahrt)
-          ? row.stunden_fahrt[0]
-          : row.stunden_fahrt) ?? null) as StundenFahrt | null,
-      }));
+      return ((data as any[]) ?? []).map(zuStundenTagFull);
     },
     enabled: params.enabled ?? true,
     staleTime: 10_000,

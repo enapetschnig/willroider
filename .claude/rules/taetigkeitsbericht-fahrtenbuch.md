@@ -25,6 +25,8 @@ paths:
 - „Gesammelt versenden“ führt ins Berichte-Archiv mit derselben Periode (`?art&jahr&monat`).
 - ‹ › neben der Personenauswahl zum Durchblättern.
 - **Eigenes Wochen-Soll** (z. B. Köstenberger, geringfügig) → `arbeitszeit-abwesenheiten.md`.
+- **Zellen speichern der Reihe nach, Tag frisch aus der DB** (seit 07.11.2026, `inReihe` + `ladeStundenTagFull`): jede Zelle ersetzt alle Zeilen des Tages, die Liste hängt aber hinterher (ungefilterter Realtime-Kanal startet sie bei jeder Änderung irgendeines Mitarbeiters neu). Vorher: 23505 auf `stunden_tage_mitarbeiter_id_datum_key` mit falscher Meldung „…den du nicht sehen darfst“ (Protokoll 06.11.) bzw. still verlorene Vorzelle. Nie wieder aus `tagByIso` speichern.
+- Offen, nicht geändert (gesehen 07.11.2026): `speichereAbwesenheit` speichert mit `fahrt: null` und löscht damit `stunden_fahrt` des Tages (auch manuelles Taggeld), wenn in der Urlaub-/Krank-Zeile etwas geändert wird.
 
 ## Fahrtenbuch (Reiter im TB)
 - Kennzeichen **je Fahrt** (Vorschläge aus Fahrzeugliste, Großbuchstaben), Abfahrt/Ankunft als **Orte**

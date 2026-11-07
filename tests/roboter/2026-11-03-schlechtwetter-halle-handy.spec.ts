@@ -48,6 +48,8 @@ test("Schlechtwetter in der Halle mit Baustelle, Handy-Bericht mit Adresse", asy
   page.on("pageerror", (e) => fehler.push(e.message));
   const schluessel = `sb-${new URL(API).hostname.split(".")[0]}-auth-token`;
   await page.addInitScript(([k, v]) => localStorage.setItem(k, v), [schluessel, JSON.stringify(ma.sitzung)]);
+  // Der Installations-Hinweis geht am Handy nach 800 ms auf und verdeckt die Seite — hier nicht das Thema.
+  await page.addInitScript(() => localStorage.setItem("willroider:install-dismissed", "true"));
 
   // 1) Halle: SW antippen → Baustellenauswahl da, Werk-Ziel-Feld nicht
   await page.goto(`${APP}/halle`);
@@ -56,6 +58,7 @@ test("Schlechtwetter in der Halle mit Baustelle, Handy-Bericht mit Adresse", asy
   await expect(sektion.getByRole("combobox")).toContainText("Baustelle wählen");
   await expect(sektion.getByText("Für welche Baustelle?")).toHaveCount(0);
   await sektion.locator('input[inputmode="decimal"]').fill("4");
+  await sektion.locator('input[inputmode="decimal"]').blur(); // das Stundenfeld übernimmt beim Verlassen
   await expect(sektion.getByText("Bitte die Baustelle wählen, auf der Schlechtwetter war.")).toBeVisible();
 
   // ohne Baustelle speichern → abgelehnt, nichts gespeichert
