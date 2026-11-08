@@ -11,6 +11,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { compressImage } from "@/lib/imageCompress";
+import { istHeic } from "@/lib/heic";
 import { sanitizeStorageName, MAX_UPLOAD_BYTES } from "@/lib/uploadHelpers";
 
 export interface UploadMaDokumentInput {
@@ -36,7 +37,7 @@ export async function uploadMaDokument(
   let toUpload = input.file;
 
   // Bilder komprimieren (Krankmeldungs-Fotos)
-  if (input.file.type.startsWith("image/")) {
+  if (input.file.type.startsWith("image/") || istHeic(input.file)) {
     try {
       toUpload = await compressImage(input.file);
     } catch {

@@ -77,6 +77,7 @@ import {
 } from "@/hooks/useBerichtVorausfuellung";
 import { fetchWetterFuerTag, geocodeAdresse } from "@/lib/wetter";
 import { compressImage } from "@/lib/imageCompress";
+import { istHeic, ladeBildAlsBrowserBlob } from "@/lib/heic";
 import { readFotoMeta } from "@/lib/exif";
 import { generateAndUploadBerichtPdf } from "@/lib/berichtPdf";
 
@@ -1393,26 +1394,57 @@ function FotosEditor({
   const [uploading, setUploading] = useState(false);
   const [thumbs, setThumbs] = useState<Map<string, string>>(new Map());
 
-  // Lade signed-URLs für Thumbnails
+  const [fehlend, setFehlend] = useState<Set<string>>(new Set());
+
+  // Lade signed-URLs für Thumbnails. HEIC (Handy-Format) zeigt Chrome/Edge
+  // nicht an → im Browser in JPG umwandeln und als Blob-URL zeigen.
   useEffect(() => {
+    let abgebrochen = false;
+    const blobUrls: string[] = [];
     (async () => {
       const docIds = fotos.map((f) => f.dokument_id);
       if (docIds.length === 0) return;
       const { data: docs } = await supabase
         .from("dokumente")
-        .select("id, storage_path")
+        .select("id, storage_path, mimetype")
         .in("id", docIds);
       const newMap = new Map<string, string>();
+      const heicDocs: { id: string; url: string; pfad: string }[] = [];
+      const ohne = new Set<string>(docIds);
       await Promise.all(
         (docs ?? []).map(async (d: any) => {
           const { data } = await supabase.storage
             .from("baustellen")
             .createSignedUrl(d.storage_path, 600);
-          if (data?.signedUrl) newMap.set(d.id, data.signedUrl);
+          if (!data?.signedUrl) return;
+          if (istHeic(d.storage_path) || istHeic(d.mimetype)) {
+            heicDocs.push({ id: d.id, url: data.signedUrl, pfad: d.storage_path });
+          } else {
+            newMap.set(d.id, data.signedUrl);
+            ohne.delete(d.id);
+          }
         }),
       );
-      setThumbs(newMap);
+      if (abgebrochen) return;
+      setThumbs(new Map(newMap));
+      // HEIC der Reihe nach umwandeln (Speicher am Handy schonen)
+      for (const h of heicDocs) {
+        const blob = await ladeBildAlsBrowserBlob(h.url, h.pfad);
+        if (abgebrochen) return;
+        if (blob) {
+          const u = URL.createObjectURL(blob);
+          blobUrls.push(u);
+          newMap.set(h.id, u);
+          ohne.delete(h.id);
+          setThumbs(new Map(newMap));
+        }
+      }
+      if (!abgebrochen) setFehlend(new Set(ohne));
     })();
+    return () => {
+      abgebrochen = true;
+      blobUrls.forEach((u) => URL.revokeObjectURL(u));
+    };
   }, [fotos]);
 
   const upload = async (files: FileList | null) => {
@@ -1426,7 +1458,8 @@ function FotosEditor({
       try {
         const meta = await readFotoMeta(file);
         const compressed = await compressImage(file);
-        const safeName = file.name
+        // Name vom umgewandelten Bild (HEIC → .jpg), damit Endung und Inhalt passen
+        const safeName = compressed.name
           .toLowerCase()
           .replace(/[ä]/g, "ae")
           .replace(/[ö]/g, "oe")
@@ -1450,7 +1483,7 @@ function FotosEditor({
             baustelle_id: baustelleId,
             ordner: "fotos",
             subpath: datum,
-            dateiname: file.name,
+            dateiname: compressed.name,
             storage_path: storagePath,
             groesse: compressed.size,
             mimetype: compressed.type,
@@ -1589,6 +1622,10 @@ function FotosEditor({
                     className="w-full h-32 object-cover bg-muted"
                     loading="lazy"
                   />
+                ) : fehlend.has(f.dokument_id) ? (
+                  <div className="w-full h-32 bg-muted flex items-center justify-center text-xs text-muted-foreground text-center px-2">
+                    Foto konnte nicht geladen werden
+                  </div>
                 ) : (
                   <div className="w-full h-32 bg-muted flex items-center justify-center">
                     <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -1721,6 +1758,7 @@ function StatusBar({
             .createSignedUrl(doc.storage_path, 3600);
           return {
             signedUrl: data?.signedUrl ?? "",
+            pfad: doc.storage_path,
             bildunterschrift: f.bildunterschrift,
           };
         }),
@@ -1749,7 +1787,7 @@ function StatusBar({
         })),
         taetigkeiten: bericht_full.taetigkeiten,
         aufmass: bericht_full.aufmass,
-        fotos: fotoSignedUrls.filter((x): x is { signedUrl: string; bildunterschrift: string | null } => !!x),
+        fotos: fotoSignedUrls.filter((x): x is { signedUrl: string; pfad: string; bildunterschrift: string | null } => !!x),
         unterschriften: bericht_full.unterschriften,
       });
 

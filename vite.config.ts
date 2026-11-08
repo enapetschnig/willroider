@@ -65,6 +65,8 @@ export default defineConfig(({ mode }) => ({
           '**/mammoth*', '**/cytoscape*', '**/katex*', '**/html2canvas*',
           '**/mermaid*', '**/chunk-*.js',
           '**/excalidraw/**',
+          // HEIC-Umwandlung (~3 MB) nur laden, wenn wirklich ein HEIC-Foto kommt
+          '**/heic-to*',
         ],
         // Was nicht vorab im Cache liegt, bleibt nach dem ersten Laden
         // erhalten — so geht die Zeichenfläche auch ohne Netz, sobald sie

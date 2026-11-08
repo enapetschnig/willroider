@@ -8,6 +8,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { supabase } from "@/integrations/supabase/client";
+import { ladeBildAlsBrowserBlob } from "@/lib/heic";
 import type {
   Database,
   BerichtTyp,
@@ -60,7 +61,7 @@ export interface BerichtPdfInput {
   mitarbeiter: { row: BerichtMitarbeiter; profil: Profile | null }[];
   taetigkeiten: BerichtTaetigkeit[];
   aufmass: BerichtAufmass[];
-  fotos: { signedUrl: string; bildunterschrift?: string | null }[];
+  fotos: { signedUrl: string; pfad?: string | null; bildunterschrift?: string | null }[];
   /** Unterschriften von Polier und/oder Kunde. Beide freiwillig — fehlt
    *  eine, wird nur die Linie zum händischen Unterschreiben gedruckt. */
   unterschriften?: {
@@ -98,11 +99,11 @@ async function getLogoDataUrl(): Promise<string | null> {
  * jsPDF.addImage akzeptiert keine plain HTTP-URLs — wir holen das Bild
  * als Blob und wandeln es in eine dataURL um.
  */
-async function fetchAsDataUrl(url: string): Promise<string | null> {
+async function fetchAsDataUrl(url: string, pfad?: string | null): Promise<string | null> {
   try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const blob = await res.blob();
+    // HEIC (Handy-Format) kann jsPDF nicht einbetten → vorher in JPG umwandeln
+    const blob = await ladeBildAlsBrowserBlob(url, pfad);
+    if (!blob) return null;
     return await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
@@ -434,7 +435,7 @@ export async function makeBerichtPdf(input: BerichtPdfInput): Promise<jsPDF> {
     // abbrechen — bei Fehler wird ein Platzhalter gerendert.
     const settled = await Promise.allSettled(
       fotos.map(async (f) => ({
-        dataUrl: await fetchAsDataUrl(f.signedUrl),
+        dataUrl: await fetchAsDataUrl(f.signedUrl, f.pfad),
         bildunterschrift: f.bildunterschrift ?? null,
       })),
     );

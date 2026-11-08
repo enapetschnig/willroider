@@ -25,6 +25,11 @@ paths:
   (`baustellen.bauleiter_id`); ansehen, suchen und freigeben darf weiter jeder Bauleiter jeden Bericht
   (E. Winkler, 19.10.).
 - Ablage als PDF in SharePoint `00-Baustelle` → `sharepoint-onedrive.md`.
+- **Fotos im HEIC-Format** (J. Maurer, 08.11.2026: „die bilder müssen beim prüfen sichtbar sein“): ein Handy schickte 34 Fotos als .heic,
+  `compressImage` ließ HEIC unverändert durch → Chrome/Edge zeigen nichts, jsPDF bettet es nicht ein. Jetzt wandelt `lib/heic.ts` (`heic-to`,
+  ~3 MB, nur bei Bedarf geladen, nicht im SW-Precache) HEIC beim Hochladen in JPG; alte HEIC werden in Vorschau und Bericht-PDF im Browser umgewandelt.
+  Die 34 Fotos von Bericht 8a3dc3bc wurden als JPG daneben abgelegt und `dokumente` umgestellt (Original-.heic bleibt im Speicher;
+  Sicherung `~/roboter/sicherungen/willroider-2026-11-08-heic/`).
 
 ## Berichte-Archiv (`/berichte-archiv`, Recht `stunden.bsb.bestaetigen`)
 - Abgestimmt mit J. Maurer (21.09., er wollte vorher gefragt werden): fertige TB (nach Freigabe) und BSB

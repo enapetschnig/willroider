@@ -3,8 +3,13 @@
  * Resize auf maxSide=2000 px lange Seite, JPEG q=0.85.
  * iPhone-Original (~8 MB) → ~400 KB.
  *
- * Fallback (HEIC/Crash) → Original wird zurückgegeben.
+ * HEIC/HEIF (iPhone, manche Android-Handys) wird vorher in JPG umgewandelt —
+ * Chrome/Edge am PC zeigen HEIC nicht an und ins PDF lässt es sich nicht
+ * einbetten (J. Maurer, 08.11.2026: 34 Fotos im Bericht leer).
+ * Fallback (Crash) → Original wird zurückgegeben.
  */
+
+import { heicZuJpeg, istHeic } from "@/lib/heic";
 
 const MAX_SIDE = 2000;
 const QUALITY = 0.85;
@@ -41,10 +46,21 @@ async function loadImage(file: File): Promise<HTMLImageElement | ImageBitmap> {
  * Suffix `.jpg` zurück. Bei Fehler oder unbekanntem Format → Original.
  */
 export async function compressImage(file: File): Promise<File> {
+  const heic = istHeic(file);
   // Nur Bilder bearbeiten — sonst Original durchreichen
-  if (!file.type.startsWith("image/")) return file;
-  // HEIC kann der Browser nicht rendern → Original durchlassen
-  if (/hei[cf]/i.test(file.type)) return file;
+  if (!file.type.startsWith("image/") && !heic) return file;
+
+  if (heic) {
+    // Erst in JPG umwandeln, dann wie jedes andere Foto verkleinern.
+    try {
+      const jpg = await heicZuJpeg(file, 0.92);
+      const baseName = file.name.replace(/\.[^.]+$/, "");
+      file = new File([jpg], `${baseName}.jpg`, { type: "image/jpeg", lastModified: file.lastModified });
+    } catch (e) {
+      console.error("HEIC-Umwandlung fehlgeschlagen", e);
+      return file;
+    }
+  }
 
   try {
     const img = await loadImage(file);

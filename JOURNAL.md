@@ -1,5 +1,12 @@
 # Journal
 
+## 2026-11-08 · Bericht-Fotos im HEIC-Format sichtbar (J. Maurer)
+
+- Bericht vom 06.11. (34 Fotos, alle leer): alle 34 Dateien `image/heic` vom Handy; `compressImage` hat HEIC absichtlich durchgelassen. Sonst lag nirgends HEIC im Speicher.
+- Neu `src/lib/heic.ts` (heic-to): Upload → JPG (Bericht, Krankmeldung, Notiz-Zeichnen), Vorschau und PDF wandeln alte HEIC im Browser um, Kachel zeigt „Foto konnte nicht geladen werden“ statt Endlos-Kreisel.
+- Daten: 34 JPG (2000 px) neben die HEIC gelegt, `dokumente.storage_path/dateiname/mimetype/groesse` umgestellt; Sicherung der Zeilen + Originale unter `~/roboter/sicherungen/willroider-2026-11-08-heic/`.
+- Test `tests/roboter/2026-11-08-bericht-fotos-heic.spec.ts` (künstliches HEIC, Polier lädt hoch, Verwaltung prüft).
+
 
 ## 2026-11-04 · Archiv: Download direkt, Zulagen-Zettel und Krankenzettel (J. Maurer)
 
