@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
+import { istHeic, ladeBildAlsBrowserBlob } from "@/lib/heic";
 import { useToast } from "@/hooks/use-toast";
 import {
   Loader2,
@@ -60,7 +61,7 @@ function detectKind(item: DocViewerItem): ViewKind {
   // Word und Excel aus SharePoint kommen bereits als PDF zum Ansehen —
   // dann zählt die Art des Inhalts, nicht die Endung des Namens.
   if (item.direkt_url && mt === "application/pdf") return "pdf";
-  if (mt.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"].includes(ext))
+  if (mt.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "heif"].includes(ext))
     return "image";
   if (mt === "application/pdf" || ext === "pdf") return "pdf";
   if (
@@ -149,6 +150,21 @@ export function DocViewerDialog({
           title: "Vorschau-Fehler",
           description: error?.message ?? "Datei nicht erreichbar.",
         });
+        setLoading(false);
+        return;
+      }
+      if (kind === "image" && (istHeic(item.dateiname) || istHeic(item.mimetype) || istHeic(item.storage_path))) {
+        // HEIC (Handy-Format) zeigt Chrome/Edge nicht an → im Browser in JPG umwandeln
+        const blob = await ladeBildAlsBrowserBlob(data.signedUrl, "image/heic");
+        if (!active) return;
+        if (blob) {
+          const objektUrl = URL.createObjectURL(blob);
+          blobUrl.current = objektUrl;
+          setSignedUrl(objektUrl);
+        } else {
+          toast({ variant: "destructive", title: "Vorschau-Fehler", description: "Foto konnte nicht umgewandelt werden." });
+          setSignedUrl(data.signedUrl);
+        }
         setLoading(false);
         return;
       }

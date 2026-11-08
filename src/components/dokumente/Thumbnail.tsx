@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import { FileText, File as FileIcon, Loader2 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/integrations/supabase/client";
+import { istHeic, ladeBildAlsBrowserBlob } from "@/lib/heic";
 
 type FileKind = "image" | "pdf" | "xlsx" | "docx" | "pptx" | "video" | "other";
 
@@ -30,7 +31,7 @@ interface ThumbnailProps {
 function detectKind(name: string, mt?: string | null): FileKind {
   const ext = (name.split(".").pop() ?? "").toLowerCase();
   const m = (mt ?? "").toLowerCase();
-  if (m.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"].includes(ext))
+  if (m.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "heif"].includes(ext))
     return "image";
   if (m === "application/pdf" || ext === "pdf") return "pdf";
   if (["xlsx", "xls", "ods", "csv"].includes(ext)) return "xlsx";
@@ -283,7 +284,15 @@ export function Thumbnail({
         if (error || !data) throw error ?? new Error("kein Signed-URL");
         if (aborted.current) return;
 
-        if (kind === "image") {
+        if (kind === "image" && (istHeic(dateiname) || istHeic(mimetype) || istHeic(storagePath))) {
+          // HEIC (Handy-Format) zeigt Chrome/Edge nicht an → im Browser umwandeln
+          const blob = await ladeBildAlsBrowserBlob(data.signedUrl, "image/heic");
+          if (!blob) throw new Error("HEIC nicht lesbar");
+          if (aborted.current) return;
+          const u = URL.createObjectURL(blob);
+          cache.set(cacheKey, u);
+          setSrc(u);
+        } else if (kind === "image") {
           cache.set(cacheKey, data.signedUrl);
           setSrc(data.signedUrl);
         } else if (kind === "pdf") {

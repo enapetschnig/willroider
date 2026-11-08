@@ -47,3 +47,20 @@ export async function ladeBildAlsBrowserBlob(url: string, pfadOderTyp?: string |
     return null;
   }
 }
+
+/**
+ * Datei-Upload ohne Verkleinerung (Dokumente-Reiter): HEIC wird in ein JPG
+ * gleicher Größe umgewandelt, alles andere bleibt unverändert. Klappt die
+ * Umwandlung nicht, geht das Original hoch (wie bisher).
+ */
+export async function heicDateiAlsJpg(file: File): Promise<File> {
+  if (!istHeic(file)) return file;
+  try {
+    const jpg = await heicZuJpeg(file, 0.92);
+    const baseName = file.name.replace(/\.[^.]+$/, "");
+    return new File([jpg], `${baseName}.jpg`, { type: "image/jpeg", lastModified: file.lastModified });
+  } catch (e) {
+    console.error("HEIC-Umwandlung fehlgeschlagen", e);
+    return file;
+  }
+}

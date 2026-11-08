@@ -2,6 +2,7 @@
 // Handy-Fotos im HEIC-Format kann Chrome/Edge nicht anzeigen und jsPDF nicht einbetten.
 //  1) Polier lädt ein HEIC-Foto in seinen Bericht → landet als JPG (Pfad .jpg, image/jpeg) und ist sichtbar.
 //  2) Ein schon gespeichertes HEIC-Foto (alter Stand) wird beim Prüfen durch die Verwaltung angezeigt.
+//  3) Baustelle → Dokumente → Fotos: HEIC-Upload wird JPG, altes HEIC hat eine sichtbare Vorschau und öffnet im Betrachter.
 // probe-synthetisch.heic ist ein künstliches 800×600-Testbild (keine Kundendaten).
 // Läuft NUR gegen die Testumgebung (testumgebung.mjs start), App mit VITE_SUPABASE_URL auf die Testumgebung:
 // TEST_API_URL=… TEST_ANON_KEY=… TEST_SERVICE_ROLE_KEY=… TEST_APP_URL=http://localhost:55410 npx playwright test -c tests/roboter/playwright.config.ts
@@ -94,6 +95,31 @@ test("HEIC-Fotos im Bericht: Upload wird JPG, alte HEIC werden angezeigt", async
   await expect(p2.getByText("Fotos (2)")).toBeVisible({ timeout: 30_000 });
   await fotosSichtbar(p2, 2);
   await expect(p2.getByText("Foto konnte nicht geladen werden")).toHaveCount(0);
+
+  // 3) Dokumente-Reiter der Baustelle, Ordner „Fotos“
+  const altDok = `${bs.id}/fotos/2_alt_dok.heic`;
+  await fetch(`${API}/storage/v1/object/baustellen/${altDok}`, {
+    method: "POST", headers: { apikey: SR, Authorization: `Bearer ${SR}`, "Content-Type": "image/heic" }, body: fs.readFileSync(HEIC),
+  });
+  await rest("/rest/v1/dokumente", "POST", { baustelle_id: bs.id, ordner: "fotos", dateiname: "alt-dok.heic", storage_path: altDok, groesse: 969, mimetype: "image/heic" });
+  await p2.goto(`${APP}/baustellen/${bs.id}?tab=dokumente&ordner=fotos`);
+  const altBild = p2.locator('img[alt="alt-dok.heic"]').first();
+  await expect(altBild).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => altBild.evaluate((e) => (e as HTMLImageElement).naturalWidth), { timeout: 30_000 }).toBe(800);
+
+  await p2.locator('input[type=file][multiple]:not([accept])').setInputFiles({ name: "dok-handy.heic", mimeType: "", buffer: fs.readFileSync(HEIC) });
+  await expect
+    .poll(async () => (await rest(`/rest/v1/dokumente?baustelle_id=eq.${bs.id}&dateiname=like.dok-handy*&select=dateiname,mimetype,storage_path`, "GET")), { timeout: 30_000 })
+    .toEqual([expect.objectContaining({ dateiname: "dok-handy.jpg", mimetype: "image/jpeg", storage_path: expect.stringMatching(/\.jpg$/) })]);
+  const neuBild = p2.locator('img[alt="dok-handy.jpg"]').first();
+  await expect(neuBild).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => neuBild.evaluate((e) => (e as HTMLImageElement).naturalWidth), { timeout: 30_000 }).toBe(800);
+
+  // Betrachter: altes HEIC öffnet sichtbar
+  await altBild.dblclick(); // einfacher Klick markiert, Doppelklick öffnet
+  const gross = p2.getByRole("dialog").locator('img[alt="alt-dok.heic"]');
+  await expect(gross).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => gross.evaluate((e) => (e as HTMLImageElement).naturalWidth), { timeout: 30_000 }).toBe(800);
 
   expect(fehler).toEqual([]);
 });

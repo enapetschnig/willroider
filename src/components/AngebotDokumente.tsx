@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { heicDateiAlsJpg } from "@/lib/heic";
 import {
   Upload,
   FileText,
@@ -169,7 +170,9 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
     let success = 0;
     let skipped = 0;
     for (let i = 0; i < items.length; i++) {
-      const { file, subpath } = items[i];
+      const { subpath } = items[i];
+      // Handy-Fotos im HEIC-Format zeigt Chrome/Edge nicht an → als JPG ablegen
+      const file = await heicDateiAlsJpg(items[i].file);
       if (file.size > MAX_UPLOAD_BYTES) {
         toast({
           variant: "destructive",

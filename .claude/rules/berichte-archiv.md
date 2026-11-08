@@ -29,7 +29,9 @@ paths:
   `compressImage` ließ HEIC unverändert durch → Chrome/Edge zeigen nichts, jsPDF bettet es nicht ein. Jetzt wandelt `lib/heic.ts` (`heic-to`,
   ~3 MB, nur bei Bedarf geladen, nicht im SW-Precache) HEIC beim Hochladen in JPG; alte HEIC werden in Vorschau und Bericht-PDF im Browser umgewandelt.
   Die 34 Fotos von Bericht 8a3dc3bc wurden als JPG daneben abgelegt und `dokumente` umgestellt (Original-.heic bleibt im Speicher;
-  Sicherung `~/roboter/sicherungen/willroider-2026-11-08-heic/`).
+  Sicherung `~/roboter/sicherungen/willroider-2026-11-08-heic/`). Gleiches nachgezogen im Dokumente-Reiter (Baustelle + Angebot): Upload HEIC → JPG
+  (`heicDateiAlsJpg`, ohne Verkleinern), `dokumente/Thumbnail.tsx` und `DocViewerDialog.tsx` wandeln alte HEIC aus dem Speicher im Browser um
+  (SharePoint-HEIC kommt schon über `sharepoint-datei` als JPG).
 
 ## Berichte-Archiv (`/berichte-archiv`, Recht `stunden.bsb.bestaetigen`)
 - Abgestimmt mit J. Maurer (21.09., er wollte vorher gefragt werden): fertige TB (nach Freigabe) und BSB
