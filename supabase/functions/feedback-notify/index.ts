@@ -39,8 +39,13 @@ function esc(s: string): string {
   return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
 }
 
+// 09.11.2026, Christoph: Keine Mail mehr je neuem Änderungswunsch – der Roboter holt die Wünsche ohnehin ab.
+// Wieder einschalten: AUS auf false setzen und die Function neu deployen.
+const AUS = true;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (AUS) return json({ ok: true, aus: true });
 
   try {
     const auth = req.headers.get("Authorization");
