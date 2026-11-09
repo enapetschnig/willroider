@@ -1,5 +1,14 @@
 # Journal
 
+## 2026-11-09 · Nachtrag Gegenprüfung: Personenwechsel leert Formular nicht mehr
+
+- Gegenprüfung (Kollege): Schlüssel von `stunden_tage_fuer_datum` enthält die Personenauswahl → bei jedem Wechsel kurz
+  `undefined`; bei Tagen > 30 Tage zurück verschwand damit der eigene Tag und der Reset-Effekt leerte das Formular
+  (getippte Änderungen weg). Stimmt.
+- Fix `src/pages/Stunden.tsx`: `placeholderData` behält die Daten desselben Datums; `bestehendeGeladen` = erfolgreich
+  UND kein Platzhalter, damit Vorbelegung/Laden Mitgebuchter weiter auf die echten Daten wartet.
+- Build + TS2304-Gate grün; Browser-Probefahrt nicht gemacht (Docker-Testumgebung lief nicht).
+
 ## 2026-11-09 · Stunden „Ändern“: geschriebene Einträge aller Personen laden (N. Gwenger)
 
 - Meldung: beim Ändern geschriebener Stunden standen BVH der Planung und 0 Std. drin. Niklas' eigene Tage luden in der

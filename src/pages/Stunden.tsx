@@ -532,11 +532,22 @@ export default function Stunden() {
         .sort(),
     [forUserIds, primaryUserId],
   );
-  const { data: bestehendeTage, isSuccess: bestehendeGeladen } = useQuery({
+  // Beim Ändern der Personenauswahl (neuer Schlüssel) die Daten desselben
+  // Datums als Platzhalter behalten — sonst wäre der eigene Tag kurz weg
+  // (bei Tagen > 30 Tage zurück) und das Formular würde geleert. Platzhalter
+  // gelten NICHT als „geladen“: Vorbelegung/Laden Mitgebuchter wartet weiter.
+  const {
+    data: bestehendeTage,
+    isSuccess: bestehendeOk,
+    isPlaceholderData: bestehendePlatzhalter,
+  } = useQuery({
     queryKey: ["stunden_tage_fuer_datum", date, bestehendeIds],
     queryFn: () => ladeStundenTageFuerDatum(date, bestehendeIds),
     enabled: !!date && bestehendeIds.length > 0,
+    placeholderData: (prev, prevQuery) =>
+      prevQuery?.queryKey[1] === date ? prev : undefined,
   });
+  const bestehendeGeladen = bestehendeOk && !bestehendePlatzhalter;
   const bestehendeMap = useMemo(() => {
     const m = new Map<string, StundenTagFull>();
     for (const t of bestehendeTage ?? []) m.set(t.tag.mitarbeiter_id, t);
