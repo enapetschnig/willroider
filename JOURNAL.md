@@ -1,5 +1,19 @@
 # Journal
 
+## 2026-11-09 · Stunden „Ändern“: geschriebene Einträge aller Personen laden (N. Gwenger)
+
+- Meldung: beim Ändern geschriebener Stunden standen BVH der Planung und 0 Std. drin. Niklas' eigene Tage luden in der
+  Testumgebung korrekt (auch mit verzögertem Netz); nachgestellt wurde der Fehler bei mitgebuchten Personen
+  (Polier + Partie): nur der eigene Tag kam ins Formular, die anderen wurden aus der Planung vorbelegt, Soll lud noch → 0,
+  „wer hat schon“ (Status-Abfrage) lud noch → Vorbelegung trotz vorhandener Stunden; Speichern überschrieb sie.
+- `src/pages/Stunden.tsx`: Tage aller ausgewählten Personen laden (`ladeStundenTageFuerDatum` in `useStundenTag.ts`),
+  Vorbelegung erst nach Soll/Status/bestehenden Tagen, Fahrtgeld/Anmerkung/Arbeitsbeginn Mitgebuchter erhalten,
+  Hinweistext angepasst. Nebenbei: Tage älter als 30 Tage laden beim „Ändern“ jetzt auch.
+- Test `tests/roboter/2026-11-09-stunden-aendern-mitgebuchte.spec.ts` (alter Code rot, neu grün); alle 6 Roboter-Tests grün.
+- Testumgebung: Enum `berufsschule/polierschule` fehlte (4 Migrationen liefen nicht), `stunden_tage` wurde deshalb nicht
+  geladen — Werte von Hand ergänzt; `rollen_berechtigungen` für `buero` unvollständig. Der Test 2026-11-03 hinterlässt
+  eine Freigabe für 2031-03-04 und ist im selben Docker nur einmal grün.
+
 ## 2026-11-08 · Bericht-Fotos im HEIC-Format sichtbar (J. Maurer)
 
 - Bericht vom 06.11. (34 Fotos, alle leer): alle 34 Dateien `image/heic` vom Handy; `compressImage` hat HEIC absichtlich durchgelassen. Sonst lag nirgends HEIC im Speicher.

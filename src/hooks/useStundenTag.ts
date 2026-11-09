@@ -128,6 +128,25 @@ export async function ladeStundenTagFull(
   return data ? zuStundenTagFull(data) : null;
 }
 
+/**
+ * Die Tage mehrerer Mitarbeiter an EINEM Datum — für die Erfassung, die beim
+ * „Ändern" eines Tages die geschriebenen Einträge ALLER ausgewählten Personen
+ * zeigen muss (N. Gwenger 09.11.2026). Nur, was RLS sehen lässt.
+ */
+export async function ladeStundenTageFuerDatum(
+  datum: string,
+  mitarbeiterIds: string[],
+): Promise<StundenTagFull[]> {
+  if (mitarbeiterIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("stunden_tage")
+    .select(STUNDEN_TAG_SELECT)
+    .eq("datum", datum)
+    .in("mitarbeiter_id", mitarbeiterIds);
+  if (error) throw error;
+  return ((data as any[]) ?? []).map(zuStundenTagFull);
+}
+
 /** Liste der Stunden-Tage in einem Datums-Bereich (für TagBlocks + Auswertung). */
 export function useStundenTageList(params: {
   fromDate: string;

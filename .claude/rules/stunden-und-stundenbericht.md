@@ -47,6 +47,12 @@ paths:
   solange das Büro den Tag nicht freigegeben hat (B. Sirnitzer, 19.10.).
 - Fallstrick: Masken ohne bestimmte Felder müssen beim Speichern den gespeicherten Wert übernehmen
   (Ort, Fahrtgeld), sonst fällt er still zurück.
+- **„Ändern“ zeigt alle wie geschrieben** (N. Gwenger, 09.11.2026: „das alles wie geschrieben aufleuchtet und nur
+  einzelne Stunden und Baustellen geändert werden können“): `/stunden` lädt die gespeicherten Tage ALLER ausgewählten
+  Personen (`ladeStundenTageFuerDatum`) samt km und Zulagen ins Formular. Vorher nur den eigenen Tag — Mitgebuchte
+  bekamen die Planungs-Baustelle und, solange Soll/„wer hat schon“ noch luden, 0 Std., und Speichern überschrieb das.
+  Vorbelegung aus der Planung erst, wenn Soll, Status und bestehende Tage geladen sind. Eigener Tag nicht mehr auf die
+  30-Tage-Liste angewiesen. Fahrtgeld/Anmerkung/Arbeitsbeginn Mitgebuchter bleiben beim Speichern erhalten.
 
 ## Baustellenstundenbericht (BSB)
 - Nur für **Arbeiter**. Angestellte haben Tätigkeitsbericht (N. Gwenger, 01.10.):

@@ -74,11 +74,13 @@ import {
 } from "@/hooks/useStammdatenStunden";
 import {
   useStundenTageList,
+  ladeStundenTageFuerDatum,
   useSaveStundenTag,
   useDeleteStundenTag,
   type SaveEintrag,
   type SaveZulage,
   type SaveFahrt,
+  type StundenTagFull,
 } from "@/hooks/useStundenTag";
 import { useSollHoursForDayBulk } from "@/hooks/useSollHoursForDayBulk";
 import { getPlanFuerTag, type PlanEintrag } from "@/lib/tagesplanung";
@@ -371,14 +373,16 @@ export default function Stunden() {
   // nur erhalten. Einmal laden, um sie beim Formular-Laden auszufiltern
   // (sonst doppelt gezählt) und beim Speichern zu bewahren.
   const [maschinenIds, setMaschinenIds] = useState<Set<string>>(new Set());
+  const [maschinenGeladen, setMaschinenGeladen] = useState(false);
   useEffect(() => {
     supabase
       .from("baustellen")
       .select("id")
       .eq("kategorie", "maschine")
-      .then(({ data }) =>
-        setMaschinenIds(new Set((data ?? []).map((m: { id: string }) => m.id))),
-      );
+      .then(({ data }) => {
+        setMaschinenIds(new Set((data ?? []).map((m: { id: string }) => m.id)));
+        setMaschinenGeladen(true);
+      });
   }, []);
   const istMaschinenEintrag = (art: string, baustelleId: string | null) =>
     art === "baustelle" && !!baustelleId && maschinenIds.has(baustelleId);
@@ -416,7 +420,10 @@ export default function Stunden() {
   const verfuegbareZulagenIds =
     forUserIds.size > 1 ? (erlaubteZulagenUnion ?? alleZulagenIds) : erlaubteZulagenIds;
   const { data: limits } = useArbeitszeitLimits();
-  const { sollPerMa } = useSollHoursForDayBulk(Array.from(forUserIds), date);
+  const { sollPerMa, isLoading: sollLaedt } = useSollHoursForDayBulk(
+    Array.from(forUserIds),
+    date,
+  );
 
   // Vorbelegung je selektiertem MA — direkt aus dem einmal geladenen Plan.
   // (Früher: eine Abfrage pro Mitarbeiter in einer Schleife.)
@@ -455,7 +462,7 @@ export default function Stunden() {
       ),
     [user, allMembers],
   );
-  const { data: statusForDateMap = new Map<string, TagStatusInfo>() } = useQuery({
+  const { data: statusForDateMap = new Map<string, TagStatusInfo>(), isSuccess: statusGeladen } = useQuery({
     queryKey: ["stunden_status_for_date", date, memberIds],
     queryFn: async () => {
       if (memberIds.length === 0) return new Map<string, TagStatusInfo>();
@@ -512,17 +519,53 @@ export default function Stunden() {
     mitarbeiterIds: primaryUserId ? [primaryUserId] : [],
     enabled: !!primaryUserId,
   });
+  // Die schon geschriebenen Tage ALLER ausgewählten Personen an diesem Datum.
+  // Wunsch N. Gwenger (09.11.2026): Beim „Ändern" muss alles so erscheinen,
+  // wie es geschrieben wurde. Vorher kam nur der eigene Tag ins Formular — die
+  // mitgebuchten Leute bekamen die Baustelle aus der Planung und (solange das
+  // Soll noch lud) 0 Stunden, und das hat beim Speichern ihre echten Stunden
+  // überschrieben. Ersetzt zugleich die 30-Tage-Grenze der Liste oben.
+  const bestehendeIds = useMemo(
+    () =>
+      Array.from(new Set([primaryUserId, ...Array.from(forUserIds)]))
+        .filter(Boolean)
+        .sort(),
+    [forUserIds, primaryUserId],
+  );
+  const { data: bestehendeTage, isSuccess: bestehendeGeladen } = useQuery({
+    queryKey: ["stunden_tage_fuer_datum", date, bestehendeIds],
+    queryFn: () => ladeStundenTageFuerDatum(date, bestehendeIds),
+    enabled: !!date && bestehendeIds.length > 0,
+  });
+  const bestehendeMap = useMemo(() => {
+    const m = new Map<string, StundenTagFull>();
+    for (const t of bestehendeTage ?? []) m.set(t.tag.mitarbeiter_id, t);
+    return m;
+  }, [bestehendeTage]);
+
   const aktuellerEigenerTag = useMemo(
-    () => tageList.find((t) => t.tag.datum === date),
-    [tageList, date],
+    () =>
+      tageList.find((t) => t.tag.datum === date) ??
+      (bestehendeTage ?? []).find(
+        (t) => t.tag.mitarbeiter_id === primaryUserId && t.tag.datum === date,
+      ),
+    [tageList, date, bestehendeTage, primaryUserId],
   );
 
   // ─── Form-State ─────────────────────────────────────────────────────
   const [form, setForm] = useState<ErfassungForm>(() => emptyForm());
 
+  // Welche mitgebuchten Personen schon aus ihrem gespeicherten Tag ins
+  // Formular geladen wurden („datum|person|tag-id“). Wird geleert, sobald das
+  // Formular neu aufgebaut wird.
+  const geladeneAndereRef = useRef<Set<string>>(new Set());
+  const [formNonce, setFormNonce] = useState(0);
+
   // Bei Datums-/User-Wechsel: bestehenden Eintrag des primaryUsers laden.
   useEffect(() => {
     const uids = Array.from(forUserIds);
+    geladeneAndereRef.current = new Set();
+    setFormNonce((n) => n + 1);
     if (!aktuellerEigenerTag) {
       setForm({
         ...emptyForm(),
@@ -581,6 +624,74 @@ export default function Stunden() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aktuellerEigenerTag?.tag.id, primaryUserId, date, maschinenIds]);
 
+  // Mitgebuchte Personen, die an diesem Tag schon Stunden haben: ihre
+  // geschriebenen Einträge, Kilometer und Zulagen ins Formular laden — genau
+  // so, wie sie gespeichert sind (Wunsch N. Gwenger 09.11.2026). Wer nicht
+  // lesbar ist (andere Partie), bleibt leer und wird beim Speichern übersprungen.
+  useEffect(() => {
+    if (!bestehendeGeladen || !maschinenGeladen) return;
+    const zuLaden: StundenTagFull[] = [];
+    for (const uid of forUserIds) {
+      if (uid === primaryUserId) continue;
+      const t = bestehendeMap.get(uid);
+      if (!t || t.tag.datum !== date) continue;
+      const k = `${date}|${uid}|${t.tag.id}`;
+      if (geladeneAndereRef.current.has(k)) continue;
+      geladeneAndereRef.current.add(k);
+      zuLaden.push(t);
+    }
+    if (zuLaden.length === 0) return;
+    setForm((f) => {
+      const maEintraege = { ...f.maEintraege };
+      const kmPerMa = { ...f.kmPerMa };
+      const zulagenSelected = new Map(f.zulagenSelected);
+      for (const t of zuLaden) {
+        const uid = t.tag.mitarbeiter_id;
+        maEintraege[uid] = t.taetigkeiten
+          .filter((tt) => !istMaschinenEintrag(tt.art, tt.baustelle_id))
+          .map((tt) => ({
+            key: newKey(),
+            art: tt.art,
+            baustelle_id: tt.baustelle_id,
+            ziel_baustelle_id: (tt as any).ziel_baustelle_id ?? null,
+            ort: (tt as any).ort === "firma" ? "firma" : "baustelle",
+            taetigkeit_id: tt.taetigkeit_id,
+            taetigkeit_freitext: tt.taetigkeit_freitext ?? "",
+            stunden: Number(tt.stunden),
+            notiz: tt.notiz ?? "",
+          }));
+        kmPerMa[uid] = Number(t.fahrt?.km_gefahren ?? 0);
+        // Zulagen je Person: was er hat, mit seinen Stunden; was er nicht hat,
+        // mit 0 (= nicht für ihn). Weicht er vom Rest ab → „pro MA“.
+        const seine = new Map(t.zulagen.map((z) => [z.zulagen_typ_id, z]));
+        for (const [typId, z] of zulagenSelected) {
+          const eigen = seine.get(typId);
+          const wert = eigen ? (eigen.stunden ?? null) : 0;
+          const andere = Object.entries(z.stundenPerMa).filter(([id]) => id !== uid);
+          const abweichend = andere.some(([, v]) => v !== wert);
+          zulagenSelected.set(typId, {
+            ...z,
+            stundenPerMa: { ...z.stundenPerMa, [uid]: wert },
+            proMaModus: z.proMaModus || abweichend,
+          });
+        }
+        for (const [typId, eigen] of seine) {
+          if (zulagenSelected.has(typId)) continue;
+          const stundenPerMa: Record<string, number | null> = {};
+          for (const id of forUserIds) stundenPerMa[id] = 0;
+          stundenPerMa[uid] = eigen.stunden ?? null;
+          zulagenSelected.set(typId, {
+            stundenPerMa,
+            notiz: eigen.notiz ?? "",
+            proMaModus: forUserIds.size > 1,
+          });
+        }
+      }
+      return { ...f, maEintraege, kmPerMa, zulagenSelected };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bestehendeMap, bestehendeGeladen, maschinenGeladen, forUserIds, primaryUserId, date, formNonce]);
+
   // forUserIds-Wechsel: für jeden selektierten MA ein Eintrags-Array sichern,
   // Zulagen-stundenPerMa abgleichen.
   useEffect(() => {
@@ -619,6 +730,10 @@ export default function Stunden() {
   // noch niemand etwas → Fallback auf einen Baustellen-Eintrag aus der
   // Tagesplanung + Soll-Stunden.
   useEffect(() => {
+    // Erst vorbelegen, wenn feststeht, wer an dem Tag schon Stunden hat und
+    // wie viel Soll gilt — sonst landen Planungs-Baustelle und 0 Stunden bei
+    // Leuten, die längst gebucht haben (N. Gwenger 09.11.2026).
+    if (!bestehendeGeladen || !statusGeladen || sollLaedt) return;
     setForm((f) => {
       // Aktive Arten aus den bestehenden MA-Einträgen ableiten
       const aktive = new Set<TagStatus>();
@@ -634,7 +749,7 @@ export default function Stunden() {
         // Tagesplanungs-Schätzwerten vorbefüllen — sonst würde ihr eigener
         // Eintrag beim Speichern überschrieben. Block bleibt leer → Submit
         // überspringt sie.
-        if (statusForDateMap.has(uid)) continue;
+        if (statusForDateMap.has(uid) || bestehendeMap.has(uid)) continue;
         const tp = tagesplanungPerMa.get(uid);
         const soll = sollPerMa.get(uid) ?? 0;
         // Urlaub / Krank / Schlechtwetter: statt Baustellenstunden die
@@ -693,8 +808,19 @@ export default function Stunden() {
       }
       return changed ? { ...f, maEintraege } : f;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tagesplanungPerMa, sollPerMa, forUserIds, statusForDateMap]);
+  }, [
+    tagesplanungPerMa,
+    sollPerMa,
+    forUserIds,
+    statusForDateMap,
+    bestehendeMap,
+    bestehendeGeladen,
+    statusGeladen,
+    sollLaedt,
+    // Nach jedem Neuaufbau des Formulars (Datum, eigener Tag, Maschinenliste)
+    // neu vorbelegen — sonst bleibt ein neuer Tag leer.
+    formNonce,
+  ]);
 
   /** Summe der Netto-Stunden eines MA aus seinen Einträgen. */
   const summenProMa = useMemo(() => {
@@ -1012,12 +1138,18 @@ export default function Stunden() {
           .reduce((s, r) => s + Number(r.stunden), 0);
         const isPolierSelf = uid === primaryUserId && istPolier;
         const polierFahrt = isPolierSelf ? form.fahrt : null;
+        // Mitgebuchte Personen: ihr eigenes Fahrtgeld, ihre Anmerkung und
+        // ihren Arbeitsbeginn behalten — die Maske zeigt dafür nur die Werte
+        // des Erfassenden (Fallstrick „gespeicherten Wert übernehmen“).
+        const bisher = uid !== primaryUserId ? bestehendeMap.get(uid) : undefined;
         const km = Math.max(0, Number(form.kmPerMa[uid] ?? 0));
         // Taggeld immer automatisch — kein manuelles Überschreiben mehr
         // (Änderungswunsch B. Sirnitzer 07.10.: „Kein Taggeld, keine
         // Geldangaben"). Der Polier wählt nur noch Fahrtgeld in Stunden.
         const auto = berechneTaggeld(baustelleStd, "baustelle");
-        const fahrtgeldStd = polierFahrt?.fahrtgeld_stunden ?? 0;
+        const fahrtgeldStd =
+          polierFahrt?.fahrtgeld_stunden ??
+          Number(bisher?.fahrt?.fahrtgeld_stunden ?? 0);
         let fahrtToSave: SaveFahrt | null = null;
         if (auto.kurz > 0 || auto.lang > 0 || fahrtgeldStd > 0 || km > 0) {
           fahrtToSave = {
@@ -1036,8 +1168,8 @@ export default function Stunden() {
             id: existingEntry?.id,
             mitarbeiter_id: uid,
             datum: date,
-            arbeitsbeginn: form.arbeitsbeginn,
-            anmerkung: form.anmerkung.trim() || null,
+            arbeitsbeginn: form.arbeitsbeginn ?? bisher?.tag.arbeitsbeginn ?? null,
+            anmerkung: form.anmerkung.trim() || bisher?.tag.anmerkung || null,
             taetigkeiten: eintraege,
             zulagen,
             fahrt: fahrtToSave,
@@ -1092,6 +1224,7 @@ export default function Stunden() {
         }
       } else {
         refetchTage();
+        queryClient.invalidateQueries({ queryKey: ["stunden_tage_fuer_datum"] });
         if (!aktuellerEigenerTag) {
           setForm({
             ...emptyForm(),
@@ -1217,8 +1350,9 @@ export default function Stunden() {
             ))}
           </ul>
           <div className="text-[11px] text-amber-800 pl-6">
-            Beim Speichern werden offene Einträge überschrieben — bereits bestätigte
-            oder freigegebene Tage werden übersprungen.
+            Die geschriebenen Einträge stehen unten im Formular — was du dort
+            änderst, wird gespeichert. Bereits bestätigte oder freigegebene Tage
+            werden übersprungen.
             {konflikte.some((k) => k.verborgen) &&
               " Tage aus einer anderen Partie bleiben unverändert — Änderungen dort bitte übers Büro."}
           </div>
