@@ -53,6 +53,8 @@ paths:
   bekamen die Planungs-Baustelle und, solange Soll/„wer hat schon“ noch luden, 0 Std., und Speichern überschrieb das.
   Vorbelegung aus der Planung erst, wenn Soll, Status und bestehende Tage geladen sind. Eigener Tag nicht mehr auf die
   30-Tage-Liste angewiesen. Fahrtgeld/Anmerkung/Arbeitsbeginn Mitgebuchter bleiben beim Speichern erhalten.
+  Fallstrick (10.11.): Query `stunden_tage_fuer_datum` muss bei JEDEM Speichern/Löschen eines Tags mit ungültig
+  werden (passiert in `useSaveStundenTag`/`useDeleteStundenTag`) — sonst blieb ein gelöschter Tag im Formular.
 
 ## Baustellenstundenbericht (BSB)
 - Nur für **Arbeiter**. Angestellte haben Tätigkeitsbericht (N. Gwenger, 01.10.):

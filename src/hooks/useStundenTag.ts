@@ -305,6 +305,9 @@ export function useSaveStundenTag() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["stunden_tage_list"] });
+      // Auch die Tage-je-Datum-Abfrage der Stunden-Seite (Fallback für
+      // „Ändern“), sonst zeigt sie bis zu 30 s den alten Stand.
+      qc.invalidateQueries({ queryKey: ["stunden_tage_fuer_datum"] });
     },
   });
 }
@@ -317,7 +320,12 @@ export function useDeleteStundenTag() {
       const { error } = await supabase.from("stunden_tage").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["stunden_tage_list"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stunden_tage_list"] });
+      // Sonst bleibt ein gelöschter Tag über den Fallback in Stunden.tsx
+      // (bestehendeTage) im Formular stehen und würde wieder gespeichert.
+      qc.invalidateQueries({ queryKey: ["stunden_tage_fuer_datum"] });
+    },
   });
 }
 
