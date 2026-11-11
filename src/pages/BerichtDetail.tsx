@@ -78,6 +78,8 @@ import {
 import { fetchWetterFuerTag, geocodeAdresse } from "@/lib/wetter";
 import { compressImage } from "@/lib/imageCompress";
 import { istHeic, ladeBildAlsBrowserBlob } from "@/lib/heic";
+import { istPdf, pdfErsteSeiteAlsJpeg } from "@/lib/pdfVorschau";
+import { DocViewerDialog, type DocViewerItem } from "@/components/dokumente/DocViewerDialog";
 import { readFotoMeta } from "@/lib/exif";
 import { generateAndUploadBerichtPdf } from "@/lib/berichtPdf";
 
@@ -1395,9 +1397,14 @@ function FotosEditor({
   const [thumbs, setThumbs] = useState<Map<string, string>>(new Map());
 
   const [fehlend, setFehlend] = useState<Set<string>>(new Set());
+  /** Dokument-Angaben je Foto — für die Großansicht und PDF-Anhänge. */
+  const [docInfo, setDocInfo] = useState<Map<string, { storage_path: string; dateiname: string; mimetype: string | null }>>(new Map());
+  const [gross, setGross] = useState<DocViewerItem | null>(null);
 
   // Lade signed-URLs für Thumbnails. HEIC (Handy-Format) zeigt Chrome/Edge
   // nicht an → im Browser in JPG umwandeln und als Blob-URL zeigen.
+  // Ist statt eines Fotos eine PDF angehängt (z. B. Plan), wird die erste
+  // Seite als Vorschau gezeichnet.
   useEffect(() => {
     let abgebrochen = false;
     const blobUrls: string[] = [];
@@ -1406,10 +1413,19 @@ function FotosEditor({
       if (docIds.length === 0) return;
       const { data: docs } = await supabase
         .from("dokumente")
-        .select("id, storage_path, mimetype")
+        .select("id, storage_path, mimetype, dateiname")
         .in("id", docIds);
+      if (abgebrochen) return;
+      setDocInfo(
+        new Map(
+          (docs ?? []).map((d: any) => [
+            d.id,
+            { storage_path: d.storage_path, dateiname: d.dateiname ?? d.storage_path.split("/").pop(), mimetype: d.mimetype ?? null },
+          ]),
+        ),
+      );
       const newMap = new Map<string, string>();
-      const heicDocs: { id: string; url: string; pfad: string }[] = [];
+      const umwandeln: { id: string; url: string; pfad: string; pdf: boolean }[] = [];
       const ohne = new Set<string>(docIds);
       await Promise.all(
         (docs ?? []).map(async (d: any) => {
@@ -1417,8 +1433,10 @@ function FotosEditor({
             .from("baustellen")
             .createSignedUrl(d.storage_path, 600);
           if (!data?.signedUrl) return;
-          if (istHeic(d.storage_path) || istHeic(d.mimetype)) {
-            heicDocs.push({ id: d.id, url: data.signedUrl, pfad: d.storage_path });
+          if (istPdf(d.storage_path) || istPdf(d.mimetype)) {
+            umwandeln.push({ id: d.id, url: data.signedUrl, pfad: d.storage_path, pdf: true });
+          } else if (istHeic(d.storage_path) || istHeic(d.mimetype)) {
+            umwandeln.push({ id: d.id, url: data.signedUrl, pfad: d.storage_path, pdf: false });
           } else {
             newMap.set(d.id, data.signedUrl);
             ohne.delete(d.id);
@@ -1427,13 +1445,24 @@ function FotosEditor({
       );
       if (abgebrochen) return;
       setThumbs(new Map(newMap));
-      // HEIC der Reihe nach umwandeln (Speicher am Handy schonen)
-      for (const h of heicDocs) {
-        const blob = await ladeBildAlsBrowserBlob(h.url, h.pfad);
+      // HEIC/PDF der Reihe nach umwandeln (Speicher am Handy schonen)
+      for (const h of umwandeln) {
+        let u: string | null = null;
+        if (h.pdf) {
+          try {
+            u = await pdfErsteSeiteAlsJpeg(h.url, 512, 0.7);
+          } catch (e) {
+            console.error("PDF-Vorschau fehlgeschlagen", e);
+          }
+        } else {
+          const blob = await ladeBildAlsBrowserBlob(h.url, h.pfad);
+          if (blob) {
+            u = URL.createObjectURL(blob);
+            blobUrls.push(u);
+          }
+        }
         if (abgebrochen) return;
-        if (blob) {
-          const u = URL.createObjectURL(blob);
-          blobUrls.push(u);
+        if (u) {
           newMap.set(h.id, u);
           ohne.delete(h.id);
           setThumbs(new Map(newMap));
@@ -1446,6 +1475,12 @@ function FotosEditor({
       blobUrls.forEach((u) => URL.revokeObjectURL(u));
     };
   }, [fotos]);
+
+  const oeffneGross = (dokumentId: string) => {
+    const d = docInfo.get(dokumentId);
+    if (!d) return;
+    setGross({ bucket: "baustellen", storage_path: d.storage_path, dateiname: d.dateiname, mimetype: d.mimetype });
+  };
 
   const upload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -1613,19 +1648,38 @@ function FotosEditor({
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {fotos.map((f) => {
             const url = thumbs.get(f.dokument_id);
+            const info = docInfo.get(f.dokument_id);
+            const pdf = !!info && (istPdf(info.storage_path) || istPdf(info.mimetype));
             return (
               <div key={f.id} className="rounded-md border bg-card overflow-hidden">
                 {url ? (
-                  <img
-                    src={url}
-                    alt={f.bildunterschrift ?? ""}
-                    className="w-full h-32 object-cover bg-muted"
-                    loading="lazy"
-                  />
+                  <button
+                    type="button"
+                    className="relative block w-full cursor-zoom-in"
+                    onClick={() => oeffneGross(f.dokument_id)}
+                    title="Groß ansehen"
+                  >
+                    <img
+                      src={url}
+                      alt={f.bildunterschrift ?? info?.dateiname ?? ""}
+                      className="w-full h-32 object-cover bg-muted"
+                      style={pdf ? { objectPosition: "top" } : undefined}
+                      loading="lazy"
+                    />
+                    {pdf && (
+                      <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                        PDF
+                      </span>
+                    )}
+                  </button>
                 ) : fehlend.has(f.dokument_id) ? (
-                  <div className="w-full h-32 bg-muted flex items-center justify-center text-xs text-muted-foreground text-center px-2">
-                    Foto konnte nicht geladen werden
-                  </div>
+                  <button
+                    type="button"
+                    className="w-full h-32 bg-muted flex items-center justify-center text-xs text-muted-foreground text-center px-2"
+                    onClick={() => oeffneGross(f.dokument_id)}
+                  >
+                    {info?.dateiname && pdf ? info.dateiname : "Foto konnte nicht geladen werden"}
+                  </button>
                 ) : (
                   <div className="w-full h-32 bg-muted flex items-center justify-center">
                     <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -1657,6 +1711,7 @@ function FotosEditor({
             );
           })}
         </div>
+        <DocViewerDialog open={!!gross} onOpenChange={(o) => !o && setGross(null)} item={gross} />
       </CardContent>
     </Card>
   );

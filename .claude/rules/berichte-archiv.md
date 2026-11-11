@@ -32,6 +32,10 @@ paths:
   Sicherung `~/roboter/sicherungen/willroider-2026-11-08-heic/`). Gleiches nachgezogen im Dokumente-Reiter (Baustelle + Angebot): Upload HEIC → JPG
   (`heicDateiAlsJpg`, ohne Verkleinern), `dokumente/Thumbnail.tsx` und `DocViewerDialog.tsx` wandeln alte HEIC aus dem Speicher im Browser um
   (SharePoint-HEIC kommt schon über `sharepoint-datei` als JPG).
+- **Fotos groß ansehen / PDF statt Foto** (J. Maurer, 11.11.2026: „Bilder nicht ersichtlich sollen sich auch beim anklicken größer öffnen lassen“):
+  Im Bericht a33c3e50 war unter „Fotos“ eine PDF (Plan, 11 MB) angehängt — „Aus Galerie“ (`accept="image/*"`) lässt am PC trotzdem jede Datei zu,
+  `compressImage` reicht Nicht-Bilder durch. Kachel war leer. Jetzt: Klick auf Kachel → `DocViewerDialog` (Bild groß, PDF im Rahmen); PDF-Kachel zeigt
+  die erste Seite (`lib/pdfVorschau.ts`) mit „PDF“-Marke; im Bericht-PDF wird die erste Seite eingepasst (nicht verzerrt) als Bild gedruckt. PDFs bleiben erlaubt.
 
 ## Berichte-Archiv (`/berichte-archiv`, Recht `stunden.bsb.bestaetigen`)
 - Abgestimmt mit J. Maurer (21.09., er wollte vorher gefragt werden): fertige TB (nach Freigabe) und BSB

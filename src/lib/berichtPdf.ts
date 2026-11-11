@@ -9,6 +9,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { supabase } from "@/integrations/supabase/client";
 import { ladeBildAlsBrowserBlob } from "@/lib/heic";
+import { istPdf, pdfErsteSeiteAlsJpeg } from "@/lib/pdfVorschau";
 import type {
   Database,
   BerichtTyp,
@@ -101,6 +102,8 @@ async function getLogoDataUrl(): Promise<string | null> {
  */
 async function fetchAsDataUrl(url: string, pfad?: string | null): Promise<string | null> {
   try {
+    // Statt eines Fotos ist eine PDF angehängt (z. B. Plan) → erste Seite als Bild
+    if (istPdf(pfad)) return await pdfErsteSeiteAlsJpeg(url, 1600, 0.85);
     // HEIC (Handy-Format) kann jsPDF nicht einbetten → vorher in JPG umwandeln
     const blob = await ladeBildAlsBrowserBlob(url, pfad);
     if (!blob) return null;
@@ -437,12 +440,13 @@ export async function makeBerichtPdf(input: BerichtPdfInput): Promise<jsPDF> {
       fotos.map(async (f) => ({
         dataUrl: await fetchAsDataUrl(f.signedUrl, f.pfad),
         bildunterschrift: f.bildunterschrift ?? null,
+        pdf: istPdf(f.pfad),
       })),
     );
     const fotoData = settled.map((s, i) =>
       s.status === "fulfilled"
         ? s.value
-        : { dataUrl: null, bildunterschrift: fotos[i].bildunterschrift ?? null },
+        : { dataUrl: null, bildunterschrift: fotos[i].bildunterschrift ?? null, pdf: false },
     );
 
     if (y > PAGE_H - 80) {
@@ -474,7 +478,18 @@ export async function makeBerichtPdf(input: BerichtPdfInput): Promise<jsPDF> {
         // Bild oder Platzhalter
         if (f.dataUrl) {
           try {
-            doc.addImage(f.dataUrl, "JPEG", x, y, cellW, cellH, undefined, "FAST");
+            if (f.pdf) {
+              // PDF-Seite (Plan) nicht verzerren: ins Feld einpassen
+              const props = doc.getImageProperties(f.dataUrl);
+              const fak = Math.min(cellW / props.width, cellH / props.height);
+              const w = props.width * fak;
+              const h = props.height * fak;
+              doc.setDrawColor(...BORDER_LIGHT);
+              doc.rect(x, y, cellW, cellH);
+              doc.addImage(f.dataUrl, "JPEG", x + (cellW - w) / 2, y + (cellH - h) / 2, w, h, undefined, "FAST");
+            } else {
+              doc.addImage(f.dataUrl, "JPEG", x, y, cellW, cellH, undefined, "FAST");
+            }
           } catch {
             doc.setDrawColor(...BORDER_LIGHT);
             doc.rect(x, y, cellW, cellH);

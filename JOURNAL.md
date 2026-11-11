@@ -1,5 +1,10 @@
 # Journal
 
+## 2026-11-11 · Bericht-Fotos groß ansehen, PDF-Anhang sichtbar (J. Maurer)
+- Bericht a33c3e50 (10.11.): einziges „Foto“ war eine PDF (Plan) → leere Kachel. Kachel öffnet jetzt per Klick den Betrachter (Bild groß / PDF),
+  PDF-Kacheln zeigen die erste Seite, Bericht-PDF druckt die erste Seite eingepasst. Neue Hilfe `src/lib/pdfVorschau.ts` (auch von `dokumente/Thumbnail.tsx` genutzt).
+- Test `tests/roboter/2026-11-11-bericht-fotos-gross-pdf.spec.ts` (Gegenprobe mit altem Code schlägt fehl), alle 8 Roboter-Tests grün.
+
 ## 2026-11-09 · Nachtrag Gegenprüfung: Personenwechsel leert Formular nicht mehr
 
 - Gegenprüfung (Kollege): Schlüssel von `stunden_tage_fuer_datum` enthält die Personenauswahl → bei jedem Wechsel kurz

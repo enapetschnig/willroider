@@ -17,6 +17,7 @@ import { FileText, File as FileIcon, Loader2 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/integrations/supabase/client";
 import { istHeic, ladeBildAlsBrowserBlob } from "@/lib/heic";
+import { pdfErsteSeiteAlsJpeg } from "@/lib/pdfVorschau";
 
 type FileKind = "image" | "pdf" | "xlsx" | "docx" | "pptx" | "video" | "other";
 
@@ -44,32 +45,8 @@ function detectKind(name: string, mt?: string | null): FileKind {
 const cache = new Map<string, string>();
 
 async function renderPdfThumbnail(url: string): Promise<string> {
-  // pdfjs einmal importiert lazy laden, damit es nicht im initial bundle
-  // landet, wenn der User nie auf Dokumente klickt.
-  const pdfjsLib = await import("pdfjs-dist");
-  // @ts-expect-error — Vite ?url-Import gibt String
-  const workerUrl = (await import("pdfjs-dist/build/pdf.worker.mjs?url")).default;
-  (pdfjsLib.GlobalWorkerOptions as any).workerSrc = workerUrl;
-
-  const buf = await (await fetch(url)).arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-  const page = await pdf.getPage(1);
-  const viewport = page.getViewport({ scale: 1 });
-  const targetSize = 512;
-  const scale = Math.min(
-    targetSize / viewport.width,
-    targetSize / viewport.height,
-  );
-  const scaled = page.getViewport({ scale });
-
-  const canvas = document.createElement("canvas");
-  canvas.width = scaled.width;
-  canvas.height = scaled.height;
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  await page.render({ canvasContext: ctx, viewport: scaled } as any).promise;
-  return canvas.toDataURL("image/jpeg", 0.7);
+  // pdfjs wird erst bei Bedarf geladen (lib/pdfVorschau)
+  return pdfErsteSeiteAlsJpeg(url, 512, 0.7);
 }
 
 async function renderXlsxThumbnail(url: string): Promise<string> {
