@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { BesprechungsModus } from "@/components/admin/BesprechungsModus";
 import { FeedbackFaden } from "@/components/feedback/FeedbackFaden";
+import { WunschAntwort } from "@/components/feedback/WunschAntwort";
 
 const fmtDauer = (s: number) =>
   `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -317,6 +318,7 @@ export function AdminFeedback() {
                       {r.text && (
                         <div className="text-sm whitespace-pre-wrap break-words">{r.text}</div>
                       )}
+                      <WunschAntwort notiz={r.admin_notiz} status={r.status} className="mt-1.5" />
                       {r.anhang_pfad && (
                         <div className="mt-1.5">
                           {r.anhang_typ?.startsWith("image/") && anhangUrls.get(r.id) ? (

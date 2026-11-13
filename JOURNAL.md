@@ -1,5 +1,9 @@
 # Journal
 
+## 2026-11-13 – Antwort auf Änderungswünsche (admin_notiz) sichtbar
+- `admin_notiz` wurde vom Roboter befüllt (67 umgesetzte Wünsche), aber nirgends angezeigt. Neu: `WunschAntwort.tsx` in Meine Wünsche, `/aenderungswuensche`, AdminFeedback, Besprechungsmodus.
+- Keine DB-Änderung: RLS `feedback_select` gibt dem Melder seine eigenen Zeilen inkl. `admin_notiz`, Spaltenrechte für `authenticated` vorhanden. Probefahrt `tests/roboter/2026-11-13-wunsch-antwort-anzeigen.spec.ts`, alle 10 grün.
+
 ## 2026-11-13 – Storage 544/429 beim Signieren von Bericht-Fotos
 - Protokoll 12.11. 14:29 UTC: 34 Einzel-Signieraufrufe gleichzeitig (Bericht mit 34 Fotos) → 25× 544, 5× 500, 4× 429; Fotos blieben leer.
 - `BerichtDetail` (Kacheln + Bericht-PDF) signiert jetzt per `createSignedUrls` in einem Aufruf (`src/lib/storageSign.ts`, Nachzügler einzeln nacheinander); `Thumbnail` höchstens 6 gleichzeitig.

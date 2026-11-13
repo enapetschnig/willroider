@@ -30,6 +30,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { FeedbackFaden } from "@/components/feedback/FeedbackFaden";
+import { WunschAntwort } from "@/components/feedback/WunschAntwort";
 
 export type BesprechungsWunsch = {
   id: string;
@@ -45,6 +46,7 @@ export type BesprechungsWunsch = {
   anhang_pfad: string | null;
   anhang_name: string | null;
   anhang_typ: string | null;
+  admin_notiz?: string | null;
 };
 
 const DRINGLICHKEIT: Record<string, { label: string; cls: string }> = {
@@ -192,6 +194,7 @@ export function BesprechungsModus({
               <div className="text-base leading-relaxed whitespace-pre-wrap break-words">
                 {aktuell.text || <span className="italic text-muted-foreground">(nur Sprachnachricht)</span>}
               </div>
+              <WunschAntwort notiz={aktuell.admin_notiz} status={aktuell.status} className="mt-3" />
               {aktuell.seiten_kontext && (
                 <div className="text-[11px] text-muted-foreground mt-2">
                   Seite: {aktuell.seiten_kontext}

@@ -310,6 +310,7 @@ oder `admin.view`; `has_permission(_user_id, _schluessel)`.
 | Berichte & Archiv | `.claude/rules/berichte-archiv.md` | Bautages-/Regiebericht, Berichte-Archiv, gesammelt versenden |
 | Anmeldung, Mitarbeiter, Rechte | `.claude/rules/anmeldung-mitarbeiter.md` | Login, Einladung, Doppelkonten, Freischalten, Leasing, Rechte je Person |
 | Push, Erinnerungen, Dashboard-Hinweise | `.claude/rules/push-erinnerungen.md` | Benachrichtigungen, SMS-Ersatz, Cron, wer welchen Hinweis sieht |
+| Änderungswünsche | `.claude/rules/aenderungswuensche.md` | Antwort an den Melder (`admin_notiz`), Meine Wünsche, Besprechung |
 | Supabase-Protokolle | `.claude/rules/supabase-protokolle.md` | Meldungen aus den Fehlerprotokollen, die schon geprüft und harmlos sind |
 
 ## Wissen ablegen (für jede KI – auch den Roboter)

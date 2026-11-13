@@ -34,6 +34,7 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { FeedbackFaden } from "@/components/feedback/FeedbackFaden";
+import { WunschAntwort } from "@/components/feedback/WunschAntwort";
 import { BesprechungsModus, type BesprechungsWunsch } from "@/components/admin/BesprechungsModus";
 
 type Row = BesprechungsWunsch & {
@@ -287,6 +288,8 @@ export default function Aenderungswuensche() {
                   {r.text && (
                     <div className="text-sm whitespace-pre-wrap break-words">{r.text}</div>
                   )}
+
+                  <WunschAntwort notiz={r.admin_notiz} status={r.status} />
 
                   {medien.get(`a:${r.id}`) && (
                     <div className="flex items-center gap-2">

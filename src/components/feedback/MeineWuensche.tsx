@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, ChevronDown, ChevronRight, HelpCircle } from "lucide-react";
 import { FeedbackFaden } from "./FeedbackFaden";
+import { WunschAntwort } from "./WunschAntwort";
 
 type Wunsch = {
   id: string;
@@ -22,6 +23,7 @@ type Wunsch = {
   created_at: string;
   erstellt_von: string | null;
   offene_frage: boolean | null;
+  admin_notiz: string | null;
 };
 
 /** Was der Melder vom Verwaltungs-Status sehen soll — in seiner Sprache. */
@@ -43,7 +45,7 @@ export function MeineWuensche({ userId }: { userId: string }) {
   const load = async () => {
     const { data } = await supabase
       .from("feedback" as any)
-      .select("id, text, kategorie, status, dringlichkeit, created_at, erstellt_von, offene_frage")
+      .select("id, text, kategorie, status, dringlichkeit, created_at, erstellt_von, offene_frage, admin_notiz")
       .eq("erstellt_von", userId)
       .order("created_at", { ascending: false });
     const list = (data as unknown as Wunsch[]) ?? [];
@@ -134,6 +136,11 @@ export function MeineWuensche({ userId }: { userId: string }) {
                 </div>
               </div>
             </button>
+            {r.admin_notiz?.trim() && (
+              <div className="px-3 pb-2.5 -mt-1 pl-9">
+                <WunschAntwort notiz={r.admin_notiz} status={r.status} />
+              </div>
+            )}
             {auf && (
               <div className="px-3 pb-3 border-t pt-2">
                 <FeedbackFaden
