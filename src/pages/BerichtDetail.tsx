@@ -82,6 +82,7 @@ import { istPdf, pdfErsteSeiteAlsJpeg } from "@/lib/pdfVorschau";
 import { DocViewerDialog, type DocViewerItem } from "@/components/dokumente/DocViewerDialog";
 import { readFotoMeta } from "@/lib/exif";
 import { generateAndUploadBerichtPdf } from "@/lib/berichtPdf";
+import { signiereBaustellenPfade } from "@/lib/storageSign";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -1427,22 +1428,24 @@ function FotosEditor({
       const newMap = new Map<string, string>();
       const umwandeln: { id: string; url: string; pfad: string; pdf: boolean }[] = [];
       const ohne = new Set<string>(docIds);
-      await Promise.all(
-        (docs ?? []).map(async (d: any) => {
-          const { data } = await supabase.storage
-            .from("baustellen")
-            .createSignedUrl(d.storage_path, 600);
-          if (!data?.signedUrl) return;
-          if (istPdf(d.storage_path) || istPdf(d.mimetype)) {
-            umwandeln.push({ id: d.id, url: data.signedUrl, pfad: d.storage_path, pdf: true });
-          } else if (istHeic(d.storage_path) || istHeic(d.mimetype)) {
-            umwandeln.push({ id: d.id, url: data.signedUrl, pfad: d.storage_path, pdf: false });
-          } else {
-            newMap.set(d.id, data.signedUrl);
-            ohne.delete(d.id);
-          }
-        }),
+      // Alle Links in EINEM Aufruf holen – je Foto ein eigener Aufruf
+      // gleichzeitig (34 Fotos) wurde vom Storage mit 429/544 abgewiesen.
+      const signiert = await signiereBaustellenPfade(
+        (docs ?? []).map((d: any) => d.storage_path),
+        600,
       );
+      for (const d of (docs ?? []) as any[]) {
+        const signedUrl = signiert.get(d.storage_path);
+        if (!signedUrl) continue;
+        if (istPdf(d.storage_path) || istPdf(d.mimetype)) {
+          umwandeln.push({ id: d.id, url: signedUrl, pfad: d.storage_path, pdf: true });
+        } else if (istHeic(d.storage_path) || istHeic(d.mimetype)) {
+          umwandeln.push({ id: d.id, url: signedUrl, pfad: d.storage_path, pdf: false });
+        } else {
+          newMap.set(d.id, signedUrl);
+          ohne.delete(d.id);
+        }
+      }
       if (abgebrochen) return;
       setThumbs(new Map(newMap));
       // HEIC/PDF der Reihe nach umwandeln (Speicher am Handy schonen)
@@ -1800,24 +1803,23 @@ function StatusBar({
       return new Error("Bericht ist noch nicht vollständig geladen");
     setPdfBusy(true);
     try {
-      const fotoSignedUrls = await Promise.all(
-        bericht_full.fotos.map(async (f) => {
-          const { data: doc } = await supabase
-            .from("dokumente")
-            .select("storage_path")
-            .eq("id", f.dokument_id)
-            .maybeSingle();
-          if (!doc?.storage_path) return null;
-          const { data } = await supabase.storage
-            .from("baustellen")
-            .createSignedUrl(doc.storage_path, 3600);
-          return {
-            signedUrl: data?.signedUrl ?? "",
-            pfad: doc.storage_path,
-            bildunterschrift: f.bildunterschrift,
-          };
-        }),
+      const fotoDocIds = bericht_full.fotos.map((f) => f.dokument_id);
+      const { data: fotoDocs } = fotoDocIds.length
+        ? await supabase.from("dokumente").select("id, storage_path").in("id", fotoDocIds)
+        : { data: [] as { id: string; storage_path: string }[] };
+      const pfadJeDoc = new Map(
+        ((fotoDocs ?? []) as { id: string; storage_path: string }[]).map((d) => [d.id, d.storage_path]),
       );
+      const fotoSignedMap = await signiereBaustellenPfade([...pfadJeDoc.values()], 3600);
+      const fotoSignedUrls = bericht_full.fotos.map((f) => {
+        const pfad = pfadJeDoc.get(f.dokument_id);
+        if (!pfad) return null;
+        return {
+          signedUrl: fotoSignedMap.get(pfad) ?? "",
+          pfad,
+          bildunterschrift: f.bildunterschrift,
+        };
+      });
 
       // Profile für MA
       const profileIds = bericht_full.mitarbeiter.map((m) => m.mitarbeiter_id);

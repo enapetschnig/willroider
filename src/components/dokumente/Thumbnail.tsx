@@ -44,6 +44,23 @@ function detectKind(name: string, mt?: string | null): FileKind {
 
 const cache = new Map<string, string>();
 
+// Höchstens 6 Signier-Aufrufe gleichzeitig – bei Ordnern mit vielen Fotos
+// hat der Storage sonst mit 429/544 abgelehnt (12.11.2026).
+let laufendeSignaturen = 0;
+const warteschlange: (() => void)[] = [];
+async function begrenztSignieren<T>(fn: () => Promise<T>): Promise<T> {
+  if (laufendeSignaturen >= 6) {
+    await new Promise<void>((r) => warteschlange.push(r));
+  }
+  laufendeSignaturen++;
+  try {
+    return await fn();
+  } finally {
+    laufendeSignaturen--;
+    warteschlange.shift()?.();
+  }
+}
+
 async function renderPdfThumbnail(url: string): Promise<string> {
   // pdfjs wird erst bei Bedarf geladen (lib/pdfVorschau)
   return pdfErsteSeiteAlsJpeg(url, 512, 0.7);
@@ -255,9 +272,9 @@ export function Thumbnail({
 
     (async () => {
       try {
-        const { data, error } = await supabase.storage
-          .from(bucket)
-          .createSignedUrl(storagePath, 600);
+        const { data, error } = await begrenztSignieren(() =>
+          supabase.storage.from(bucket).createSignedUrl(storagePath, 600),
+        );
         if (error || !data) throw error ?? new Error("kein Signed-URL");
         if (aborted.current) return;
 

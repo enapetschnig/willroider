@@ -1,5 +1,10 @@
 # Journal
 
+## 2026-11-13 – Storage 544/429 beim Signieren von Bericht-Fotos
+- Protokoll 12.11. 14:29 UTC: 34 Einzel-Signieraufrufe gleichzeitig (Bericht mit 34 Fotos) → 25× 544, 5× 500, 4× 429; Fotos blieben leer.
+- `BerichtDetail` (Kacheln + Bericht-PDF) signiert jetzt per `createSignedUrls` in einem Aufruf (`src/lib/storageSign.ts`, Nachzügler einzeln nacheinander); `Thumbnail` höchstens 6 gleichzeitig.
+- Probefahrt `tests/roboter/2026-11-13-bericht-viele-fotos-sammel-signieren.spec.ts` (40 Fotos, 0 Einzelaufrufe), alle 9 Roboter-Tests grün.
+
 ## 2026-11-11 · Bericht-Fotos groß ansehen, PDF-Anhang sichtbar (J. Maurer)
 - Bericht a33c3e50 (10.11.): einziges „Foto“ war eine PDF (Plan) → leere Kachel. Kachel öffnet jetzt per Klick den Betrachter (Bild groß / PDF),
   PDF-Kacheln zeigen die erste Seite, Bericht-PDF druckt die erste Seite eingepasst. Neue Hilfe `src/lib/pdfVorschau.ts` (auch von `dokumente/Thumbnail.tsx` genutzt).
