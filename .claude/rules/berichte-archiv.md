@@ -36,6 +36,16 @@ paths:
   Im Bericht a33c3e50 war unter „Fotos“ eine PDF (Plan, 11 MB) angehängt — „Aus Galerie“ (`accept="image/*"`) lässt am PC trotzdem jede Datei zu,
   `compressImage` reicht Nicht-Bilder durch. Kachel war leer. Jetzt: Klick auf Kachel → `DocViewerDialog` (Bild groß, PDF im Rahmen); PDF-Kachel zeigt
   die erste Seite (`lib/pdfVorschau.ts`) mit „PDF“-Marke; im Bericht-PDF wird die erste Seite eingepasst (nicht verzerrt) als Bild gedruckt. PDFs bleiben erlaubt.
+- **Bautagesbericht → Regiebericht** (J. Maurer, 17.11.2026: „Übernehmen in Regiebericht“): Knopf „In Regiebericht übernehmen“ im Kopf des
+  Bautagesberichts (`uebernehmeInRegiebericht` in `useBericht.ts`). Legt den Regiebericht für denselben Tag/dieselbe Baustelle an (UNIQUE baustelle+datum+typ),
+  kopiert Wetter, Besonderheiten, MA, Tätigkeiten, Aufmaß, Fotos (gleiche `dokument_id`, keine Kopie der Datei), keine Unterschriften. Gibt es den
+  Regiebericht schon → nur öffnen. Übernimmt die Verwaltung, gehört er dem Polier des Bautagesberichts (`erfasst_von`). Weil Fotos geteilt sein
+  können, löscht `useDeleteBericht` Foto-Dokumente nur, wenn kein anderer Bericht sie noch nutzt.
+- **Zurück mit letzter Auswahl** (J. Maurer, 17.11.2026): `/berichte` merkt Typ/Zeitraum/Status/Baustelle in `sessionStorage` (`lib/berichteAuswahl.ts`);
+  Zurück-Pfeil im Bericht und der Menüpunkt holen sie zurück. Baustellen-Auswahl (Filter + „Neuer Bericht“) ist jetzt `BaustelleCombobox` mit Suche nach Name/KST.
+- **„ZE“** = Zeile aus der Zeiterfassung: beim MA dessen Stunden auf der Baustelle an dem Tag, bei der Tätigkeit die Summe aller MA. Entfernt man MA von Hand,
+  bleibt die Tätigkeits-Summe stehen (Bericht 605b6c96, 09.11.: 5×9,5 = 47,5 h übernommen, 2 MA danach entfernt). Vermutlich sieht der Polier beim Anlegen per RLS
+  nur Arbeiter-Stunden, Angestellten-Stunden auf derselben KST (dort 11 h ohne Tätigkeit) kommen dann nicht mit.
 
 ## Berichte-Archiv (`/berichte-archiv`, Recht `stunden.bsb.bestaetigen`)
 - Abgestimmt mit J. Maurer (21.09., er wollte vorher gefragt werden): fertige TB (nach Freigabe) und BSB

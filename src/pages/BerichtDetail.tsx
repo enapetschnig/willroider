@@ -55,6 +55,7 @@ import {
   X,
   History,
   RefreshCw,
+  ClipboardList,
 } from "lucide-react";
 import type {
   Database,
@@ -67,7 +68,9 @@ import {
   useSetBerichtStatus,
   useUpdateBerichtFelder,
   useDeleteBericht,
+  uebernehmeInRegiebericht,
 } from "@/hooks/useBericht";
+import { berichteListePfad } from "@/lib/berichteAuswahl";
 import {
   ladeVorausfuellung,
   uebernehmeVorausfuellung,
@@ -252,12 +255,59 @@ export default function BerichtDetail() {
     }
   };
 
+  // Bautagesbericht → Regiebericht (J. Maurer, 17.11.2026)
+  const inRegieUebernehmen = async () => {
+    if (
+      !window.confirm(
+        "Regiebericht für diesen Tag und diese Baustelle anlegen? Mitarbeiter, Tätigkeiten, " +
+          "Aufmaß, Wetter und Fotos werden übernommen und können dort angepasst werden. " +
+          "Gibt es schon einen Regiebericht, wird dieser geöffnet.",
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const r = await uebernehmeInRegiebericht(b.id, { alsAdmin: isAdmin });
+      toast({
+        title: r.created
+          ? "Regiebericht angelegt — Inhalte übernommen"
+          : "Regiebericht für diesen Tag gibt es schon — geöffnet",
+      });
+      navigate(`/berichte/${r.id}`);
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Übernehmen hat nicht geklappt",
+        description: (e as Error).message,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-4 max-w-3xl mx-auto">
       <PageHeader
+        actions={
+          !istRegie ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={inRegieUebernehmen}
+              disabled={busy}
+            >
+              {busy ? (
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              ) : (
+                <ClipboardList className="h-4 w-4 mr-1.5" />
+              )}
+              In Regiebericht übernehmen
+            </Button>
+          ) : undefined
+        }
         title={
           <div className="flex items-center gap-2 flex-wrap">
-            <Link to="/berichte" className="text-muted-foreground hover:text-foreground">
+            <Link to={berichteListePfad()} className="text-muted-foreground hover:text-foreground" aria-label="Zurück zu den Berichten">
               <ArrowLeft className="h-5 w-5" />
             </Link>
             {TYP_LABEL[b.typ]}
@@ -839,7 +889,7 @@ function MitarbeiterEditor({
                 <div className="text-sm font-medium truncate">
                   {p ? `${p.nachname} ${p.vorname}` : "—"}
                   {m.aus_zeiterfassung && (
-                    <Badge variant="outline" className="text-[9px] ml-1.5">
+                    <Badge variant="outline" className="text-[9px] ml-1.5" title="ZE = aus der Zeiterfassung: Stunden, die dieser Mitarbeiter an dem Tag auf dieser Baustelle gebucht hat">
                       ZE
                     </Badge>
                   )}
@@ -985,7 +1035,7 @@ function TaetigkeitenEditor({
             />
             <span className="text-xs text-muted-foreground">h</span>
             {t.aus_zeiterfassung && (
-              <Badge variant="outline" className="text-[9px]">
+              <Badge variant="outline" className="text-[9px]" title="ZE = aus der Zeiterfassung: Summe der Stunden aller Mitarbeiter für diese Tätigkeit an dem Tag auf dieser Baustelle">
                 ZE
               </Badge>
             )}
@@ -1763,7 +1813,7 @@ function StatusBar({
     deleteMut.mutate(bericht.id, {
       onSuccess: () => {
         toast({ title: "Bericht gelöscht" });
-        navigate("/berichte");
+        navigate(berichteListePfad());
       },
       onError: (e) =>
         toast({

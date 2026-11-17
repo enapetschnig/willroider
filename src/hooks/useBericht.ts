@@ -138,10 +138,21 @@ export function useDeleteBericht() {
           .eq("id", id)
           .maybeSingle(),
       ]);
-      const dokIds = [
+      let dokIds: string[] = [
         ...((fotos ?? []) as any[]).map((f) => f.dokument_id).filter(Boolean),
         ...((b as any)?.pdf_dokument_id ? [(b as any).pdf_dokument_id] : []),
       ];
+      // Fotos, die auch in einem anderen Bericht hängen (z. B. Regiebericht
+      // aus Bautagesbericht übernommen), nicht mitlöschen.
+      if (dokIds.length > 0) {
+        const { data: geteilt } = await supabase
+          .from("bericht_fotos")
+          .select("dokument_id")
+          .in("dokument_id", dokIds)
+          .neq("bericht_id", id);
+        const behalten = new Set(((geteilt ?? []) as any[]).map((g) => g.dokument_id));
+        dokIds = dokIds.filter((d) => !behalten.has(d));
+      }
       // Storage-Dateien best-effort entfernen
       if (dokIds.length > 0) {
         const { data: docs } = await supabase
@@ -280,4 +291,133 @@ export async function findeOderErstelleBerichtMitVorausfuellung(
     }
   }
   return { ...r, importiert, ausPlan };
+}
+
+/** Legt aus einem Bautagesbericht einen Regiebericht für denselben Tag und
+ *  dieselbe Baustelle an und übernimmt Wetter, Besonderheiten, Mitarbeiter,
+ *  Tätigkeiten, Aufmaß und Fotos (Fotos verweisen auf dieselben Dateien).
+ *  Unterschriften werden nicht übernommen. Gibt es den Regiebericht schon,
+ *  wird nichts kopiert, sondern nur seine id geliefert (J. Maurer, 17.11.2026). */
+export async function uebernehmeInRegiebericht(
+  quelleId: string,
+  opts: { alsAdmin: boolean },
+): Promise<{ id: string; created: boolean }> {
+  const { data: q, error: qErr } = await supabase
+    .from("berichte")
+    .select("*")
+    .eq("id", quelleId)
+    .single();
+  if (qErr) throw qErr;
+  const quelle = q as any;
+
+  const { data: vorhanden } = await supabase
+    .from("berichte")
+    .select("id")
+    .eq("baustelle_id", quelle.baustelle_id)
+    .eq("datum", quelle.datum)
+    .eq("typ", "regiebericht")
+    .maybeSingle();
+  if (vorhanden) return { id: vorhanden.id, created: false };
+
+  const { data: { user } } = await supabase.auth.getUser();
+  // Admin übernimmt für den Polier: der Regiebericht gehört dann ihm, damit
+  // er ihn selbst weiterschreiben kann. Sonst gehört er dem, der übernimmt.
+  const erfasstVon = opts.alsAdmin ? quelle.erfasst_von ?? user?.id ?? null : user?.id ?? null;
+  const { data: neu, error: insErr } = await supabase
+    .from("berichte")
+    .insert({
+      baustelle_id: quelle.baustelle_id,
+      datum: quelle.datum,
+      typ: "regiebericht",
+      erfasst_von: erfasstVon,
+      wetter_beschreibung: quelle.wetter_beschreibung,
+      temperatur_min: quelle.temperatur_min,
+      temperatur_max: quelle.temperatur_max,
+      niederschlag_mm: quelle.niederschlag_mm,
+      wetter_quelle: quelle.wetter_quelle,
+      freitext_besonderheiten: quelle.freitext_besonderheiten,
+      zeiterfassung_quelle_am: quelle.zeiterfassung_quelle_am,
+      einteilung_quelle_am: quelle.einteilung_quelle_am ?? null,
+    } as any)
+    .select("id")
+    .single();
+  if (insErr) {
+    if ((insErr as any).code === "23505") {
+      const { data: again } = await supabase
+        .from("berichte")
+        .select("id")
+        .eq("baustelle_id", quelle.baustelle_id)
+        .eq("datum", quelle.datum)
+        .eq("typ", "regiebericht")
+        .maybeSingle();
+      if (again) return { id: again.id, created: false };
+    }
+    throw insErr;
+  }
+  const zielId = neu.id as string;
+
+  const ohne = (row: any, ...keys: string[]) => {
+    const r = { ...row };
+    for (const k of ["id", "bericht_id", "created_at", "updated_at", ...keys]) delete r[k];
+    return r;
+  };
+
+  try {
+    const [{ data: mas }, { data: taets }, { data: aufs }, { data: fotos }] = await Promise.all([
+      supabase.from("bericht_mitarbeiter").select("*").eq("bericht_id", quelleId),
+      supabase.from("bericht_taetigkeiten").select("*").eq("bericht_id", quelleId),
+      supabase.from("bericht_aufmass").select("*").eq("bericht_id", quelleId),
+      supabase.from("bericht_fotos").select("*").eq("bericht_id", quelleId),
+    ]);
+
+    if ((mas ?? []).length > 0) {
+      const { error } = await supabase
+        .from("bericht_mitarbeiter")
+        .insert((mas as any[]).map((m) => ({ ...ohne(m), bericht_id: zielId })));
+      if (error) throw error;
+    }
+    if ((taets ?? []).length > 0) {
+      const { error } = await supabase
+        .from("bericht_taetigkeiten")
+        .insert((taets as any[]).map((t) => ({ ...ohne(t), bericht_id: zielId })));
+      if (error) throw error;
+    }
+    // Aufmaß einzeln, damit Fotos ihre Aufmaß-Position behalten
+    const aufMap = new Map<string, string>();
+    for (const a of (aufs ?? []) as any[]) {
+      const { data: na, error } = await supabase
+        .from("bericht_aufmass")
+        .insert({ ...ohne(a), bericht_id: zielId })
+        .select("id")
+        .single();
+      if (error) throw error;
+      aufMap.set(a.id, (na as any).id);
+    }
+    if ((fotos ?? []).length > 0) {
+      const { error } = await supabase.from("bericht_fotos").insert(
+        (fotos as any[]).map((f) => ({
+          ...ohne(f),
+          bericht_id: zielId,
+          aufmass_position_id: f.aufmass_position_id
+            ? aufMap.get(f.aufmass_position_id) ?? null
+            : null,
+        })),
+      );
+      if (error) throw error;
+    }
+
+    const d = new Date(quelle.datum).toLocaleDateString("de-AT");
+    await supabase.from("bericht_aenderungen").insert({
+      bericht_id: zielId,
+      autor_id: user?.id ?? null,
+      art: "vorausfuellung",
+      details: `Aus Bautagesbericht vom ${d} übernommen (${(mas ?? []).length} MA, ${(taets ?? []).length} Tätigkeiten, ${(aufs ?? []).length} Aufmaß, ${(fotos ?? []).length} Fotos)`,
+    });
+  } catch (e) {
+    // Halb kopiert soll nicht liegen bleiben — der Nutzer kann es nochmal probieren.
+    await supabase.from("berichte").delete().eq("id", zielId);
+    throw e;
+  }
+
+  return { id: zielId, created: true };
 }

@@ -20,6 +20,9 @@ export function BaustelleCombobox({
   onChange,
   allowClear = false,
   kategorie,
+  clearLabel,
+  placeholder,
+  triggerClassName,
 }: {
   baustellen: Baustelle[];
   value: string;
@@ -29,6 +32,12 @@ export function BaustelleCombobox({
    *  'baustelle' für die normale Erfassung, 'firma' für Firma-Stunden
    *  (interne Kostenstellen oben, dann die Baustellen). Ohne Wert: alle. */
   kategorie?: "baustelle" | "maschine" | "firma";
+  /** Text für den Leer-Eintrag (allowClear), z. B. „alle Baustellen“ im Filter. */
+  clearLabel?: string;
+  /** Text, wenn nichts gewählt ist. */
+  placeholder?: string;
+  /** Zusätzliche Klassen für den Knopf (z. B. niedrigere Höhe im Filter). */
+  triggerClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const istFirma = kategorie === "firma";
@@ -43,11 +52,11 @@ export function BaustelleCombobox({
   const selected = liste.find((b) => b.id === value);
   const istMaschine = kategorie === "maschine";
   const Icon = istMaschine ? Wrench : Building2;
-  const placeholderText = istMaschine
+  const placeholderText = placeholder ?? (istMaschine
     ? "Werk/Maschine wählen…"
     : istFirma
     ? "Kostenstelle bzw. Baustelle wählen…"
-    : "Baustelle wählen…";
+    : "Baustelle wählen…");
   const searchPlaceholder = istMaschine
     ? "Werk/Maschine suchen…"
     : istFirma
@@ -78,7 +87,7 @@ export function BaustelleCombobox({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="w-full justify-between h-12 text-left font-normal"
+          className={`w-full justify-between h-12 text-left font-normal ${triggerClassName ?? ""}`}
         >
           {selected ? (
             <span className="flex items-center gap-2 min-w-0 flex-1">
@@ -112,7 +121,7 @@ export function BaustelleCombobox({
             <CommandGroup>
               {allowClear && !istMaschine && (
                 <CommandItem
-                  value="--keine--"
+                  value={clearLabel ? `--keine-- ${clearLabel}` : "--keine--"}
                   onSelect={() => {
                     onChange("");
                     setOpen(false);
@@ -120,7 +129,7 @@ export function BaustelleCombobox({
                   className="cursor-pointer text-muted-foreground italic"
                 >
                   <Check className={`mr-2 h-4 w-4 ${!value ? "opacity-100" : "opacity-0"}`} />
-                  Keine Baustelle (allgemein in Firma)
+                  {clearLabel ?? "Keine Baustelle (allgemein in Firma)"}
                 </CommandItem>
               )}
               {liste.map((b, idx) => {

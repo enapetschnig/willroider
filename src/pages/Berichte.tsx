@@ -28,6 +28,8 @@ import type { Database, BerichtStatus, BerichtTyp } from "@/integrations/supabas
 import { useBerichteList } from "@/hooks/useBerichte";
 import { getBaustellenForMaToday } from "@/lib/tagesplanung";
 import { findeOderErstelleBerichtMitVorausfuellung } from "@/hooks/useBericht";
+import { BaustelleCombobox } from "@/components/stunden/BaustelleCombobox";
+import { BERICHTE_AUSWAHL_KEY } from "@/lib/berichteAuswahl";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -108,6 +110,25 @@ export default function Berichte() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [openNeu, setOpenNeu] = useState(false);
 
+  // Letzte Auswahl (Typ, Zeitraum, Status, Baustelle) merken, damit der
+  // Zurück-Pfeil im Bericht und der Menüpunkt wieder genau hier landen
+  // (J. Maurer, 17.11.2026). Kommt man ohne Parameter auf die Seite, wird
+  // die gemerkte Auswahl wiederhergestellt.
+  const paramStr = params.toString();
+  useEffect(() => {
+    try {
+      if (paramStr) {
+        sessionStorage.setItem(BERICHTE_AUSWAHL_KEY, paramStr);
+      } else {
+        const gemerkt = sessionStorage.getItem(BERICHTE_AUSWAHL_KEY);
+        if (gemerkt) setParams(new URLSearchParams(gemerkt), { replace: true });
+      }
+    } catch {
+      /* sessionStorage nicht verfügbar — dann eben ohne Merken */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paramStr]);
+
   // Tab-State: default Bautagesbericht. Wird im URL-Param gespiegelt.
   const aktiverTyp: BerichtTyp =
     (params.get("typ") as BerichtTyp) === "regiebericht" ? "regiebericht" : "bautagesbericht";
@@ -165,8 +186,9 @@ export default function Berichte() {
     (params.get("to") != null && params.get("to") !== todayIso());
 
   const resetFilter = () => {
+    // typ immer setzen: leere Parameter würden die gemerkte Auswahl zurückholen.
     const next = new URLSearchParams();
-    if (aktiverTyp === "regiebericht") next.set("typ", "regiebericht");
+    next.set("typ", aktiverTyp);
     setParams(next, { replace: true });
   };
 
@@ -247,18 +269,15 @@ export default function Berichte() {
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Baustelle</Label>
-            <select
+<BaustelleCombobox
+              baustellen={baustellen}
               value={filter.baustelleId ?? ""}
-              onChange={(e) => setFilter("baustelle", e.target.value || null)}
-              className="h-9 w-full rounded-md border bg-background px-2 text-sm"
-            >
-              <option value="">alle</option>
-              {baustellen.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.bvh_name}
-                </option>
-              ))}
-            </select>
+              onChange={(id) => setFilter("baustelle", id || null)}
+              allowClear
+              clearLabel="alle Baustellen"
+              placeholder="alle"
+              triggerClassName="h-9 text-sm"
+            />
           </div>
         </CardContent>
       </Card>
@@ -458,20 +477,13 @@ function NeuerBerichtDialog({
           </div>
           <div className="space-y-1">
             <Label>Baustelle</Label>
-            <select
+<BaustelleCombobox
+              baustellen={baustellen}
               value={baustelleId}
-              onChange={(e) => setBaustelleId(e.target.value)}
-              required
-              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-            >
-              <option value="">— wählen —</option>
-              {baustellen.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.bvh_name}
-                  {b.kostenstelle ? ` · ${b.kostenstelle}` : ""}
-                </option>
-              ))}
-            </select>
+              onChange={setBaustelleId}
+              placeholder="— wählen (Name oder KST suchen) —"
+              triggerClassName="h-10"
+            />
             {baustelleId && (
               <div className="text-[10px] text-muted-foreground italic">
                 Aus Tagesplanung vorausgewählt — kannst du frei ändern.
