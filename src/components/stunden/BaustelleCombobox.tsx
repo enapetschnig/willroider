@@ -111,7 +111,7 @@ export function BaustelleCombobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="p-0 w-[var(--radix-popover-trigger-width)] max-h-[60vh]"
+        className="p-0 w-[var(--radix-popover-trigger-width)] min-w-[min(20rem,90vw)] max-h-[60vh]"
         align="start"
       >
         <Command>
