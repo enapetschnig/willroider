@@ -141,6 +141,22 @@ test("Bautagesbericht → Regiebericht übernehmen, Baustellen-Suche, Zurück mi
   await expect(page).toHaveURL(/typ=regiebericht/);
   await expect(page).toHaveURL(new RegExp(`baustelle=${bs.id}`));
 
+  // Nachprüfung: nur ein Filter in der URL, dann „alle“ wählen → darf nicht zurückspringen
+  await page.goto(`${APP}/berichte?baustelle=${bs.id}`);
+  await expect(page).toHaveURL(new RegExp(`baustelle=${bs.id}`));
+  await page.locator('button[role="combobox"]').first().click();
+  await page.getByRole("option", { name: "alle Baustellen" }).click();
+  await expect(page).not.toHaveURL(/baustelle=/);
+  await page.waitForTimeout(500);
+  await expect(page).not.toHaveURL(/baustelle=/);
+  await page.goto(`${APP}/berichte?status=entwurf`);
+  await expect(page).toHaveURL(/status=entwurf/);
+  await page.locator("select").first().selectOption("");
+  await expect(page).not.toHaveURL(/status=/);
+  await page.waitForTimeout(500);
+  await expect(page).not.toHaveURL(/status=/);
+  await expect(page.locator("select").first()).toHaveValue("");
+
   // a) Polier übernimmt seinen eigenen Bautagesbericht selbst (RLS)
   const b = await btbMitInhalt(bs.id, d(3), polier.id, polier.id);
   const p2 = await page.context().browser()!.newPage();

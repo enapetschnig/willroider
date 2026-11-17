@@ -173,6 +173,9 @@ export default function Berichte() {
     const next = new URLSearchParams(params);
     if (val === null || val === "") next.delete(key);
     else next.set(key, val);
+    // typ immer mitschreiben: eine leere URL würde die gemerkte Auswahl
+    // zurückholen und „alle“ ließe sich nicht mehr wählen.
+    if (!next.get("typ")) next.set("typ", aktiverTyp);
     setParams(next, { replace: true });
   };
 
