@@ -10,7 +10,7 @@
  * das Kennzeichen „ausstehend“ und wird nachgeholt, sobald Netz da ist.
  */
 import { supabase } from "@/integrations/supabase/client";
-import { speicher } from "./planSpeicher";
+import { nutzerId, speicher } from "./planSpeicher";
 
 export type Grund = { id: string; farbe: string; breite: number };
 export type Form =
@@ -54,10 +54,7 @@ export const beiSyncAenderung = (fn: () => void) => {
 };
 const melden = () => zuhoerer.forEach((f) => f());
 
-const lokalerSchluessel = async (dateiSchluessel: string) => {
-  const { data } = await supabase.auth.getSession();
-  return `${data.session?.user.id ?? "ohne"}|${dateiSchluessel}`;
-};
+const lokalerSchluessel = async (dateiSchluessel: string) => `${(await nutzerId()) ?? "ohne"}|${dateiSchluessel}`;
 
 export async function ladeAnmerkungen(dateiSchluessel: string): Promise<{ daten: AnmerkungsDaten; status: SyncStatus }> {
   const k = await lokalerSchluessel(dateiSchluessel);
@@ -145,8 +142,7 @@ export async function syncStatus(dateiSchluessel: string): Promise<SyncStatus> {
 
 /** Alles Ausstehende nachschieben (beim Wiederverbinden). */
 export async function ausstehendeAnmerkungenHochladen(): Promise<number> {
-  const { data: s } = await supabase.auth.getSession();
-  const uid = s.session?.user.id;
+  const uid = await nutzerId();
   if (!uid) return 0;
   let n = 0;
   for (const { key, wert } of await speicher.alle<Lokal>("anmerkungen")) {

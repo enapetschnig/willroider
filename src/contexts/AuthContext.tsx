@@ -45,6 +45,22 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+/** Gespeicherte Anmeldung aus dem Browser — nur für den Start ohne Netz. */
+function gespeicherteSitzung(): Session | null {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i) ?? "";
+      if (k.startsWith("sb-") && k.endsWith("-auth-token")) {
+        const v = JSON.parse(localStorage.getItem(k) ?? "null");
+        if (v?.user?.id && v?.access_token) return v as Session;
+      }
+    }
+  } catch {
+    /* nichts */
+  }
+  return null;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -117,8 +133,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let mounted = true;
     // Wann für wen zuletzt Profil/Rolle/Rechte geladen wurden.
     let zuletzt: { id: string; zeit: number } | null = null;
-    const handle = async (s: Session | null, ereignis?: string) => {
+    const handle = async (sitzung: Session | null, ereignis?: string) => {
       if (!mounted) return;
+      let s = sitzung;
+      // Ohne Netz kann supabase-js einen abgelaufenen Zugang nicht erneuern
+      // und meldet „keine Sitzung“. Dann mit der gespeicherten Anmeldung
+      // weiterarbeiten (z. B. offline gespeicherte Pläne auf der Baustelle,
+      // S. Egger 18.11.2026); mit Netz erneuert supabase-js sie wie gewohnt.
+      if (!s && !navigator.onLine) s = gespeicherteSitzung();
       setSession(s);
       // Dieselbe Person → dasselbe user-Objekt (siehe loadProfile).
       setUser((alt) => (alt && s?.user && alt.id === s.user.id ? alt : s?.user ?? null));
@@ -133,7 +155,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ereignis === "TOKEN_REFRESHED" &&
           zuletzt?.id === s.user.id &&
           Math.abs(jetzt - zuletzt.zeit) < 60_000;
-        if (!kurzVorher) {
+        // Ohne Netz würde jede Abfrage auf die Token-Erneuerung warten —
+        // Profil/Rechte dann erst laden, wenn wieder Netz da ist (TOKEN_REFRESHED).
+        if (!kurzVorher && navigator.onLine) {
           zuletzt = { id: s.user.id, zeit: jetzt };
           await loadProfile(s.user.id);
         }
@@ -152,14 +176,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } = supabase.auth.onAuthStateChange((ereignis, s) => {
       window.setTimeout(() => void handle(s, ereignis), 0);
     });
+    // Ohne Netz hängt getSession bei abgelaufenem Zugang in Wiederholungen —
+    // nach 2,5 s mit der gespeicherten Anmeldung starten.
+    let erstLadung = false;
+    const offlineStart = !navigator.onLine
+      ? window.setTimeout(() => {
+          if (!erstLadung) void handle(gespeicherteSitzung());
+        }, 2500)
+      : null;
     supabase.auth.getSession().then(({ data: { session } }) => {
+      erstLadung = true;
+      if (offlineStart) window.clearTimeout(offlineStart);
       void handle(session);
     });
     return () => {
       mounted = false;
+      if (offlineStart) window.clearTimeout(offlineStart);
       subscription.unsubscribe();
     };
   }, [loadProfile]);
+
+  // App ohne Netz gestartet → Profil/Rechte fehlen noch; sobald Netz da ist nachladen.
+  useEffect(() => {
+    if (!user || profile) return;
+    const online = () => void loadProfile(user.id);
+    window.addEventListener("online", online);
+    return () => window.removeEventListener("online", online);
+  }, [user, profile, loadProfile]);
 
   // Realtime: Permissions reloaden wenn user_roles oder
   // rollen_berechtigungen sich ändern.

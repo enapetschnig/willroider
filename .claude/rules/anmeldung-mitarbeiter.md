@@ -66,3 +66,9 @@ paths:
   Stundenauswertung (Filter Eigenes/Leasing, Summe je Firma). Nicht in Zugang senden, Urlaubs-/ZA-Konten,
   Lohnzettel. `admin-create-employee` mit `leasing: true` (Platzhalter-Mail, Zufallspasswort, Rolle Mitarbeiter).
 - `AuthContext` lädt Profil/Rolle/Rechte bei `TOKEN_REFRESHED` derselben Person höchstens 1×/min (18.11.2026). Grund: Bei vorgestellter Geräteuhr löste jedes Neuladen die nächste Token-Erneuerung aus (Endlosschleife, 429, danach Abfragen als `anon`). Diese Sperre nicht entfernen; Rechte-Änderungen kommen weiter über Realtime bzw. beim nächsten Neuladen.
+
+## Start ohne Netz (18.11.2026, Plan-Viewer offline)
+- Ist der Zugang abgelaufen und kein Netz da, hängt `supabase.auth.getSession()` (und jede Abfrage) in Wiederholungen →
+  App blieb bei „Lädt…“. `AuthContext` startet offline nach 2,5 s mit der gespeicherten Anmeldung, lädt Profil/Rechte
+  erst mit Netz (Ereignis `online`). Offline-Code nie auf `getSession()` warten lassen (`lib/plan/planSpeicher.nutzerId`).
+- Offline-Pläne, wartende Kopien und offene Tabs gehören je einer Person (geteiltes Tablet).

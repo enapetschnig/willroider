@@ -70,6 +70,36 @@ export const speicher = {
   },
 };
 
+/**
+ * Angemeldeter Benutzer — auch ohne Netz und mit abgelaufenem Zugang
+ * (dann aus der gespeicherten Anmeldung im Browser). Offline Gespeichertes
+ * gehört immer einer Person; am geteilten Tablet sieht der Nächste es nicht.
+ */
+export async function nutzerId(): Promise<string | null> {
+  try {
+    // Ohne Netz hängt getSession bei abgelaufenem Zugang → gleich den Browser-Speicher nehmen
+    if (navigator.onLine) {
+      const { supabase } = await import("@/integrations/supabase/client");
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.user.id) return data.session.user.id;
+    }
+  } catch {
+    /* weiter mit dem Browser-Speicher */
+  }
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i) ?? "";
+      if (k.startsWith("sb-") && k.endsWith("-auth-token")) {
+        const id = JSON.parse(localStorage.getItem(k) ?? "{}")?.user?.id;
+        if (id) return id as string;
+      }
+    }
+  } catch {
+    /* nichts */
+  }
+  return null;
+}
+
 /** Ein Plan, wie er im lokalen Speicher liegt. */
 export type GespeicherterPlan = {
   blob: Blob;
@@ -84,4 +114,6 @@ export type GespeicherterPlan = {
   ordnerKey?: string | null;
   subpath?: string | null;
   webUrl?: string | null;
+  /** Wem die Offline-Fassung gehört. */
+  nutzer?: string | null;
 };

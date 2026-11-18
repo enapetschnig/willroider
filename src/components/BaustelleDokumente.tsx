@@ -675,7 +675,9 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const open = async (d: Dokument) => {
     // Pläne (PDF) und Bilder öffnen im Plan-Viewer — mit einem Klick, in
     // einem eigenen Tab (Wunsch S. Egger, 18.11.2026).
-    if (planFaehig(d.dateiname, d.mimetype)) {
+    // Fotos außerhalb der Pläne-Ordner bleiben in der einfachen Ansicht.
+    const istPdfDatei = isPdf(d.mimetype) || /\.pdf$/i.test(d.dateiname);
+    if (planFaehig(d.dateiname, d.mimetype) && (istPdfDatei || folderMeta(d.ordner).klasse === "91-plaene")) {
       planViewer.oeffnen(planTab(d));
       return;
     }

@@ -26,6 +26,8 @@ export type PlanViewerZustand = {
   /** Nebeneinander-Ansicht an */
   split: boolean;
   offen: boolean;
+  /** Wem diese Tabs gehören (geteiltes Tablet). */
+  nutzer?: string | null;
 };
 
 const LS = "willroider:planViewer";
@@ -123,7 +125,12 @@ export const planViewer = {
     setzen({ ...zustand, offen: false });
   },
   allesSchliessen() {
-    setzen(leer);
+    setzen({ ...leer, nutzer: zustand.nutzer ?? null });
+  },
+  /** Beim Anmelden: Tabs eines anderen Benutzers nicht zeigen. */
+  fuerNutzer(id: string) {
+    if (zustand.nutzer === id) return;
+    setzen(zustand.nutzer ? { ...leer, nutzer: id } : { ...zustand, nutzer: id });
   },
 };
 

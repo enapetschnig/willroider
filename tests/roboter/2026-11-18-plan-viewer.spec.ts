@@ -259,6 +259,19 @@ test("Plan-Viewer: Ein-Klick, Tabs, Wischen, Anmerkungen, Kopie, offline", async
     await navigator.serviceWorker.ready;
     return !!navigator.serviceWorker.controller;
   });
+  if (mitSw) {
+    // Baustelle ohne Netz, Zugang inzwischen abgelaufen (Tablet erst Stunden später geöffnet)
+    await page.evaluate(() => {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i)!;
+        if (k.startsWith("sb-") && k.endsWith("-auth-token")) {
+          const v = JSON.parse(localStorage.getItem(k)!);
+          v.expires_at = Math.floor(Date.now() / 1000) - 600;
+          localStorage.setItem(k, JSON.stringify(v));
+        }
+      }
+    });
+  }
   await context.setOffline(true);
   if (mitSw) {
     await page.goto(`${APP}/plaene`);
@@ -297,6 +310,18 @@ test("Plan-Viewer: Ein-Klick, Tabs, Wischen, Anmerkungen, Kopie, offline", async
   const offKopie = await rest(`/rest/v1/dokumente?baustelle_id=eq.${bs.id}&dateiname=eq.${encodeURIComponent(`Offline Kopie ${stamp}.pdf`)}&select=id,ordner`, "GET");
   expect(offKopie).toHaveLength(1);
   expect(offKopie[0].ordner).toBe("91-plaene");
+
+  // Anderer Benutzer am selben Gerät sieht weder Tabs noch Offline-Pläne
+  await page.evaluate((v) => {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)!;
+      if (k.startsWith("sb-") && k.endsWith("-auth-token")) localStorage.setItem(k, v);
+    }
+  }, JSON.stringify(andere.sitzung));
+  await page.goto(`${APP}/plaene`);
+  await expect(page.getByText("Kein Plan offen.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("Noch nichts offline.", { exact: false })).toBeVisible();
+  await expect(viewer).toHaveCount(0);
 
   expect(fehler, fehler.join("\n")).toHaveLength(0);
 });

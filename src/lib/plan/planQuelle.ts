@@ -5,7 +5,7 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { sharePointDateiUrl } from "@/lib/sharepoint";
-import { speicher, type GespeicherterPlan } from "./planSpeicher";
+import { nutzerId, speicher, type GespeicherterPlan } from "./planSpeicher";
 import type { PlanTab } from "./planTabs";
 
 export type PlanInhalt = { blob: Blob; istPdf: boolean; webUrl: string | null; ausSpeicher: boolean };
@@ -54,7 +54,10 @@ async function frischHolen(tab: PlanTab): Promise<{ blob: Blob; istPdf: boolean;
 
 export async function ladePlan(tab: PlanTab, erzwingen = false): Promise<PlanInhalt> {
   if (!erzwingen && imSpeicher.has(tab.key)) return imSpeicher.get(tab.key)!;
-  const lokal = await speicher.lesen<GespeicherterPlan>("dateien", tab.key);
+  const ich = await nutzerId();
+  const roh = await speicher.lesen<GespeicherterPlan>("dateien", tab.key);
+  // Offline-Fassungen gehören der Person, die sie gespeichert hat
+  const lokal = roh && roh.nutzer === ich ? roh : undefined;
   if (navigator.onLine) {
     try {
       const f = await frischHolen(tab);
@@ -88,7 +91,7 @@ export async function ladePlan(tab: PlanTab, erzwingen = false): Promise<PlanInh
 
 export async function istOffline(key: string): Promise<boolean> {
   const l = await speicher.lesen<GespeicherterPlan>("dateien", key);
-  return !!l?.offline;
+  return !!l?.offline && l.nutzer === (await nutzerId());
 }
 
 /** Plan für die Nutzung ohne Netz ablegen. */
@@ -101,6 +104,7 @@ export async function offlineSpeichern(tab: PlanTab): Promise<void> {
     baustelleId: tab.baustelleId,
     baustelleName: tab.baustelleName ?? null,
     offline: true,
+    nutzer: await nutzerId(),
     gespeichertAm: new Date().toISOString(),
     ordnerKey: tab.ordnerKey ?? null,
     subpath: tab.subpath ?? null,
@@ -138,8 +142,9 @@ export async function offlineEntfernen(key: string): Promise<void> {
 
 export type OfflinePlan = PlanTab & { gespeichertAm: string; groesse: number };
 export async function offlinePlaene(): Promise<OfflinePlan[]> {
+  const ich = await nutzerId();
   return (await speicher.alle<GespeicherterPlan & { storagePath?: string | null }>("dateien"))
-    .filter((x) => x.wert.offline)
+    .filter((x) => x.wert.offline && !!ich && x.wert.nutzer === ich)
     .map(({ key, wert }) => ({
       key,
       dateiname: wert.dateiname,

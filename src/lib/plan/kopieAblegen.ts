@@ -12,7 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { sanitizeFolderName, sanitizeStorageName } from "@/lib/uploadHelpers";
 import { pfadKlasse, speicherPfadTeil } from "@/lib/ordnerKlasse";
 import { SP_PREFIX, sharePointHochladenAnstossen } from "@/lib/sharepoint";
-import { speicher } from "./planSpeicher";
+import { nutzerId, speicher } from "./planSpeicher";
 
 export type KopieZiel = {
   baustelleId: string;
@@ -21,7 +21,7 @@ export type KopieZiel = {
   subpath: string;
 };
 
-type Wartend = KopieZiel & { blob: Blob; dateiname: string; erstelltAm: string };
+type Wartend = KopieZiel & { blob: Blob; dateiname: string; erstelltAm: string; nutzer?: string | null };
 
 const zuhoerer = new Set<() => void>();
 export const beiKopienAenderung = (fn: () => void) => {
@@ -82,14 +82,15 @@ export async function kopieSpeichern(
       if (navigator.onLine && !/fetch|network|Failed/i.test((e as Error).message)) throw e;
     }
   }
-  const w: Wartend = { ...ziel, blob, dateiname, erstelltAm: new Date().toISOString() };
+  const w: Wartend = { ...ziel, blob, dateiname, erstelltAm: new Date().toISOString(), nutzer: await nutzerId() };
   await speicher.schreiben("kopien", `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, w);
   melden();
   return { status: "ausstehend" };
 }
 
 export async function wartendeKopien(): Promise<{ key: string; dateiname: string; erstelltAm: string }[]> {
-  return (await speicher.alle<Wartend>("kopien")).map(({ key, wert }) => ({
+  const ich = await nutzerId();
+  return (await speicher.alle<Wartend>("kopien")).filter((x) => x.wert.nutzer === ich).map(({ key, wert }) => ({
     key,
     dateiname: wert.dateiname,
     erstelltAm: wert.erstelltAm,
@@ -103,7 +104,10 @@ export async function wartendeKopienHochladen(): Promise<number> {
   laeuft = true;
   let n = 0;
   try {
+    const ich = await nutzerId();
     for (const { key, wert } of await speicher.alle<Wartend>("kopien")) {
+      // nur die eigenen — die eines anderen am selben Gerät lädt er selbst hoch
+      if (!ich || wert.nutzer !== ich) continue;
       try {
         await kopieHochladen(wert, wert.blob, wert.dateiname);
         await speicher.entfernen("kopien", key);

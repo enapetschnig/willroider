@@ -1,4 +1,4 @@
-import { ReactNode, Suspense, lazy, useEffect, useState } from "react";
+import { Component, ReactNode, Suspense, lazy, useEffect, useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -52,11 +52,28 @@ import {
 } from "@/components/ui/dropdown-menu";
 import ChangePasswordDialog from "@/components/ChangePasswordDialog";
 import { cn } from "@/lib/utils";
-import { usePlanViewer } from "@/lib/plan/planTabs";
+import { planViewer, usePlanViewer } from "@/lib/plan/planTabs";
 import { usePlanSync } from "@/lib/plan/planSync";
 
 // Plan-Viewer erst laden, wenn ein Plan offen ist (PDF-Bausteine sind groß).
 const PlanViewer = lazy(() => import("@/components/plan/PlanViewer"));
+
+/** Lässt sich der Plan-Viewer nicht laden (z. B. alte Version nach Update, kein Netz),
+ *  schließt er sich — die übrige App läuft weiter. */
+class PlanViewerGrenze extends Component<{ children: ReactNode }, { fehler: boolean }> {
+  state = { fehler: false };
+  static getDerivedStateFromError() {
+    return { fehler: true };
+  }
+  componentDidCatch(e: Error) {
+    console.error("Plan-Viewer nicht geladen:", e);
+    planViewer.schliessen();
+    window.setTimeout(() => this.setState({ fehler: false }), 0);
+  }
+  render() {
+    return this.state.fehler ? null : this.props.children;
+  }
+}
 import type { PermissionKey } from "@/lib/permissionKeys";
 
 type NavItem = {
@@ -117,6 +134,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const planViewerZustand = usePlanViewer();
   usePlanSync(!!user);
+  useEffect(() => {
+    if (user?.id) planViewer.fuerNutzer(user.id);
+  }, [user?.id]);
   const [installOpen, setInstallOpen] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -511,9 +531,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       <InstallPromptDialog open={installOpen} onClose={closeInstallDialog} />
       <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} bildschirmfoto={feedbackBild} />
       {planViewerZustand.offen && planViewerZustand.tabs.length > 0 && (
-        <Suspense fallback={null}>
-          <PlanViewer />
-        </Suspense>
+        <PlanViewerGrenze>
+          <Suspense fallback={null}>
+            <PlanViewer />
+          </Suspense>
+        </PlanViewerGrenze>
       )}
     </div>
   );

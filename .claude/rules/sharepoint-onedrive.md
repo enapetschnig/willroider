@@ -80,3 +80,4 @@ App gelöscht wird, bleibt in SharePoint. Einmalige Löschungen nur auf ausdrüc
   synchronisieren“ widerspricht der Nix-löschen/überschreiben-Regel) → erneut speichern = neue Datei.
 - Offline: `/plaene` (ohne Rechte-Prüfung, zeigt nur Geräte-Speicher). pdf.worker (.mjs) ist nicht im Vorab-Cache —
   `offlineSpeichern` ruft ihn einmal ab, damit der Service Worker ihn behält.
+- Fotos außerhalb der Pläne-Ordner öffnen weiter in der einfachen Ansicht; PDFs überall im Plan-Viewer.
