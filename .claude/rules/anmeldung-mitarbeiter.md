@@ -56,6 +56,8 @@ paths:
 - Rechte je Person (`user_berechtigungen`, `MitarbeiterRechteDialog`) gehen der Rolle vor; Ordner-Ausnahme je
   Person gilt auch für Bauleiter (14.09.).
 - **Einfache Handyansicht** (`einfacheAnsicht` in `AuthContext`): Mitarbeiter starten in Mein Tag, kurzes Menü.
+  Das kurze Menü (`EINFACH` in `AppShell.tsx`) enthält auch „Pläne“ (`/plaene`), sonst fänden Mitarbeiter ihre
+  offline gespeicherten Pläne nicht (18.11.).
 - Mitarbeiter/Vorarbeiter sehen keine Kosten (Christoph, 05/2026: „die Menüpunkte 'Kosten' nicht sehen“).
 - Kalkulator und Anleitung sind aus dem Menü genommen (Christoph, 15.09.), Routen bestehen noch.
 - Schutz gegen versehentliche Stammdaten-Änderungen (18.07., Anlass Fischer-Fall).

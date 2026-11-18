@@ -245,8 +245,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (user?.id) void pushAboAuffrischen(user.id);
   }, [user?.id]);
 
-  // Einfache Ansicht: nur Mein Tag, Baustellen, Zeiterfassung/Halle.
-  const EINFACH = new Set(["/mein-tag", "/baustellen", "/stunden", "/halle", "/taetigkeitsbericht"]);
+  // Einfache Ansicht: nur Mein Tag, Baustellen, Pläne (offline gespeicherte), Zeiterfassung/Halle.
+  const EINFACH = new Set(["/mein-tag", "/baustellen", "/plaene", "/stunden", "/halle", "/taetigkeitsbericht"]);
   const visibleNav = NAV.filter((n) => {
     if (einfacheAnsicht && !EINFACH.has(n.to)) return false;
     // Zusatzbedingung am Profil (z.B. Angestellter/Bauarbeiter) gilt immer.
