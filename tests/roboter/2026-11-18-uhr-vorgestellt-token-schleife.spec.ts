@@ -49,7 +49,11 @@ test("Uhr am Gerät 2 h vor: keine Endlosschleife beim Token-Erneuern", async ({
   page.on("request", (r) => {
     const url = r.url();
     if (url.includes("grant_type=refresh_token")) erneuerungen++;
-    if (url.includes("/rest/v1/") && !(r.headers()["authorization"] ?? "").includes(".")) ohneAnmeldung++;
+    if (url.includes("/rest/v1/") && (r.headers()["authorization"] ?? "") === `Bearer ${ANON}`) ohneAnmeldung++;
+  });
+  let rechteGeladen = 0;
+  page.on("response", (r) => {
+    if (r.url().includes("/rpc/my_permissions") && r.status() === 200) rechteGeladen++;
   });
   const schluessel = `sb-${new URL(API).hostname.split(".")[0]}-auth-token`;
   await page.addInitScript(() => {
@@ -78,7 +82,9 @@ test("Uhr am Gerät 2 h vor: keine Endlosschleife beim Token-Erneuern", async ({
   await page.waitForTimeout(10000);
   const imLeerlauf = erneuerungen - nachStart;
   console.log(`Erneuerungen beim Start: ${nachStart}, danach in 10 s Leerlauf: ${imLeerlauf}, Abfragen ohne Anmeldung: ${ohneAnmeldung}`);
+  expect(rechteGeladen).toBeGreaterThan(0); // App hat das Backend wirklich erreicht
   expect(imLeerlauf).toBeLessThanOrEqual(3);
+  expect(ohneAnmeldung).toBe(0);
   expect(fehler).toEqual([]);
   await ctx.close();
   await rest(`/auth/v1/admin/users/${u.id}`, "DELETE");
