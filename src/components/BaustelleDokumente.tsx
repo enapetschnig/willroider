@@ -172,6 +172,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const [viewerItem, setViewerItem] = useState<DocViewerItem | null>(null);
   /** Welche Datei gerade groß offen ist — für Weiterblättern durch die Fotos des Ordners. */
   const [viewerDocId, setViewerDocId] = useState<string | null>(null);
+  const viewerAnfrage = useRef(0);
   const [sendItems, setSendItems] = useState<DocSendItem[] | null>(null);
   const [visibility, setVisibility] = useState<Visibility>(DEFAULT_VISIBILITY);
   const [dragOver, setDragOver] = useState(false);
@@ -683,10 +684,13 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       planViewer.oeffnen(planTab(d));
       return;
     }
-    setViewerDocId(d.id);
+    // Nur die zuletzt angeforderte Datei anzeigen — beim schnellen Weiterblättern
+    // können SharePoint-Antworten in anderer Reihenfolge ankommen.
+    const anfrage = ++viewerAnfrage.current;
     if (istSharePointId(d.id)) {
       // Inhalt liegt in SharePoint — Adresse wird kurzfristig geholt.
       const ziel = await sharePointDateiUrl(d.id);
+      if (anfrage !== viewerAnfrage.current) return;
       if (!ziel) {
         toast({
           variant: "destructive",
@@ -695,6 +699,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         });
         return;
       }
+      setViewerDocId(d.id);
       setViewerItem({
         bucket: "baustellen",
         storage_path: "",
@@ -706,6 +711,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       });
       return;
     }
+    setViewerDocId(d.id);
     setViewerItem({
       bucket: "baustellen",
       storage_path: d.storage_path,
@@ -1917,6 +1923,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
         open={!!viewerItem}
         onOpenChange={(o) => {
           if (!o) {
+            viewerAnfrage.current++;
             setViewerItem(null);
             setViewerDocId(null);
           }

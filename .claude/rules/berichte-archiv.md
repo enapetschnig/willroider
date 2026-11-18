@@ -39,6 +39,7 @@ paths:
 - **Fotos weiterblättern** (J. Maurer, 18.11.2026: „nach öffnen eines Bildes eine weiter Klick Funktion“): `DocViewerDialog` hat optional
   `onVorher`/`onWeiter`/`position` → Pfeile links/rechts, Tasten ← →, Wischen, „3 / 5“ im Titel, am Ende wieder von vorn. Genutzt im Bericht (alle Fotos
   inkl. PDF-Anhänge in Kachel-Reihenfolge) und in den Dokumente-Reitern von Baustelle und Angebot (nur Bilder im selben Ordner; Pläne gehen in den Plan-Viewer).
+  Baustelle: `viewerDocId` erst zusammen mit `setViewerItem` setzen, SharePoint-Antworten per Zähler (`viewerAnfrage`) — sonst zeigt die Position die neue, die Ansicht die alte Datei.
   Probefahrt: Dev-Server scheitert hier an ENOSPC (inotify) → mit eigener Config `server.watch: null` starten.
 - **Bautagesbericht → Regiebericht** (J. Maurer, 17.11.2026: „Übernehmen in Regiebericht“): Knopf „In Regiebericht übernehmen“ im Kopf des
   Bautagesberichts (`uebernehmeInRegiebericht` in `useBericht.ts`). Legt den Regiebericht für denselben Tag/dieselbe Baustelle an (UNIQUE baustelle+datum+typ),
