@@ -209,14 +209,20 @@ export function PlanAnsicht({
   onKopieSpeichern,
   onPerMail,
   onLinkTeilen,
+  quelle,
+  nurAnsehen = false,
 }: {
   tab: PlanTab;
   aktiv: boolean;
   onFokus: () => void;
   onWischen: (richtung: 1 | -1) => void;
-  onKopieSpeichern: (a: PlanAktion) => void;
-  onPerMail: (a: PlanAktion, mitAnmerkungen: boolean) => void;
-  onLinkTeilen: (a: PlanAktion) => void;
+  onKopieSpeichern?: (a: PlanAktion) => void;
+  onPerMail?: (a: PlanAktion, mitAnmerkungen: boolean) => void;
+  onLinkTeilen?: (a: PlanAktion) => void;
+  /** Inhalt selbst liefern (z. B. Angebots-/Bericht-PDF) statt aus Baustellen-Dokumenten. */
+  quelle?: () => Promise<PlanInhalt>;
+  /** Nur ansehen: gleiche Bedienung (Seiten, Scrollen, Zoomen), ohne Anmerkungen/Werkzeuge. */
+  nurAnsehen?: boolean;
 }) {
   const { toast } = useToast();
   const boxRef = useRef<HTMLDivElement>(null);
@@ -295,7 +301,10 @@ export function PlanAnsicht({
     setRedo([]);
     (async () => {
       try {
-        const [i, a] = await Promise.all([ladePlan(tab), ladeAnmerkungen(tab.key)]);
+        const [i, a] = await Promise.all([
+          quelle ? quelle() : ladePlan(tab),
+          nurAnsehen ? Promise.resolve({ daten: leereDaten(), status: "synchronisiert" as SyncStatus }) : ladeAnmerkungen(tab.key),
+        ]);
         if (!aktivLaden) return;
         setDaten(a.daten);
         setStatus(a.status);
@@ -332,7 +341,7 @@ export function PlanAnsicht({
         if (aktivLaden) setFehler((e as Error).message);
       }
     })();
-    istOffline(tab.key).then((o) => aktivLaden && setOffline(o));
+    if (!nurAnsehen) istOffline(tab.key).then((o) => aktivLaden && setOffline(o));
     return () => {
       aktivLaden = false;
     };
@@ -350,9 +359,9 @@ export function PlanAnsicht({
   useEffect(
     () =>
       beiSyncAenderung(() => {
-        if (!ungespeichert.current) syncStatus(tab.key).then(setStatus);
+        if (!ungespeichert.current && !nurAnsehen) syncStatus(tab.key).then(setStatus);
       }),
-    [tab.key],
+    [tab.key, nurAnsehen],
   );
 
   // ───────────── Ansicht ─────────────
@@ -1289,6 +1298,7 @@ export function PlanAnsicht({
     >
       {/* Werkzeugleiste */}
       <div className="flex items-center gap-1 px-1.5 py-1 bg-background border-b overflow-x-auto shrink-0 [scrollbar-width:thin]">
+        {!nurAnsehen && (<>
         {WERKZEUGE.map(({ w, icon: I, label }) => (
           <Button
             key={w}
@@ -1365,10 +1375,12 @@ export function PlanAnsicht({
         >
           <Scaling className="h-4 w-4" />
         </Button>
+        </>)}
         <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" title="Ganze Seite" aria-label="Ganzer Plan" onClick={() => einpassen()}>
           <Maximize2 className="h-4 w-4" />
         </Button>
         <div className="flex-1" />
+        {!nurAnsehen && (<>
         <span
           className="shrink-0 inline-flex items-center gap-1 text-[11px] text-muted-foreground px-1"
           title={status === "synchronisiert" ? "Anmerkungen gespeichert" : status === "speichert" ? "Wird gespeichert…" : "Noch nicht hochgeladen — wird nachgeholt, sobald Netz da ist"}
@@ -1392,17 +1404,17 @@ export function PlanAnsicht({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-64">
-            <DropdownMenuItem onClick={() => { const a = aktion(); if (a) onKopieSpeichern(a); }}>
+            <DropdownMenuItem onClick={() => { const a = aktion(); if (a) onKopieSpeichern?.(a); }}>
               <Save className="h-4 w-4 mr-2" /> Als Kopie speichern
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => { const a = aktion(); if (a) onLinkTeilen(a); }}>
+            <DropdownMenuItem onClick={() => { const a = aktion(); if (a) onLinkTeilen?.(a); }}>
               <Share2 className="h-4 w-4 mr-2" /> SharePoint-Link teilen
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { const a = aktion(); if (a) onPerMail(a, false); }}>
+            <DropdownMenuItem onClick={() => { const a = aktion(); if (a) onPerMail?.(a, false); }}>
               <Share2 className="h-4 w-4 mr-2" /> Plan per E-Mail senden
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={anzahlAnmerkungen === 0} onClick={() => { const a = aktion(); if (a) onPerMail(a, true); }}>
+            <DropdownMenuItem disabled={anzahlAnmerkungen === 0} onClick={() => { const a = aktion(); if (a) onPerMail?.(a, true); }}>
               <Share2 className="h-4 w-4 mr-2" /> Mit Anmerkungen per E-Mail
             </DropdownMenuItem>
             <DropdownMenuSeparator />
@@ -1452,6 +1464,7 @@ export function PlanAnsicht({
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+        </>)}
       </div>
 
       {/* Zeichenfläche */}

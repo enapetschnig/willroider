@@ -11,6 +11,8 @@
   `/src/lib/berichtPdf.ts` per import() → nur gegen den Vite-Dev-Server grün, gegen `vite preview` rot.
   `2026-11-17-berichte-regie…` war im Gesamtlauf einmal rot (zwei offene Auswahllisten, Zeitproblem), allein grün.
   Nicht am echten Tablet getestet (Finger nur simuliert).
+- Nachgezogen: Angebots- und Bericht-PDFs (`DocViewerDialog`) nutzen dieselbe PDF-Bedienung (PlanAnsicht `nurAnsehen`)
+  statt iframe; Test um Angebot-PDF ergänzt, `2026-11-11-bericht-fotos-gross-pdf` auf die neue Ansicht umgestellt.
 
 
 ## 2026-11-18 – Bericht-Fotos: in der Großansicht weiterblättern (J. Maurer)

@@ -16,7 +16,7 @@
  * Tab geöffnet werden.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -61,6 +61,59 @@ interface DocViewerDialogProps {
 }
 
 type ViewKind = "image" | "pdf" | "office" | "text" | "other";
+
+// PDFs wie im Plan-Viewer bedienen (E. Winkler 18.11.2026): alle Seiten untereinander, Rad scrollt,
+// Strg+Rad zoomt nur das PDF, Finger scrollen/zoomen, Seitenpfeile — hier nur zum Ansehen.
+const PlanAnsicht = lazy(() => import("@/components/plan/PlanAnsicht").then((m) => ({ default: m.PlanAnsicht })));
+
+function PdfAnsicht({
+  url,
+  schluessel,
+  dateiname,
+  onWischen,
+}: {
+  url: string;
+  schluessel: string;
+  dateiname: string;
+  onWischen: (richtung: 1 | -1) => void;
+}) {
+  // Lässt sich die Datei nicht selbst holen (z. B. fremde Adresse ohne Freigabe), wie bisher eingebettet zeigen
+  const [eingebettet, setEingebettet] = useState(false);
+  useEffect(() => setEingebettet(false), [url]);
+  if (eingebettet) return <iframe src={url} title={dateiname} className="w-full h-[80vh] border-0" />;
+  const laden = async () => {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`Laden fehlgeschlagen (${r.status})`);
+      const roh = await r.blob();
+      const blob = roh.type === "application/pdf" ? roh : new Blob([roh], { type: "application/pdf" });
+      return { blob, istPdf: true, webUrl: null, ausSpeicher: false };
+    } catch (e) {
+      setEingebettet(true);
+      throw e;
+    }
+  };
+  return (
+    <div className="w-full h-[80vh]" data-testid="pdf-ansicht">
+      <Suspense
+        fallback={
+          <div className="h-full flex items-center justify-center text-muted-foreground">
+            <Loader2 className="h-6 w-6 animate-spin mr-2" /> Vorschau wird geladen…
+          </div>
+        }
+      >
+        <PlanAnsicht
+          tab={{ key: `ansicht:${schluessel}`, dateiname, mimetype: "application/pdf", baustelleId: "" }}
+          aktiv
+          onFokus={() => undefined}
+          onWischen={onWischen}
+          quelle={laden}
+          nurAnsehen
+        />
+      </Suspense>
+    </div>
+  );
+}
 
 function detectKind(item: DocViewerItem): ViewKind {
   const mt = (item.mimetype ?? "").toLowerCase();
@@ -302,7 +355,8 @@ export function DocViewerDialog({
         <div
           className="relative flex-1 min-h-[60vh] bg-muted/30 overflow-hidden"
           onTouchStart={(e) => {
-            if (e.touches.length !== 1) {
+            // PDF: Wischen und Zoomen übernimmt die PDF-Ansicht selbst
+            if (e.touches.length !== 1 || kind === "pdf") {
               wischStart.current = null;
               return;
             }
@@ -356,10 +410,11 @@ export function DocViewerDialog({
               />
             </div>
           ) : kind === "pdf" ? (
-            <iframe
-              src={signedUrl}
-              title={item?.dateiname ?? "PDF"}
-              className="w-full h-[80vh] border-0"
+            <PdfAnsicht
+              url={signedUrl}
+              schluessel={`${item?.bucket ?? ""}:${item?.storage_path || item?.direkt_url || signedUrl}`}
+              dateiname={item?.dateiname ?? "PDF"}
+              onWischen={(r) => (r === 1 ? onWeiter?.() : onVorher?.())}
             />
           ) : kind === "office" && officeUrl ? (
             <iframe

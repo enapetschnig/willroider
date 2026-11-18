@@ -192,3 +192,58 @@ test("Plan-Viewer: alle Seiten untereinander, Rad scrollt, Strg+Rad zoomt, Pfeil
   await rest(`/rest/v1/baustellen?id=eq.${bs.id}`, "DELETE").catch(() => null);
   await rest(`/auth/v1/admin/users/${buero.id}`, "DELETE").catch(() => null);
 });
+
+// Nachgezogen 18.11.: PDFs außerhalb der Baustellen-Dokumente (Angebot, Bericht) öffnen in der Großansicht
+// mit derselben Bedienung (nur ansehen, ohne Zeichenwerkzeuge) statt im eingebetteten Browser-PDF.
+test("Angebot-PDF: Seiten untereinander, Seitenpfeile, Strg+Rad zoomt nur das PDF", async ({ page }) => {
+  test.setTimeout(120_000);
+  const stamp = Date.now().toString().slice(-6);
+  const buero = await konto("Elias", `Angebot${stamp}`, "buero");
+  const [ang] = await rest("/rest/v1/angebote", "POST", { bvh_name: `PV-Angebot ${stamp}` });
+  const bytes = await mehrseitigesPdf();
+  const pfad = `${ang.id}/plaene/${Date.now()}_ausschreibung.pdf`;
+  const up = await fetch(`${API}/storage/v1/object/angebote/${pfad}`, {
+    method: "POST", headers: { apikey: SR, Authorization: `Bearer ${SR}`, "Content-Type": "application/pdf" }, body: bytes,
+  });
+  expect(up.ok).toBeTruthy();
+  await rest("/rest/v1/angebot_dokumente", "POST", {
+    angebot_id: ang.id, ordner: "plaene", dateiname: "Ausschreibung.pdf", storage_path: pfad,
+    mimetype: "application/pdf", groesse: bytes.length, hochgeladen_von: buero.id,
+  });
+
+  const fehler: string[] = [];
+  page.on("pageerror", (e) => fehler.push(e.message));
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await anmelden(page, buero.sitzung);
+  await page.goto(`${APP}/angebote/${ang.id}?dok=plaene`);
+  await page.getByText("Ausschreibung.pdf", { exact: true }).first().click();
+  const ansicht = page.getByTestId("pdf-ansicht");
+  await expect(ansicht).toBeVisible({ timeout: 20_000 });
+  await expect(ansicht.locator("iframe")).toHaveCount(0);
+  await expect(ansicht.locator("[data-plan-seite]")).toHaveCount(3, { timeout: 20_000 });
+  // Nur ansehen: keine Zeichenwerkzeuge
+  await expect(page.getByRole("button", { name: "Rechteck" })).toHaveCount(0);
+  const anzeige = page.getByTestId("plan-seite");
+  await expect(anzeige).toHaveText("Seite 1 / 3");
+  await page.getByRole("button", { name: "Nächste Seite" }).click();
+  await expect(anzeige).toHaveText("Seite 2 / 3");
+  // Strg + Rad zoomt nur das PDF
+  const b = (await ansicht.boundingBox())!;
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  const vorher = (await seitenBox(page, 2))!.width;
+  await page.keyboard.down("Control");
+  for (let i = 0; i < 4; i++) await page.mouse.wheel(0, -100);
+  await page.keyboard.up("Control");
+  expect((await seitenBox(page, 2))!.width).toBeGreaterThan(vorher * 1.5);
+  expect(await page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
+  // Rad scrollt weiter zur letzten Seite
+  await page.getByRole("button", { name: "Ganzer Plan" }).click();
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  for (let i = 0; i < 30; i++) await page.mouse.wheel(0, 300);
+  await expect(anzeige).toHaveText("Seite 3 / 3");
+  expect(fehler).toEqual([]);
+
+  await rest(`/rest/v1/angebot_dokumente?angebot_id=eq.${ang.id}`, "DELETE").catch(() => null);
+  await rest(`/rest/v1/angebote?id=eq.${ang.id}`, "DELETE").catch(() => null);
+  await rest(`/auth/v1/admin/users/${buero.id}`, "DELETE").catch(() => null);
+});

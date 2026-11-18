@@ -88,3 +88,6 @@ App gelöscht wird, bleibt in SharePoint. Einmalige Löschungen nur auf ausdrüc
   Grundbilder nur für sichtbare Seiten ±1 (bei >6 Seiten werden ferne freigegeben), scharfer Ausschnitt je Seite.
 - Ursache „nächste Seite geht nicht“: die Seitenpfeile lagen auf der Zeichenfläche, deren `pointerdown` den Zeiger
   fängt (`setPointerCapture`) → der Klick kam nie beim Knopf an. Knöpfe auf der Fläche brauchen `data-steuerung`.
+- PDFs außerhalb der Baustellen-Dokumente (Angebot-Dokumente, Bericht-Anhänge) öffnen im `DocViewerDialog` — dort seit
+  18.11. ebenfalls mit `PlanAnsicht` (`nurAnsehen`, `quelle` = Blob der signierten Adresse), ohne Werkzeuge/Anmerkungen;
+  lässt sich die Datei nicht holen, wie früher als eingebettetes Browser-PDF. Die BSB-Vorschau im Versand-Dialog bleibt iframe.

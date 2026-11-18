@@ -122,7 +122,12 @@ test("Bericht-Fotos: Klick öffnet groß, PDF-Anhang hat Vorschau und landet im 
   // Klick auf die PDF → PDF im Betrachter
   await kacheln.nth(1).click();
   await expect(page.getByRole("dialog").getByText("Plan Probe.pdf")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole("dialog").locator('iframe[title="Plan Probe.pdf"]')).toBeVisible({ timeout: 30_000 });
+  // Seit 18.11. (E. Winkler) mit der PDF-Ansicht des Plan-Viewers statt eingebettetem Browser-PDF: die Seite ist gezeichnet
+  const ansicht = page.getByRole("dialog").getByTestId("pdf-ansicht");
+  await expect(ansicht.locator("[data-plan-seite]").first()).toBeVisible({ timeout: 30_000 });
+  await expect
+    .poll(() => ansicht.locator('[data-plan-seite="1"] canvas').evaluate((c: HTMLCanvasElement) => c.width), { timeout: 30_000 })
+    .toBeGreaterThan(0);
   await page.keyboard.press("Escape");
 
   // 3) Bericht-PDF: Foto und PDF-Seite werden als Bild eingebettet
