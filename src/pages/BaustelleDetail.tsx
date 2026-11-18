@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { suchParameterSetzen, zurueck } from "@/lib/menuGedaechtnis";
 import { PageHeader } from "@/components/PageHeader";
 import { BaustelleDokumente } from "@/components/BaustelleDokumente";
 import { Button } from "@/components/ui/button";
@@ -120,9 +121,14 @@ export default function BaustelleDetail() {
   /** Gegenstück Planung ↔ Ausführung (für den Querverweis). */
   const [gegenstueck, setGegenstueck] = useState<{ id: string; kostenstelle: string | null; bvh_name: string } | null>(null);
   // ?tab=dokumente&ordner=91-plaene aus „Mein Tag" → direkt im richtigen Ordner
-  const [activeTab, setActiveTab] = useState<string>(
+  const [activeTab, setActiveTabState] = useState<string>(
     () => new URLSearchParams(window.location.search).get("tab") || "dokumente",
   );
+  // Reiter steht in der Adresse → die Seitenleiste merkt ihn sich (E. Winkler 18.11.)
+  const setActiveTab = (t: string) => {
+    setActiveTabState(t);
+    suchParameterSetzen(navigate, { tab: t === "dokumente" ? null : t });
+  };
   const [unterschriftStats, setUnterschriftStats] = useState<{
     total: number;
     done: number;
@@ -149,6 +155,11 @@ export default function BaustelleDetail() {
       supabase.from("evaluierungen").select("*").eq("baustelle_id", id).order("datum", { ascending: false }),
     ]);
     const baustelle = (bs.data as Baustelle) ?? null;
+    if (!bs.error && !baustelle) {
+      // Gibt es nicht (mehr) oder kein Zugriff — z. B. gemerkte Position einer gelöschten Baustelle
+      navigate("/baustellen", { replace: true });
+      return;
+    }
     setB(baustelle);
     setTermine((t.data as Termin[]) ?? []);
     setDokumente((d.data as Dokument[]) ?? []);
@@ -406,16 +417,16 @@ export default function BaustelleDetail() {
 
   return (
     <div className="space-y-4">
-      {/* Einen Schritt in der History zurück statt fix auf /baustellen —
-          so kommt die Baustellen-Liste mit der vorherigen Suche (in der URL)
-          zurück. Fallback auf die Liste, falls die Seite direkt (Deep-Link,
-          kein Verlauf) geöffnet wurde. */}
+      {/* Zurück im Verlauf (Baustellen-Liste mit der vorherigen Suche), wenn man aus den
+          Baustellen kam; sonst (Deep-Link, über die gemerkte Position aus einem anderen
+          Menüpunkt) direkt zur Baustellen-Liste. */}
       <Button
         variant="ghost"
         size="sm"
         onClick={() => {
-          if (window.history.length > 1) navigate(-1);
-          else navigate("/baustellen");
+          // Nur zurückblättern, wenn man aus den Baustellen kam — sonst (z. B. über
+          // die gemerkte Position aus „Pläne“ hergekommen) zur Baustellen-Liste.
+          zurueck(navigate, "/baustellen");
         }}
       >
         <ArrowLeft className="h-4 w-4 mr-2" /> Zurück

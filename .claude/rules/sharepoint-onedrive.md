@@ -81,3 +81,10 @@ App gelöscht wird, bleibt in SharePoint. Einmalige Löschungen nur auf ausdrüc
 - Offline: `/plaene` (ohne Rechte-Prüfung, zeigt nur Geräte-Speicher). pdf.worker (.mjs) ist nicht im Vorab-Cache —
   `offlineSpeichern` ruft ihn einmal ab, damit der Service Worker ihn behält.
 - Fotos außerhalb der Pläne-Ordner öffnen weiter in der einfachen Ansicht; PDFs überall im Plan-Viewer.
+- **Bedienung wie ein PDF-Programm (E. Winkler 18.11.2026, ersetzt das Hand-Werkzeug von S. Egger):** alle Seiten
+  untereinander (`lib/plan/seitenLage.ts`, Anmerkungen weiter je Seite in Seitenkoordinaten `daten.seiten["n"]`),
+  Mausrad = scrollen, Strg/⌘+Rad = nur Plan zoomen, Finger: 1 Finger scrollt mit Schwung, 2 Finger zoomen. Kein
+  „Verschieben“-Werkzeug: ohne gewähltes Werkzeug wird gescrollt, zweiter Tipp aufs Werkzeug wählt ab.
+  Grundbilder nur für sichtbare Seiten ±1 (bei >6 Seiten werden ferne freigegeben), scharfer Ausschnitt je Seite.
+- Ursache „nächste Seite geht nicht“: die Seitenpfeile lagen auf der Zeichenfläche, deren `pointerdown` den Zeiger
+  fängt (`setPointerCapture`) → der Klick kam nie beim Knopf an. Knöpfe auf der Fläche brauchen `data-steuerung`.

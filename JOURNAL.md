@@ -1,5 +1,17 @@
 # Journal
 
+## 2026-11-18 – Plan-Viewer wie PDF-Programm, Position je Menüpunkt (E. Winkler)
+- `PlanAnsicht`: alle Seiten untereinander, Rad scrollt, Strg+Rad zoomt nur den Plan, 1 Finger scrollt mit Schwung,
+  2 Finger zoomen, Seitenanzeige läuft mit, Bild auf/ab, Pos1/Ende. Hand-Werkzeug weg (Werkzeug abwählbar).
+  Seitenpfeile gingen nicht: Zeichenfläche fing den Klick per Pointer-Capture ab.
+- `menuGedaechtnis` + AppShell: Menüpunkte merken die letzte Adresse; Baustellen-Reiter und Dokumente-Ordner
+  (Baustelle, Angebot) stehen jetzt in der URL. Zurück-Knopf Baustelle/Stundenbericht hierarchisch.
+- Tests `2026-11-18-plan-viewer-seiten-scrollen`, `2026-11-18-menue-position-merken` (verknüpfte + unverknüpfte Baustelle).
+  Alter Stand nachgeprüft: Klick auf „Nächste Seite“ blieb auf Seite 1. Hinweis: `2026-11-11-bericht-fotos-gross-pdf` lädt
+  `/src/lib/berichtPdf.ts` per import() → nur gegen den Vite-Dev-Server grün, gegen `vite preview` rot.
+  `2026-11-17-berichte-regie…` war im Gesamtlauf einmal rot (zwei offene Auswahllisten, Zeitproblem), allein grün.
+  Nicht am echten Tablet getestet (Finger nur simuliert).
+
 
 ## 2026-11-18 – Bericht-Fotos: in der Großansicht weiterblättern (J. Maurer)
 - `DocViewerDialog`: optionale Pfeile/Tasten/Wischen + Position; Bericht-Fotos, Dokumente Baustelle (Bilder außerhalb Pläne) und Angebot.

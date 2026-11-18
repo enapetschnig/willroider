@@ -10,9 +10,8 @@
  * Stift: Sobald ein Eingabestift erkannt wurde, zeichnet nur noch der Stift;
  * Finger (auch die aufgelegte Hand) verschieben und zoomen nur.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Hand,
   Pencil,
   Type,
   MoveUpRight,
@@ -74,9 +73,9 @@ import {
 } from "@/lib/plan/anmerkungen";
 import { ladePlan, istOffline, offlineSpeichern, offlineEntfernen, type PlanInhalt } from "@/lib/plan/planQuelle";
 import type { PlanTab } from "@/lib/plan/planTabs";
+import { seitenLage, type Lage } from "@/lib/plan/seitenLage";
 
 type Werkzeug =
-  | "hand"
   | "stift"
   | "text"
   | "pfeil"
@@ -88,8 +87,9 @@ type Werkzeug =
   | "radierer"
   | "kalibrieren";
 
-const WERKZEUGE: { w: Werkzeug; icon: typeof Hand; label: string }[] = [
-  { w: "hand", icon: Hand, label: "Verschieben" },
+// Kein eigenes Verschieben-Werkzeug (E. Winkler 18.11.): ohne gewähltes
+// Werkzeug scrollt/verschiebt man, ein zweiter Tipp aufs Werkzeug wählt es ab.
+const WERKZEUGE: { w: Werkzeug; icon: typeof Pencil; label: string }[] = [
   { w: "stift", icon: Pencil, label: "Freihand" },
   { w: "text", icon: Type, label: "Text" },
   { w: "pfeil", icon: MoveUpRight, label: "Pfeil" },
@@ -104,7 +104,6 @@ const FARBEN = ["#dc2626", "#2563eb", "#16a34a", "#f59e0b", "#9333ea", "#111827"
 const STAERKEN = [2, 4, 8];
 
 type View = { s: number; tx: number; ty: number };
-
 let pdfjsVersprechen: Promise<typeof import("pdfjs-dist")> | null = null;
 function pdfjs() {
   if (!pdfjsVersprechen) {
@@ -224,23 +223,32 @@ export function PlanAnsicht({
   const untenRef = useRef<HTMLDivElement>(null);
   const obenRef = useRef<HTMLDivElement>(null);
   const scharfRef = useRef<HTMLCanvasElement>(null);
-  const grundRef = useRef<HTMLCanvasElement>(null);
+  const grundRefs = useRef<(HTMLCanvasElement | null)[]>([]);
   const fotoInputRef = useRef<HTMLInputElement>(null);
 
   const [inhalt, setInhalt] = useState<PlanInhalt | null>(null);
   const [fehler, setFehler] = useState<string | null>(null);
   const [pdf, setPdf] = useState<any>(null);
+  /** Seite, die gerade in der Mitte der Ansicht steht (läuft beim Scrollen mit). */
   const [seite, setSeite] = useState(1);
+  const seiteRef = useRef(1);
   const [seitenAnzahl, setSeitenAnzahl] = useState(1);
-  const [groesse, setGroesse] = useState<{ w: number; h: number } | null>(null);
+  const [lage, setLage] = useState<Lage | null>(null);
+  const lageRef = useRef<Lage | null>(null);
+  lageRef.current = lage;
   const [bildUrl, setBildUrl] = useState<string | null>(null);
-  const grundK = useRef(1);
+  /** Auflösung der Grundbilder je Seite (0 = noch nicht gezeichnet). */
+  const grundK = useRef<number[]>([]);
+  /** Seiten nahe der Ansicht, deren Grundbild gebraucht wird. */
+  const [bereich, setBereich] = useState<[number, number]>([1, 1]);
+  const bereichRef = useRef<[number, number]>([1, 1]);
 
   const view = useRef<View>({ s: 1, tx: 0, ty: 0 });
   const fitS = useRef(1);
   const [viewVersion, setViewVersion] = useState(0);
+  const schwung = useRef<number | null>(null);
 
-  const [werkzeug, setWerkzeug] = useState<Werkzeug>("hand");
+  const [werkzeug, setWerkzeug] = useState<Werkzeug | null>(null);
   const [farbe, setFarbe] = useState(FARBEN[0]);
   const [staerke, setStaerke] = useState(STAERKEN[1]);
   const [ebeneSichtbar, setEbeneSichtbar] = useState(true);
@@ -255,13 +263,16 @@ export function PlanAnsicht({
   const speicherTimer = useRef<number | null>(null);
   const ungespeichert = useRef(false);
 
-  const [entwurf, setEntwurf] = useState<Form | null>(null);
-  const entwurfRef = useRef<Form | null>(null);
+  /** Entwurf gehört immer zu genau einer Seite (die, auf der er begonnen wurde). */
+  const [entwurf, setEntwurfState] = useState<{ seite: number; form: Form } | null>(null);
+  const entwurfRef = useRef<{ seite: number; form: Form } | null>(null);
   entwurfRef.current = entwurf;
+  const setEntwurf = (form: Form | null, nr?: number) =>
+    setEntwurfState(form ? { seite: nr ?? entwurfRef.current?.seite ?? 1, form } : null);
 
-  const [textDialog, setTextDialog] = useState<{ x: number; y: number; id?: string; text: string } | null>(null);
-  const [fotoZeigen, setFotoZeigen] = useState<Extract<Form, { typ: "foto" }> | null>(null);
-  const fotoPos = useRef<{ x: number; y: number } | null>(null);
+  const [textDialog, setTextDialog] = useState<{ seite: number; x: number; y: number; id?: string; text: string } | null>(null);
+  const [fotoZeigen, setFotoZeigen] = useState<{ seite: number; form: Extract<Form, { typ: "foto" }> } | null>(null);
+  const fotoPos = useRef<{ seite: number; x: number; y: number } | null>(null);
   const [massDialog, setMassDialog] = useState(false);
   const [massN, setMassN] = useState("");
   const [kalibrierStrecke, setKalibrierStrecke] = useState<number | null>(null);
@@ -275,8 +286,10 @@ export function PlanAnsicht({
     setInhalt(null);
     setFehler(null);
     setPdf(null);
-    setGroesse(null);
+    setLage(null);
     setSeite(1);
+    seiteRef.current = 1;
+    grundK.current = [];
     setGeladen(false);
     setUndo([]);
     setRedo([]);
@@ -292,8 +305,16 @@ export function PlanAnsicht({
           const lib = await pdfjs();
           const doc = await lib.getDocument({ data: new Uint8Array(await i.blob.arrayBuffer()) }).promise;
           if (!aktivLaden) return;
+          // Größen aller Seiten vorab (nur Kopfdaten, schnell) — für die durchgehende Ansicht
+          const groessen: { w: number; h: number }[] = [];
+          for (let n = 1; n <= doc.numPages; n++) {
+            const vp = (await doc.getPage(n)).getViewport({ scale: 1 });
+            groessen.push({ w: vp.width, h: vp.height });
+          }
+          if (!aktivLaden) return;
           setSeitenAnzahl(doc.numPages);
           setPdf(doc);
+          setLage(seitenLage(groessen));
         } else {
           const url = URL.createObjectURL(i.blob);
           const img = new Image();
@@ -305,7 +326,7 @@ export function PlanAnsicht({
           if (!aktivLaden) return;
           setSeitenAnzahl(1);
           setBildUrl(url);
-          setGroesse({ w: img.naturalWidth, h: img.naturalHeight });
+          setLage(seitenLage([{ w: img.naturalWidth, h: img.naturalHeight }]));
         }
       } catch (e) {
         if (aktivLaden) setFehler((e as Error).message);
@@ -335,28 +356,84 @@ export function PlanAnsicht({
   );
 
   // ───────────── Ansicht ─────────────
+  /** Hält das Dokument in Reichweite (nicht ins Leere scrollen). */
+  const begrenzen = useCallback((v: View): View => {
+    const box = boxRef.current;
+    const l = lageRef.current;
+    if (!box || !l) return v;
+    const rand = 40;
+    const achse = (t: number, sicht: number, doc: number) => {
+      const lo = Math.min(0, sicht - doc) - rand;
+      const hi = Math.max(0, sicht - doc) + rand;
+      return Math.min(hi, Math.max(lo, t));
+    };
+    return { s: v.s, tx: achse(v.tx, box.clientWidth, l.W * v.s), ty: achse(v.ty, box.clientHeight, l.H * v.s) };
+  }, []);
+
   const anwenden = useCallback(() => {
     const { s, tx, ty } = view.current;
     const t = `translate(${tx}px, ${ty}px) scale(${s})`;
     if (untenRef.current) untenRef.current.style.transform = t;
     if (obenRef.current) obenRef.current.style.transform = t;
     if (scharfRef.current) scharfRef.current.style.visibility = "hidden";
+    const box = boxRef.current;
+    const l = lageRef.current;
+    if (!box || !l) return;
+    // Seitenanzeige läuft mit: Seite in der Mitte der Ansicht
+    const ch = box.clientHeight;
+    const mitte = (ch / 2 - ty) / s;
+    let nr = 1;
+    l.seiten.forEach((p, i) => {
+      if (mitte >= p.y - 0.0001) nr = i + 1;
+    });
+    if (nr !== seiteRef.current) {
+      seiteRef.current = nr;
+      setSeite(nr);
+    }
+    // Sichtbare Seiten (± 1) brauchen ein Grundbild
+    const oben = -ty / s, unten = (ch - ty) / s;
+    let a = 0, b = 0;
+    l.seiten.forEach((p, i) => {
+      if (p.y + p.h >= oben && p.y <= unten) {
+        if (!a) a = i + 1;
+        b = i + 1;
+      }
+    });
+    if (!a) a = b = nr;
+    const neu: [number, number] = [Math.max(1, a - 1), Math.min(l.seiten.length, b + 1)];
+    if (neu[0] !== bereichRef.current[0] || neu[1] !== bereichRef.current[1]) {
+      bereichRef.current = neu;
+      setBereich(neu);
+    }
   }, []);
 
-  const einpassen = useCallback(() => {
-    const box = boxRef.current;
-    if (!box || !groesse) return;
-    const cw = box.clientWidth, ch = box.clientHeight;
-    const s = Math.min(cw / groesse.w, ch / groesse.h) * 0.97;
-    fitS.current = s;
-    view.current = { s, tx: (cw - groesse.w * s) / 2, ty: (ch - groesse.h * s) / 2 };
-    anwenden();
-    setViewVersion((v) => v + 1);
-  }, [groesse, anwenden]);
+  const setzeView = useCallback(
+    (v: View) => {
+      view.current = begrenzen(v);
+      anwenden();
+    },
+    [begrenzen, anwenden],
+  );
+
+  /** Seite nr ganz in die Ansicht einpassen (ohne nr: die aktuelle). */
+  const einpassen = useCallback(
+    (nr?: number) => {
+      const box = boxRef.current;
+      const l = lageRef.current;
+      if (!box || !l) return;
+      const p = l.seiten[(nr ?? seiteRef.current) - 1] ?? l.seiten[0];
+      const cw = box.clientWidth, ch = box.clientHeight;
+      const s = Math.min(cw / p.w, ch / p.h) * 0.97;
+      fitS.current = s;
+      setzeView({ s, tx: (cw - l.W * s) / 2, ty: (ch - p.h * s) / 2 - p.y * s });
+      setViewVersion((v) => v + 1);
+    },
+    [setzeView],
+  );
 
   useEffect(() => {
-    einpassen();
-  }, [einpassen]);
+    if (lage) einpassen(1);
+  }, [lage, einpassen]);
 
   useEffect(() => {
     const box = boxRef.current;
@@ -372,38 +449,89 @@ export function PlanAnsicht({
     return () => ro.disconnect();
   }, [einpassen]);
 
-  // Seite des PDFs: Größe + Grundbild
+  /** Zur Seite springen (Zoom bleibt). */
+  const zurSeite = useCallback(
+    (nr: number) => {
+      const box = boxRef.current;
+      const l = lageRef.current;
+      if (!box || !l) return;
+      const n = Math.max(1, Math.min(l.seiten.length, nr));
+      const p = l.seiten[n - 1];
+      const { s, tx } = view.current;
+      const ch = box.clientHeight;
+      const ty = p.h * s <= ch ? (ch - p.h * s) / 2 - p.y * s : 8 - p.y * s;
+      setzeView({ s, tx, ty });
+      seiteRef.current = n;
+      setSeite(n);
+      setViewVersion((v) => v + 1);
+    },
+    [setzeView],
+  );
+
+  // Grundbilder der Seiten nahe der Ansicht (mittlere Auflösung, flüssig beim Zoomen)
   useEffect(() => {
-    if (!pdf) return;
+    if (!pdf || !lage) return;
     let ab = false;
     let task: any = null;
     (async () => {
-      const p = await pdf.getPage(seite);
-      if (ab) return;
-      const vp1 = p.getViewport({ scale: 1 });
-      setGroesse({ w: vp1.width, h: vp1.height });
-      // Grundbild: höchstens ~5 Mio. Bildpunkte (Tablet-Grenze 16 Mio.)
-      const k = Math.min(3, Math.sqrt(5_000_000 / (vp1.width * vp1.height)));
-      grundK.current = k;
-      const vp = p.getViewport({ scale: k });
-      const c = grundRef.current;
-      if (!c) return;
-      c.width = Math.floor(vp.width);
-      c.height = Math.floor(vp.height);
-      task = p.render({ canvasContext: c.getContext("2d")!, viewport: vp, canvas: c } as any);
-      await task.promise.catch(() => undefined);
-      if (!ab) setViewVersion((v) => v + 1);
+      const [a, b] = bereich;
+      // Erst die Seite in der Mitte, dann die Nachbarn
+      const reihe = Array.from({ length: b - a + 1 }, (_, i) => a + i).sort(
+        (x, y) => Math.abs(x - seiteRef.current) - Math.abs(y - seiteRef.current),
+      );
+      for (const nr of reihe) {
+        if (ab) return;
+        if (grundK.current[nr - 1]) continue;
+        const p = await pdf.getPage(nr);
+        if (ab) return;
+        const vp1 = p.getViewport({ scale: 1 });
+        // höchstens ~5 Mio. Bildpunkte bei einem Plan, ~2,5 Mio. je Seite bei mehreren (Tablet-Grenze)
+        const budget = lage.seiten.length === 1 ? 5_000_000 : 2_500_000;
+        const k = Math.min(3, Math.sqrt(budget / (vp1.width * vp1.height)));
+        const vp = p.getViewport({ scale: k });
+        const off = document.createElement("canvas");
+        off.width = Math.floor(vp.width);
+        off.height = Math.floor(vp.height);
+        task = p.render({ canvasContext: off.getContext("2d")!, viewport: vp, canvas: off } as any);
+        try {
+          await task.promise;
+        } catch {
+          return;
+        }
+        if (ab) return;
+        const c = grundRefs.current[nr - 1];
+        if (!c) continue;
+        c.width = off.width;
+        c.height = off.height;
+        c.getContext("2d")!.drawImage(off, 0, 0);
+        grundK.current[nr - 1] = k;
+        setViewVersion((v) => v + 1);
+      }
+      // Weit entfernte Seiten wieder freigeben (Speicher am Tablet)
+      if (lage.seiten.length > 6) {
+        grundK.current.forEach((k, i) => {
+          const nr = i + 1;
+          if (k && (nr < a - 2 || nr > b + 2)) {
+            const c = grundRefs.current[i];
+            if (c) {
+              c.width = 0;
+              c.height = 0;
+            }
+            grundK.current[i] = 0;
+          }
+        });
+      }
     })();
     return () => {
       ab = true;
       task?.cancel?.();
     };
-  }, [pdf, seite]);
+  }, [pdf, lage, bereich]);
 
-  // Scharfer Ausschnitt, wenn das Bild stillsteht
+  // Scharfer Ausschnitt, wenn das Bild stillsteht — je sichtbarer Seite einzeln
   useEffect(() => {
-    if (!pdf || !groesse) return;
-    let task: any = null;
+    if (!pdf || !lage) return;
+    const tasks: any[] = [];
     let ab = false;
     const timer = window.setTimeout(async () => {
       const c = scharfRef.current;
@@ -411,72 +539,103 @@ export function PlanAnsicht({
       if (!c || !box) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const { s, tx, ty } = view.current;
-      if (s * dpr <= grundK.current * 1.05) {
-        c.style.visibility = "hidden";
-        return;
-      }
-      const p = await pdf.getPage(seite);
-      if (ab) return;
       const cw = box.clientWidth, ch = box.clientHeight;
-      const off = document.createElement("canvas");
-      off.width = Math.floor(cw * dpr);
-      off.height = Math.floor(ch * dpr);
-      const vp = p.getViewport({ scale: s * dpr });
-      task = p.render({
-        canvasContext: off.getContext("2d")!,
-        viewport: vp,
-        canvas: off,
-        transform: [1, 0, 0, 1, tx * dpr, ty * dpr],
-      } as any);
-      try {
-        await task.promise;
-      } catch {
-        return;
+      const stuecke: { off: HTMLCanvasElement; x: number; y: number }[] = [];
+      for (let i = 0; i < lage.seiten.length; i++) {
+        const l = lage.seiten[i];
+        const sx = tx + l.x * s, sy = ty + l.y * s;
+        const x0 = Math.max(0, sx), y0 = Math.max(0, sy);
+        const x1 = Math.min(cw, sx + l.w * s), y1 = Math.min(ch, sy + l.h * s);
+        if (x1 - x0 < 1 || y1 - y0 < 1) continue;
+        if (s * dpr <= (grundK.current[i] || 0) * 1.05) continue;
+        const p = await pdf.getPage(i + 1);
+        if (ab) return;
+        const off = document.createElement("canvas");
+        off.width = Math.ceil((x1 - x0) * dpr);
+        off.height = Math.ceil((y1 - y0) * dpr);
+        const task = p.render({
+          canvasContext: off.getContext("2d")!,
+          viewport: p.getViewport({ scale: s * dpr }),
+          canvas: off,
+          transform: [1, 0, 0, 1, (sx - x0) * dpr, (sy - y0) * dpr],
+        } as any);
+        tasks.push(task);
+        try {
+          await task.promise;
+        } catch {
+          return;
+        }
+        if (ab) return;
+        stuecke.push({ off, x: x0 * dpr, y: y0 * dpr });
       }
       if (ab) return;
       const v = view.current;
       if (v.s !== s || v.tx !== tx || v.ty !== ty) return;
-      c.width = off.width;
-      c.height = off.height;
+      if (!stuecke.length) {
+        c.style.visibility = "hidden";
+        return;
+      }
+      c.width = Math.floor(cw * dpr);
+      c.height = Math.floor(ch * dpr);
       c.style.width = `${cw}px`;
       c.style.height = `${ch}px`;
-      c.getContext("2d")!.drawImage(off, 0, 0);
+      const ctx = c.getContext("2d")!;
+      ctx.clearRect(0, 0, c.width, c.height);
+      for (const st of stuecke) ctx.drawImage(st.off, Math.round(st.x), Math.round(st.y));
       c.style.visibility = "visible";
     }, 180);
     return () => {
       ab = true;
       window.clearTimeout(timer);
-      task?.cancel?.();
+      tasks.forEach((t) => t?.cancel?.());
     };
-  }, [viewVersion, pdf, seite, groesse]);
+  }, [viewVersion, pdf, lage]);
 
   const zoomUm = useCallback(
     (faktor: number, cx: number, cy: number) => {
       const v = view.current;
       const s = Math.max(fitS.current * 0.5, Math.min(v.s * faktor, Math.max(fitS.current * 40, 8)));
       const k = s / v.s;
-      view.current = { s, tx: cx - (cx - v.tx) * k, ty: cy - (cy - v.ty) * k };
-      anwenden();
+      setzeView({ s, tx: cx - (cx - v.tx) * k, ty: cy - (cy - v.ty) * k });
     },
-    [anwenden],
+    [setzeView],
   );
 
-  // Mausrad (nicht passiv, sonst scrollt die Seite)
+  const schwungStopp = () => {
+    if (schwung.current) cancelAnimationFrame(schwung.current);
+    schwung.current = null;
+  };
+
+  // Mausrad wie im PDF-Programm: Rad = scrollen (Umschalt = waagrecht),
+  // Strg/⌘ + Rad (auch Zwei-Finger-Zoom am Touchpad) = nur den Plan zoomen.
+  // Nicht passiv, sonst scrollt bzw. zoomt der Browser die ganze App.
   useEffect(() => {
     const box = boxRef.current;
     if (!box) return;
     let t: number | null = null;
     const rad = (e: WheelEvent) => {
       e.preventDefault();
+      schwungStopp();
       const r = box.getBoundingClientRect();
-      const f = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0018));
-      zoomUm(f, e.clientX - r.left, e.clientY - r.top);
+      if (e.ctrlKey || e.metaKey) {
+        const f = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0025));
+        zoomUm(f, e.clientX - r.left, e.clientY - r.top);
+      } else {
+        const faktor = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? box.clientHeight : 1;
+        let dx = e.deltaX * faktor, dy = e.deltaY * faktor;
+        if (e.shiftKey && !dx) {
+          dx = dy;
+          dy = 0;
+        }
+        const v = view.current;
+        setzeView({ s: v.s, tx: v.tx - dx, ty: v.ty - dy });
+      }
       if (t) window.clearTimeout(t);
       t = window.setTimeout(() => setViewVersion((v) => v + 1), 120);
     };
     box.addEventListener("wheel", rad, { passive: false });
     return () => box.removeEventListener("wheel", rad);
-  }, [zoomUm]);
+  }, [zoomUm, setzeView]);
 
   // ───────────── Anmerkungen ändern / speichern ─────────────
   const speichernBald = useCallback(() => {
@@ -518,9 +677,9 @@ export function PlanAnsicht({
     },
     [speichernBald],
   );
-  const formen = daten.seiten[String(seite)] ?? [];
-  const seitenFormenSetzen = (fn: (f: Form[]) => Form[]) =>
-    aendern((d) => ({ ...d, seiten: { ...d.seiten, [String(seite)]: fn(d.seiten[String(seite)] ?? []) } }));
+  const formenVon = (nr: number) => daten.seiten[String(nr)] ?? [];
+  const seitenFormenSetzen = (nr: number, fn: (f: Form[]) => Form[]) =>
+    aendern((d) => ({ ...d, seiten: { ...d.seiten, [String(nr)]: fn(d.seiten[String(nr)] ?? []) } }));
 
   const rueckgaengig = () => {
     if (!undo.length) return;
@@ -548,7 +707,8 @@ export function PlanAnsicht({
     if (!aktiv) return;
     const taste = (e: KeyboardEvent) => {
       const ziel = e.target as HTMLElement;
-      if (ziel?.closest?.("input, textarea, [contenteditable]")) return;
+      if (e.defaultPrevented) return; // offenes Menü/Dialog hat die Taste schon
+      if (ziel?.closest?.("input, textarea, [contenteditable], [role=menu], [role=listbox]")) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         if (e.shiftKey) wiederholen();
@@ -558,6 +718,17 @@ export function PlanAnsicht({
         wiederholen();
       } else if (e.key === "Escape" && entwurfRef.current) {
         setEntwurf(null);
+      } else if (e.key === "PageDown" || e.key === "PageUp") {
+        e.preventDefault();
+        zurSeite(seiteRef.current + (e.key === "PageDown" ? 1 : -1));
+      } else if (e.key === "Home" || e.key === "End") {
+        e.preventDefault();
+        zurSeite(e.key === "Home" ? 1 : seitenAnzahl);
+      } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const v = view.current;
+        setzeView({ s: v.s, tx: v.tx, ty: v.ty + (e.key === "ArrowDown" ? -60 : 60) });
+        setViewVersion((x) => x + 1);
       }
     };
     window.addEventListener("keydown", taste);
@@ -569,15 +740,37 @@ export function PlanAnsicht({
   const stiftGesehen = useRef(false);
   const geste = useRef<
     | null
-    | { art: "pan"; x0: number; y0: number; v0: View; t0: number; id: number; typ: string }
+    | { art: "pan"; x0: number; y0: number; v0: View; t0: number; id: number; typ: string; spur: { x: number; y: number; t: number }[] }
     | { art: "pinch"; d0: number; mx: number; my: number; v0: View }
-    | { art: "zeichnen"; id: number; typ: string; x0: number; y0: number; bewegt: boolean; textId?: string; radiert?: Set<string> }
+    | { art: "zeichnen"; id: number; typ: string; x0: number; y0: number; seite: number; bewegt: boolean; textId?: string; radiert?: Set<string>; fotoOffen?: boolean }
   >(null);
 
-  const zuPlan = (clientX: number, clientY: number) => {
+  /** Bildschirmpunkt → Punkt im Gesamtdokument (alle Seiten untereinander). */
+  const zuDok = (clientX: number, clientY: number) => {
     const r = boxRef.current!.getBoundingClientRect();
     const { s, tx, ty } = view.current;
     return { x: (clientX - r.left - tx) / s, y: (clientY - r.top - ty) / s };
+  };
+  /** Seite unter dem Punkt (im Abstand dazwischen: die nächstgelegene). */
+  const seiteBei = (clientX: number, clientY: number) => {
+    const l = lageRef.current;
+    if (!l) return 1;
+    const d = zuDok(clientX, clientY);
+    let best = 1, bestAbst = Infinity;
+    l.seiten.forEach((p, i) => {
+      const abst = d.y < p.y ? p.y - d.y : d.y > p.y + p.h ? d.y - p.y - p.h : 0;
+      if (abst < bestAbst) {
+        bestAbst = abst;
+        best = i + 1;
+      }
+    });
+    return best;
+  };
+  /** Bildschirmpunkt → Punkt auf Seite nr (Einheit der gespeicherten Anmerkungen). */
+  const zuPlan = (clientX: number, clientY: number, nr: number) => {
+    const d = zuDok(clientX, clientY);
+    const p = lageRef.current?.seiten[nr - 1] ?? { x: 0, y: 0 };
+    return { x: d.x - p.x, y: d.y - p.y };
   };
   const tol = () => 10 / view.current.s;
   const linienBreite = () => staerke / view.current.s;
@@ -598,7 +791,31 @@ export function PlanAnsicht({
     setViewVersion((v) => v + 1);
   };
 
-  const formUnter = (x: number, y: number, nurTyp?: Form["typ"]) => {
+  /** Nach dem Wischen mit dem Finger ausrollen lassen (wie beim Scrollen am Handy). */
+  const ausrollen = (vx: number, vy: number) => {
+    schwungStopp();
+    let letzte = performance.now();
+    const schritt = (jetzt: number) => {
+      const dt = Math.min(40, jetzt - letzte);
+      letzte = jetzt;
+      const v = view.current;
+      setzeView({ s: v.s, tx: v.tx + vx * dt, ty: v.ty + vy * dt });
+      const abklingen = Math.pow(0.995, dt);
+      vx *= abklingen;
+      vy *= abklingen;
+      if (Math.hypot(vx, vy) < 0.03) {
+        schwung.current = null;
+        gestenEnde();
+        return;
+      }
+      schwung.current = requestAnimationFrame(schritt);
+    };
+    schwung.current = requestAnimationFrame(schritt);
+  };
+  useEffect(() => () => schwungStopp(), []);
+
+  const formUnter = (nr: number, x: number, y: number, nurTyp?: Form["typ"]) => {
+    const formen = formenVon(nr);
     for (let i = formen.length - 1; i >= 0; i--) {
       const f = formen[i];
       if (nurTyp && f.typ !== nurTyp) continue;
@@ -609,7 +826,10 @@ export function PlanAnsicht({
 
   const onPointerDown = (e: React.PointerEvent) => {
     onFokus();
-    if (!groesse) return;
+    // Knöpfe auf der Fläche (Seiten, „Fläche fertig“) bekommen ihren Klick selbst
+    if ((e.target as HTMLElement).closest?.("[data-steuerung]")) return;
+    if (!lage) return;
+    schwungStopp();
     if (e.pointerType === "pen") stiftGesehen.current = true;
     // Handballen: während der Stift zeichnet, zählen Finger gar nicht
     const g = geste.current;
@@ -622,54 +842,63 @@ export function PlanAnsicht({
     zeiger.current.set(e.pointerId, { x: e.clientX, y: e.clientY, typ: e.pointerType });
     const finger = [...zeiger.current.values()].filter((z) => z.typ === "touch").length;
     if (e.pointerType === "touch" && finger >= 2) {
-      // zweiter Finger → Zoomen; begonnener Fingerstrich verfällt
-      if (g?.art === "zeichnen") setEntwurf(null);
+      // zweiter Finger → Zoomen; begonnener Fingerstrich verfällt (eine offene Fläche bleibt)
+      if (g?.art === "zeichnen" && entwurfRef.current?.form.typ !== "flaeche") setEntwurf(null);
       pinchStart();
       return;
     }
-    const p = zuPlan(e.clientX, e.clientY);
     const nurBewegen =
-      werkzeug === "hand" || e.button === 1 || (e.pointerType === "touch" && stiftGesehen.current);
+      werkzeug === null || e.button === 1 || (e.pointerType === "touch" && stiftGesehen.current);
     if (nurBewegen) {
-      geste.current = { art: "pan", x0: e.clientX, y0: e.clientY, v0: { ...view.current }, t0: Date.now(), id: e.pointerId, typ: e.pointerType };
+      geste.current = {
+        art: "pan", x0: e.clientX, y0: e.clientY, v0: { ...view.current }, t0: Date.now(), id: e.pointerId, typ: e.pointerType,
+        spur: [{ x: e.clientX, y: e.clientY, t: performance.now() }],
+      };
       return;
     }
     if (e.button !== 0 && e.pointerType === "mouse") return;
-    geste.current = { art: "zeichnen", id: e.pointerId, typ: e.pointerType, x0: e.clientX, y0: e.clientY, bewegt: false };
+    // Offene Fläche: weitere Punkte gehören auf ihre Seite
+    const offen = entwurfRef.current;
+    const nr = werkzeug === "flaeche" && offen?.form.typ === "flaeche" ? offen.seite : seiteBei(e.clientX, e.clientY);
+    const p = zuPlan(e.clientX, e.clientY, nr);
+    const gz: Extract<NonNullable<typeof geste.current>, { art: "zeichnen" }> = {
+      art: "zeichnen", id: e.pointerId, typ: e.pointerType, x0: e.clientX, y0: e.clientY, seite: nr, bewegt: false,
+    };
+    geste.current = gz;
     const basis = { id: neueId(), farbe, breite: linienBreite() };
     switch (werkzeug) {
       case "stift":
-        setEntwurf({ ...basis, typ: "stift", punkte: [p.x, p.y] });
+        setEntwurf({ ...basis, typ: "stift", punkte: [p.x, p.y] }, nr);
         break;
       case "pfeil":
       case "rechteck":
       case "wolke":
       case "laenge":
-        setEntwurf({ ...basis, typ: werkzeug, x1: p.x, y1: p.y, x2: p.x, y2: p.y });
+        setEntwurf({ ...basis, typ: werkzeug, x1: p.x, y1: p.y, x2: p.x, y2: p.y }, nr);
         break;
       case "kalibrieren":
-        setEntwurf({ ...basis, farbe: "#0ea5e9", typ: "laenge", x1: p.x, y1: p.y, x2: p.x, y2: p.y });
+        setEntwurf({ ...basis, farbe: "#0ea5e9", typ: "laenge", x1: p.x, y1: p.y, x2: p.x, y2: p.y }, nr);
         break;
       case "text": {
-        const t = formUnter(p.x, p.y, "text");
-        if (t) (geste.current as any).textId = t.id;
+        const t = formUnter(nr, p.x, p.y, "text");
+        if (t) gz.textId = t.id;
         break;
       }
       case "foto": {
         // Maus: Dateiauswahl schon beim Drücken öffnen — nur dann gilt der
         // Klick sicher als Nutzeraktion (Finger/Stift: beim Loslassen).
-        if (e.pointerType === "mouse" && !formUnter(p.x, p.y, "foto")) {
-          fotoPos.current = p;
-          (geste.current as any).fotoOffen = true;
+        if (e.pointerType === "mouse" && !formUnter(nr, p.x, p.y, "foto")) {
+          fotoPos.current = { seite: nr, ...p };
+          gz.fotoOffen = true;
           fotoInputRef.current?.click();
         }
         break;
       }
       case "radierer": {
         const set = new Set<string>();
-        const f = formUnter(p.x, p.y);
+        const f = formUnter(nr, p.x, p.y);
         if (f) set.add(f.id);
-        (geste.current as any).radiert = set;
+        gz.radiert = set;
         break;
       }
       default:
@@ -690,23 +919,24 @@ export function PlanAnsicht({
       const mx = (pts[0].x + pts[1].x) / 2 - r.left;
       const my = (pts[0].y + pts[1].y) / 2 - r.top;
       const s = Math.max(fitS.current * 0.5, Math.min(g.v0.s * (d / g.d0), Math.max(fitS.current * 40, 8)));
-      // Der Planpunkt unter der Anfangsmitte bleibt unter den Fingern
+      // Der Planpunkt unter der Anfangsmitte bleibt unter den Fingern (zwei Finger verschieben auch)
       const px = (g.mx - g.v0.tx) / g.v0.s, py = (g.my - g.v0.ty) / g.v0.s;
-      view.current = { s, tx: mx - px * s, ty: my - py * s };
-      anwenden();
+      setzeView({ s, tx: mx - px * s, ty: my - py * s });
       return;
     }
     if (g.art === "pan") {
       if (e.pointerId !== g.id) return;
-      view.current = { ...g.v0, tx: g.v0.tx + e.clientX - g.x0, ty: g.v0.ty + e.clientY - g.y0 };
-      anwenden();
+      g.spur.push({ x: e.clientX, y: e.clientY, t: performance.now() });
+      if (g.spur.length > 6) g.spur.shift();
+      setzeView({ ...g.v0, tx: g.v0.tx + e.clientX - g.x0, ty: g.v0.ty + e.clientY - g.y0 });
       return;
     }
     if (e.pointerId !== g.id) return;
     if (Math.hypot(e.clientX - g.x0, e.clientY - g.y0) > 4) g.bewegt = true;
-    const p = zuPlan(e.clientX, e.clientY);
+    const nr = g.seite;
+    const p = zuPlan(e.clientX, e.clientY, nr);
     if (werkzeug === "radierer") {
-      const f = formUnter(p.x, p.y);
+      const f = formUnter(nr, p.x, p.y);
       if (f && g.radiert && !g.radiert.has(f.id)) {
         g.radiert.add(f.id);
         setViewVersion((v) => v + 1);
@@ -715,14 +945,14 @@ export function PlanAnsicht({
     }
     if (werkzeug === "text" && g.textId && g.bewegt) {
       // Text verschieben (Vorschau über den Entwurf)
-      const t = formen.find((f) => f.id === g.textId);
+      const t = formenVon(nr).find((f) => f.id === g.textId);
       if (t && t.typ === "text") {
-        const a = zuPlan(g.x0, g.y0);
-        setEntwurf({ ...t, x: t.x + p.x - a.x, y: t.y + p.y - a.y });
+        const a = zuPlan(g.x0, g.y0, nr);
+        setEntwurf({ ...t, x: t.x + p.x - a.x, y: t.y + p.y - a.y }, nr);
       }
       return;
     }
-    const en = entwurfRef.current;
+    const en = entwurfRef.current?.form;
     if (!en) return;
     if (en.typ === "stift") {
       const n = en.punkte.length;
@@ -732,7 +962,7 @@ export function PlanAnsicht({
       const ev = e.nativeEvent as PointerEvent;
       const zus = typeof ev.getCoalescedEvents === "function" ? ev.getCoalescedEvents() : [];
       for (const c of zus.slice(0, -1)) {
-        const q = zuPlan(c.clientX, c.clientY);
+        const q = zuPlan(c.clientX, c.clientY, nr);
         extra.push(q.x, q.y);
       }
       setEntwurf({ ...en, punkte: [...en.punkte, ...extra, p.x, p.y] });
@@ -742,15 +972,16 @@ export function PlanAnsicht({
   };
 
   const flaecheFertig = () => {
-    const en = entwurfRef.current;
-    if (!en || en.typ !== "flaeche") return;
+    const offen = entwurfRef.current;
+    if (!offen || offen.form.typ !== "flaeche") return;
+    const en = offen.form;
     setEntwurf(null);
     if (en.punkte.length < 6) return;
     if (!datenRef.current.massstab) {
       toast({ title: "Maßstab fehlt", description: "Bitte zuerst den Maßstab einstellen oder eine bekannte Strecke kalibrieren." });
       setMassDialog(true);
     }
-    seitenFormenSetzen((fs) => [...fs, en]);
+    seitenFormenSetzen(offen.seite, (fs) => [...fs, en]);
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
@@ -783,53 +1014,68 @@ export function PlanAnsicht({
       }
       // Antippen eines Foto-Pins
       if (Math.hypot(dx, dy) < 5) {
-        const p = zuPlan(e.clientX, e.clientY);
-        const f = formUnter(p.x, p.y, "foto");
-        if (f && f.typ === "foto") setFotoZeigen(f);
+        const nr = seiteBei(e.clientX, e.clientY);
+        const p = zuPlan(e.clientX, e.clientY, nr);
+        const f = formUnter(nr, p.x, p.y, "foto");
+        if (f && f.typ === "foto") setFotoZeigen({ seite: nr, form: f });
+        gestenEnde();
+        return;
+      }
+      // Finger/Stift: Schwung mitnehmen
+      const sp = g.spur;
+      const a = sp[0], b = sp[sp.length - 1];
+      const zeit = b.t - a.t;
+      if (g.typ !== "mouse" && zeit > 0 && performance.now() - b.t < 80) {
+        const vx = (b.x - a.x) / zeit, vy = (b.y - a.y) / zeit;
+        if (Math.hypot(vx, vy) > 0.25) {
+          ausrollen(vx, vy);
+          return;
+        }
       }
       gestenEnde();
       return;
     }
     if (e.pointerId !== g.id) return;
     geste.current = null;
-    const p = zuPlan(e.clientX, e.clientY);
+    const nr = g.seite;
+    const p = zuPlan(e.clientX, e.clientY, nr);
     switch (werkzeug) {
       case "radierer": {
         const ids = g.radiert ?? new Set();
-        if (ids.size) seitenFormenSetzen((fs) => fs.filter((f) => !ids.has(f.id)));
+        if (ids.size) seitenFormenSetzen(nr, (fs) => fs.filter((f) => !ids.has(f.id)));
         break;
       }
       case "text": {
         if (g.textId) {
-          const t = formen.find((f) => f.id === g.textId);
+          const t = formenVon(nr).find((f) => f.id === g.textId);
           if (t && t.typ === "text") {
-            if (g.bewegt && entwurfRef.current) {
-              const neu = entwurfRef.current;
-              seitenFormenSetzen((fs) => fs.map((f) => (f.id === t.id ? neu : f)));
+            const verschoben = entwurfRef.current?.form;
+            if (g.bewegt && verschoben) {
+              seitenFormenSetzen(nr, (fs) => fs.map((f) => (f.id === t.id ? verschoben : f)));
             } else {
-              setTextDialog({ x: t.x, y: t.y, id: t.id, text: t.text });
+              setTextDialog({ seite: nr, x: t.x, y: t.y, id: t.id, text: t.text });
             }
           }
           setEntwurf(null);
         } else if (!g.bewegt) {
-          setTextDialog({ x: p.x, y: p.y, text: "" });
+          setTextDialog({ seite: nr, x: p.x, y: p.y, text: "" });
         }
         break;
       }
       case "foto": {
-        if (g.bewegt || (g as any).fotoOffen) break;
-        const f = formUnter(p.x, p.y, "foto");
+        if (g.bewegt || g.fotoOffen) break;
+        const f = formUnter(nr, p.x, p.y, "foto");
         if (f && f.typ === "foto") {
-          setFotoZeigen(f);
+          setFotoZeigen({ seite: nr, form: f });
           break;
         }
-        fotoPos.current = p;
+        fotoPos.current = { seite: nr, ...p };
         fotoInputRef.current?.click();
         break;
       }
       case "flaeche": {
         if (g.bewegt) break;
-        const en = entwurfRef.current;
+        const en = entwurfRef.current?.form;
         if (en && en.typ === "flaeche") {
           // Antippen des ersten Punkts schließt die Fläche
           if (en.punkte.length >= 6 && Math.hypot(p.x - en.punkte[0], p.y - en.punkte[1]) <= tol() * 1.5) {
@@ -838,17 +1084,17 @@ export function PlanAnsicht({
             setEntwurf({ ...en, punkte: [...en.punkte, p.x, p.y] });
           }
         } else {
-          setEntwurf({ id: neueId(), farbe, breite: linienBreite(), typ: "flaeche", punkte: [p.x, p.y] });
+          setEntwurf({ id: neueId(), farbe, breite: linienBreite(), typ: "flaeche", punkte: [p.x, p.y] }, nr);
         }
         break;
       }
       default: {
-        const en = entwurfRef.current;
+        const en = entwurfRef.current?.form;
         if (!en) break;
         setEntwurf(null);
         if (en.typ === "stift") {
           const punkte = en.punkte.length === 2 ? [...en.punkte, en.punkte[0] + 0.01, en.punkte[1]] : en.punkte;
-          seitenFormenSetzen((fs) => [...fs, { ...en, punkte }]);
+          seitenFormenSetzen(nr, (fs) => [...fs, { ...en, punkte }]);
         } else if ("x2" in en) {
           const lang = Math.hypot(en.x2 - en.x1, en.y2 - en.y1) * view.current.s;
           if (lang < 6) break;
@@ -861,16 +1107,16 @@ export function PlanAnsicht({
             toast({ title: "Maßstab fehlt", description: "Bitte zuerst den Maßstab einstellen oder eine bekannte Strecke kalibrieren." });
             setMassDialog(true);
           }
-          seitenFormenSetzen((fs) => [...fs, en]);
+          seitenFormenSetzen(nr, (fs) => [...fs, en]);
         }
       }
     }
   };
 
-  // Werkzeugwechsel bricht offene Entwürfe ab
+  // Werkzeugwechsel bricht offene Entwürfe ab (Scrollen nicht)
   useEffect(() => {
-    setEntwurf(null);
-  }, [werkzeug, seite]);
+    setEntwurfState(null);
+  }, [werkzeug]);
 
   const fotoGewaehlt = async (file: File | undefined) => {
     const pos = fotoPos.current;
@@ -878,7 +1124,7 @@ export function PlanAnsicht({
     if (!file || !pos) return;
     try {
       const bild = await fotoAlsDataUrl(file);
-      seitenFormenSetzen((fs) => [
+      seitenFormenSetzen(pos.seite, (fs) => [
         ...fs,
         { id: neueId(), typ: "foto", x: pos.x, y: pos.y, bild, farbe: "#b0353c", breite: 3 / view.current.s },
       ]);
@@ -893,11 +1139,11 @@ export function PlanAnsicht({
     setTextDialog(null);
     const text = td.text.trimEnd();
     if (td.id) {
-      seitenFormenSetzen((fs) =>
+      seitenFormenSetzen(td.seite, (fs) =>
         text ? fs.map((f) => (f.id === td.id && f.typ === "text" ? { ...f, text } : f)) : fs.filter((f) => f.id !== td.id),
       );
     } else if (text) {
-      seitenFormenSetzen((fs) => [
+      seitenFormenSetzen(td.seite, (fs) => [
         ...fs,
         { id: neueId(), typ: "text", x: td.x, y: td.y, text, farbe, breite: 1, groesse: (12 + staerke * 2) / view.current.s },
       ]);
@@ -908,7 +1154,7 @@ export function PlanAnsicht({
 
   // ───────────── Darstellung der Formen ─────────────
   const s = view.current.s;
-  const zeichneForm = (f: Form, vorschau = false) => {
+  const zeichneForm = (f: Form, formen: Form[], vorschau = false) => {
     const strich = { stroke: f.farbe, strokeWidth: f.breite, fill: "none", strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
     const masstabText = (t: string, x: number, y: number) => {
       const g = 13 / s;
@@ -1023,22 +1269,18 @@ export function PlanAnsicht({
   };
 
   const radiertIds = geste.current?.art === "zeichnen" ? geste.current.radiert : undefined;
-  const sichtbareFormen = useMemo(
-    () =>
-      formen.filter((f) => {
-        if (radiertIds?.has(f.id)) return false;
-        if (entwurf && entwurf.id === f.id) return false; // Text wird gerade verschoben
-        return true;
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [formen, entwurf, viewVersion],
-  );
+  const sichtbareFormen = (formen: Form[]) =>
+    formen.filter((f) => {
+      if (radiertIds?.has(f.id)) return false;
+      if (entwurf && entwurf.form.id === f.id) return false; // Text wird gerade verschoben
+      return true;
+    });
 
   const aktion = (): PlanAktion | null => (inhalt ? { tab, inhalt, daten: datenRef.current } : null);
   const anzahlAnmerkungen = Object.values(daten.seiten).reduce((a, f) => a + f.length, 0);
 
   const cursor =
-    werkzeug === "hand" ? "grab" : werkzeug === "text" ? "text" : werkzeug === "radierer" ? "cell" : "crosshair";
+    werkzeug === null ? "grab" : werkzeug === "text" ? "text" : werkzeug === "radierer" ? "cell" : "crosshair";
 
   return (
     <div
@@ -1056,7 +1298,7 @@ export function PlanAnsicht({
             title={label}
             aria-label={label}
             aria-pressed={werkzeug === w}
-            onClick={() => setWerkzeug(w)}
+            onClick={() => setWerkzeug(werkzeug === w ? null : w)}
           >
             <I className="h-4 w-4" />
           </Button>
@@ -1123,7 +1365,7 @@ export function PlanAnsicht({
         >
           <Scaling className="h-4 w-4" />
         </Button>
-        <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" title="Ganzer Plan" aria-label="Ganzer Plan" onClick={einpassen}>
+        <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" title="Ganze Seite" aria-label="Ganzer Plan" onClick={() => einpassen()}>
           <Maximize2 className="h-4 w-4" />
         </Button>
         <div className="flex-1" />
@@ -1230,61 +1472,84 @@ export function PlanAnsicht({
             <div className="font-medium">Plan konnte nicht geladen werden</div>
             <div className="text-muted-foreground max-w-sm">{fehler}</div>
           </div>
-        ) : !groesse || !geladen ? (
+        ) : !lage || !geladen ? (
           <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm">
             <Loader2 className="h-5 w-5 animate-spin mr-2" /> Plan wird geladen…
           </div>
         ) : null}
         <div
           ref={untenRef}
-          className="absolute left-0 top-0 origin-top-left bg-white shadow-lg"
-          style={{ width: groesse?.w ?? 0, height: groesse?.h ?? 0, visibility: groesse ? "visible" : "hidden" }}
+          className="absolute left-0 top-0 origin-top-left"
+          style={{ width: lage?.W ?? 0, height: lage?.H ?? 0, visibility: lage ? "visible" : "hidden" }}
         >
-          {inhalt?.istPdf ? (
-            <canvas ref={grundRef} style={{ width: "100%", height: "100%", display: "block" }} />
-          ) : bildUrl ? (
-            <img src={bildUrl} alt={tab.dateiname} draggable={false} style={{ width: "100%", height: "100%", display: "block" }} />
-          ) : null}
+          {lage?.seiten.map((l, i) => (
+            <div
+              key={i}
+              className="absolute bg-white shadow-lg"
+              style={{ left: l.x, top: l.y, width: l.w, height: l.h }}
+              data-plan-seite={i + 1}
+            >
+              {inhalt?.istPdf ? (
+                <canvas
+                  ref={(c) => {
+                    grundRefs.current[i] = c;
+                  }}
+                  style={{ width: "100%", height: "100%", display: "block" }}
+                />
+              ) : bildUrl ? (
+                <img src={bildUrl} alt={tab.dateiname} draggable={false} style={{ width: "100%", height: "100%", display: "block" }} />
+              ) : null}
+            </div>
+          ))}
         </div>
         <canvas ref={scharfRef} className="absolute left-0 top-0 pointer-events-none" style={{ visibility: "hidden" }} />
         <div
           ref={obenRef}
           className="absolute left-0 top-0 origin-top-left pointer-events-none"
-          style={{ width: groesse?.w ?? 0, height: groesse?.h ?? 0 }}
+          style={{ width: lage?.W ?? 0, height: lage?.H ?? 0 }}
         >
-          {groesse && (
-            <svg
-              width={groesse.w}
-              height={groesse.h}
-              viewBox={`0 0 ${groesse.w} ${groesse.h}`}
-              style={{ overflow: "visible", display: "block" }}
-              data-testid="plan-ebene"
-              data-anzahl={formen.length}
-            >
-              {ebeneSichtbar && sichtbareFormen.map((f) => zeichneForm(f))}
-              {entwurf && zeichneForm(entwurf, true)}
-            </svg>
-          )}
+          {lage?.seiten.map((l, i) => {
+            const nr = i + 1;
+            const formen = formenVon(nr);
+            return (
+              <svg
+                key={i}
+                width={l.w}
+                height={l.h}
+                viewBox={`0 0 ${l.w} ${l.h}`}
+                style={{ overflow: "visible", display: "block", position: "absolute", left: l.x, top: l.y }}
+                data-testid="plan-ebene"
+                data-seite={nr}
+                data-anzahl={formen.length}
+              >
+                {ebeneSichtbar && sichtbareFormen(formen).map((f) => zeichneForm(f, formen))}
+                {entwurf && entwurf.seite === nr && zeichneForm(entwurf.form, formen, true)}
+              </svg>
+            );
+          })}
         </div>
 
-        {/* Seiten bei mehrseitigen PDFs */}
+        {/* Seiten bei mehrseitigen PDFs — Anzeige läuft beim Scrollen mit */}
         {seitenAnzahl > 1 && (
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-background/95 border rounded-full shadow px-1 py-0.5 text-xs">
-            <Button size="icon" variant="ghost" className="h-8 w-8" disabled={seite <= 1} onClick={() => setSeite(seite - 1)} aria-label="Vorige Seite">
+          <div
+            data-steuerung
+            className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-background/95 border rounded-full shadow px-1 py-0.5 text-xs"
+          >
+            <Button size="icon" variant="ghost" className="h-8 w-8" disabled={seite <= 1} onClick={() => zurSeite(seite - 1)} aria-label="Vorige Seite">
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <span className="tabular-nums px-1">
+            <span className="tabular-nums px-1" data-testid="plan-seite">
               Seite {seite} / {seitenAnzahl}
             </span>
-            <Button size="icon" variant="ghost" className="h-8 w-8" disabled={seite >= seitenAnzahl} onClick={() => setSeite(seite + 1)} aria-label="Nächste Seite">
+            <Button size="icon" variant="ghost" className="h-8 w-8" disabled={seite >= seitenAnzahl} onClick={() => zurSeite(seite + 1)} aria-label="Nächste Seite">
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
         )}
-        {entwurf?.typ === "flaeche" && (
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-background/95 border rounded-full shadow px-2 py-1 text-xs">
+        {entwurf?.form.typ === "flaeche" && (
+          <div data-steuerung className="absolute top-2 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-background/95 border rounded-full shadow px-2 py-1 text-xs">
             <span className="px-1">Eckpunkte antippen</span>
-            <Button size="sm" className="h-7" disabled={entwurf.punkte.length < 6} onClick={flaecheFertig}>
+            <Button size="sm" className="h-7" disabled={entwurf.form.punkte.length < 6} onClick={flaecheFertig}>
               <Check className="h-3.5 w-3.5 mr-1" /> Fläche fertig
             </Button>
             <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEntwurf(null)} aria-label="Abbrechen">
@@ -1348,16 +1613,17 @@ export function PlanAnsicht({
           <DialogHeader>
             <DialogTitle>Foto</DialogTitle>
           </DialogHeader>
-          {fotoZeigen && <img src={fotoZeigen.bild} alt="Foto zum Plan" className="max-h-[70vh] w-auto mx-auto rounded" />}
+          {fotoZeigen && <img src={fotoZeigen.form.bild} alt="Foto zum Plan" className="max-h-[70vh] w-auto mx-auto rounded" />}
           <Input
             placeholder="Notiz zum Foto (optional)"
-            defaultValue={fotoZeigen?.notiz ?? ""}
-            key={fotoZeigen?.id}
+            defaultValue={fotoZeigen?.form.notiz ?? ""}
+            key={fotoZeigen?.form.id}
             onBlur={(e) => {
-              const id = fotoZeigen?.id;
+              const fz = fotoZeigen;
+              const id = fz?.form.id;
               const notiz = e.target.value.trim();
-              if (!id || notiz === (fotoZeigen?.notiz ?? "")) return;
-              seitenFormenSetzen((fs) => fs.map((f) => (f.id === id && f.typ === "foto" ? { ...f, notiz } : f)));
+              if (!fz || !id || notiz === (fz.form.notiz ?? "")) return;
+              seitenFormenSetzen(fz.seite, (fs) => fs.map((f) => (f.id === id && f.typ === "foto" ? { ...f, notiz } : f)));
             }}
           />
           <DialogFooter className="flex-row gap-2">
@@ -1365,9 +1631,9 @@ export function PlanAnsicht({
               variant="outline"
               className="flex-1"
               onClick={() => {
-                const id = fotoZeigen?.id;
+                const fz = fotoZeigen;
                 setFotoZeigen(null);
-                if (id) seitenFormenSetzen((fs) => fs.filter((f) => f.id !== id));
+                if (fz) seitenFormenSetzen(fz.seite, (fs) => fs.filter((f) => f.id !== fz.form.id));
               }}
             >
               Pin entfernen

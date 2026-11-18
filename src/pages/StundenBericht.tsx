@@ -10,6 +10,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { zurueck } from "@/lib/menuGedaechtnis";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
@@ -438,7 +439,7 @@ export default function StundenBericht() {
         <p className="text-sm text-muted-foreground">
           Bericht nicht gefunden oder kein Zugriff.
         </p>
-        <Button variant="outline" onClick={() => navigate(-1)}>
+        <Button variant="outline" onClick={() => zurueck(navigate)}>
           <ChevronLeft className="h-4 w-4 mr-1" /> Zurück
         </Button>
       </div>
@@ -685,7 +686,7 @@ export default function StundenBericht() {
   return (
     <div className="space-y-4 max-w-5xl mx-auto pb-44 lg:pb-6">
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+        <Button variant="ghost" size="icon" onClick={() => zurueck(navigate)}>
           <ChevronLeft className="h-5 w-5" />
         </Button>
         <PageHeader title="Baustellenstundenbericht" />

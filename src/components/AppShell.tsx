@@ -1,5 +1,6 @@
-import { Component, ReactNode, Suspense, lazy, useEffect, useState } from "react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { Component, ReactNode, Suspense, lazy, useEffect, useRef, useState } from "react";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { bereichFuer, gedaechtnisLeeren, gemerktePosition, menueZustand, positionMerken } from "@/lib/menuGedaechtnis";
 import {
   LayoutDashboard,
   CalendarDays,
@@ -261,7 +262,35 @@ export function AppShell({ children }: { children: ReactNode }) {
     return false;
   });
 
+  // Letzte Position je Menüpunkt merken (E. Winkler 18.11.): wer zu einem
+  // anderen Menüpunkt wechselt und zurückkommt, landet wieder dort, wo er war.
+  // Tippt man auf den Menüpunkt, in dem man gerade ist, geht es zur Übersicht.
+  const location = useLocation();
+  const menuWurzeln = NAV.map((n) => n.to);
+  const bereichRef = useRef<string | null>(null);
+  useEffect(() => {
+    // Seiten ohne eigenen Menüpunkt gehören zu dem, aus dem man kam (bei Wiederherstellung: im Verlaufseintrag)
+    const b = bereichFuer(location.pathname, menuWurzeln) ?? menueZustand()?.bereich ?? bereichRef.current;
+    if (!b) return;
+    bereichRef.current = b;
+    if (user?.id) positionMerken(user.id, b, location.pathname + location.search);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, location.search, user?.id]);
+  const menuKlick = (to: string) => (e: React.MouseEvent) => {
+    if (!user?.id || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (to === "/") return; // Start/Dashboard immer frisch
+    const jetzt = bereichFuer(location.pathname, menuWurzeln) ?? bereichRef.current;
+    if (jetzt === to) return; // schon in diesem Menüpunkt → normal zur Übersicht
+    const ziel = gemerktePosition(user.id, to);
+    if (ziel && ziel !== to) {
+      e.preventDefault();
+      bereichRef.current = to;
+      navigate(ziel, { state: { ausMenue: true, bereich: to } });
+    }
+  };
+
   const handleLogout = async () => {
+    gedaechtnisLeeren();
     // Gerät vom Konto lösen, solange die Anmeldung noch gilt — sonst kämen
     // auf einem geteilten Tablet die Erinnerungen der vorigen Person weiter.
     await pushVomKontoLoesen();
@@ -311,6 +340,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               key={item.to}
               to={item.to}
               end={item.end ?? true}
+              onClick={menuKlick(item.to)}
               className={({ isActive }) =>
                 cn(
                   "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
@@ -514,6 +544,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               key={item.to}
               to={item.to}
               end={item.end}
+              onClick={menuKlick(item.to)}
               className={({ isActive }) =>
                 cn(
                   "flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px]",

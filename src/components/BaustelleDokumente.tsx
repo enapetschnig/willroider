@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { suchParameterSetzen } from "@/lib/menuGedaechtnis";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -140,6 +142,7 @@ function isPdf(mimetype?: string | null) {
 export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const { toast } = useToast();
   const { role, profile } = useAuth();
+  const navigate = useNavigate();
   const [docs, setDocs] = useState<Dokument[]>([]);
   /** dokument_id → letzter Versand (für „schon verschickt?"). */
   const [versand, setVersand] = useState<Map<string, VersandInfo>>(new Map());
@@ -159,8 +162,12 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const [offlineLaeuft, setOfflineLaeuft] = useState<{ fertig: number; gesamt: number } | null>(null);
   // "root" = Top-Level-Übersicht (alle 14 Ordner). Sonst = im Ordner drin.
   // ?ordner=91-plaene (aus „Mein Tag") öffnet den Ordner direkt
+  // ?dok=…&pfad=… = zuletzt offener Ordner (die Seitenleiste merkt sich die Adresse, E. Winkler 18.11.)
   const [currentFolder, setCurrentFolder] = useState<"root" | FolderKey>(() => {
-    const o = new URLSearchParams(window.location.search).get("ordner");
+    const q = new URLSearchParams(window.location.search);
+    const dok = q.get("dok");
+    if (dok) return dok as FolderKey;
+    const o = q.get("ordner");
     return o && BAUSTELLEN_ORDNER.some((f) => f.key === o) ? (o as FolderKey) : "root";
   });
   /** Tiefer Link (?ordner=91-plaene) bei verknüpfter Baustelle: nach dem Laden auf den echten Ordner umbiegen. */
@@ -434,7 +441,9 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
 
   // Subpath zurücksetzen, wenn der Top-Level-Ordner wechselt — außer eine
   // Kachel (Fotos/Unterweisung) will direkt in einen Unterordner springen.
-  const pendingSubRef = useRef<string | null>(null);
+  const pendingSubRef = useRef<string | null>(
+    new URLSearchParams(window.location.search).get("dok") ? new URLSearchParams(window.location.search).get("pfad") : null,
+  );
   useEffect(() => {
     setCurrentSubpath(pendingSubRef.current ?? "");
     pendingSubRef.current = null;
@@ -446,6 +455,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   };
 
   // Visibility-Settings laden (einmalig)
+  const [visGeladen, setVisGeladen] = useState(false);
   useEffect(() => {
     supabase
       .from("app_settings")
@@ -454,6 +464,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       .maybeSingle()
       .then(({ data }) => {
         if (data?.value) setVisibility(data.value as Visibility);
+        setVisGeladen(true);
       });
   }, []);
 
@@ -487,13 +498,24 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     }
   }, [visibleFolders]);
 
-  // Wenn im aktuellen Ordner kein Recht mehr → zurück zur Wurzel
+  // Wenn im aktuellen Ordner kein Recht mehr (oder den gemerkten Ordner gibt es
+  // nicht mehr) → zurück zur Wurzel. Erst wenn Ordner und Rechte geladen sind.
   useEffect(() => {
-    if (currentFolder === "root") return;
+    if (currentFolder === "root" || loading || !visGeladen) return;
     if (!visibleFolders.some((f) => f.key === currentFolder)) {
       setCurrentFolder("root");
     }
-  }, [visibleFolders, currentFolder]);
+  }, [visibleFolders, currentFolder, loading, visGeladen]);
+
+  // Offenen Ordner in die Adresse schreiben (ersetzt, kein neuer Verlaufseintrag)
+  useEffect(() => {
+    if (loading) return; // gemerkten Ordner nicht vor dem Laden überschreiben
+    suchParameterSetzen(navigate, {
+      dok: currentFolder === "root" ? null : currentFolder,
+      pfad: currentFolder === "root" || !currentSubpath ? null : currentSubpath,
+      ordner: null,
+    });
+  }, [currentFolder, currentSubpath, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Letzte hochgeladene Datei pro Top-Level-Ordner (für „aktualisiert" Datum in Wurzel)
   const folderStats = useMemo(() => {

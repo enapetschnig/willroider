@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { suchParameterSetzen } from "@/lib/menuGedaechtnis";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,8 +70,16 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
   const [docs, setDocs] = useState<Dokument[]>([]);
   const [folderMarkers, setFolderMarkers] = useState<Marker[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentFolder, setCurrentFolder] = useState<"root" | AngebotOrdnerKey>("root");
+  // ?dok=…&pfad=… = zuletzt offener Ordner (die Seitenleiste merkt sich die Adresse, E. Winkler 18.11.)
+  const navigate = useNavigate();
+  const [currentFolder, setCurrentFolder] = useState<"root" | AngebotOrdnerKey>(() => {
+    const dok = new URLSearchParams(window.location.search).get("dok");
+    return dok && ANGEBOT_ORDNER.some((f) => f.key === dok) ? (dok as AngebotOrdnerKey) : "root";
+  });
   const [currentSubpath, setCurrentSubpath] = useState<string>("");
+  const startPfad = useRef<string | null>(
+    currentFolder === "root" ? null : new URLSearchParams(window.location.search).get("pfad"),
+  );
   const [viewerItem, setViewerItem] = useState<DocViewerItem | null>(null);
   /** Welche Datei gerade groß offen ist — für Weiterblättern durch die Fotos des Ordners. */
   const [viewerDocId, setViewerDocId] = useState<string | null>(null);
@@ -107,8 +117,16 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
   }, [angebotId]);
 
   useEffect(() => {
-    setCurrentSubpath("");
+    setCurrentSubpath(startPfad.current ?? "");
+    startPfad.current = null;
   }, [currentFolder]);
+
+  useEffect(() => {
+    suchParameterSetzen(navigate, {
+      dok: currentFolder === "root" ? null : currentFolder,
+      pfad: currentFolder === "root" || !currentSubpath ? null : currentSubpath,
+    });
+  }, [currentFolder, currentSubpath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const folderStats = useMemo(() => {
     const stats: Record<string, { count: number; latest: string | null }> = {};

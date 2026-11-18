@@ -312,6 +312,7 @@ oder `admin.view`; `has_permission(_user_id, _schluessel)`.
 | Push, Erinnerungen, Dashboard-Hinweise | `.claude/rules/push-erinnerungen.md` | Benachrichtigungen, SMS-Ersatz, Cron, wer welchen Hinweis sieht |
 | Änderungswünsche | `.claude/rules/aenderungswuensche.md` | Antwort an den Melder (`admin_notiz`), Meine Wünsche, Besprechung |
 | Supabase-Protokolle | `.claude/rules/supabase-protokolle.md` | Meldungen aus den Fehlerprotokollen, die schon geprüft und harmlos sind |
+| Seitenleiste / Navigation | `.claude/rules/navigation-menue.md` | Letzte Position je Menüpunkt, Zustand in der URL, Zurück-Knöpfe |
 
 ## Wissen ablegen (für jede KI – auch den Roboter)
 - Diese Datei ist die kurze Kundenakte und bleibt unter 25 KB. Hier nur: wer der Kunde ist, feste Regeln, Technik, Index.
