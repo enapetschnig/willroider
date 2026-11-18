@@ -32,6 +32,8 @@ import {
   Download,
   ExternalLink,
   FileWarning,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 export interface DocViewerItem {
@@ -51,6 +53,11 @@ interface DocViewerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   item: DocViewerItem | null;
+  /** Vorige/nächste Datei der Liste (z. B. Fotos im Bericht) — Pfeile, Tasten ← →, Wischen. */
+  onVorher?: (() => void) | null;
+  onWeiter?: (() => void) | null;
+  /** z. B. „3 / 5“ */
+  position?: string | null;
 }
 
 type ViewKind = "image" | "pdf" | "office" | "text" | "other";
@@ -90,8 +97,30 @@ export function DocViewerDialog({
   open,
   onOpenChange,
   item,
+  onVorher,
+  onWeiter,
+  position,
 }: DocViewerDialogProps) {
   const { toast } = useToast();
+  const wischStart = useRef<{ x: number; y: number } | null>(null);
+
+  // Pfeiltasten am PC: ← vorige, → nächste Datei
+  useEffect(() => {
+    if (!open || (!onVorher && !onWeiter)) return;
+    const taste = (e: KeyboardEvent) => {
+      const ziel = e.target as HTMLElement | null;
+      if (ziel && (ziel.tagName === "INPUT" || ziel.tagName === "TEXTAREA" || ziel.isContentEditable)) return;
+      if (e.key === "ArrowLeft" && onVorher) {
+        e.preventDefault();
+        onVorher();
+      } else if (e.key === "ArrowRight" && onWeiter) {
+        e.preventDefault();
+        onWeiter();
+      }
+    };
+    window.addEventListener("keydown", taste);
+    return () => window.removeEventListener("keydown", taste);
+  }, [open, onVorher, onWeiter]);
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -228,6 +257,11 @@ export function DocViewerDialog({
       <DialogContent className="max-w-5xl w-[95vw] max-h-[92vh] p-0 flex flex-col gap-0">
         <DialogHeader className="px-4 py-3 border-b flex flex-row items-center justify-between gap-2 space-y-0">
           <DialogTitle className="text-sm font-semibold truncate flex-1">
+            {position && (
+              <span className="mr-2 text-muted-foreground font-normal" data-testid="viewer-position">
+                {position}
+              </span>
+            )}
             {item?.dateiname ?? "Dokument"}
           </DialogTitle>
           <div className="flex items-center gap-1.5 shrink-0">
@@ -265,7 +299,49 @@ export function DocViewerDialog({
           </div>
         </DialogHeader>
 
-        <div className="flex-1 min-h-[60vh] bg-muted/30 overflow-hidden">
+        <div
+          className="relative flex-1 min-h-[60vh] bg-muted/30 overflow-hidden"
+          onTouchStart={(e) => {
+            if (e.touches.length !== 1) {
+              wischStart.current = null;
+              return;
+            }
+            wischStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+          }}
+          onTouchEnd={(e) => {
+            const start = wischStart.current;
+            wischStart.current = null;
+            if (!start || e.changedTouches.length !== 1) return;
+            const dx = e.changedTouches[0].clientX - start.x;
+            const dy = e.changedTouches[0].clientY - start.y;
+            // nur deutliches waagrechtes Wischen zählt
+            if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+            if (dx < 0) onWeiter?.();
+            else onVorher?.();
+          }}
+        >
+          {onVorher && (
+            <button
+              type="button"
+              onClick={onVorher}
+              aria-label="Vorige Datei"
+              title="Vorige (←)"
+              className="absolute left-2 top-1/2 -translate-y-1/2 z-10 h-12 w-12 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/70"
+            >
+              <ChevronLeft className="h-7 w-7" />
+            </button>
+          )}
+          {onWeiter && (
+            <button
+              type="button"
+              onClick={onWeiter}
+              aria-label="Nächste Datei"
+              title="Nächste (→)"
+              className="absolute right-2 top-1/2 -translate-y-1/2 z-10 h-12 w-12 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/70"
+            >
+              <ChevronRight className="h-7 w-7" />
+            </button>
+          )}
           {loading || !signedUrl ? (
             <div className="h-full min-h-[60vh] flex items-center justify-center text-muted-foreground">
               <Loader2 className="h-6 w-6 animate-spin mr-2" />

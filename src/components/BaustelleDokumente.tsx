@@ -170,6 +170,8 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [viewerItem, setViewerItem] = useState<DocViewerItem | null>(null);
+  /** Welche Datei gerade groß offen ist — für Weiterblättern durch die Fotos des Ordners. */
+  const [viewerDocId, setViewerDocId] = useState<string | null>(null);
   const [sendItems, setSendItems] = useState<DocSendItem[] | null>(null);
   const [visibility, setVisibility] = useState<Visibility>(DEFAULT_VISIBILITY);
   const [dragOver, setDragOver] = useState(false);
@@ -681,6 +683,7 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       planViewer.oeffnen(planTab(d));
       return;
     }
+    setViewerDocId(d.id);
     if (istSharePointId(d.id)) {
       // Inhalt liegt in SharePoint — Adresse wird kurzfristig geholt.
       const ziel = await sharePointDateiUrl(d.id);
@@ -709,6 +712,21 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       dateiname: d.dateiname,
       mimetype: d.mimetype,
     });
+  };
+
+  // Fotos im selben Ordner groß ansehen und mit Pfeilen/Wischen weiterblättern
+  // (Wunsch J. Maurer, 18.11.2026). Bilder, die im Plan-Viewer aufgehen, nicht.
+  const blaetterListe = filtered.filter(
+    (d) =>
+      (isImage(d.mimetype) || /\.(jpe?g|png|gif|webp|bmp|heic|heif)$/i.test(d.dateiname)) &&
+      !(planFaehig(d.dateiname, d.mimetype) && folderMeta(d.ordner).klasse === "91-plaene"),
+  );
+  const blaetterIndex = viewerDocId ? blaetterListe.findIndex((d) => d.id === viewerDocId) : -1;
+  const blaetterBar = !!viewerItem && blaetterIndex >= 0 && blaetterListe.length > 1;
+  const blaettern = (schritt: number) => {
+    if (!blaetterBar) return;
+    const n = blaetterListe.length;
+    open(blaetterListe[(blaetterIndex + schritt + n) % n]);
   };
 
   /** Datei auf das Gerät laden — für eigene wie für SharePoint-Dateien. */
@@ -1897,8 +1915,16 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
 
       <DocViewerDialog
         open={!!viewerItem}
-        onOpenChange={(o) => !o && setViewerItem(null)}
+        onOpenChange={(o) => {
+          if (!o) {
+            setViewerItem(null);
+            setViewerDocId(null);
+          }
+        }}
         item={viewerItem}
+        onVorher={blaetterBar ? () => blaettern(-1) : null}
+        onWeiter={blaetterBar ? () => blaettern(1) : null}
+        position={blaetterBar ? `${blaetterIndex + 1} / ${blaetterListe.length}` : null}
       />
       <DocSendDialog
         open={!!sendItems}

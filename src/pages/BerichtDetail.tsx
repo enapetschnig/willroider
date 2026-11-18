@@ -1450,7 +1450,8 @@ function FotosEditor({
   const [fehlend, setFehlend] = useState<Set<string>>(new Set());
   /** Dokument-Angaben je Foto — für die Großansicht und PDF-Anhänge. */
   const [docInfo, setDocInfo] = useState<Map<string, { storage_path: string; dateiname: string; mimetype: string | null }>>(new Map());
-  const [gross, setGross] = useState<DocViewerItem | null>(null);
+  /** Dokument-ID des groß geöffneten Fotos — mit Pfeilen durch alle Fotos blättern. */
+  const [grossId, setGrossId] = useState<string | null>(null);
 
   // Lade signed-URLs für Thumbnails. HEIC (Handy-Format) zeigt Chrome/Edge
   // nicht an → im Browser in JPG umwandeln und als Blob-URL zeigen.
@@ -1530,9 +1531,23 @@ function FotosEditor({
   }, [fotos]);
 
   const oeffneGross = (dokumentId: string) => {
-    const d = docInfo.get(dokumentId);
-    if (!d) return;
-    setGross({ bucket: "baustellen", storage_path: d.storage_path, dateiname: d.dateiname, mimetype: d.mimetype });
+    if (!docInfo.get(dokumentId)) return;
+    setGrossId(dokumentId);
+  };
+  // Nur Fotos, deren Datei bekannt ist, in der Reihenfolge der Kacheln
+  const grossListe = fotos.map((f) => f.dokument_id).filter((id) => docInfo.has(id));
+  const grossIndex = grossId ? grossListe.indexOf(grossId) : -1;
+  const grossInfo = grossId ? docInfo.get(grossId) : undefined;
+  const gross = useMemo<DocViewerItem | null>(
+    () =>
+      grossInfo
+        ? { bucket: "baustellen", storage_path: grossInfo.storage_path, dateiname: grossInfo.dateiname, mimetype: grossInfo.mimetype }
+        : null,
+    [grossInfo],
+  );
+  const grossBlaettern = (schritt: number) => {
+    if (grossIndex < 0 || grossListe.length < 2) return;
+    setGrossId(grossListe[(grossIndex + schritt + grossListe.length) % grossListe.length]);
   };
 
   const upload = async (files: FileList | null) => {
@@ -1764,7 +1779,14 @@ function FotosEditor({
             );
           })}
         </div>
-        <DocViewerDialog open={!!gross} onOpenChange={(o) => !o && setGross(null)} item={gross} />
+        <DocViewerDialog
+          open={!!gross}
+          onOpenChange={(o) => !o && setGrossId(null)}
+          item={gross}
+          onVorher={grossListe.length > 1 && grossIndex >= 0 ? () => grossBlaettern(-1) : null}
+          onWeiter={grossListe.length > 1 && grossIndex >= 0 ? () => grossBlaettern(1) : null}
+          position={grossListe.length > 1 && grossIndex >= 0 ? `${grossIndex + 1} / ${grossListe.length}` : null}
+        />
       </CardContent>
     </Card>
   );

@@ -1,6 +1,10 @@
 # Journal
 
 
+## 2026-11-18 – Bericht-Fotos: in der Großansicht weiterblättern (J. Maurer)
+- `DocViewerDialog`: optionale Pfeile/Tasten/Wischen + Position; Bericht-Fotos, Dokumente Baustelle (Bilder außerhalb Pläne) und Angebot.
+- Test `tests/roboter/2026-11-18-bericht-fotos-weiterblaettern.spec.ts`; alle 15 Roboter-Tests grün.
+
 ## 2026-11-18 · Plan-Viewer (S. Egger)
 Ein-Klick-Öffnen, Tabs (gemerkt), Wischen, Nebeneinander, Zoom/Pinch mit scharfem Ausschnitt (A0), Werkzeuge
 (Freihand, Text, Pfeil, Rechteck, Wolke, Länge/Fläche mit Maßstab oder Kalibrierung, Foto-Pin, Radierer,

@@ -36,6 +36,10 @@ paths:
   Im Bericht a33c3e50 war unter „Fotos“ eine PDF (Plan, 11 MB) angehängt — „Aus Galerie“ (`accept="image/*"`) lässt am PC trotzdem jede Datei zu,
   `compressImage` reicht Nicht-Bilder durch. Kachel war leer. Jetzt: Klick auf Kachel → `DocViewerDialog` (Bild groß, PDF im Rahmen); PDF-Kachel zeigt
   die erste Seite (`lib/pdfVorschau.ts`) mit „PDF“-Marke; im Bericht-PDF wird die erste Seite eingepasst (nicht verzerrt) als Bild gedruckt. PDFs bleiben erlaubt.
+- **Fotos weiterblättern** (J. Maurer, 18.11.2026: „nach öffnen eines Bildes eine weiter Klick Funktion“): `DocViewerDialog` hat optional
+  `onVorher`/`onWeiter`/`position` → Pfeile links/rechts, Tasten ← →, Wischen, „3 / 5“ im Titel, am Ende wieder von vorn. Genutzt im Bericht (alle Fotos
+  inkl. PDF-Anhänge in Kachel-Reihenfolge) und in den Dokumente-Reitern von Baustelle und Angebot (nur Bilder im selben Ordner; Pläne gehen in den Plan-Viewer).
+  Probefahrt: Dev-Server scheitert hier an ENOSPC (inotify) → mit eigener Config `server.watch: null` starten.
 - **Bautagesbericht → Regiebericht** (J. Maurer, 17.11.2026: „Übernehmen in Regiebericht“): Knopf „In Regiebericht übernehmen“ im Kopf des
   Bautagesberichts (`uebernehmeInRegiebericht` in `useBericht.ts`). Legt den Regiebericht für denselben Tag/dieselbe Baustelle an (UNIQUE baustelle+datum+typ),
   kopiert Wetter, Besonderheiten, MA, Tätigkeiten, Aufmaß, Fotos (gleiche `dokument_id`, keine Kopie der Datei), keine Unterschriften. Gibt es den

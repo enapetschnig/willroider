@@ -71,6 +71,8 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
   const [currentFolder, setCurrentFolder] = useState<"root" | AngebotOrdnerKey>("root");
   const [currentSubpath, setCurrentSubpath] = useState<string>("");
   const [viewerItem, setViewerItem] = useState<DocViewerItem | null>(null);
+  /** Welche Datei gerade groß offen ist — für Weiterblättern durch die Fotos des Ordners. */
+  const [viewerDocId, setViewerDocId] = useState<string | null>(null);
   const [sendItems, setSendItems] = useState<DocSendItem[] | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState<{
@@ -244,12 +246,25 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
   };
 
   const openFile = (d: Dokument) => {
+    setViewerDocId(d.id);
     setViewerItem({
       bucket: "angebote",
       storage_path: d.storage_path,
       dateiname: d.dateiname,
       mimetype: d.mimetype,
     });
+  };
+
+  // Fotos im selben Ordner mit Pfeilen/Wischen weiterblättern (J. Maurer, 18.11.2026)
+  const blaetterListe = filtered.filter(
+    (d) => isImage(d.mimetype) || /\.(jpe?g|png|gif|webp|bmp|heic|heif)$/i.test(d.dateiname),
+  );
+  const blaetterIndex = viewerDocId ? blaetterListe.findIndex((d) => d.id === viewerDocId) : -1;
+  const blaetterBar = !!viewerItem && blaetterIndex >= 0 && blaetterListe.length > 1;
+  const blaettern = (schritt: number) => {
+    if (!blaetterBar) return;
+    const n = blaetterListe.length;
+    openFile(blaetterListe[(blaetterIndex + schritt + n) % n]);
   };
 
   const sendFile = (d: Dokument, e?: React.MouseEvent) => {
@@ -676,8 +691,16 @@ export function AngebotDokumente({ angebotId }: { angebotId: string }) {
 
       <DocViewerDialog
         open={!!viewerItem}
-        onOpenChange={(o) => !o && setViewerItem(null)}
+        onOpenChange={(o) => {
+          if (!o) {
+            setViewerItem(null);
+            setViewerDocId(null);
+          }
+        }}
         item={viewerItem}
+        onVorher={blaetterBar ? () => blaettern(-1) : null}
+        onWeiter={blaetterBar ? () => blaettern(1) : null}
+        position={blaetterBar ? `${blaetterIndex + 1} / ${blaetterListe.length}` : null}
       />
       <DocSendDialog
         open={!!sendItems}
