@@ -24,6 +24,7 @@ import {
 import { BesprechungsModus } from "@/components/admin/BesprechungsModus";
 import { FeedbackFaden } from "@/components/feedback/FeedbackFaden";
 import { WunschAntwort } from "@/components/feedback/WunschAntwort";
+import { signierePfade } from "@/lib/storageSign";
 
 const fmtDauer = (s: number) =>
   `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -119,26 +120,19 @@ export function AdminFeedback() {
     setNamen(m);
 
     // Signierte URLs für Sprachnachrichten + Datei-Anhänge (private Buckets, 1 h)
+    // Gesammelt signieren statt je Anhang einzeln gleichzeitig (Storage 429/544).
+    const [audioSig, dateiSig] = await Promise.all([
+      signierePfade("feedback-audio", list.map((r) => r.audio_pfad ?? ""), 3600),
+      signierePfade("feedback-dateien", list.map((r) => r.anhang_pfad ?? ""), 3600),
+    ]);
     const urls = new Map<string, string>();
     const dateiUrls = new Map<string, string>();
-    await Promise.all([
-      ...list
-        .filter((r) => r.audio_pfad)
-        .map(async (r) => {
-          const { data: signed } = await supabase.storage
-            .from("feedback-audio")
-            .createSignedUrl(r.audio_pfad!, 3600);
-          if (signed?.signedUrl) urls.set(r.id, signed.signedUrl);
-        }),
-      ...list
-        .filter((r) => r.anhang_pfad)
-        .map(async (r) => {
-          const { data: signed } = await supabase.storage
-            .from("feedback-dateien")
-            .createSignedUrl(r.anhang_pfad!, 3600);
-          if (signed?.signedUrl) dateiUrls.set(r.id, signed.signedUrl);
-        }),
-    ]);
+    for (const r of list) {
+      const a = r.audio_pfad ? audioSig.get(r.audio_pfad) : undefined;
+      if (a) urls.set(r.id, a);
+      const d = r.anhang_pfad ? dateiSig.get(r.anhang_pfad) : undefined;
+      if (d) dateiUrls.set(r.id, d);
+    }
     setAudioUrls(urls);
     setAnhangUrls(dateiUrls);
     setLoading(false);

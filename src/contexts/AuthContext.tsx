@@ -115,14 +115,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Initial-Load + Auth-State-Changes
   useEffect(() => {
     let mounted = true;
-    const handle = async (s: Session | null) => {
+    // Wann für wen zuletzt Profil/Rolle/Rechte geladen wurden.
+    let zuletzt: { id: string; zeit: number } | null = null;
+    const handle = async (s: Session | null, ereignis?: string) => {
       if (!mounted) return;
       setSession(s);
       // Dieselbe Person → dasselbe user-Objekt (siehe loadProfile).
       setUser((alt) => (alt && s?.user && alt.id === s.user.id ? alt : s?.user ?? null));
       if (s?.user) {
-        await loadProfile(s.user.id);
+        // Bei einer Token-Erneuerung derselben Person höchstens einmal pro
+        // Minute neu laden. Geht die Uhr am Gerät vor, hält supabase-js jedes
+        // frische Token sofort für abgelaufen: jedes Neuladen löste die nächste
+        // Erneuerung aus – Schleife mit ~10 Erneuerungen/s, dann 429 und
+        // Abfragen ohne Anmeldung (Mac, 17.11.2026).
+        const jetzt = Date.now();
+        const kurzVorher =
+          ereignis === "TOKEN_REFRESHED" &&
+          zuletzt?.id === s.user.id &&
+          Math.abs(jetzt - zuletzt.zeit) < 60_000;
+        if (!kurzVorher) {
+          zuletzt = { id: s.user.id, zeit: jetzt };
+          await loadProfile(s.user.id);
+        }
       } else {
+        zuletzt = null;
         setProfile(null);
         setTestzugang(false);
         setRole(null);
@@ -133,8 +149,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, s) => {
-      window.setTimeout(() => void handle(s), 0);
+    } = supabase.auth.onAuthStateChange((ereignis, s) => {
+      window.setTimeout(() => void handle(s, ereignis), 0);
     });
     supabase.auth.getSession().then(({ data: { session } }) => {
       void handle(session);

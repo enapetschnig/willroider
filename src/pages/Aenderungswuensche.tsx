@@ -36,6 +36,7 @@ import {
 import { FeedbackFaden } from "@/components/feedback/FeedbackFaden";
 import { WunschAntwort } from "@/components/feedback/WunschAntwort";
 import { BesprechungsModus, type BesprechungsWunsch } from "@/components/admin/BesprechungsModus";
+import { signierePfade } from "@/lib/storageSign";
 
 type Row = BesprechungsWunsch & {
   offene_frage: boolean | null;
@@ -105,25 +106,18 @@ export default function Aenderungswuensche() {
     );
 
     // Signierte URLs für Bild-/Sprach-Anhänge
-    const m = new Map<string, string>();
-    await Promise.all([
-      ...list
-        .filter((r) => r.anhang_pfad)
-        .map(async (r) => {
-          const { data: s } = await supabase.storage
-            .from("feedback-dateien")
-            .createSignedUrl(r.anhang_pfad!, 3600);
-          if (s?.signedUrl) m.set(`d:${r.id}`, s.signedUrl);
-        }),
-      ...list
-        .filter((r) => r.audio_pfad)
-        .map(async (r) => {
-          const { data: s } = await supabase.storage
-            .from("feedback-audio")
-            .createSignedUrl(r.audio_pfad!, 3600);
-          if (s?.signedUrl) m.set(`a:${r.id}`, s.signedUrl);
-        }),
+    // Gesammelt signieren statt je Anhang einzeln gleichzeitig (Storage 429/544).
+    const [dateiSig, audioSig] = await Promise.all([
+      signierePfade("feedback-dateien", list.map((r) => r.anhang_pfad ?? ""), 3600),
+      signierePfade("feedback-audio", list.map((r) => r.audio_pfad ?? ""), 3600),
     ]);
+    const m = new Map<string, string>();
+    for (const r of list) {
+      const d = r.anhang_pfad ? dateiSig.get(r.anhang_pfad) : undefined;
+      if (d) m.set(`d:${r.id}`, d);
+      const a = r.audio_pfad ? audioSig.get(r.audio_pfad) : undefined;
+      if (a) m.set(`a:${r.id}`, a);
+    }
     setMedien(m);
     setLaedt(false);
   };

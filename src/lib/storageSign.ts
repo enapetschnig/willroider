@@ -11,12 +11,26 @@ export async function signiereBaustellenPfade(
   pfade: string[],
   ttlSekunden: number,
 ): Promise<Map<string, string>> {
+  return signierePfade("baustellen", pfade, ttlSekunden);
+}
+
+/**
+ * Wie signiereBaustellenPfade, für einen beliebigen privaten Bucket
+ * (z. B. „feedback-dateien“, „feedback-audio“: die Änderungswunsch-Liste
+ * signierte je Anhang einzeln, ~70 gleichzeitig, bei jeder Änderung neu →
+ * 429/544, 17.11.2026).
+ */
+export async function signierePfade(
+  bucket: string,
+  pfade: string[],
+  ttlSekunden: number,
+): Promise<Map<string, string>> {
   const ergebnis = new Map<string, string>();
   const eindeutig = [...new Set(pfade.filter(Boolean))];
   for (let i = 0; i < eindeutig.length; i += 100) {
     const teil = eindeutig.slice(i, i + 100);
     const { data, error } = await supabase.storage
-      .from("baustellen")
+      .from(bucket)
       .createSignedUrls(teil, ttlSekunden);
     if (!error && data) {
       for (const d of data) {
@@ -28,7 +42,7 @@ export async function signiereBaustellenPfade(
     for (const pfad of teil) {
       if (ergebnis.has(pfad)) continue;
       const { data: einzeln } = await supabase.storage
-        .from("baustellen")
+        .from(bucket)
         .createSignedUrl(pfad, ttlSekunden);
       if (einzeln?.signedUrl) ergebnis.set(pfad, einzeln.signedUrl);
     }
