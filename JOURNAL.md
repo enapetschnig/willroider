@@ -1,5 +1,14 @@
 # Journal
 
+
+## 2026-11-18 · Plan-Viewer (S. Egger)
+Ein-Klick-Öffnen, Tabs (gemerkt), Wischen, Nebeneinander, Zoom/Pinch mit scharfem Ausschnitt (A0), Werkzeuge
+(Freihand, Text, Pfeil, Rechteck, Wolke, Länge/Fläche mit Maßstab oder Kalibrierung, Foto-Pin, Radierer,
+Rückgängig/Wiederholen, Ebene ein/aus), Stift-Handballenschutz, Kopie als PDF nach SharePoint, Teilen (Link/Mail),
+offline (IndexedDB + /plaene). Migration `20261118120000_plan_anmerkungen` live. Probefahrt
+`tests/roboter/2026-11-18-plan-viewer.spec.ts` (auch Offline-Neustart im Produktions-Build). Nicht am echten Tablet/Stift
+getestet; SharePoint-Ankunft nur bis `dokumente`-Zeile geprüft (Testumgebung ohne Graph).
+
 ## 2026-11-13 – Antwort auf Änderungswünsche (admin_notiz) sichtbar
 - `admin_notiz` wurde vom Roboter befüllt (67 umgesetzte Wünsche), aber nirgends angezeigt. Neu: `WunschAntwort.tsx` in Meine Wünsche, `/aenderungswuensche`, AdminFeedback, Besprechungsmodus.
 - Keine DB-Änderung: RLS `feedback_select` gibt dem Melder seine eigenen Zeilen inkl. `admin_notiz`, Spaltenrechte für `authenticated` vorhanden. Probefahrt `tests/roboter/2026-11-13-wunsch-antwort-anzeigen.spec.ts`, alle 10 grün.

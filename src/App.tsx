@@ -29,6 +29,7 @@ import TaetigkeitsberichteListe from "@/pages/TaetigkeitsberichteListe";
 import BerichteArchiv from "@/pages/BerichteArchiv";
 import Berichte from "@/pages/Berichte";
 import Notizen from "@/pages/Notizen";
+import Plaene from "@/pages/Plaene";
 import Aenderungswuensche from "@/pages/Aenderungswuensche";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import BerichtDetail from "@/pages/BerichtDetail";
@@ -105,6 +106,8 @@ const App = () => (
               <Route path="/tagesplanung" element={<RequirePermission perm="tagesplanung.edit"><Tagesplanung /></RequirePermission>} />
               <Route path="/baustellen" element={<RequirePermission perm="baustellen.view"><Baustellen /></RequirePermission>} />
               <Route path="/baustellen/:id" element={<RequirePermission perm="baustellen.view"><BaustelleDetail /></RequirePermission>} />
+              {/* Ohne Rechte-Prüfung: muss auch offline gehen; zeigt nur, was dieses Gerät selbst gespeichert hat. */}
+              <Route path="/plaene" element={<Plaene />} />
               <Route path="/angebote" element={<RequirePermission perm="angebote.view"><Angebote /></RequirePermission>} />
               <Route path="/angebote/:id" element={<RequirePermission perm="angebote.view"><AngebotDetail /></RequirePermission>} />
               <Route path="/admin" element={<RequirePermission perm="admin.view"><Admin /></RequirePermission>} />

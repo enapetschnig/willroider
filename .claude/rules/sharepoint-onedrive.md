@@ -68,3 +68,15 @@ App gelöscht wird, bleibt in SharePoint. Einmalige Löschungen nur auf ausdrüc
   OneDrive-Abgleich nach (Fall Winkler, 28.10.) — erst in SharePoint selbst nachsehen.
 - Testreste, die von Hand gelöscht werden müssten: „ZZ TEST App-Vorlage …“ im Team „Aktuelle BVH Gruber Peter“;
   falsch abgelegte „1404050-2606 Baustellenanlage 2026-10-19.pdf“ in „1404050-2605 Egger Test“.
+
+## Plan-Viewer (S. Egger, 18.11.2026)
+- PDFs/Bilder im Dokumente-Reiter öffnen mit **einem Klick** im Plan-Viewer (`components/plan/`, app-weit in
+  AppShell, Tabs in localStorage `willroider:planViewer`). Auswählen: Kästchen, Strg/Umschalt, oder Klick, sobald
+  schon etwas ausgewählt ist. Andere Dateien weiter im `DocViewerDialog`.
+- Anmerkungen = eigene Ebene je Person in `plan_anmerkungen` (Schlüssel `sp:<sharepoint_dateien.id>` / `dok:<id>`,
+  RLS nur eigene), lokal zuerst in IndexedDB `willroider-plaene` (geht offline, „ausstehend“ wird nachgeholt).
+- „Als Kopie speichern“ = pdf-lib (Original bleibt Vektor) → normaler Upload (`dokumente` + `sharepoint_ziel_pfad`)
+  → `sharepoint-schreiben`. **Eine gespeicherte Kopie wird nie überschrieben** (Wunsch 3.7 „Änderungen automatisch
+  synchronisieren“ widerspricht der Nix-löschen/überschreiben-Regel) → erneut speichern = neue Datei.
+- Offline: `/plaene` (ohne Rechte-Prüfung, zeigt nur Geräte-Speicher). pdf.worker (.mjs) ist nicht im Vorab-Cache —
+  `offlineSpeichern` ruft ihn einmal ab, damit der Service Worker ihn behält.

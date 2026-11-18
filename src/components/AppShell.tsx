@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, Suspense, lazy, useEffect, useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -26,6 +26,7 @@ import {
   NotebookPen,
   Bell,
   Archive,
+  Map as MapIcon,
 } from "lucide-react";
 import { InstallPromptDialog } from "./InstallPromptDialog";
 import { detectPlatform } from "./InstallGuide";
@@ -51,6 +52,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import ChangePasswordDialog from "@/components/ChangePasswordDialog";
 import { cn } from "@/lib/utils";
+import { usePlanViewer } from "@/lib/plan/planTabs";
+import { usePlanSync } from "@/lib/plan/planSync";
+
+// Plan-Viewer erst laden, wenn ein Plan offen ist (PDF-Bausteine sind groß).
+const PlanViewer = lazy(() => import("@/components/plan/PlanViewer"));
 import type { PermissionKey } from "@/lib/permissionKeys";
 
 type NavItem = {
@@ -80,6 +86,7 @@ const NAV: NavItem[] = [
   { to: "/tagesplanung", label: "Tagesplanung", icon: ClipboardCheck, perm: "tagesplanung.edit", end: true },
   { to: "/angebote", label: "Angebote", icon: Briefcase, perm: "angebote.view", end: false },
   { to: "/baustellen", label: "Baustellen", icon: Building2, perm: "baustellen.view", end: false },
+  { to: "/plaene", label: "Pläne", icon: MapIcon, perm: "baustellen.view", end: true },
   // Angestellte erfassen im Tätigkeitsbericht, nicht hier — sonst gäbe es
   // zwei Wege zu denselben Stunden.
   { to: "/stunden", label: "Zeiterfassung", icon: Clock, perm: "stunden.view_eigene", end: true,
@@ -108,6 +115,8 @@ const NAV: NavItem[] = [
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, profile, role, isAdmin, canReview, hasPermission, signOut, einfacheAnsicht } = useAuth();
   const navigate = useNavigate();
+  const planViewerZustand = usePlanViewer();
+  usePlanSync(!!user);
   const [installOpen, setInstallOpen] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -501,6 +510,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <InstallPromptDialog open={installOpen} onClose={closeInstallDialog} />
       <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} bildschirmfoto={feedbackBild} />
+      {planViewerZustand.offen && planViewerZustand.tabs.length > 0 && (
+        <Suspense fallback={null}>
+          <PlanViewer />
+        </Suspense>
+      )}
     </div>
   );
 }

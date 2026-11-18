@@ -91,6 +91,8 @@ import {
   type SharePointUnterordner,
 } from "@/lib/sharepoint";
 import { ordnerKlasse, pfadKlasse, speicherPfadTeil } from "@/lib/ordnerKlasse";
+import { planFaehig, planViewer, usePlanViewer, type PlanTab } from "@/lib/plan/planTabs";
+import { offlineSpeichern } from "@/lib/plan/planQuelle";
 
 // Einheitliche, dezente Folder-Farbe (Windows-Yellow)
 const FOLDER_COLOR = "#eab308";
@@ -151,6 +153,10 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
   /** Unterpfad für den nächsten Upload, wenn er nicht der aktuelle ist (Foto-Kachel). */
   const [uploadSub, setUploadSub] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  /** Name der Baustelle — für die Tabs im Plan-Viewer und die Offline-Liste. */
+  const [baustelleName, setBaustelleName] = useState<string | null>(null);
+  const planZustand = usePlanViewer();
+  const [offlineLaeuft, setOfflineLaeuft] = useState<{ fertig: number; gesamt: number } | null>(null);
   // "root" = Top-Level-Übersicht (alle 14 Ordner). Sonst = im Ordner drin.
   // ?ordner=91-plaene (aus „Mein Tag") öffnet den Ordner direkt
   const [currentFolder, setCurrentFolder] = useState<"root" | FolderKey>(() => {
@@ -301,10 +307,13 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     setLoading(true);
     const { data: bst } = await supabase
       .from("baustellen")
-      .select("sharepoint_item_id")
+      .select("sharepoint_item_id, bvh_name, kostenstelle")
       .eq("id", baustelleId)
       .maybeSingle();
     const istVerknuepft = !!(bst as any)?.sharepoint_item_id;
+    setBaustelleName(
+      bst ? [(bst as any).kostenstelle, (bst as any).bvh_name].filter(Boolean).join(" ") || null : null,
+    );
     const [d, m, sp, uo] = await Promise.all([
       supabase
         .from("dokumente")
@@ -651,7 +660,25 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
     return uploadItems(items, folder);
   };
 
+  /** Plan-Viewer-Tab zu einer Datei (PDF/Bild). */
+  const planTab = (d: Dokument): PlanTab => ({
+    key: istSharePointId(d.id) ? d.id : `dok:${d.id}`,
+    dateiname: d.dateiname,
+    mimetype: d.mimetype,
+    baustelleId,
+    baustelleName,
+    storagePath: istSharePointId(d.id) ? null : d.storage_path,
+    ordnerKey: d.ordner,
+    subpath: d.subpath ?? "",
+  });
+
   const open = async (d: Dokument) => {
+    // Pläne (PDF) und Bilder öffnen im Plan-Viewer — mit einem Klick, in
+    // einem eigenen Tab (Wunsch S. Egger, 18.11.2026).
+    if (planFaehig(d.dateiname, d.mimetype)) {
+      planViewer.oeffnen(planTab(d));
+      return;
+    }
     if (istSharePointId(d.id)) {
       // Inhalt liegt in SharePoint — Adresse wird kurzfristig geholt.
       const ziel = await sharePointDateiUrl(d.id);
@@ -762,6 +789,39 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
       }
       return next;
     });
+  };
+  /** Alle Pläne der Baustelle (Ordner „Pläne“ samt Unterordnern), die der Viewer zeigen kann. */
+  const plaeneDerBaustelle = useMemo(
+    () => docs.filter((d) => planFaehig(d.dateiname, d.mimetype) && folderMeta(d.ordner).klasse === "91-plaene"),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [docs, alleFolders],
+  );
+  const alleOfflineSpeichern = async () => {
+    const liste = plaeneDerBaustelle;
+    let ok = 0;
+    setOfflineLaeuft({ fertig: 0, gesamt: liste.length });
+    for (const d of liste) {
+      try {
+        await offlineSpeichern(planTab(d));
+        ok++;
+      } catch {
+        /* einzelne Datei nicht erreichbar → weiter */
+      }
+      setOfflineLaeuft((v) => (v ? { ...v, fertig: v.fertig + 1 } : v));
+    }
+    setOfflineLaeuft(null);
+    toast({
+      title: `${ok} von ${liste.length} Plänen offline gespeichert`,
+      description: "Ohne Netz zu finden im Menü unter „Pläne“.",
+      ...(ok < liste.length ? { variant: "destructive" as const } : {}),
+    });
+  };
+
+  /** Ein Klick öffnet (auch am Tablet). Auswählen: Kästchen, Strg/Umschalt
+   *  oder — sobald etwas ausgewählt ist — jeder weitere Klick. */
+  const klick = (d: Dokument, e: React.MouseEvent) => {
+    if (e.ctrlKey || e.metaKey || e.shiftKey || selected.size > 0) toggleSelection(d.id, e);
+    else void open(d);
   };
   const clearSelection = () => setSelected(new Set());
   const selectAll = () => setSelected(new Set(filtered.map((d) => d.id)));
@@ -1419,7 +1479,27 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
           </>
         )}
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 flex-wrap justify-end">
+          {!planZustand.offen && planZustand.tabs.length > 0 && (
+            <Button onClick={() => planViewer.zeigen()} variant="outline" className="h-9">
+              <FileText className="h-4 w-4 mr-2" />
+              Offene Pläne ({planZustand.tabs.length})
+            </Button>
+          )}
+          {currentFolder !== "root" && folderMeta(currentFolder).klasse === "91-plaene" && plaeneDerBaustelle.length > 0 && (
+            <Button
+              onClick={alleOfflineSpeichern}
+              variant="outline"
+              className="h-9"
+              disabled={!!offlineLaeuft}
+              title="Alle Pläne dieser Baustelle auf diesem Gerät speichern — gehen dann auch ohne Netz (Menü → Pläne)"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              {offlineLaeuft
+                ? `Offline speichern … ${offlineLaeuft.fertig}/${offlineLaeuft.gesamt}`
+                : `Alle Pläne offline speichern (${plaeneDerBaustelle.length})`}
+            </Button>
+          )}
           {currentFolder === "fotos" || currentFolder === "root" ? (
             <Button onClick={triggerCamera} variant="default" className="h-9">
               <Camera className="h-4 w-4 mr-2" />
@@ -1711,8 +1791,8 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
                       onRenameCommit={commitRename}
                       onRenameCancel={cancelRename}
                       onOpen={() => open(d)}
-                      onClick={(e) => toggleSelection(d.id, e)}
-                      onDoubleClick={() => open(d)}
+                      onClick={(e) => klick(d, e)}
+                      onDoubleClick={() => undefined}
                       onDelete={(e) => remove(d, e)}
                       onSend={(e) => sendOne(d, e)}
                       onDownload={(e) => herunterladen(d, e)}
@@ -1741,8 +1821,8 @@ export function BaustelleDokumente({ baustelleId }: { baustelleId: string }) {
                   onRenameChange={setRenameValue}
                   onRenameCommit={commitRename}
                   onRenameCancel={cancelRename}
-                  onRowClick={(d, e) => toggleSelection(d.id, e)}
-                  onRowDoubleClick={(d) => open(d)}
+                  onRowClick={(d, e) => klick(d, e)}
+                  onRowDoubleClick={() => undefined}
                   onStartRename={(d) => startRename(d)}
                   onDelete={(d) => remove(d)}
                   onSend={(d) => sendOne(d)}
@@ -2017,11 +2097,13 @@ function FileCard({
             {/* Selection-Checkbox-Overlay (immer sichtbar bei Selektion, sonst on-hover) */}
             <div
               className={`absolute top-1.5 left-1.5 transition-opacity ${
-                isSelected ? "opacity-100" : "sm:opacity-0 sm:group-hover:opacity-100 opacity-100"
+                isSelected ? "opacity-100" : "sm:opacity-0 sm:group-hover:opacity-100 opacity-100 [@media(hover:none)]:opacity-100"
               }`}
               onClick={(e) => {
                 e.stopPropagation();
-                onClick(e);
+                // Kästchen wählt zusätzlich aus (wie Strg+Klick) — ein
+                // einfacher Klick auf die Kachel öffnet die Datei.
+                onClick({ ctrlKey: true } as React.MouseEvent);
               }}
             >
               <Checkbox

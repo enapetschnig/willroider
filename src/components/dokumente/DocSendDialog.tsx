@@ -37,6 +37,8 @@ export interface DocSendItem {
   dateiname: string;
   groesse?: number | null;
   mimetype?: string | null;
+  /** Fertige Datei (z. B. Plan mit Anmerkungen) statt aus dem Storage laden. */
+  blob?: Blob;
 }
 
 interface DocSendDialogProps {
@@ -147,6 +149,10 @@ export function DocSendDialog({
       // Dateien aus Storage laden + base64-kodieren
       const attachments: { filename: string; contentBase64: string }[] = [];
       for (const item of items) {
+        if (item.blob) {
+          attachments.push({ filename: item.dateiname, contentBase64: await blobToBase64(item.blob) });
+          continue;
+        }
         const { data, error } = await supabase.storage
           .from(item.bucket)
           .download(item.storage_path);
