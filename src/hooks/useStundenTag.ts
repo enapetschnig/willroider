@@ -192,10 +192,7 @@ export function useSaveStundenTag() {
       // transaktional, ein späterer Abbruch ließe den Tag halb gespeichert.
       if (!input.zulagenUnveraendert && input.zulagen.length > 1) {
         const { data: typen } = await supabase.from("zulagen_typen").select("*");
-        const arbeit = input.taetigkeiten
-          .filter((t) => t.art === "baustelle" || t.art === "firma")
-          .reduce((s, t) => s + Number(t.stunden || 0), 0);
-        const fehler = zulagenUeberschneidung(input.zulagen, (typen as unknown[]) ?? [], arbeit);
+        const fehler = zulagenUeberschneidung(input.zulagen, (typen as unknown[]) ?? []);
         if (fehler) throw new Error(fehler);
       }
 

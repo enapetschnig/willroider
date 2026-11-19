@@ -71,42 +71,41 @@ export function erlaubteZulagenIds(typen: readonly unknown[], zugeteilteIds: rea
 }
 
 /**
- * „Für dieselbe Tätigkeit nur eine Zulage“ (J. Maurer, 19.11.2026):
- * Zulagen derselben Ausschluss-Gruppe (Schmutz 10 % / Abbruch 15 %) dürfen
- * nicht für dieselben Stunden gelten. Beide an einem Tag nur mit
- * Stundenangabe und zusammen höchstens die Arbeitsstunden des Tages.
- * Liefert den Hinweistext oder null.
+ * „Für dieselbe Tätigkeit nur eine Zulage“ (J. Maurer, 19.11.2026; Christoph
+ * am selben Tag: „nicht mehr beide gleichzeitig auswählbar – Auswahl des einen
+ * nimmt das andere weg“): Zulagen derselben Ausschluss-Gruppe (Schmutz 10 % /
+ * Abbruch 15 %) gibt es an einem Tag nur eine. Liefert den Hinweistext oder null.
+ * arbeitsStunden bleibt für bestehende Aufrufer im Aufruf, zählt aber nicht mehr.
  */
 export function zulagenUeberschneidung(
   gewaehlt: readonly { zulagen_typ_id: string; stunden: number | null }[],
   typen: readonly unknown[],
-  arbeitsStunden: number,
+  _arbeitsStunden?: number,
 ): string | null {
   const byId = new Map((typen as ZulagenTypRegel[]).map((t) => [t.id, t]));
-  const gruppen = new Map<string, { namen: string[]; summe: number; ohneStunden: boolean }>();
+  const gruppen = new Map<string, string[]>();
   for (const z of gewaehlt) {
     const t = byId.get(z.zulagen_typ_id);
     const g = t?.ausschluss_gruppe;
     if (!t || !g) continue;
     if (z.stunden != null && Number(z.stunden) <= 0) continue;
-    const e = gruppen.get(g) ?? { namen: [], summe: 0, ohneStunden: false };
-    if (!e.namen.includes(t.bezeichnung)) e.namen.push(t.bezeichnung);
-    if (z.stunden == null) e.ohneStunden = true;
-    else e.summe += Number(z.stunden);
-    gruppen.set(g, e);
+    const namen = gruppen.get(g) ?? [];
+    if (!namen.includes(t.bezeichnung)) namen.push(t.bezeichnung);
+    gruppen.set(g, namen);
   }
-  for (const e of gruppen.values()) {
-    if (e.namen.length < 2) continue;
-    const liste = e.namen.join(" und ");
-    if (e.ohneStunden || e.summe > arbeitsStunden + 0.001) {
-      const max = String(Math.round(arbeitsStunden * 100) / 100).replace(".", ",");
-      return `${liste} gibt es nicht für dieselben Stunden – bitte nur eine wählen oder die Stunden aufteilen (zusammen höchstens ${max} Std.).`;
-    }
+  for (const namen of gruppen.values()) {
+    if (namen.length < 2) continue;
+    return `${namen.join(" und ")} gibt es nicht am selben Tag – bitte nur eine wählen.`;
   }
   return null;
 }
 
-/** Andere Zulagen derselben Ausschluss-Gruppe (für „antippen = umschalten“). */
+/** Hinweis bei der Auswahl, welche der beiden gilt (J. Maurer, 19.11.2026, nach KV). */
+export const SCHMUTZ_ABBRUCH_HINWEIS =
+  "Nur eine von beiden: Abbruch einer Dippelbaum- oder Tramdecke samt Beschüttung = Schmutzzulage (10 %); " +
+  "echter Abbruch (ganze Bauteile, Dachstühle, mit Staubentwicklung) = Abbruchzulage (15 %).";
+
+/** Andere Zulagen derselben Ausschluss-Gruppe (antippen der einen nimmt die andere weg). */
 export function zulagenGleicheGruppe(typId: string, typen: readonly unknown[]): string[] {
   const t = typen as ZulagenTypRegel[];
   const g = t.find((x) => x.id === typId)?.ausschluss_gruppe;

@@ -49,6 +49,13 @@ paths:
   `lib/zulagen.ts`: beide nur mit Stunden und zusammen ≤ Arbeitsstunden; geprüft in `useSaveStundenTag` VOR dem ersten
   Schreiben (Speichern ist nicht transaktional → keine ablehnenden DB-Trigger). Halle/Tätigkeitsbericht geben
   `zulagenUnveraendert` mit. Die 27 Alt-Tage blieben unverändert (welche Zulage stimmt, entscheidet das Büro).
+  **Verschärft am 19.11.2026 abends (Christoph: „nicht mehr beide gleichzeitig auswählbar – Auswahl des einen nimmt das
+  andere weg, auch serverseitig/DB absichern“):** kein Aufteilen der Stunden mehr — je Tag nur eine der beiden, Antippen
+  (Stunden, Tag bearbeiten, Büro-Korrektur) nimmt die andere weg, Hinweis `SCHMUTZ_ABBRUCH_HINWEIS` unter der Auswahl.
+  DB-Trigger `trg_stunden_zulagen_schmutz_abbruch` löscht beim Speichern die andere derselben Gruppe (zuletzt gespeicherte
+  gilt, nicht ablehnen). Ausnahme: Tage in `zulagen_ausschluss_altfaelle` (28 Alt-Tage, Sicherung
+  `~/roboter/sicherungen/willroider-2026-11-19-zulagen-doppelt/`) — Rückfrage an Maurer als `feedback_kommentare.ist_frage`
+  im Wunsch f92eea3d; nach seiner Antwort bereinigen und die Zeilen aus `zulagen_ausschluss_altfaelle` löschen.
 - **Vorarbeiterzulage** (19.11.2026) nur für Martin Tripolt: `zulagen_typen.nur_zugeteilt` — erscheint nur bei
   Zuteilung (Mitarbeiter → Erlaubte Zulagen) und zählt NICHT als „bewusste Zuteilung“ (`erlaubteZulagenIds()`); DB-Trigger
   `stunden_zulagen_nur_zugeteilt` lässt sie bei Nicht-Zugeteilten still weg. Nicht auf dem Erschwernis-Zettel.

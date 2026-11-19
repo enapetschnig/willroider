@@ -36,7 +36,7 @@ import {
   useTaetigkeitenStamm,
   useZulagenTypen,
 } from "@/hooks/useStammdatenStunden";
-import { zulagenUeberschneidung } from "@/lib/zulagen";
+import { SCHMUTZ_ABBRUCH_HINWEIS, zulagenGleicheGruppe, zulagenUeberschneidung } from "@/lib/zulagen";
 import { fmtH } from "@/lib/zeiterfassung";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
@@ -95,13 +95,10 @@ export function AdminTagEditModal({
   const [zulagen, setZulagen] = useState<FormZul[]>([]);
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const { data: zugeteilteZulagen = [] } = useMitarbeiterZulagen(tag?.tag.mitarbeiter_id);
-  // Schmutz + Abbruch nicht für dieselben Stunden (J. Maurer, 19.11.2026)
+  // Schmutz + Abbruch nicht am selben Tag (J. Maurer, 19.11.2026)
   const zulagenWarnung = zulagenUeberschneidung(
     zulagen.filter((z) => z.zulagen_typ_id),
     zulagenTypen,
-    eintraege
-      .filter((e) => istArbeitArt(e.art))
-      .reduce((s, e) => s + Number(e.stunden || 0), 0),
   );
 
   // Reset Form wenn ein neuer Tag geladen wird
@@ -174,7 +171,14 @@ export function AdminTagEditModal({
   const removeZul = (idx: number) =>
     setZulagen((cur) => cur.filter((_, i) => i !== idx));
   const updateZul = (idx: number, patch: Partial<FormZul>) =>
-    setZulagen((cur) => cur.map((z, i) => (i === idx ? { ...z, ...patch } : z)));
+    setZulagen((cur) => {
+      const neu = cur.map((z, i) => (i === idx ? { ...z, ...patch } : z));
+      // Schmutz- oder Abbruchzulage, nie beide (J. Maurer/Christoph, 19.11.2026):
+      // die neu gewählte nimmt die andere weg.
+      if (!patch.zulagen_typ_id) return neu;
+      const andere = new Set(zulagenGleicheGruppe(patch.zulagen_typ_id, zulagenTypen));
+      return neu.filter((z, i) => i === idx || !andere.has(z.zulagen_typ_id));
+    });
 
   const handleSave = async () => {
     // Keine Arbeitsstunden ohne Baustelle bzw. Kostenstelle (N. Gwenger 08.10.)
@@ -504,6 +508,9 @@ export function AdminTagEditModal({
             </div>
             {zulagenWarnung && (
               <p className="mt-1.5 text-xs text-destructive font-medium">{zulagenWarnung}</p>
+            )}
+            {zulagen.length > 0 && zulagenTypen.some((z) => (z as any).ausschluss_gruppe) && (
+              <p className="mt-1 text-[11px] text-muted-foreground">{SCHMUTZ_ABBRUCH_HINWEIS}</p>
             )}
           </div>
 

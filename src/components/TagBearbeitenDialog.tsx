@@ -38,7 +38,7 @@ import {
   useTaetigkeitenStamm,
   useZulagenTypen,
 } from "@/hooks/useStammdatenStunden";
-import { zulagenGleicheGruppe, zulagenUeberschneidung } from "@/lib/zulagen";
+import { SCHMUTZ_ABBRUCH_HINWEIS, zulagenGleicheGruppe, zulagenUeberschneidung } from "@/lib/zulagen";
 import { StatusButtonsLeiste } from "@/components/stunden/StatusButtonsLeiste";
 import { ArtSection } from "@/components/stunden/ArtSection";
 import {
@@ -122,17 +122,13 @@ export function TagBearbeitenDialog({
     );
   }, [open, tag]);
   const { data: zugeteilteZulagen = [] } = useMitarbeiterZulagen(mitarbeiterId);
-  /** Arbeitsstunden (Baustelle/Firma) des Tages — Obergrenze für Schmutz + Abbruch. */
-  const arbeitsStunden = eintraege
-    .filter((e) => e.art === "baustelle" || e.art === "firma")
-    .reduce((s, e) => s + (Number(String(e.stunden).replace(",", ".")) || 0), 0);
   const zulagenAlsSave = (m: Map<string, { stunden: string; notiz: string | null }>): SaveZulage[] =>
     Array.from(m.entries()).map(([id, z]) => ({
       zulagen_typ_id: id,
       stunden: z.stunden.trim() ? Number(z.stunden.replace(",", ".")) : null,
       notiz: z.notiz,
     }));
-  const zulagenWarnung = zulagenUeberschneidung(zulagenAlsSave(zulagen), zulagenTypen, arbeitsStunden);
+  const zulagenWarnung = zulagenUeberschneidung(zulagenAlsSave(zulagen), zulagenTypen);
   const toggleZulage = (id: string) =>
     setZulagen((m) => {
       const n = new Map(m);
@@ -140,23 +136,10 @@ export function TagBearbeitenDialog({
         n.delete(id);
         return n;
       }
-      // Schmutz und Abbruch nie für dieselben Stunden (J. Maurer, 19.11.2026):
-      // andere ohne Stunden (= ganzer Tag) oder ohne Rest → umschalten.
-      const gruppe = zulagenGleicheGruppe(id, zulagenTypen).filter((g) => n.has(g));
-      let rest = arbeitsStunden;
-      let ganzerTag = false;
-      for (const g of gruppe) {
-        const st = n.get(g)!.stunden.trim();
-        if (!st) ganzerTag = true;
-        else rest -= Number(st.replace(",", ".")) || 0;
-      }
-      rest = Math.round(rest * 100) / 100;
-      if (gruppe.length > 0 && (ganzerTag || rest <= 0)) {
-        for (const g of gruppe) n.delete(g);
-        n.set(id, { stunden: "", notiz: null });
-      } else {
-        n.set(id, { stunden: gruppe.length > 0 ? String(rest).replace(".", ",") : "", notiz: null });
-      }
+      // Schmutz- oder Abbruchzulage, nie beide (J. Maurer/Christoph, 19.11.2026):
+      // die neu gewählte nimmt die andere weg.
+      for (const g of zulagenGleicheGruppe(id, zulagenTypen)) n.delete(g);
+      n.set(id, { stunden: "", notiz: null });
       return n;
     });
 
@@ -493,6 +476,9 @@ export function TagBearbeitenDialog({
               })}
               {zulagenWarnung && (
                 <p className="text-xs text-destructive font-medium">{zulagenWarnung}</p>
+              )}
+              {zulagenTypen.some((z) => (z as any).ausschluss_gruppe) && (
+                <p className="text-[11px] text-muted-foreground">{SCHMUTZ_ABBRUCH_HINWEIS}</p>
               )}
             </div>
           )}

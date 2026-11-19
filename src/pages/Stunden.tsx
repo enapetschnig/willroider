@@ -87,6 +87,7 @@ import { getPlanFuerTag, type PlanEintrag } from "@/lib/tagesplanung";
 import { berechneTaggeld } from "@/lib/taggeld";
 import {
   erlaubteZulagenIds as berechneErlaubteZulagen,
+  SCHMUTZ_ABBRUCH_HINWEIS,
   zulagenGleicheGruppe,
   zulagenUeberschneidung,
 } from "@/lib/zulagen";
@@ -868,13 +869,13 @@ export default function Stunden() {
       .filter((r) => istArbeitArt(r.art))
       .reduce((s, r) => s + Number(r.stunden || 0), 0);
 
-  /** Schmutz + Abbruch für dieselben Stunden (J. Maurer, 19.11.2026) — je
+  /** Schmutz + Abbruch am selben Tag (J. Maurer, 19.11.2026) — je
    *  Person geprüft, mit Namen, wenn mehrere gebucht werden. */
   const zulagenWarnungFuer = (uid: string): string | null => {
     const gewaehlt = Array.from(form.zulagenSelected.entries())
       .filter(([, v]) => v.stundenPerMa[uid] !== 0)
       .map(([typId, v]) => ({ zulagen_typ_id: typId, stunden: v.stundenPerMa[uid] ?? null }));
-    return zulagenUeberschneidung(gewaehlt, zulagenTypen, taetSummeFuer(uid));
+    return zulagenUeberschneidung(gewaehlt, zulagenTypen);
   };
 
   const selectedMaList = useMemo(() => {
@@ -1592,35 +1593,15 @@ export default function Stunden() {
                               next.delete(z.id);
                               return { ...f, zulagenSelected: next };
                             }
-                            // Schmutz und Abbruch nie für dieselben Stunden
-                            // (J. Maurer, 19.11.2026): Ist die andere schon
-                            // für den ganzen Tag gewählt, wird umgeschaltet;
-                            // sonst bekommt die neue die restlichen Stunden.
-                            const gruppe = zulagenGleicheGruppe(z.id, zulagenTypen).filter((g) =>
-                              next.has(g),
-                            );
-                            const restFuer = (uid: string): number => {
-                              let rest = taetSummeFuer(uid);
-                              for (const g of gruppe) {
-                                const v = next.get(g)?.stundenPerMa[uid];
-                                if (v == null) return 0;
-                                rest -= Number(v);
-                              }
-                              return Math.max(0, Math.round(rest * 100) / 100);
-                            };
-                            const umschalten =
-                              gruppe.length > 0 &&
-                              Array.from(forUserIds).some((uid) => restFuer(uid) <= 0);
-                            if (umschalten) for (const g of gruppe) next.delete(g);
+                            // Schmutz- oder Abbruchzulage, nie beide
+                            // (J. Maurer/Christoph, 19.11.2026): die neu
+                            // gewählte nimmt die andere weg.
+                            for (const g of zulagenGleicheGruppe(z.id, zulagenTypen)) next.delete(g);
                             next.set(z.id, {
                               stundenPerMa: Object.fromEntries(
                                 Array.from(forUserIds).map((uid) => [
                                   uid,
-                                  z.ermoeglicht_stunden_split
-                                    ? gruppe.length > 0 && !umschalten
-                                      ? restFuer(uid)
-                                      : taetSummeFuer(uid)
-                                    : null,
+                                  z.ermoeglicht_stunden_split ? taetSummeFuer(uid) : null,
                                 ]),
                               ),
                               notiz: "",
@@ -1678,10 +1659,7 @@ export default function Stunden() {
                 </p>
               ))}
               {zulagenTypen.some((z) => (z as any).ausschluss_gruppe) && (
-                <p className="text-[11px] text-muted-foreground">
-                  Schmutz- und Abbruchzulage gibt es nicht für dieselben Stunden – nur eine wählen
-                  oder die Stunden aufteilen.
-                </p>
+                <p className="text-[11px] text-muted-foreground">{SCHMUTZ_ABBRUCH_HINWEIS}</p>
               )}
             </div>
           )}

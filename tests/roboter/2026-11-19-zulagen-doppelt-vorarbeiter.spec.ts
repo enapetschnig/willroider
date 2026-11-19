@@ -1,9 +1,11 @@
 // Probefahrt 19.11.2026 zu J. Maurer („Für dieselbe Tätigkeit nur eine Zulage … Beide Zulagen für dieselbe
 // Stunde und denselben Umstand zu zahlen, wäre eine Doppelabgeltung“ + „Vorarbeiterzulage … nur für Tripold
 // Martin zum Auswählen“):
-//  - Schmutz- und Abbruchzulage für dieselben Stunden lässt sich nicht mehr speichern: Antippen der zweiten
-//    schaltet um bzw. gibt ihr nur die restlichen Stunden; ein alter Doppel-Tag zeigt den Hinweis und wird
-//    nicht gespeichert.
+//  - Schmutz- und Abbruchzulage nie am selben Tag (Christoph, 19.11.2026 abends: „nicht mehr beide gleichzeitig
+//    auswählbar – Auswahl des einen nimmt das andere weg, auch serverseitig/DB absichern“; vorher durften sie
+//    sich die Stunden teilen): Antippen der zweiten nimmt die erste weg, auch bei Teilstunden; die Datenbank
+//    behält von beiden nur die zuletzt gespeicherte; alte Doppel-Tage (zulagen_ausschluss_altfaelle) bleiben
+//    unangetastet, zeigen den Hinweis und werden nicht gespeichert.
 //  - Vorarbeiterzulage sehen nur Zugeteilte; wer nur sie zugeteilt hat, behält alle normalen Zulagen; die
 //    Datenbank lässt sie bei Nicht-Zugeteilten weg.
 // Läuft NUR gegen die Testumgebung (testumgebung.mjs start):
@@ -85,7 +87,7 @@ async function speichern(page: Page) {
   await page.getByRole("button", { name: /speichern/i }).last().click();
 }
 
-test("Schmutz- und Abbruchzulage nie für dieselben Stunden", async ({ page }) => {
+test("Schmutz- und Abbruchzulage nie am selben Tag", async ({ page }) => {
   const stamp = Date.now();
   const ma = await konto(`Zul${stamp % 100000}`, "mitarbeiter");
   const [bst] = await rest("/rest/v1/baustellen", "POST", {
@@ -113,29 +115,45 @@ test("Schmutz- und Abbruchzulage nie für dieselben Stunden", async ({ page }) =
   await expect(page.getByText(/\d+ (Eintrag|Einträge) gespeichert/).first()).toBeVisible();
   expect(await zulagenVon(tag1)).toEqual(["Abbruchzulage:8"]);
 
-  // 2) Schmutz nur 5 Std. → Abbruch bekommt die restlichen 3 Std., beide werden gespeichert.
+  await expect(page.getByText(/Dippelbaum- oder Tramdecke samt Beschüttung = Schmutzzulage/).first()).toBeVisible();
+
+  // 2) Schmutz nur 5 Std. → Abbruch antippen nimmt Schmutz trotzdem weg, Abbruch für den ganzen Tag.
   await rest(`/rest/v1/stunden_zulagen?stunden_tag_id=eq.${tag1}`, "DELETE");
   await rest("/rest/v1/stunden_zulagen", "POST", { stunden_tag_id: tag1, zulagen_typ_id: schmutz, stunden: 5 });
   await page.goto(`${APP}/stunden?datum=${tag1Datum}`);
   await expect(page.getByRole("button", { name: /^Schmutzzulage\s?· 5h$/ })).toBeVisible({ timeout: 20_000 });
   await page.waitForTimeout(1500);
   await chip(page, "Abbruchzulage").click();
-  await expect(page.getByRole("button", { name: /^Abbruchzulage\s?· 3h$/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Abbruchzulage\s?· 8h$/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Schmutzzulage", exact: true })).toBeVisible();
   await speichern(page);
   await expect(page.getByText(/\d+ (Eintrag|Einträge) gespeichert/).first()).toBeVisible();
-  expect(await zulagenVon(tag1)).toEqual(["Abbruchzulage:3", "Schmutzzulage:5"]);
+  expect(await zulagenVon(tag1)).toEqual(["Abbruchzulage:8"]);
 
-  // 3) Alter Doppel-Tag (beide 8 Std.) → Hinweis, Speichern gesperrt, nichts verändert.
+  // 3) Datenbank (ältere App-Stände): beide auf einmal → nur die zuletzt gespeicherte bleibt.
+  await rest(`/rest/v1/stunden_zulagen?stunden_tag_id=eq.${tag1}`, "DELETE");
+  await rest("/rest/v1/stunden_zulagen", "POST", [
+    { stunden_tag_id: tag1, zulagen_typ_id: schmutz, stunden: 4 },
+    { stunden_tag_id: tag1, zulagen_typ_id: abbruch, stunden: 4 },
+  ]);
+  expect(await zulagenVon(tag1)).toEqual(["Abbruchzulage:4"]);
+  await rest("/rest/v1/stunden_zulagen", "POST", { stunden_tag_id: tag1, zulagen_typ_id: schmutz, stunden: 8 });
+  expect(await zulagenVon(tag1)).toEqual(["Schmutzzulage:8"]);
+
+  // 4) Alter Doppel-Tag (in zulagen_ausschluss_altfaelle, wartet auf Entscheidung des Kunden)
+  //    → bleibt unverändert, Hinweis, Speichern gesperrt.
   const tag2Datum = vergangenerWerktag(10);
   const tag2 = await tagMit8h(ma.id, tag2Datum, bst.id);
+  await rest("/rest/v1/zulagen_ausschluss_altfaelle", "POST", { stunden_tag_id: tag2 });
   await rest("/rest/v1/stunden_zulagen", "POST", [
     { stunden_tag_id: tag2, zulagen_typ_id: schmutz, stunden: 8 },
     { stunden_tag_id: tag2, zulagen_typ_id: abbruch, stunden: 8 },
   ]);
+  expect(await zulagenVon(tag2)).toEqual(["Abbruchzulage:8", "Schmutzzulage:8"]);
   await page.goto(`${APP}/stunden?datum=${tag2Datum}`);
   await expect(page.getByRole("button", { name: /^Abbruchzulage\s?· 8h$/ })).toBeVisible({ timeout: 20_000 });
   await expect(
-    page.getByText(/Schmutzzulage und Abbruchzulage gibt es nicht für dieselben Stunden/).first(),
+    page.getByText(/Schmutzzulage und Abbruchzulage gibt es nicht am selben Tag/).first(),
   ).toBeVisible();
   await speichern(page);
   await expect(page.getByText("Zulagen doppelt").first()).toBeVisible();

@@ -1,5 +1,11 @@
 # Journal
 
+## 2026-11-19 (abends) · Schmutz- ODER Abbruchzulage, nie beide (J. Maurer, Vorgabe Christoph)
+- Kein Aufteilen mehr: Antippen nimmt die andere weg (Stunden, Tag bearbeiten, Büro-Korrektur), Hinweistext nach KV.
+- Migration `20261119200000_zulagen_schmutz_abbruch_ausschluss.sql`: Trigger löscht die andere derselben Gruppe; 28 Alt-Tage
+  in `zulagen_ausschluss_altfaelle` ausgenommen (Sicherung `~/roboter/sicherungen/willroider-2026-11-19-zulagen-doppelt/`).
+- Rückfrage an Maurer im Wunsch (feedback_kommentare, ist_frage). Test `2026-11-19-zulagen-doppelt-vorarbeiter` angepasst, alle 21 grün.
+
 ## 2026-11-19 · Berichte gesammelt versenden (J. Maurer)
 - `/berichte`: Knopf „Gesammelt versenden“ → Häkchen, Auswahl bleibt über Typ/Filter hinweg, Mail (Verwaltung) oder ZIP.
 - `DocSendDialog` teilt große Auswahl auf mehrere Mails (je ≤ 15 MB, `lib/mailTeile.ts`).
