@@ -263,6 +263,20 @@ export function FahrtenbuchTab({
     });
 
   async function aendern(id: string, patch: Partial<FahrtRow>) {
+    // Grenzen der Spalten (km NUMERIC(7,1), Stände NUMERIC(8,1)) vorher
+    // prüfen — sonst kam nur „numeric field overflow“ zurück (18.11.2026:
+    // Tachostand in „gefahrene km“ getippt).
+    if (patch.km != null && Number(patch.km) >= 1_000_000) {
+      fehler(new Error("Bei „km“ die gefahrene Strecke eintragen, nicht den Tachostand (unter 1.000.000)."));
+      return;
+    }
+    for (const feld of ["km_start", "km_ende"] as const) {
+      const n = patch[feld];
+      if (n != null && Math.abs(Number(n)) >= 10_000_000) {
+        fehler(new Error("Der km-Stand ist zu groß — bitte den Tachostand prüfen."));
+        return;
+      }
+    }
     setBusy(id);
     try {
       const { error } = await supabase
