@@ -85,6 +85,11 @@ import {
 import { useSollHoursForDayBulk } from "@/hooks/useSollHoursForDayBulk";
 import { getPlanFuerTag, type PlanEintrag } from "@/lib/tagesplanung";
 import { berechneTaggeld } from "@/lib/taggeld";
+import {
+  erlaubteZulagenIds as berechneErlaubteZulagen,
+  zulagenGleicheGruppe,
+  zulagenUeberschneidung,
+} from "@/lib/zulagen";
 
 type Baustelle = Database["public"]["Tables"]["baustellen"]["Row"];
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -396,9 +401,12 @@ export default function Stunden() {
   // Nur 4 von 48 hatten welche zugeteilt — alle anderen sahen den Bereich gar
   // nicht. Keine Zuteilung heißt jetzt: alle aktiven Zulagen. Wo das Büro
   // bewusst zugeteilt hat, bleibt es bei dieser Auswahl.
-  const alleZulagenIds = useMemo(() => zulagenTypen.map((z) => z.id), [zulagenTypen]);
-  const erlaubteZulagenIds =
-    zugeteilteZulagenIds.length > 0 ? zugeteilteZulagenIds : alleZulagenIds;
+  // Vorarbeiterzulage (J. Maurer, 19.11.2026) gibt es nur für zugeteilte
+  // Personen und zählt nicht als Zuteilung — siehe lib/zulagen.ts.
+  const erlaubteZulagenIds = useMemo(
+    () => berechneErlaubteZulagen(zulagenTypen, zugeteilteZulagenIds),
+    [zulagenTypen, zugeteilteZulagenIds],
+  );
 
   const { data: erlaubteZulagenUnion = [] } = useQuery({
     queryKey: ["mitarbeiter_zulagen_union", Array.from(forUserIds)],
@@ -409,16 +417,24 @@ export default function Stunden() {
         .from("mitarbeiter_zulagen")
         .select("mitarbeiter_id, zulagen_typ_id")
         .in("mitarbeiter_id", ids);
-      const rows = (data ?? []) as { mitarbeiter_id: string; zulagen_typ_id: string }[];
-      // Jemand ohne Zuteilung dabei → er darf alle, also alle anbieten.
-      const mitZuteilung = new Set(rows.map((r) => r.mitarbeiter_id));
-      if (ids.some((id) => !mitZuteilung.has(id))) return null;
-      return Array.from(new Set(rows.map((r) => r.zulagen_typ_id)));
+      return (data ?? []) as { mitarbeiter_id: string; zulagen_typ_id: string }[];
     },
     enabled: forUserIds.size > 0,
   });
+  /** Erlaubte Zulagen je Person (für Mitgebuchte und das Speichern). */
+  const erlaubteZulagenFuer = (uid: string): string[] =>
+    berechneErlaubteZulagen(
+      zulagenTypen,
+      (erlaubteZulagenUnion ?? [])
+        .filter((r) => r.mitarbeiter_id === uid)
+        .map((r) => r.zulagen_typ_id),
+    );
+  // Mehrere Personen: alles anbieten, was wenigstens einer darf — gespeichert
+  // wird je Person nur, was sie darf.
   const verfuegbareZulagenIds =
-    forUserIds.size > 1 ? (erlaubteZulagenUnion ?? alleZulagenIds) : erlaubteZulagenIds;
+    forUserIds.size > 1
+      ? Array.from(new Set(Array.from(forUserIds).flatMap((uid) => erlaubteZulagenFuer(uid))))
+      : erlaubteZulagenIds;
   const { data: limits } = useArbeitszeitLimits();
   const { sollPerMa, isLoading: sollLaedt } = useSollHoursForDayBulk(
     Array.from(forUserIds),
@@ -852,6 +868,15 @@ export default function Stunden() {
       .filter((r) => istArbeitArt(r.art))
       .reduce((s, r) => s + Number(r.stunden || 0), 0);
 
+  /** Schmutz + Abbruch für dieselben Stunden (J. Maurer, 19.11.2026) — je
+   *  Person geprüft, mit Namen, wenn mehrere gebucht werden. */
+  const zulagenWarnungFuer = (uid: string): string | null => {
+    const gewaehlt = Array.from(form.zulagenSelected.entries())
+      .filter(([, v]) => v.stundenPerMa[uid] !== 0)
+      .map(([typId, v]) => ({ zulagen_typ_id: typId, stunden: v.stundenPerMa[uid] ?? null }));
+    return zulagenUeberschneidung(gewaehlt, zulagenTypen, taetSummeFuer(uid));
+  };
+
   const selectedMaList = useMemo(() => {
     const ids = Array.from(forUserIds);
     return ids
@@ -982,6 +1007,24 @@ export default function Stunden() {
         description: `Bitte bei Baustelle/Firma/Schlechtwetter auswählen: ${ohneKst
           .map((m) => `${m.vorname} ${m.nachname}`)
           .join(", ")}`,
+      });
+      return;
+    }
+
+    // Schmutz- und Abbruchzulage nicht für dieselben Stunden (J. Maurer, 19.11.2026)
+    const zulagenDoppelt = selectedMaList
+      .map((m) => ({ m, w: zulagenWarnungFuer(m.id) }))
+      .filter((x) => x.w);
+    if (zulagenDoppelt.length > 0) {
+      toast({
+        variant: "destructive",
+        title: "Zulagen doppelt",
+        description:
+          selectedMaList.length > 1
+            ? `${zulagenDoppelt[0].w} Betrifft: ${zulagenDoppelt
+                .map((x) => `${x.m.vorname} ${x.m.nachname}`)
+                .join(", ")}`
+            : zulagenDoppelt[0].w!,
       });
       return;
     }
@@ -1131,7 +1174,7 @@ export default function Stunden() {
             .select("zulagen_typ_id")
             .eq("mitarbeiter_id", uid);
           const zugeteilt = (zRows ?? []).map((r: any) => r.zulagen_typ_id as string);
-          erlaubteZulagenForUid = new Set(zugeteilt.length > 0 ? zugeteilt : alleZulagenIds);
+          erlaubteZulagenForUid = new Set(berechneErlaubteZulagen(zulagenTypen, zugeteilt));
         }
         const zulagen: SaveZulage[] = Array.from(form.zulagenSelected.entries())
           .filter(([typId]) => erlaubteZulagenForUid.has(typId))
@@ -1545,20 +1588,44 @@ export default function Stunden() {
                         onClick={() =>
                           setForm((f) => {
                             const next = new Map(f.zulagenSelected);
-                            if (next.has(z.id)) next.delete(z.id);
-                            else
-                              next.set(z.id, {
-                                stundenPerMa: Object.fromEntries(
-                                  Array.from(forUserIds).map((uid) => [
-                                    uid,
-                                    z.ermoeglicht_stunden_split
-                                      ? taetSummeFuer(uid)
-                                      : null,
-                                  ]),
-                                ),
-                                notiz: "",
-                                proMaModus: forUserIds.size > 1,
-                              });
+                            if (next.has(z.id)) {
+                              next.delete(z.id);
+                              return { ...f, zulagenSelected: next };
+                            }
+                            // Schmutz und Abbruch nie für dieselben Stunden
+                            // (J. Maurer, 19.11.2026): Ist die andere schon
+                            // für den ganzen Tag gewählt, wird umgeschaltet;
+                            // sonst bekommt die neue die restlichen Stunden.
+                            const gruppe = zulagenGleicheGruppe(z.id, zulagenTypen).filter((g) =>
+                              next.has(g),
+                            );
+                            const restFuer = (uid: string): number => {
+                              let rest = taetSummeFuer(uid);
+                              for (const g of gruppe) {
+                                const v = next.get(g)?.stundenPerMa[uid];
+                                if (v == null) return 0;
+                                rest -= Number(v);
+                              }
+                              return Math.max(0, Math.round(rest * 100) / 100);
+                            };
+                            const umschalten =
+                              gruppe.length > 0 &&
+                              Array.from(forUserIds).some((uid) => restFuer(uid) <= 0);
+                            if (umschalten) for (const g of gruppe) next.delete(g);
+                            next.set(z.id, {
+                              stundenPerMa: Object.fromEntries(
+                                Array.from(forUserIds).map((uid) => [
+                                  uid,
+                                  z.ermoeglicht_stunden_split
+                                    ? gruppe.length > 0 && !umschalten
+                                      ? restFuer(uid)
+                                      : taetSummeFuer(uid)
+                                    : null,
+                                ]),
+                              ),
+                              notiz: "",
+                              proMaModus: forUserIds.size > 1,
+                            });
                             return { ...f, zulagenSelected: next };
                           })
                         }
@@ -1596,6 +1663,26 @@ export default function Stunden() {
                   />
                 );
               })}
+              {Array.from(
+                new Set(
+                  selectedMaList
+                    .map((m) => {
+                      const w = zulagenWarnungFuer(m.id);
+                      return w && selectedMaList.length > 1 ? `${m.vorname}: ${w}` : w;
+                    })
+                    .filter((w): w is string => !!w),
+                ),
+              ).map((w) => (
+                <p key={w} className="text-xs text-destructive font-medium">
+                  {w}
+                </p>
+              ))}
+              {zulagenTypen.some((z) => (z as any).ausschluss_gruppe) && (
+                <p className="text-[11px] text-muted-foreground">
+                  Schmutz- und Abbruchzulage gibt es nicht für dieselben Stunden – nur eine wählen
+                  oder die Stunden aufteilen.
+                </p>
+              )}
             </div>
           )}
 

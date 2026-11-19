@@ -42,6 +42,16 @@ paths:
   `stunden_tage_select` erlaubt zusätzlich `erfasst_von = auth.uid()`.
 - **Zulagen für alle** (E. Winkler, 19.10.): keine Zuteilung = alle aktiven Zulagen; eine bewusste
   Zuteilung durch das Büro bleibt bestehen. Auch in `TagBearbeitenDialog` antippbar.
+- **Schmutz- und Abbruchzulage nie für dieselben Stunden** (J. Maurer, 19.11.2026: „Für dieselbe Tätigkeit nur eine
+  Zulage … Abbruch Dippelbaum-/Tramdecke samt Beschüttung = 10 % Schmutz, echter Rückbau = 15 % … Doppelabgeltung“).
+  Ursache vorher: die Zulagen waren unabhängige Knöpfe, Antippen füllte jede mit den vollen Tagesstunden → 27 Tage im
+  Nov. (Samonig Fürnitz) mit beiden. Jetzt `zulagen_typen.ausschluss_gruppe` + `zulagenUeberschneidung()` in
+  `lib/zulagen.ts`: beide nur mit Stunden und zusammen ≤ Arbeitsstunden; geprüft in `useSaveStundenTag` VOR dem ersten
+  Schreiben (Speichern ist nicht transaktional → keine ablehnenden DB-Trigger). Halle/Tätigkeitsbericht geben
+  `zulagenUnveraendert` mit. Die 27 Alt-Tage blieben unverändert (welche Zulage stimmt, entscheidet das Büro).
+- **Vorarbeiterzulage** (19.11.2026) nur für Martin Tripolt: `zulagen_typen.nur_zugeteilt` — erscheint nur bei
+  Zuteilung (Mitarbeiter → Erlaubte Zulagen) und zählt NICHT als „bewusste Zuteilung“ (`erlaubteZulagenIds()`); DB-Trigger
+  `stunden_zulagen_nur_zugeteilt` lässt sie bei Nicht-Zugeteilten still weg. Nicht auf dem Erschwernis-Zettel.
 - Werk-/Hallenstunden lassen sich auf eine Baustelle buchen (28.07.). Halle = Maschinen-Zeiterfassung.
 - Mein Tag → „Meine Stunden“: Baustellenname je Tag + Knopf „Ändern“ (`/stunden?datum=JJJJ-MM-TT`),
   solange das Büro den Tag nicht freigegeben hat (B. Sirnitzer, 19.10.).

@@ -33,7 +33,12 @@ import {
   type SaveZulage,
   type SaveFahrt,
 } from "@/hooks/useStundenTag";
-import { useTaetigkeitenStamm, useZulagenTypen } from "@/hooks/useStammdatenStunden";
+import {
+  useMitarbeiterZulagen,
+  useTaetigkeitenStamm,
+  useZulagenTypen,
+} from "@/hooks/useStammdatenStunden";
+import { zulagenGleicheGruppe, zulagenUeberschneidung } from "@/lib/zulagen";
 import { StatusButtonsLeiste } from "@/components/stunden/StatusButtonsLeiste";
 import { ArtSection } from "@/components/stunden/ArtSection";
 import {
@@ -116,11 +121,42 @@ export function TagBearbeitenDialog({
       ),
     );
   }, [open, tag]);
+  const { data: zugeteilteZulagen = [] } = useMitarbeiterZulagen(mitarbeiterId);
+  /** Arbeitsstunden (Baustelle/Firma) des Tages — Obergrenze für Schmutz + Abbruch. */
+  const arbeitsStunden = eintraege
+    .filter((e) => e.art === "baustelle" || e.art === "firma")
+    .reduce((s, e) => s + (Number(String(e.stunden).replace(",", ".")) || 0), 0);
+  const zulagenAlsSave = (m: Map<string, { stunden: string; notiz: string | null }>): SaveZulage[] =>
+    Array.from(m.entries()).map(([id, z]) => ({
+      zulagen_typ_id: id,
+      stunden: z.stunden.trim() ? Number(z.stunden.replace(",", ".")) : null,
+      notiz: z.notiz,
+    }));
+  const zulagenWarnung = zulagenUeberschneidung(zulagenAlsSave(zulagen), zulagenTypen, arbeitsStunden);
   const toggleZulage = (id: string) =>
     setZulagen((m) => {
       const n = new Map(m);
-      if (n.has(id)) n.delete(id);
-      else n.set(id, { stunden: "", notiz: null });
+      if (n.has(id)) {
+        n.delete(id);
+        return n;
+      }
+      // Schmutz und Abbruch nie für dieselben Stunden (J. Maurer, 19.11.2026):
+      // andere ohne Stunden (= ganzer Tag) oder ohne Rest → umschalten.
+      const gruppe = zulagenGleicheGruppe(id, zulagenTypen).filter((g) => n.has(g));
+      let rest = arbeitsStunden;
+      let ganzerTag = false;
+      for (const g of gruppe) {
+        const st = n.get(g)!.stunden.trim();
+        if (!st) ganzerTag = true;
+        else rest -= Number(st.replace(",", ".")) || 0;
+      }
+      rest = Math.round(rest * 100) / 100;
+      if (gruppe.length > 0 && (ganzerTag || rest <= 0)) {
+        for (const g of gruppe) n.delete(g);
+        n.set(id, { stunden: "", notiz: null });
+      } else {
+        n.set(id, { stunden: gruppe.length > 0 ? String(rest).replace(".", ",") : "", notiz: null });
+      }
       return n;
     });
 
@@ -238,11 +274,7 @@ export function TagBearbeitenDialog({
           };
         });
 
-      const zulagenSave: SaveZulage[] = Array.from(zulagen.entries()).map(([id, z]) => ({
-        zulagen_typ_id: id,
-        stunden: z.stunden.trim() ? Number(z.stunden.replace(",", ".")) : null,
-        notiz: z.notiz,
-      }));
+      const zulagenSave: SaveZulage[] = zulagenAlsSave(zulagen);
       // Fahrt unverändert übernehmen, damit nichts verloren geht
       const fahrt: SaveFahrt | null = tag?.fahrt
         ? {
@@ -417,7 +449,15 @@ export function TagBearbeitenDialog({
             <div className="space-y-2 border-t pt-3">
               <Label className="text-xs">Zulagen</Label>
               <div className="flex flex-wrap gap-1.5">
-                {zulagenTypen.map((z) => {
+                {zulagenTypen
+                  // Vorarbeiterzulage nur bei zugeteilten Personen (J. Maurer, 19.11.2026)
+                  .filter(
+                    (z) =>
+                      !(z as any).nur_zugeteilt ||
+                      zugeteilteZulagen.includes(z.id) ||
+                      zulagen.has(z.id),
+                  )
+                  .map((z) => {
                   const aktiv = zulagen.has(z.id);
                   return (
                     <button
@@ -451,6 +491,9 @@ export function TagBearbeitenDialog({
                   </div>
                 );
               })}
+              {zulagenWarnung && (
+                <p className="text-xs text-destructive font-medium">{zulagenWarnung}</p>
+              )}
             </div>
           )}
 

@@ -1,5 +1,13 @@
 # Journal
 
+## 2026-11-19 · Zulagen: Schmutz/Abbruch nicht doppelt, Vorarbeiterzulage (J. Maurer)
+- 27 Tage im November (Umbau Samonig Fürnitz, 2.–16.11.) hatten Schmutz- UND Abbruchzulage mit denselben Stunden.
+  Ursache: jede Zulage wurde beim Antippen mit den vollen Tagesstunden vorbelegt, keine Prüfung. Jetzt Ausschluss-Gruppe
+  in `zulagen_typen`, Prüfung in `useSaveStundenTag` (alle Masken), Umschalten/Reststunden beim Antippen in `/stunden`
+  und „Tag bearbeiten“, Hinweis in der Büro-Korrektur. Alt-Daten nicht angefasst.
+- Neue Zulage „Vorarbeiterzulage“ (`nur_zugeteilt`), Tripolt zugeteilt; Trigger lässt sie bei anderen weg.
+- Migration `20261119120000_zulagen_doppelt_vorarbeiter.sql`, Test `tests/roboter/2026-11-19-zulagen-doppelt-vorarbeiter.spec.ts`.
+
 ## 2026-11-18 – Plan-Viewer wie PDF-Programm, Position je Menüpunkt (E. Winkler)
 - `PlanAnsicht`: alle Seiten untereinander, Rad scrollt, Strg+Rad zoomt nur den Plan, 1 Finger scrollt mit Schwung,
   2 Finger zoomen, Seitenanzeige läuft mit, Bild auf/ab, Pos1/Ende. Hand-Werkzeug weg (Werkzeug abwählbar).

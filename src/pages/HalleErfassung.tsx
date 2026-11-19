@@ -376,6 +376,7 @@ export default function HalleErfassung() {
         anmerkung: anmerkung.trim() || null,
         taetigkeiten,
         zulagen,
+        zulagenUnveraendert: true,
         fahrt,
       });
       toast({ title: "Halle-Stunden gespeichert" });

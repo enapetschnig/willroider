@@ -536,6 +536,7 @@ export default function Taetigkeitsbericht() {
           anmerkung: vorhanden?.tag.anmerkung ?? null,
           taetigkeiten,
           // Zulagen und Fahrt verwaltet diese Seite nicht — unverändert lassen.
+          zulagenUnveraendert: true,
           zulagen:
             vorhanden?.zulagen.map((zu) => ({
               zulagen_typ_id: zu.zulagen_typ_id,
@@ -681,6 +682,7 @@ export default function Taetigkeitsbericht() {
           arbeitsbeginn: vorhanden?.tag.arbeitsbeginn?.slice(0, 5) ?? null,
           anmerkung: vorhanden?.tag.anmerkung ?? null,
           taetigkeiten,
+          zulagenUnveraendert: true,
           zulagen:
             vorhanden?.zulagen.map((zu) => ({
               zulagen_typ_id: zu.zulagen_typ_id,
@@ -747,6 +749,7 @@ export default function Taetigkeitsbericht() {
             stunden: Number(e.stunden),
             notiz: e.notiz,
           })) ?? [],
+        zulagenUnveraendert: true,
         zulagen:
           vorhanden?.zulagen.map((zu) => ({
             zulagen_typ_id: zu.zulagen_typ_id,

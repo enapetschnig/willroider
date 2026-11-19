@@ -373,11 +373,14 @@ export async function ladeZulagenZettel(opts: {
             .filter(Boolean),
         ),
       ] as string[],
-      zulagen: (t.zulagen ?? []).map((z: any) => ({
-        typId: z.zulagen_typ_id,
-        bezeichnung: typById.get(z.zulagen_typ_id) ?? "Zulage",
-        stunden: z.stunden,
-      })),
+      zulagen: (t.zulagen ?? [])
+        .map((z: any) => ({
+          typId: z.zulagen_typ_id,
+          bezeichnung: typById.get(z.zulagen_typ_id) ?? "Zulage",
+          stunden: z.stunden,
+        }))
+        // Die Vorarbeiterzulage ist keine Erschwerniszulage — kein eigenes Blatt.
+        .filter((z: any) => !/vorarbeiter/i.test(z.bezeichnung)),
     })),
   );
 

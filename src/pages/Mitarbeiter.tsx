@@ -87,7 +87,8 @@ function MaZulagenSection({ mitarbeiterId }: { mitarbeiterId: string }) {
         Erlaubte Zulagen
       </h3>
       <p className="text-[11px] text-muted-foreground -mt-1">
-        Welche Zulagen darf dieser Mitarbeiter im Tageserfassungs-Form auswählen?
+        Welche Zulagen darf dieser Mitarbeiter in der Stundenerfassung auswählen? Keine
+        angehakt = alle. Die Vorarbeiterzulage gibt es nur, wenn sie hier angehakt ist.
       </p>
       <div className="flex flex-wrap gap-1.5">
         {alleZulagen.map((z) => {

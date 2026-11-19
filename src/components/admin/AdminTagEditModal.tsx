@@ -31,7 +31,12 @@ import {
   type SaveEintrag,
   type SaveZulage,
 } from "@/hooks/useStundenTag";
-import { useTaetigkeitenStamm, useZulagenTypen } from "@/hooks/useStammdatenStunden";
+import {
+  useMitarbeiterZulagen,
+  useTaetigkeitenStamm,
+  useZulagenTypen,
+} from "@/hooks/useStammdatenStunden";
+import { zulagenUeberschneidung } from "@/lib/zulagen";
 import { fmtH } from "@/lib/zeiterfassung";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
@@ -89,6 +94,15 @@ export function AdminTagEditModal({
   const [eintraege, setEintraege] = useState<FormEintrag[]>([]);
   const [zulagen, setZulagen] = useState<FormZul[]>([]);
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
+  const { data: zugeteilteZulagen = [] } = useMitarbeiterZulagen(tag?.tag.mitarbeiter_id);
+  // Schmutz + Abbruch nicht für dieselben Stunden (J. Maurer, 19.11.2026)
+  const zulagenWarnung = zulagenUeberschneidung(
+    zulagen.filter((z) => z.zulagen_typ_id),
+    zulagenTypen,
+    eintraege
+      .filter((e) => istArbeitArt(e.art))
+      .reduce((s, e) => s + Number(e.stunden || 0), 0),
+  );
 
   // Reset Form wenn ein neuer Tag geladen wird
   useEffect(() => {
@@ -450,7 +464,15 @@ export function AdminTagEditModal({
                       onChange={(e) => updateZul(idx, { zulagen_typ_id: e.target.value })}
                       className="h-8 w-full rounded-md border bg-background px-1 text-xs"
                     >
-                      {zulagenTypen.map((zt) => (
+                      {zulagenTypen
+                        // Vorarbeiterzulage nur bei zugeteilten Personen
+                        .filter(
+                          (zt) =>
+                            !(zt as any).nur_zugeteilt ||
+                            zugeteilteZulagen.includes(zt.id) ||
+                            zt.id === z.zulagen_typ_id,
+                        )
+                        .map((zt) => (
                         <option key={zt.id} value={zt.id}>
                           {zt.bezeichnung}
                         </option>
@@ -480,6 +502,9 @@ export function AdminTagEditModal({
                 </div>
               ))}
             </div>
+            {zulagenWarnung && (
+              <p className="mt-1.5 text-xs text-destructive font-medium">{zulagenWarnung}</p>
+            )}
           </div>
 
           {/* Anmerkung */}

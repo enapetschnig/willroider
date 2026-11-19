@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
+import { zulagenUeberschneidung } from "@/lib/zulagen";
 
 type StundenTag = Database["public"]["Tables"]["stunden_tage"]["Row"];
 type StundenTaetigkeit = Database["public"]["Tables"]["stunden_taetigkeiten"]["Row"];
@@ -61,6 +62,10 @@ export interface SaveStundenTagInput {
   taetigkeiten: SaveEintrag[];
   zulagen: SaveZulage[];
   fahrt: SaveFahrt | null;
+  /** Masken, die Zulagen nicht bearbeiten (Halle, Tätigkeitsbericht), geben
+   *  die gespeicherten unverändert weiter — dann nicht erneut prüfen, sonst
+   *  ließe sich ein alter Tag dort gar nicht mehr speichern. */
+  zulagenUnveraendert?: boolean;
 }
 
 const STUNDEN_TAG_SELECT = `*,
@@ -181,6 +186,18 @@ export function useSaveStundenTag() {
   return useMutation({
     mutationFn: async (input: SaveStundenTagInput) => {
       let tagId = input.id;
+
+      // „Für dieselbe Tätigkeit nur eine Zulage“ (J. Maurer, 19.11.2026):
+      // VOR dem ersten Schreiben prüfen — das Speichern ist nicht
+      // transaktional, ein späterer Abbruch ließe den Tag halb gespeichert.
+      if (!input.zulagenUnveraendert && input.zulagen.length > 1) {
+        const { data: typen } = await supabase.from("zulagen_typen").select("*");
+        const arbeit = input.taetigkeiten
+          .filter((t) => t.art === "baustelle" || t.art === "firma")
+          .reduce((s, t) => s + Number(t.stunden || 0), 0);
+        const fehler = zulagenUeberschneidung(input.zulagen, (typen as unknown[]) ?? [], arbeit);
+        if (fehler) throw new Error(fehler);
+      }
 
       // tag_status + netto_stunden leitet der DB-Trigger aus den Einträgen
       // ab — beim Insert genügt ein provisorischer Status.
