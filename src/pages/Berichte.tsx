@@ -2,6 +2,9 @@
  * Berichte-Übersicht (Bautages- + Regieberichte).
  * - Filter: Baustelle / Datum / Status / Typ / Polier
  * - „Neuer Bericht"-Modal: wenn schon vorhanden für Tag+Baustelle+Typ → öffnen statt erstellen
+ * - „Gesammelt versenden“ (J. Maurer, 19.11.2026): Berichte mit PDF über die
+ *   Filter + Häkchen auswählen (Auswahl bleibt beim Umschalten von Typ/Filter
+ *   erhalten), dann in einer Mail senden (Verwaltung) oder als ZIP laden.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -23,7 +26,10 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { FileText, Plus, Building2, FileCheck2, Loader2, ChevronRight, Hammer, ClipboardList } from "lucide-react";
+import { FileText, Plus, Building2, FileCheck2, Loader2, ChevronRight, Hammer, ClipboardList, Mail, Download, X } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { DocSendDialog, type DocSendItem } from "@/components/dokumente/DocSendDialog";
+import { zipHerunterladen } from "@/lib/zipDownload";
 import type { Database, BerichtStatus, BerichtTyp } from "@/integrations/supabase/types";
 import { useBerichteList } from "@/hooks/useBerichte";
 import { getBaustellenForMaToday } from "@/lib/tagesplanung";
@@ -57,6 +63,24 @@ const STATUS_BADGE: Record<BerichtStatus, { label: string; cls: string }> = {
     cls: "bg-gray-200 text-gray-900 border-gray-400",
   },
 };
+
+/** Für den Sammelversand gemerkter Bericht (bleibt beim Filterwechsel erhalten). */
+interface BerichtWahl {
+  id: string;
+  pdfDokumentId: string;
+  datum: string;
+  typ: BerichtTyp;
+  baustelle: string;
+  kst: string | null;
+}
+
+const dateiSicher = (s: string) => s.replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim();
+const fmtDatum = (iso: string) => new Date(iso).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric" });
+
+/** Dateiname im Anhang/ZIP, z. B. „Bautagesbericht HMH Obersteiner 2026-11-18.pdf“. */
+function berichtDateiname(w: Pick<BerichtWahl, "typ" | "baustelle" | "datum">): string {
+  return `${dateiSicher(`${TYP_LABEL[w.typ]} ${w.baustelle}`)} ${w.datum}.pdf`;
+}
 
 const fmtShortDate = (iso: string | null | undefined) => {
   if (!iso) return null;
@@ -109,6 +133,12 @@ export default function Berichte() {
   const [baustellen, setBaustellen] = useState<Baustelle[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [openNeu, setOpenNeu] = useState(false);
+  const { isAdmin } = useAuth();
+  const { toast } = useToast();
+  const [auswahlModus, setAuswahlModus] = useState(false);
+  const [auswahl, setAuswahl] = useState<Map<string, BerichtWahl>>(new Map());
+  const [sendItems, setSendItems] = useState<DocSendItem[] | null>(null);
+  const [ladeSammel, setLadeSammel] = useState<"mail" | "zip" | null>(null);
 
   // Letzte Auswahl (Typ, Zeitraum, Status, Baustelle) merken, damit der
   // Zurück-Pfeil im Bericht und der Menüpunkt wieder genau hier landen
@@ -169,6 +199,132 @@ export default function Berichte() {
     [profiles],
   );
 
+  const wahlAus = (b: (typeof berichte)[number]): BerichtWahl | null => {
+    if (!b.pdf_dokument_id) return null;
+    const bs = baustelleById.get(b.baustelle_id);
+    return {
+      id: b.id,
+      pdfDokumentId: b.pdf_dokument_id,
+      datum: b.datum,
+      typ: b.typ,
+      baustelle: bs?.bvh_name ?? "Baustelle",
+      kst: bs?.kostenstelle ?? null,
+    };
+  };
+  const umschalten = (b: (typeof berichte)[number]) => {
+    const w = wahlAus(b);
+    if (!w) return;
+    setAuswahl((alt) => {
+      const neu = new Map(alt);
+      if (neu.has(w.id)) neu.delete(w.id);
+      else neu.set(w.id, w);
+      return neu;
+    });
+  };
+  const mitPdfInListe = berichte.filter((b) => !!b.pdf_dokument_id);
+  const alleInListeGewaehlt = mitPdfInListe.length > 0 && mitPdfInListe.every((b) => auswahl.has(b.id));
+  const alleInListe = (an: boolean) => {
+    setAuswahl((alt) => {
+      const neu = new Map(alt);
+      for (const b of mitPdfInListe) {
+        const w = wahlAus(b);
+        if (!w) continue;
+        if (an) neu.set(w.id, w);
+        else neu.delete(w.id);
+      }
+      return neu;
+    });
+  };
+
+  /** Gewählte Berichte sortiert (Baustelle, Datum, Typ) mit Speicherort des PDFs. */
+  const sammelDateien = async (): Promise<DocSendItem[]> => {
+    const liste = [...auswahl.values()].sort(
+      (a, b) =>
+        a.baustelle.localeCompare(b.baustelle, "de") ||
+        a.datum.localeCompare(b.datum) ||
+        a.typ.localeCompare(b.typ),
+    );
+    const ids = liste.map((w) => w.pdfDokumentId);
+    const { data, error } = await supabase
+      .from("dokumente")
+      .select("id, storage_path, groesse")
+      .in("id", ids);
+    if (error) throw error;
+    const jeId = new Map(((data ?? []) as { id: string; storage_path: string; groesse: number | null }[]).map((d) => [d.id, d]));
+    const fehlt = liste.filter((w) => !jeId.get(w.pdfDokumentId)?.storage_path);
+    if (fehlt.length > 0) {
+      throw new Error(
+        `Zu ${fehlt.length === 1 ? "einem Bericht" : `${fehlt.length} Berichten`} fehlt das PDF (${fehlt
+          .slice(0, 3)
+          .map((w) => `${w.baustelle} ${fmtDatum(w.datum)}`)
+          .join(", ")}). Im Bericht „PDF neu erstellen“ drücken.`,
+      );
+    }
+    return liste.map((w) => {
+      const d = jeId.get(w.pdfDokumentId)!;
+      return {
+        id: d.id,
+        bucket: "baustellen",
+        storage_path: d.storage_path,
+        dateiname: berichtDateiname(w),
+        groesse: d.groesse,
+        mimetype: "application/pdf",
+      };
+    });
+  };
+
+  const sammelBetreff = useMemo(() => {
+    const liste = [...auswahl.values()];
+    if (liste.length === 0) return "";
+    const typen = new Set(liste.map((w) => w.typ));
+    const art =
+      typen.size > 1 ? "Berichte" : typen.has("regiebericht") ? "Regieberichte" : "Bautagesberichte";
+    const orte = [...new Set(liste.map((w) => w.baustelle))];
+    const daten = liste.map((w) => w.datum).sort();
+    const zeit =
+      daten[0] === daten[daten.length - 1]
+        ? fmtDatum(daten[0])
+        : `${fmtDatum(daten[0])} – ${fmtDatum(daten[daten.length - 1])}`;
+    return `${liste.length === 1 ? TYP_LABEL[liste[0].typ] : art} ${orte.length === 1 ? orte[0] : `${orte.length} Baustellen`} ${zeit}`;
+  }, [auswahl]);
+
+  const sammelText = useMemo(() => {
+    const liste = [...auswahl.values()].sort(
+      (a, b) => a.baustelle.localeCompare(b.baustelle, "de") || a.datum.localeCompare(b.datum),
+    );
+    const zeilen = liste.map((w) => `- ${TYP_LABEL[w.typ]} ${w.baustelle} vom ${fmtDatum(w.datum)}`);
+    return `Hallo,\n\nim Anhang ${liste.length === 1 ? "der Bericht" : `${liste.length} Berichte`}:\n${zeilen.join("\n")}\n\nMit freundlichen Grüßen`;
+  }, [auswahl]);
+
+  const perMail = async () => {
+    setLadeSammel("mail");
+    try {
+      setSendItems(await sammelDateien());
+    } catch (e) {
+      toast({ variant: "destructive", title: "Versand nicht möglich", description: (e as Error).message });
+    } finally {
+      setLadeSammel(null);
+    }
+  };
+
+  const alsZip = async () => {
+    setLadeSammel("zip");
+    try {
+      const items = await sammelDateien();
+      const dateien: { name: string; inhalt: Blob }[] = [];
+      for (const it of items) {
+        const { data, error } = await supabase.storage.from(it.bucket).download(it.storage_path);
+        if (error || !data) throw new Error(`„${it.dateiname}“ konnte nicht geladen werden.`);
+        dateien.push({ name: it.dateiname, inhalt: data });
+      }
+      await zipHerunterladen(dateien, dateiSicher(sammelBetreff || "Berichte"));
+    } catch (e) {
+      toast({ variant: "destructive", title: "Herunterladen fehlgeschlagen", description: (e as Error).message });
+    } finally {
+      setLadeSammel(null);
+    }
+  };
+
   const setFilter = (key: string, val: string | null) => {
     const next = new URLSearchParams(params);
     if (val === null || val === "") next.delete(key);
@@ -200,10 +356,18 @@ export default function Berichte() {
       <PageHeader
         title="Berichte"
         actions={
-          <Button onClick={() => setOpenNeu(true)}>
-            <Plus className="h-4 w-4 mr-1.5" />
-            {aktiverTyp === "bautagesbericht" ? "Neuer Bautagesbericht" : "Neuer Regiebericht"}
-          </Button>
+          <div className="flex flex-wrap gap-2 justify-end">
+            {!auswahlModus && (
+              <Button variant="outline" onClick={() => setAuswahlModus(true)}>
+                <Mail className="h-4 w-4 mr-1.5" />
+                Gesammelt versenden
+              </Button>
+            )}
+            <Button onClick={() => setOpenNeu(true)}>
+              <Plus className="h-4 w-4 mr-1.5" />
+              {aktiverTyp === "bautagesbericht" ? "Neuer Bautagesbericht" : "Neuer Regiebericht"}
+            </Button>
+          </div>
         }
       />
 
@@ -285,6 +449,72 @@ export default function Berichte() {
         </CardContent>
       </Card>
 
+      {/* Sammelversand: Auswahl-Leiste */}
+      {auswahlModus && (
+        <Card className="border-primary/40 bg-primary/5" data-testid="sammel-leiste">
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="text-sm">
+                <div className="font-semibold">Berichte gesammelt versenden</div>
+                <div className="text-xs text-muted-foreground">
+                  Mit Typ, Zeitraum, Status und Baustelle die Liste eingrenzen und Berichte abhaken.
+                  Die Auswahl bleibt beim Umschalten erhalten — so gehen auch Bautages- und
+                  Regieberichte zusammen. Auswählbar sind Berichte mit PDF (nach der Freigabe).
+                </div>
+              </div>
+              <Button
+                size="icon"
+                variant="ghost"
+                aria-label="Sammelversand beenden"
+                onClick={() => {
+                  setAuswahlModus(false);
+                  setAuswahl(new Map());
+                }}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium tabular-nums" data-testid="sammel-anzahl">
+                {auswahl.size} ausgewählt
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={mitPdfInListe.length === 0}
+                onClick={() => alleInListe(!alleInListeGewaehlt)}
+              >
+                {alleInListeGewaehlt ? "Liste abwählen" : `Alle in der Liste (${mitPdfInListe.length})`}
+              </Button>
+              {auswahl.size > 0 && (
+                <Button size="sm" variant="ghost" onClick={() => setAuswahl(new Map())}>
+                  Auswahl leeren
+                </Button>
+              )}
+              <div className="flex-1" />
+              {isAdmin && (
+                <Button size="sm" disabled={auswahl.size === 0 || !!ladeSammel} onClick={perMail}>
+                  {ladeSammel === "mail" ? (
+                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                  ) : (
+                    <Mail className="h-4 w-4 mr-1.5" />
+                  )}
+                  Per Mail senden
+                </Button>
+              )}
+              <Button size="sm" variant="outline" disabled={auswahl.size === 0 || !!ladeSammel} onClick={alsZip}>
+                {ladeSammel === "zip" ? (
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4 mr-1.5" />
+                )}
+                Herunterladen (ZIP)
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Liste */}
       {isLoading ? (
         <Card>
@@ -323,12 +553,7 @@ export default function Berichte() {
             const polier = b.erfasst_von ? profileById.get(b.erfasst_von) : null;
             const sb = STATUS_BADGE[b.status];
             const statusInfo = statusChangeInfo(b);
-            return (
-              <Link
-                key={b.id}
-                to={`/berichte/${b.id}`}
-                className="block rounded-md border bg-card hover:bg-muted/40 transition p-3"
-              >
+              const inhalt = (
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -362,13 +587,75 @@ export default function Berichte() {
                       </div>
                     )}
                   </div>
-                  <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
+                  {!auswahlModus && (
+                    <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
+                  )}
                 </div>
-              </Link>
-            );
+              );
+              if (!auswahlModus) {
+                return (
+                  <Link
+                    key={b.id}
+                    to={`/berichte/${b.id}`}
+                    className="block rounded-md border bg-card hover:bg-muted/40 transition p-3"
+                  >
+                    {inhalt}
+                  </Link>
+                );
+              }
+              const gewaehlt = auswahl.has(b.id);
+              const hatPdf = !!b.pdf_dokument_id;
+              return (
+                <div
+                  key={b.id}
+                  role="checkbox"
+                  aria-checked={gewaehlt}
+                  aria-disabled={!hatPdf}
+                  tabIndex={hatPdf ? 0 : -1}
+                  data-testid="sammel-bericht"
+                  onClick={() => umschalten(b)}
+                  onKeyDown={(e) => {
+                    if (e.key === " " || e.key === "Enter") {
+                      e.preventDefault();
+                      umschalten(b);
+                    }
+                  }}
+                  className={`flex items-start gap-3 rounded-md border p-3 transition ${
+                    hatPdf ? "cursor-pointer hover:bg-muted/40" : "opacity-60"
+                  } ${gewaehlt ? "bg-primary/5 border-primary/50" : "bg-card"}`}
+                >
+                  <Checkbox
+                    checked={gewaehlt}
+                    disabled={!hatPdf}
+                    tabIndex={-1}
+                    className="mt-1 pointer-events-none"
+                    aria-hidden
+                  />
+                  <div className="min-w-0 flex-1">
+                    {inhalt}
+                    {!hatPdf && (
+                      <div className="text-[11px] text-muted-foreground italic mt-0.5">
+                        noch kein PDF — erst nach der Freigabe auswählbar
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
           })}
         </div>
       )}
+
+      <DocSendDialog
+        open={!!sendItems}
+        onOpenChange={(o) => !o && setSendItems(null)}
+        items={sendItems ?? []}
+        defaultBetreff={sammelBetreff}
+        defaultBody={sammelText}
+        onSent={() => {
+          setAuswahl(new Map());
+          setAuswahlModus(false);
+        }}
+      />
 
       <NeuerBerichtDialog
         open={openNeu}

@@ -51,6 +51,12 @@ paths:
 - **„ZE“** = Zeile aus der Zeiterfassung: beim MA dessen Stunden auf der Baustelle an dem Tag, bei der Tätigkeit die Summe aller MA. Entfernt man MA von Hand,
   bleibt die Tätigkeits-Summe stehen (Bericht 605b6c96, 09.11.: 5×9,5 = 47,5 h übernommen, 2 MA danach entfernt). Vermutlich sieht der Polier beim Anlegen per RLS
   nur Arbeiter-Stunden, Angestellten-Stunden auf derselben KST (dort 11 h ohne Tätigkeit) kommen dann nicht mit.
+- **Gesammelt versenden** (J. Maurer, 19.11.2026: „Berichte gesammelt versenden mit Auswahl Möglichkeiten“): `/berichte` → „Gesammelt versenden“
+  schaltet Häkchen ein; Auswahl über die normalen Filter (Typ, Zeitraum, Status, Baustelle) + „Alle in der Liste“, bleibt beim Umschalten erhalten
+  (Bautages- + Regieberichte in einer Mail). Nur Berichte mit `pdf_dokument_id` wählbar (Entwürfe nicht). „Per Mail senden“ nur bei `isAdmin`
+  (`dokument-versenden` ist `is_admin_role`; Poliere haben `berichte.freigeben`, sind aber keine Verwaltung), „Herunterladen (ZIP)“ für alle.
+  Dateinamen „Bautagesbericht <BVH> <Datum>.pdf“ (im Speicher heißen sie alle `<datum>_<typ>.pdf`). Bericht-PDFs sind im Schnitt 3,7 MB, bis 21 MB →
+  `DocSendDialog` teilt ab 15 MB je Mail auf mehrere Mails auf („Teil 1/2“, `lib/mailTeile.ts`) — gilt auch für Dokumente bei Baustelle/Angebot.
 
 ## Berichte-Archiv (`/berichte-archiv`, Recht `stunden.bsb.bestaetigen`)
 - Abgestimmt mit J. Maurer (21.09., er wollte vorher gefragt werden): fertige TB (nach Freigabe) und BSB

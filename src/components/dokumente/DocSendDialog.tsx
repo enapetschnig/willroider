@@ -27,6 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { pruefeEdgeAntwort } from "@/lib/edgeError";
+import { teileNachGroesse } from "@/lib/mailTeile";
 import { Loader2, Mail, FileIcon } from "lucide-react";
 
 export interface DocSendItem {
@@ -54,6 +55,10 @@ interface DocSendDialogProps {
 }
 
 const LS_LAST_RECIPIENT = "willroider:lastDocRecipient";
+/** Größe je Mail; darüber wird auf mehrere Mails aufgeteilt (Mail-Limit 35 MB). */
+const MAX_TEIL_BYTES = 15 * 1024 * 1024;
+
+
 const MAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Mehrere Adressen aus einem Feld — durch Komma, Semikolon oder Umbruch. */
@@ -145,49 +150,60 @@ export function DocSendDialog({
       return;
     }
     setSending(true);
+    // Große Auswahl (z. B. gesammelte Berichte mit vielen Fotos, J. Maurer
+    // 19.11.2026) auf mehrere Mails aufteilen statt am Mail-Limit zu
+    // scheitern. Geplant wird nach der bekannten Dateigröße.
+    const teile = teileNachGroesse(items, MAX_TEIL_BYTES);
+    let gesendet = 0;
+    let gesendetDateien = 0;
     try {
-      // Dateien aus Storage laden + base64-kodieren
-      const attachments: { filename: string; contentBase64: string }[] = [];
-      for (const item of items) {
-        if (item.blob) {
-          attachments.push({ filename: item.dateiname, contentBase64: await blobToBase64(item.blob) });
-          continue;
+      for (let t = 0; t < teile.length; t++) {
+        const attachments: { filename: string; contentBase64: string }[] = [];
+        for (const item of teile[t]) {
+          if (item.blob) {
+            attachments.push({ filename: item.dateiname, contentBase64: await blobToBase64(item.blob) });
+            continue;
+          }
+          const { data, error } = await supabase.storage
+            .from(item.bucket)
+            .download(item.storage_path);
+          if (error || !data) {
+            throw new Error(
+              `„${item.dateiname}“ konnte nicht geladen werden: ${error?.message ?? "unbekannt"}`,
+            );
+          }
+          attachments.push({
+            filename: item.dateiname,
+            contentBase64: await blobToBase64(data),
+          });
         }
-        const { data, error } = await supabase.storage
-          .from(item.bucket)
-          .download(item.storage_path);
-        if (error || !data) {
-          throw new Error(
-            `„${item.dateiname}" konnte nicht geladen werden: ${error?.message ?? "unbekannt"}`,
-          );
-        }
-        attachments.push({
-          filename: item.dateiname,
-          contentBase64: await blobToBase64(data),
-        });
-      }
 
-      const antwort = await supabase.functions.invoke("dokument-versenden", {
-        body: {
-          empfaenger: to,
-          cc: ccTrim || undefined,
-          betreff,
-          text: body,
-          attachments,
-          // Für den Versand-Nachweis: die Function trägt nach
-          // erfolgreichem Mailversand einen Eintrag je Dokument ein.
-          // filter(Boolean) — Aufrufer ohne id (z.B. Ad-hoc-Dateien)
-          // sollen keinen leeren Eintrag erzeugen.
-          dokumentIds: items.map((i) => i.id).filter(Boolean),
-        },
-      });
-      // Wirft mit dem ECHTEN Fehlertext (403, „Empfänger ungültig", …)
-      // statt des generischen „non-2xx status code".
-      await pruefeEdgeAntwort(antwort);
+        const antwort = await supabase.functions.invoke("dokument-versenden", {
+          body: {
+            empfaenger: to,
+            cc: ccTrim || undefined,
+            betreff: teile.length > 1 ? `${betreff} (Teil ${t + 1}/${teile.length})` : betreff,
+            text: teile.length > 1 ? `${body}\n\n(Mail ${t + 1} von ${teile.length})` : body,
+            attachments,
+            // Für den Versand-Nachweis: die Function trägt nach
+            // erfolgreichem Mailversand einen Eintrag je Dokument ein.
+            // filter(Boolean) — Aufrufer ohne id (z.B. Ad-hoc-Dateien)
+            // sollen keinen leeren Eintrag erzeugen.
+            dokumentIds: teile[t].map((i) => i.id).filter(Boolean),
+          },
+        });
+        // Wirft mit dem ECHTEN Fehlertext (403, „Empfänger ungültig“, …)
+        // statt des generischen „non-2xx status code“.
+        await pruefeEdgeAntwort(antwort);
+        gesendet++;
+        gesendetDateien += attachments.length;
+      }
       localStorage.setItem(LS_LAST_RECIPIENT, to);
       toast({
         title: "Mail versendet",
-        description: `${attachments.length} Datei${attachments.length === 1 ? "" : "en"} an ${to}.`,
+        description:
+          `${gesendetDateien} Datei${gesendetDateien === 1 ? "" : "en"} an ${to}` +
+          (teile.length > 1 ? ` (aufgeteilt auf ${teile.length} Mails).` : "."),
       });
       onOpenChange(false);
       onSent?.();
@@ -195,7 +211,10 @@ export function DocSendDialog({
       toast({
         variant: "destructive",
         title: "Versand fehlgeschlagen",
-        description: (e as Error).message,
+        description:
+          gesendet > 0
+            ? `Mail ${gesendet} von ${teile.length} ist raus, danach: ${(e as Error).message}`
+            : (e as Error).message,
       });
     } finally {
       setSending(false);
@@ -278,7 +297,10 @@ export function DocSendDialog({
               ))}
             </ul>
             <p className="text-[11px] text-muted-foreground">
-              Gesamt: {totalKB.toFixed(0)} KB · max. 35 MB pro Mail
+              Gesamt: {totalKB >= 1024 ? `${(totalKB / 1024).toFixed(1)} MB` : `${totalKB.toFixed(0)} KB`}
+              {teileNachGroesse(items, MAX_TEIL_BYTES).length > 1
+                ? ` · geht als ${teileNachGroesse(items, MAX_TEIL_BYTES).length} Mails raus (je bis 15 MB)`
+                : " · max. 35 MB pro Mail"}
             </p>
           </div>
         </div>

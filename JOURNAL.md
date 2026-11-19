@@ -1,5 +1,11 @@
 # Journal
 
+## 2026-11-19 · Berichte gesammelt versenden (J. Maurer)
+- `/berichte`: Knopf „Gesammelt versenden“ → Häkchen, Auswahl bleibt über Typ/Filter hinweg, Mail (Verwaltung) oder ZIP.
+- `DocSendDialog` teilt große Auswahl auf mehrere Mails (je ≤ 15 MB, `lib/mailTeile.ts`).
+- Wunsch Zulagen (Schmutz/Abbruch, Vorarbeiterzulage) war schon mit c09f537 live (Migration + Tripolt zugeteilt geprüft).
+- Test `tests/roboter/2026-11-19-berichte-gesammelt-versenden.spec.ts`; Gesamtlauf 20/21, `2026-11-08-bericht-fotos-heic` dort einmal rot, allein (mit und ohne Änderung) grün.
+
 ## 2026-11-19 · Zulagen: Schmutz/Abbruch nicht doppelt, Vorarbeiterzulage (J. Maurer)
 - 27 Tage im November (Umbau Samonig Fürnitz, 2.–16.11.) hatten Schmutz- UND Abbruchzulage mit denselben Stunden.
   Ursache: jede Zulage wurde beim Antippen mit den vollen Tagesstunden vorbelegt, keine Prüfung. Jetzt Ausschluss-Gruppe
