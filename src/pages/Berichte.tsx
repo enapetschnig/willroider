@@ -199,8 +199,11 @@ export default function Berichte() {
     [profiles],
   );
 
+  // Nur fertige Berichte: ein wieder geöffneter Entwurf hat evtl. noch das alte PDF.
+  const versendbar = (b: (typeof berichte)[number]) =>
+    !!b.pdf_dokument_id && (b.status === "freigegeben" || b.status === "archiviert");
   const wahlAus = (b: (typeof berichte)[number]): BerichtWahl | null => {
-    if (!b.pdf_dokument_id) return null;
+    if (!versendbar(b) || !b.pdf_dokument_id) return null;
     const bs = baustelleById.get(b.baustelle_id);
     return {
       id: b.id,
@@ -221,7 +224,7 @@ export default function Berichte() {
       return neu;
     });
   };
-  const mitPdfInListe = berichte.filter((b) => !!b.pdf_dokument_id);
+  const mitPdfInListe = berichte.filter(versendbar);
   const alleInListeGewaehlt = mitPdfInListe.length > 0 && mitPdfInListe.every((b) => auswahl.has(b.id));
   const alleInListe = (an: boolean) => {
     setAuswahl((alt) => {
@@ -459,7 +462,7 @@ export default function Berichte() {
                 <div className="text-xs text-muted-foreground">
                   Mit Typ, Zeitraum, Status und Baustelle die Liste eingrenzen und Berichte abhaken.
                   Die Auswahl bleibt beim Umschalten erhalten — so gehen auch Bautages- und
-                  Regieberichte zusammen. Auswählbar sind Berichte mit PDF (nach der Freigabe).
+                  Regieberichte zusammen. Auswählbar sind freigegebene Berichte (mit PDF).
                 </div>
               </div>
               <Button
@@ -604,7 +607,7 @@ export default function Berichte() {
                 );
               }
               const gewaehlt = auswahl.has(b.id);
-              const hatPdf = !!b.pdf_dokument_id;
+              const hatPdf = versendbar(b);
               return (
                 <div
                   key={b.id}
@@ -635,7 +638,7 @@ export default function Berichte() {
                     {inhalt}
                     {!hatPdf && (
                       <div className="text-[11px] text-muted-foreground italic mt-0.5">
-                        noch kein PDF — erst nach der Freigabe auswählbar
+                        noch nicht freigegeben — erst danach auswählbar
                       </div>
                     )}
                   </div>

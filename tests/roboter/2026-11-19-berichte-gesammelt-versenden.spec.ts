@@ -59,7 +59,7 @@ async function berichtMitPdf(bsId: string, datum: string, typ: string, polierId:
   return { berId: ber.id as string, dokId: dok.id as string };
 }
 
-test("Berichte gesammelt versenden: Auswahl über Typen, Mail (auch aufgeteilt), ZIP, Polier nur ZIP", async ({ page, browser }) => {
+test("Berichte gesammelt versenden: Auswahl über Typen, Mail (auch aufgeteilt), ZIP, Polier sieht Auswahl und ZIP", async ({ page, browser }) => {
   await fetch(`${API}/storage/v1/bucket`, { method: "POST", headers: kopf, body: JSON.stringify({ id: "baustellen", name: "baustellen", public: false }) });
   const stamp = Date.now().toString().slice(-6) + Math.random().toString(36).slice(2, 5);
   const polier = await konto("Polier", "bauleiter");
@@ -71,6 +71,9 @@ test("Berichte gesammelt versenden: Auswahl über Typen, Mail (auch aufgeteilt),
   const b2 = await berichtMitPdf(bs.id, tag(2), "bautagesbericht", polier.id);
   const r1 = await berichtMitPdf(bs.id, tag(2), "regiebericht", polier.id);
   await rest("/rest/v1/berichte", "POST", { baustelle_id: bs.id, datum: tag(1), typ: "bautagesbericht", erfasst_von: polier.id, status: "entwurf" });
+  // Wieder geöffneter Bericht: Entwurf, hat aber noch das alte PDF → darf nicht mitgehen
+  const alt = await berichtMitPdf(bs.id, tag(4), "bautagesbericht", polier.id);
+  await rest(`/rest/v1/berichte?id=eq.${alt.berId}`, "PATCH", { status: "entwurf" });
 
   const fehler: string[] = [];
   page.on("pageerror", (e) => fehler.push(e.message));
@@ -85,12 +88,14 @@ test("Berichte gesammelt versenden: Auswahl über Typen, Mail (auch aufgeteilt),
   await page.goto(`${APP}/berichte?typ=bautagesbericht&baustelle=${bs.id}&from=${tag(10)}&to=${tag(0)}`);
   await page.getByRole("button", { name: "Gesammelt versenden" }).click();
   const zeilen = page.getByTestId("sammel-bericht");
-  await expect(zeilen).toHaveCount(3, { timeout: 30_000 });
-  // Entwurf ohne PDF nicht wählbar
-  const entwurf = zeilen.filter({ hasText: "noch kein PDF" });
-  await expect(entwurf).toHaveCount(1);
-  await expect(entwurf).toHaveAttribute("aria-disabled", "true");
-  await entwurf.click({ force: true });
+  await expect(zeilen).toHaveCount(4, { timeout: 30_000 });
+  // Entwürfe (auch mit altem PDF) nicht wählbar
+  const entwurf = zeilen.filter({ hasText: "noch nicht freigegeben" });
+  await expect(entwurf).toHaveCount(2);
+  for (const z of await entwurf.all()) {
+    await expect(z).toHaveAttribute("aria-disabled", "true");
+    await z.click({ force: true });
+  }
   await expect(page.getByTestId("sammel-anzahl")).toHaveText("0 ausgewählt");
   await page.getByRole("button", { name: "Alle in der Liste (2)" }).click();
   await expect(page.getByTestId("sammel-anzahl")).toHaveText("2 ausgewählt");
@@ -133,7 +138,7 @@ test("Berichte gesammelt versenden: Auswahl über Typen, Mail (auch aufgeteilt),
   await anmelden(p2, polier.sitzung);
   await p2.goto(`${APP}/berichte?typ=bautagesbericht&baustelle=${bs.id}&from=${tag(10)}&to=${tag(0)}`);
   await p2.getByRole("button", { name: "Gesammelt versenden" }).click();
-  await expect(p2.getByTestId("sammel-bericht")).toHaveCount(3, { timeout: 30_000 });
+  await expect(p2.getByTestId("sammel-bericht")).toHaveCount(4, { timeout: 30_000 });
   await expect(p2.getByRole("button", { name: "Herunterladen (ZIP)" })).toBeVisible();
   // Mail-Knopf genau dann, wenn dokument-versenden es zulässt (is_admin_role). Im Kundensystem
   // sind Poliere (Rolle bauleiter) keine Verwaltung; die Testumgebung kann das anders vorbelegen.

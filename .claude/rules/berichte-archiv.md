@@ -53,7 +53,7 @@ paths:
   nur Arbeiter-Stunden, Angestellten-Stunden auf derselben KST (dort 11 h ohne Tätigkeit) kommen dann nicht mit.
 - **Gesammelt versenden** (J. Maurer, 19.11.2026: „Berichte gesammelt versenden mit Auswahl Möglichkeiten“): `/berichte` → „Gesammelt versenden“
   schaltet Häkchen ein; Auswahl über die normalen Filter (Typ, Zeitraum, Status, Baustelle) + „Alle in der Liste“, bleibt beim Umschalten erhalten
-  (Bautages- + Regieberichte in einer Mail). Nur Berichte mit `pdf_dokument_id` wählbar (Entwürfe nicht). „Per Mail senden“ nur bei `isAdmin`
+  (Bautages- + Regieberichte in einer Mail). Nur freigegebene/archivierte Berichte mit `pdf_dokument_id` wählbar („Zurück auf Entwurf“ lässt das alte PDF stehen). „Per Mail senden“ nur bei `isAdmin`
   (`dokument-versenden` ist `is_admin_role`; Poliere haben `berichte.freigeben`, sind aber keine Verwaltung), „Herunterladen (ZIP)“ für alle.
   Dateinamen „Bautagesbericht <BVH> <Datum>.pdf“ (im Speicher heißen sie alle `<datum>_<typ>.pdf`). Bericht-PDFs sind im Schnitt 3,7 MB, bis 21 MB →
   `DocSendDialog` teilt ab 15 MB je Mail auf mehrere Mails auf („Teil 1/2“, `lib/mailTeile.ts`) — gilt auch für Dokumente bei Baustelle/Angebot.
