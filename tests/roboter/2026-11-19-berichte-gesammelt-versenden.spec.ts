@@ -61,7 +61,7 @@ async function berichtMitPdf(bsId: string, datum: string, typ: string, polierId:
 
 test("Berichte gesammelt versenden: Auswahl über Typen, Mail (auch aufgeteilt), ZIP, Polier sieht Auswahl und ZIP", async ({ page, browser }) => {
   await fetch(`${API}/storage/v1/bucket`, { method: "POST", headers: kopf, body: JSON.stringify({ id: "baustellen", name: "baustellen", public: false }) });
-  const stamp = Date.now().toString().slice(-6) + Math.random().toString(36).slice(2, 5);
+  const stamp = String(Math.floor(Math.random() * 1e6)).padStart(6, "0") + Math.random().toString(36).slice(2, 5);
   const polier = await konto("Polier", "bauleiter");
   const chef = await konto("Chef", "geschaeftsfuehrung");
   const name = `Probe BVH Sammel ${stamp}`;

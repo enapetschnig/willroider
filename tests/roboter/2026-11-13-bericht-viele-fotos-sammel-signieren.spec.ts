@@ -24,7 +24,7 @@ async function rest(pfad: string, methode: string, daten?: unknown) {
 }
 const PW = "Test1234!x";
 async function konto(name: string, rolle: string) {
-  const email = `${name}.${Date.now()}@test.local`;
+  const email = `${name}.${Date.now()}${Math.random().toString(36).slice(2, 7)}@test.local`;
   const u = await rest("/auth/v1/admin/users", "POST", { email, password: PW, email_confirm: true });
   await rest(`/rest/v1/profiles?id=eq.${u.id}`, "PATCH", { vorname: name, nachname: "Test", is_active: true });
   await rest(`/rest/v1/user_roles?user_id=eq.${u.id}`, "DELETE");

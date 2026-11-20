@@ -30,7 +30,7 @@ async function rest(pfad: string, methode: string, daten?: unknown) {
 }
 const PW = "Test1234!x";
 async function konto(vorname: string, nachname: string, rolle: string) {
-  const email = `${vorname}.${Date.now()}@test.local`;
+  const email = `${vorname}.${Date.now()}${Math.random().toString(36).slice(2, 7)}@test.local`;
   const u = await rest("/auth/v1/admin/users", "POST", { email, password: PW, email_confirm: true });
   await rest(`/rest/v1/profiles?id=eq.${u.id}`, "PATCH", { vorname, nachname, is_active: true });
   await rest(`/rest/v1/user_roles?user_id=eq.${u.id}`, "DELETE");
@@ -78,7 +78,7 @@ async function ziehen(page: Page, flaeche: ReturnType<Page["locator"]>, von: [nu
 
 test("Plan-Viewer: Ein-Klick, Tabs, Wischen, Anmerkungen, Kopie, offline", async ({ page, context }) => {
   test.setTimeout(240_000);
-  const stamp = Date.now().toString().slice(-6);
+  const stamp = String(Math.floor(Math.random() * 1e6)).padStart(6, "0");
   const polier = await konto("Sebastian", "Probe", "bauleiter");
   const andere = await konto("Andere", "Person", "bauleiter");
   const [bs] = await rest("/rest/v1/baustellen", "POST", { bvh_name: `Probe BVH Plan ${stamp}`, kostenstelle: `14077${stamp}`, status: "aktiv" });

@@ -25,7 +25,7 @@ async function rest(pfad: string, methode: string, daten?: unknown) {
 }
 const PW = "Test1234!x";
 async function konto(vorname: string, rolle: string) {
-  const email = `${vorname.toLowerCase()}.${Date.now()}@test.local`;
+  const email = `${vorname.toLowerCase()}.${Date.now()}${Math.random().toString(36).slice(2, 7)}@test.local`;
   const u = await rest("/auth/v1/admin/users", "POST", { email, password: PW, email_confirm: true });
   await rest(`/rest/v1/profiles?id=eq.${u.id}`, "PATCH", { vorname, nachname: "Probe", is_active: true });
   await rest(`/rest/v1/user_roles?user_id=eq.${u.id}`, "DELETE");
@@ -64,7 +64,7 @@ async function tagAnlegen(maId: string, datum: string, vonId: string, zeilen: Ar
 }
 
 test("Tag des gewählten Datums in der Liste löschen leert das Formular", async ({ page }) => {
-  const stamp = Date.now();
+  const stamp = Date.now() * 1000 + Math.floor(Math.random() * 1000); // eindeutig auch bei gleichzeitigen Läufen (KST ist unique)
   const polier = await konto(`Polier${stamp % 10000}`, "bauleiter");
   const [partie] = await rest("/rest/v1/partien", "POST", { name: `Partie Loesch ${stamp}`, partieleiter_id: polier.id });
   await rest(`/rest/v1/profiles?id=eq.${polier.id}`, "PATCH", { partie_id: partie.id });

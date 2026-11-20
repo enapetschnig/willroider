@@ -591,7 +591,11 @@ export default function Stunden() {
 
   // Bei Datums-/User-Wechsel: bestehenden Eintrag des primaryUsers laden.
   useEffect(() => {
-    const uids = Array.from(forUserIds);
+    // Die eigene Person immer mitnehmen: kommt der gespeicherte Tag an, bevor die
+    // Personenauswahl (Planung) geladen ist, wären die Zulagen-Stunden sonst
+    // keiner Person zugeordnet → „alle“ statt z. B. 5 h, Speichern hätte den
+    // ganzen Tag geschrieben (gefunden 20.11.2026 im Paralleltest).
+    const uids = Array.from(new Set([primaryUserId, ...forUserIds].filter(Boolean)));
     geladeneAndereRef.current = new Set();
     setFormNonce((n) => n + 1);
     if (!aktuellerEigenerTag) {

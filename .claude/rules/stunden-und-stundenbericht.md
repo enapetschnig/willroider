@@ -72,6 +72,9 @@ paths:
   30-Tage-Liste angewiesen. Fahrtgeld/Anmerkung/Arbeitsbeginn Mitgebuchter bleiben beim Speichern erhalten.
   Fallstrick (10.11.): Query `stunden_tage_fuer_datum` muss bei JEDEM Speichern/Löschen eines Tags mit ungültig
   werden (passiert in `useSaveStundenTag`/`useDeleteStundenTag`) — sonst blieb ein gelöschter Tag im Formular.
+  Fallstrick (20.11.2026, Paralleltest): kam der gespeicherte Tag vor der Personenauswahl (Planung) an, hingen die
+  Zulagen-Stunden an keiner Person → Anzeige „alle“ statt z. B. 5 h, Speichern hätte den ganzen Tag geschrieben. Das
+  Lade-Effect nimmt jetzt `primaryUserId` immer mit in die Personenliste.
 
 ## Baustellenstundenbericht (BSB)
 - Nur für **Arbeiter**. Angestellte haben Tätigkeitsbericht (N. Gwenger, 01.10.):

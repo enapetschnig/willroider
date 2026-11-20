@@ -26,7 +26,7 @@ async function rest(pfad: string, methode: string, daten?: unknown) {
 }
 const PW = "Test1234!x";
 async function konto(name: string, rolle: string) {
-  const email = `${name}.${Date.now()}@test.local`;
+  const email = `${name}.${Date.now()}${Math.random().toString(36).slice(2, 7)}@test.local`;
   const u = await rest("/auth/v1/admin/users", "POST", { email, password: PW, email_confirm: true });
   await rest(`/rest/v1/profiles?id=eq.${u.id}`, "PATCH", { vorname: name, nachname: "Test", is_active: true });
   await rest(`/rest/v1/user_roles?user_id=eq.${u.id}`, "DELETE");
@@ -55,12 +55,15 @@ async function btbMitInhalt(bsId: string, datum: string, polierId: string, maId:
 }
 
 test("Bautagesbericht → Regiebericht übernehmen, Baustellen-Suche, Zurück mit letzter Auswahl", async ({ page }) => {
-  const stamp = Date.now().toString().slice(-6);
+  const stamp = String(Math.floor(Math.random() * 1e6)).padStart(6, "0");
   const polier = await konto("Polier", "bauleiter");
   const chef = await konto("Chef", "geschaeftsfuehrung");
   const kst = `14099${stamp}`;
   const [bs] = await rest("/rest/v1/baustellen", "POST", { bvh_name: `Probe BVH Regie ${stamp}`, kostenstelle: kst, status: "aktiv" });
-  await rest("/rest/v1/baustellen", "POST", { bvh_name: `Probe BVH Andere ${stamp}`, kostenstelle: `14088${stamp}`, status: "aktiv" });
+  // Name der anderen Baustelle ohne Ziffern: die Suche (cmdk) ist unscharf und fände die KST-Ziffern sonst
+  // zufällig auch im Namen („Probe BVH Andere 991409“ passte 20.11.2026 auf „14099991409“).
+  const andere = stamp.replace(/\d/g, (z) => "abcdefghij"[Number(z)]);
+  await rest("/rest/v1/baustellen", "POST", { bvh_name: `Probe BVH Andere ${andere}`, kostenstelle: `14088${stamp}`, status: "aktiv" });
   const heute = new Date();
   const d = (n: number) => { const x = new Date(heute); x.setDate(x.getDate() - n); return x.toISOString().slice(0, 10); };
   const a = await btbMitInhalt(bs.id, d(2), polier.id, polier.id);
@@ -120,7 +123,7 @@ test("Bautagesbericht → Regiebericht übernehmen, Baustellen-Suche, Zurück mi
   await page.getByRole("button", { name: /Regiebericht/ }).first().click();
   await page.locator('button[role="combobox"]').first().click();
   await page.getByPlaceholder("Baustelle suchen…").fill(kst);
-  await expect(page.getByRole("option", { name: new RegExp(`Probe BVH Andere ${stamp}`) })).toHaveCount(0);
+  await expect(page.getByRole("option", { name: new RegExp(`Probe BVH Andere ${andere}`) })).toHaveCount(0);
   await page.getByRole("option", { name: new RegExp(`Probe BVH Regie ${stamp}`) }).click();
   await expect(page).toHaveURL(new RegExp(`baustelle=${bs.id}`));
   await expect(page).toHaveURL(/typ=regiebericht/);

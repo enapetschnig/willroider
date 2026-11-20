@@ -23,7 +23,7 @@ async function rest(pfad: string, methode: string, daten?: unknown, extra: Recor
 }
 const PW = "Test1234!x";
 async function konto(name: string, rolle: string) {
-  const email = `${name}.${Date.now()}@test.local`;
+  const email = `${name}.${Date.now()}${Math.random().toString(36).slice(2, 7)}@test.local`;
   const u = await rest("/auth/v1/admin/users", "POST", { email, password: PW, email_confirm: true });
   await rest(`/rest/v1/profiles?id=eq.${u.id}`, "PATCH", { vorname: name, nachname: "Test", is_active: true });
   await rest(`/rest/v1/user_roles?user_id=eq.${u.id}`, "DELETE");
@@ -45,6 +45,20 @@ function alsNutzer(sitzung: any) {
   };
 }
 
+// Eigene, zufällige Tage weit in der Zukunft: tagesplanung_freigaben gilt je Datum für alle — mit festen
+// Tagen sah ein zweiter (oder gleichzeitiger) Lauf die Freigabe/Einteilungen des ersten.
+function eigeneTage(): [string, string] {
+  const d = new Date(Date.UTC(2040 + Math.floor(Math.random() * 50), Math.floor(Math.random() * 12), 1 + Math.floor(Math.random() * 27)));
+  const iso = (x: Date) => x.toISOString().slice(0, 10);
+  const d2 = new Date(d); d2.setUTCDate(d2.getUTCDate() + 1);
+  return [iso(d), iso(d2)];
+}
+const aufraeumen: Array<() => Promise<unknown>> = [];
+test.afterEach(async () => {
+  for (const f of aufraeumen.reverse()) await f().catch(() => null);
+  aufraeumen.length = 0;
+});
+
 test("Tagesplan-Sichtbarkeit, Bericht einreichen, BSB erzeugen nur Verwaltung", async ({ page }) => {
   const buero = await konto("Buero", "buero");
   const ma = await konto("Arbeiter", "mitarbeiter");
@@ -53,8 +67,16 @@ test("Tagesplan-Sichtbarkeit, Bericht einreichen, BSB erzeugen nur Verwaltung", 
   const [bsb] = await rest("/rest/v1/berechtigungen?schluessel=eq.stunden.bsb.bestaetigen&select=id", "GET");
   await rest("/rest/v1/user_berechtigungen", "POST", { user_id: polier.id, berechtigung_id: bsb.id, erlaubt: true });
 
-  const [bs] = await rest("/rest/v1/baustellen", "POST", { bvh_name: "Probe BVH", status: "aktiv" });
-  const d1 = "2031-03-03", d2 = "2031-03-04";
+  const nutzer = [buero.id, ma.id, kollege.id, polier.id];
+  const [bs] = await rest("/rest/v1/baustellen", "POST", { bvh_name: `Probe BVH Einteilung ${Date.now()}`, status: "aktiv" });
+  const [d1, d2] = eigeneTage();
+  aufraeumen.push(async () => {
+    await rest(`/rest/v1/tagesplanung_freigaben?datum=in.(${d1},${d2})`, "DELETE").catch(() => null);
+    await rest(`/rest/v1/berichte?baustelle_id=eq.${bs.id}`, "DELETE").catch(() => null);
+    await rest(`/rest/v1/einteilungen?baustelle_id=eq.${bs.id}`, "DELETE").catch(() => null);
+    await rest(`/rest/v1/baustellen?id=eq.${bs.id}`, "DELETE").catch(() => null);
+    for (const id of nutzer) await rest(`/auth/v1/admin/users/${id}`, "DELETE").catch(() => null);
+  });
   const [eEigen] = await rest("/rest/v1/einteilungen", "POST", { datum: d1, baustelle_id: bs.id });
   const [eFremd] = await rest("/rest/v1/einteilungen", "POST", { datum: d2, baustelle_id: bs.id });
   await rest("/rest/v1/einteilung_mitarbeiter", "POST", [

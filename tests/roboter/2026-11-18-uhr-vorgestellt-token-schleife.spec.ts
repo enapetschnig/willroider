@@ -27,8 +27,8 @@ async function rest(pfad: string, methode: string, daten?: unknown) {
 }
 
 test("Uhr am Gerät 2 h vor: keine Endlosschleife beim Token-Erneuern", async ({ browser }) => {
-  const stamp = Date.now();
-  const email = `uhr.${stamp}@test.local`;
+  const stamp = Date.now() * 1000 + Math.floor(Math.random() * 1000); // eindeutig auch bei gleichzeitigen Läufen (KST ist unique)
+  const email = `uhr.${stamp}${Math.random().toString(36).slice(2, 7)}@test.local`;
   const PW = "Test1234!x";
   const u = await rest("/auth/v1/admin/users", "POST", { email, password: PW, email_confirm: true });
   await rest(`/rest/v1/profiles?id=eq.${u.id}`, "PATCH", { vorname: "Uhr", nachname: "Probe", is_active: true });

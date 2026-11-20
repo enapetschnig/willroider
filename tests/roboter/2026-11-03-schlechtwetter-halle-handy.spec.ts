@@ -24,7 +24,7 @@ async function rest(pfad: string, methode: string, daten?: unknown) {
 }
 const PW = "Test1234!x";
 async function konto(name: string, rolle: string) {
-  const email = `${name}.${Date.now()}@test.local`;
+  const email = `${name}.${Date.now()}${Math.random().toString(36).slice(2, 7)}@test.local`;
   const u = await rest("/auth/v1/admin/users", "POST", { email, password: PW, email_confirm: true });
   await rest(`/rest/v1/profiles?id=eq.${u.id}`, "PATCH", { vorname: name, nachname: "Test", is_active: true });
   await rest(`/rest/v1/user_roles?user_id=eq.${u.id}`, "DELETE");
@@ -38,7 +38,7 @@ const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
 
 test("Schlechtwetter in der Halle mit Baustelle, Handy-Bericht mit Adresse", async ({ page }) => {
   const ma = await konto("Halle", "mitarbeiter");
-  const stamp = Date.now();
+  const stamp = Date.now() * 1000 + Math.floor(Math.random() * 1000); // eindeutig auch bei gleichzeitigen Läufen (KST ist unique)
   await rest("/rest/v1/baustellen", "POST", { bvh_name: `Säge ${stamp}`, kategorie: "maschine", status: "aktiv" });
   const [bs] = await rest("/rest/v1/baustellen", "POST", {
     bvh_name: `SW Probe ${stamp}`, status: "aktiv", kostenstelle: `9${String(stamp).slice(-6)}`, baustellen_adresse: "Teststraße 1", plz: "9500", ort: "Villach",

@@ -32,7 +32,7 @@ async function rest(pfad: string, methode: string, daten?: unknown) {
 }
 const PW = "Test1234!x";
 async function konto(vorname: string, rolle: string) {
-  const email = `${vorname.toLowerCase()}.${Date.now()}@test.local`;
+  const email = `${vorname.toLowerCase()}.${Date.now()}${Math.random().toString(36).slice(2, 7)}@test.local`;
   const u = await rest("/auth/v1/admin/users", "POST", { email, password: PW, email_confirm: true });
   await rest(`/rest/v1/profiles?id=eq.${u.id}`, "PATCH", { vorname, nachname: "Zulage", is_active: true });
   await rest(`/rest/v1/user_roles?user_id=eq.${u.id}`, "DELETE");
@@ -88,7 +88,7 @@ async function speichern(page: Page) {
 }
 
 test("Schmutz- und Abbruchzulage nie am selben Tag", async ({ page }) => {
-  const stamp = Date.now();
+  const stamp = Date.now() * 1000 + Math.floor(Math.random() * 1000); // eindeutig auch bei gleichzeitigen Läufen (KST ist unique)
   const ma = await konto(`Zul${stamp % 100000}`, "mitarbeiter");
   const [bst] = await rest("/rest/v1/baustellen", "POST", {
     bvh_name: `Zulagen Probe ${stamp}`, status: "aktiv", kostenstelle: `6${String(stamp).slice(-6)}`,
@@ -162,7 +162,7 @@ test("Schmutz- und Abbruchzulage nie am selben Tag", async ({ page }) => {
 });
 
 test("Vorarbeiterzulage nur für zugeteilte Mitarbeiter", async ({ page }) => {
-  const stamp = Date.now();
+  const stamp = Date.now() * 1000 + Math.floor(Math.random() * 1000); // eindeutig auch bei gleichzeitigen Läufen (KST ist unique)
   const vorarbeiter = await konto(`Vor${stamp % 100000}`, "mitarbeiter");
   const anderer = await konto(`And${stamp % 100000}`, "mitarbeiter");
   const [bst] = await rest("/rest/v1/baustellen", "POST", {

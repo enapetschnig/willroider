@@ -24,7 +24,7 @@ const PW = "Test1234!x";
 const pad = (n: number) => String(n).padStart(2, "0");
 
 test("Schnell eintippen: kein doppelter Tag, kein verlorener Wert", async ({ page }) => {
-  const email = `tb.${Date.now()}@test.local`;
+  const email = `tb.${Date.now()}${Math.random().toString(36).slice(2, 7)}@test.local`;
   const u = await rest("/auth/v1/admin/users", "POST", { email, password: PW, email_confirm: true });
   await rest(`/rest/v1/profiles?id=eq.${u.id}`, "PATCH", { vorname: "Tb", nachname: "Test", is_active: true, zeiterfassung_typ: "angestellter" });
   await rest(`/rest/v1/user_roles?user_id=eq.${u.id}`, "DELETE");
@@ -42,7 +42,7 @@ test("Schnell eintippen: kein doppelter Tag, kein verlorener Wert", async ({ pag
   };
 
   // Zwei Kostenstellen-Zeilen über einen schon erfassten Tag
-  const stamp = Date.now();
+  const stamp = Date.now() * 1000 + Math.floor(Math.random() * 1000); // eindeutig auch bei gleichzeitigen Läufen (KST ist unique)
   const baustellen = await Promise.all([1, 2].map(async (n) => {
     const [b] = await rest("/rest/v1/baustellen", "POST", { bvh_name: `TB Probe ${n} ${stamp}`, status: "aktiv", kostenstelle: `8${n}${String(stamp).slice(-5)}` });
     return b.id as string;

@@ -27,7 +27,7 @@ async function rest(pfad: string, methode: string, daten?: unknown) {
 }
 const PW = "Test1234!x";
 async function konto(vorname: string, nachname: string, rolle: string) {
-  const email = `menue-pos-${vorname}.${Date.now()}@test.local`;
+  const email = `menue-pos-${vorname}.${Date.now()}${Math.random().toString(36).slice(2, 7)}@test.local`;
   const u = await rest("/auth/v1/admin/users", "POST", { email, password: PW, email_confirm: true });
   await rest(`/rest/v1/profiles?id=eq.${u.id}`, "PATCH", { vorname, nachname, is_active: true });
   await rest(`/rest/v1/user_roles?user_id=eq.${u.id}`, "DELETE");
@@ -45,7 +45,7 @@ const menue = (page: Page, name: string) => page.locator("aside nav, nav").first
 
 test("Seitenleiste merkt sich je Menüpunkt die letzte Position (Baustelle → Dokumente → Ordner)", async ({ page }) => {
   test.setTimeout(120_000);
-  const stamp = Date.now().toString().slice(-6);
+  const stamp = String(Math.floor(Math.random() * 1e6)).padStart(6, "0");
   const buero = await konto("Elias", `Menue${stamp}`, "buero");
   const name = `Menü-Probe ${stamp}`;
   const [bs] = await rest("/rest/v1/baustellen", "POST", { bvh_name: name, kostenstelle: `14055${stamp}`, status: "aktiv", sharepoint_item_id: `probe-${stamp}` });

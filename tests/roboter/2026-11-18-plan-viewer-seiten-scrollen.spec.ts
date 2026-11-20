@@ -27,7 +27,7 @@ async function rest(pfad: string, methode: string, daten?: unknown) {
 }
 const PW = "Test1234!x";
 async function konto(vorname: string, nachname: string, rolle: string) {
-  const email = `pv-seiten-${vorname}.${Date.now()}@test.local`;
+  const email = `pv-seiten-${vorname}.${Date.now()}${Math.random().toString(36).slice(2, 7)}@test.local`;
   const u = await rest("/auth/v1/admin/users", "POST", { email, password: PW, email_confirm: true });
   await rest(`/rest/v1/profiles?id=eq.${u.id}`, "PATCH", { vorname, nachname, is_active: true });
   await rest(`/rest/v1/user_roles?user_id=eq.${u.id}`, "DELETE");
@@ -56,7 +56,7 @@ const seitenBox = (page: Page, nr: number) => page.locator(`[data-plan-seite="${
 
 test("Plan-Viewer: alle Seiten untereinander, Rad scrollt, Strg+Rad zoomt, Pfeile, Finger", async ({ page }) => {
   test.setTimeout(180_000);
-  const stamp = Date.now().toString().slice(-6);
+  const stamp = String(Math.floor(Math.random() * 1e6)).padStart(6, "0");
   const buero = await konto("Elias", `Seiten${stamp}`, "buero");
   const [bs] = await rest("/rest/v1/baustellen", "POST", { bvh_name: `PV-Seiten ${stamp}`, kostenstelle: `14066${stamp}`, status: "aktiv" });
   await fetch(`${API}/storage/v1/bucket`, {
@@ -197,7 +197,7 @@ test("Plan-Viewer: alle Seiten untereinander, Rad scrollt, Strg+Rad zoomt, Pfeil
 // mit derselben Bedienung (nur ansehen, ohne Zeichenwerkzeuge) statt im eingebetteten Browser-PDF.
 test("Angebot-PDF: Seiten untereinander, Seitenpfeile, Strg+Rad zoomt nur das PDF", async ({ page }) => {
   test.setTimeout(120_000);
-  const stamp = Date.now().toString().slice(-6);
+  const stamp = String(Math.floor(Math.random() * 1e6)).padStart(6, "0");
   const buero = await konto("Elias", `Angebot${stamp}`, "buero");
   const [ang] = await rest("/rest/v1/angebote", "POST", { bvh_name: `PV-Angebot ${stamp}` });
   const bytes = await mehrseitigesPdf();

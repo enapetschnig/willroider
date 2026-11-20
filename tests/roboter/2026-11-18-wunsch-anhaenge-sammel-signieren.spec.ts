@@ -31,9 +31,9 @@ const PNG = Buffer.from(
 const ANZAHL = 30;
 
 test("Änderungswünsche: viele Anhänge mit einem Sammelaufruf signiert, Bilder sichtbar", async ({ browser }) => {
-  const stamp = Date.now();
+  const stamp = Date.now() * 1000 + Math.floor(Math.random() * 1000); // eindeutig auch bei gleichzeitigen Läufen
   const PW = "Test1234!x";
-  const email = `chef.${stamp}@test.local`;
+  const email = `chef.${stamp}${Math.random().toString(36).slice(2, 7)}@test.local`;
   const u = await rest("/auth/v1/admin/users", "POST", { email, password: PW, email_confirm: true });
   await rest(`/rest/v1/profiles?id=eq.${u.id}`, "PATCH", { vorname: "Chef", nachname: "Probe", is_active: true });
   await rest(`/rest/v1/user_roles?user_id=eq.${u.id}`, "DELETE");

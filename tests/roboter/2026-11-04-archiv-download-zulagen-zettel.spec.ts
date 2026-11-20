@@ -25,10 +25,10 @@ async function rest(pfad: string, methode: string, daten?: unknown) {
   return t ? JSON.parse(t) : null;
 }
 const PW = "Test1234!x";
-const stamp = Date.now();
+const stamp = Date.now() * 1000 + Math.floor(Math.random() * 1000); // eindeutig auch bei gleichzeitigen Läufen (KST ist unique)
 const KST = `9${String(stamp).slice(-6)}`;
 async function konto(vorname: string, nachname: string, rolle: string) {
-  const email = `${vorname.toLowerCase()}.${stamp}@test.local`;
+  const email = `${vorname.toLowerCase()}.${stamp}${Math.random().toString(36).slice(2, 7)}@test.local`;
   const u = await rest("/auth/v1/admin/users", "POST", { email, password: PW, email_confirm: true });
   await rest(`/rest/v1/profiles?id=eq.${u.id}`, "PATCH", { vorname, nachname, is_active: true, pers_nr: "542" });
   await rest(`/rest/v1/user_roles?user_id=eq.${u.id}`, "DELETE");

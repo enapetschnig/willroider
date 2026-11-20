@@ -1,5 +1,13 @@
 # Journal
 
+## 2026-11-20 · Roboter-Tests: alle grün, jetzt parallel (Christoph)
+- Erstlauf `--workers=1`: alle 21 grün → `bekannt-rot.txt` nicht nötig.
+- Parallel-Umbau: E-Mails/`stamp`/KST mit Zufallsanteil (KST unique → 409 bei gleicher ms), Einteilungs-Test mit eigenen
+  Zufallstagen + Aufräumen (Freigabe gilt je Datum für alle), Regie-Suche-Test ohne Ziffern im Vergleichsnamen (cmdk unscharf).
+- App-Fix `/stunden`: Zulagen-Teilstunden wurden bei langsamer Planung als „alle“ geladen (eigene Person fehlte noch in
+  der Personenliste) — fand `--repeat-each=3 --workers=4`.
+- Härtetest 63/63, danach zweimal hintereinander 21/21 mit `--workers=4` → `tests/roboter/parallel-ok` angelegt.
+
 ## 2026-11-19 (abends) · Schmutz- ODER Abbruchzulage, nie beide (J. Maurer, Vorgabe Christoph)
 - Kein Aufteilen mehr: Antippen nimmt die andere weg (Stunden, Tag bearbeiten, Büro-Korrektur), Hinweistext nach KV.
 - Migration `20261119200000_zulagen_schmutz_abbruch_ausschluss.sql`: Trigger löscht die andere derselben Gruppe; 28 Alt-Tage
