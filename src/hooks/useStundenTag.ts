@@ -289,19 +289,22 @@ export function useSaveStundenTag() {
         .delete()
         .eq("stunden_tag_id", tagId);
       if (zDelErr) throw zDelErr;
-      if (input.zulagen.length > 0) {
-        // Zulagen immer mit Stunden speichern (J. Maurer, 20.11.2026: „kein Hacken
-        // oder Kreuz sondern hier müssen auch stunden eingetragen werden“): leer
-        // („alle“) = Arbeitsstunden des Tages. Die DB füllt zusätzlich nach.
-        const arbeitStd = arbeitsStundenAusEintraegen(input.taetigkeiten);
-        const { error: zErr } = await supabase.from("stunden_zulagen").insert(
-          input.zulagen.map((z) => ({
-            stunden_tag_id: tagId!,
-            zulagen_typ_id: z.zulagen_typ_id,
-            stunden: z.stunden ?? (arbeitStd > 0 ? arbeitStd : null),
-            notiz: z.notiz,
-          })),
-        );
+      // Zulagen immer mit Stunden speichern (J. Maurer, 20.11.2026: „kein Hacken
+      // oder Kreuz sondern hier müssen auch stunden eingetragen werden“): leer
+      // („alle“) = Arbeitsstunden des Tages. Ohne Stunden (Tag ohne Baustellen-/
+      // Firmenstunden, 0 h) wird keine Zulage gespeichert — sonst stünde im BSB und
+      // am Erschwernis-Zettel ein „x“ (J. Maurer, 20.11.2026). Die DB sichert ab.
+      const arbeitStd = arbeitsStundenAusEintraegen(input.taetigkeiten);
+      const zulagenMitStunden = input.zulagen
+        .map((z) => ({
+          stunden_tag_id: tagId!,
+          zulagen_typ_id: z.zulagen_typ_id,
+          stunden: z.stunden != null ? Number(z.stunden) : arbeitStd,
+          notiz: z.notiz,
+        }))
+        .filter((z) => (Number(z.stunden) || 0) > 0);
+      if (zulagenMitStunden.length > 0) {
+        const { error: zErr } = await supabase.from("stunden_zulagen").insert(zulagenMitStunden);
         if (zErr) throw zErr;
       }
 

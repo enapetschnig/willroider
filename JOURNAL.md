@@ -1,5 +1,10 @@
 # Journal
 
+## 20.11.2026 – Erschwernis-Zettel ohne „x“ (J. Maurer)
+- Wunsch 09:18: Zettel Tripolt KW 47 zeigte „x“ / 0,00 Std. Daten waren um 09:14 schon gefüllt (9,5 h), der Screenshot stammte
+  vom Stand davor. Rest-Lücken geschlossen: Zettel ohne „x“, Zulagen mit 0 h werden weder in der App noch in der DB gespeichert.
+- Roboter-Reihe: 22/23 grün im ersten Lauf, `2026-11-17-berichte-regie-…` einmal rot (Baustellen-Suche), einzeln 2× grün – wackelt.
+
 ## 2026-11-20 · BSB: Zulagen mit Stunden, letzter Tag nicht mehr „geändert“ (J. Maurer)
 - Tripolt Nov. I: Abbruchzulage 16.11. war `stunden = NULL` (Polier Hinteregger hat für die Partie gebucht, Feld leer = „alle“).
   9 solche Zeilen gesamt (Maurer 20.05., 3× 21.10., Rüting 11.11., Tripolt 16.11.) → mit Arbeitsstunden gefüllt.

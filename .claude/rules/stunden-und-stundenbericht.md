@@ -112,6 +112,11 @@ paths:
   der letzte Tag wird meist danach geschrieben → „geändert“. Jetzt zieht `stunden_bericht_unterschreiben` den Snapshot neu
   (`stunden_bericht_snapshot()`), vor der Unterschrift zählen neu dazugekommene Tage nicht. Bestand: 9 NULL-Zulagen gefüllt,
   101 Snapshots nachgezogen (Sicherungstabellen `sicherung_20261120_*`). Archivierte PDFs (SharePoint) blieben unverändert.
+- **Nie eine Zulage ohne Stunden** (J. Maurer, 20.11.2026, Erschwernis-Zettel Tripolt KW 47: „dann übernimmt er auch das x
+  was alles verfällscht“). Ursache: am 20.11. vormittags war nur der BSB umgestellt, `erschwerniszulagePdf.ts` druckte bei
+  0 h weiter „x“ (Gesamt 0,00), und eine Zulage auf einem Tag ohne Baustellen-/Firmenstunden blieb ohne Stunden. Jetzt:
+  `useSaveStundenTag` lässt Zulagen mit 0 h weg, Trigger `trg_stunden_zulagen_0_stunden_fuellen` speichert sie nicht
+  (RETURN NULL, läuft vor dem Schmutz/Abbruch-Ausschluss), der Zettel kennt kein „x“ mehr. Test `2026-11-20-zulagen-zettel-ohne-x`.
 - Erinnern an Unterschrift (Glocke, „Alle n erinnern“) → siehe `push-erinnerungen.md`.
 - Fehler 29.10. (L. Schuller): `useState` hinter frühem Return → React #310, Seite stürzte für alle ab.
   Hooks immer vor `if (isLoading) return`.

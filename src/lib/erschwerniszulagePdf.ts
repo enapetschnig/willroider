@@ -62,7 +62,7 @@ export interface ZettelBlatt {
   /** Mo–So; Sonntag wird nur gedruckt, wenn er belegt ist. */
   tage: {
     iso: string;
-    /** null = kein Eintrag; 0 = Zulage ohne Stundenangabe („x“ wie am Stundenbericht). */
+    /** null = kein Eintrag; sonst Zulagen-Stunden (nie „x“ — J. Maurer, 20.11.2026). */
     stunden: number | null;
     beginn: number;
     kostenstellen: string[];
@@ -84,6 +84,10 @@ export function zulagenBlaetter(tage: ZettelTagEingabe[]): ZettelBlatt[] {
   for (const t of tage) {
     const datum = new Date(`${t.datum}T00:00:00`);
     for (const z of t.zulagen) {
+      // Zulage ohne Stunden zählt nicht und erscheint nicht als „x“ (J. Maurer, 20.11.2026:
+      // „dann übernimmt er auch das x was alles verfälscht“).
+      const h = Number(z.stunden ?? 0) || 0;
+      if (h <= 0) continue;
       const kw = getISOWeek(datum);
       const jahr = getISOWeekYear(datum);
       const key = `${jahr}-${kw}-${z.typId}`;
@@ -107,7 +111,6 @@ export function zulagenBlaetter(tage: ZettelTagEingabe[]): ZettelBlatt[] {
         blaetter.set(key, blatt);
       }
       const tag = blatt.tage.find((x) => x.iso === t.datum)!;
-      const h = Number(z.stunden ?? 0) || 0;
       tag.stunden = (tag.stunden ?? 0) + h;
       tag.beginn = beginnAlsZahl(t.arbeitsbeginn);
       tag.kostenstellen = t.kostenstellen;
@@ -210,7 +213,7 @@ export async function makeErschwerniszulagePdf(blaetter: ZettelBlatt[], kopf: Ze
       ]),
       [
         "Summe",
-        ...spalten.map(({ t }) => (t.stunden === null ? "" : t.stunden > 0 ? fmtHNum(t.stunden) : "x")),
+        ...spalten.map(({ t }) => (t.stunden === null ? "" : fmtHNum(t.stunden))),
       ],
     ];
     autoTable(doc, {
@@ -252,9 +255,7 @@ export async function makeErschwerniszulagePdf(blaetter: ZettelBlatt[], kopf: Ze
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
     doc.setTextColor(90, 90, 95);
-    const hinweis = blatt.tage.some((t) => t.stunden === 0)
-      ? "Raster ab Arbeitsbeginn durchgezählt, in der App sind nur Stunden je Tag erfasst. x = Zulage ohne Stundenangabe."
-      : "Raster ab Arbeitsbeginn durchgezählt, in der App sind nur Stunden je Tag erfasst.";
+    const hinweis = "Raster ab Arbeitsbeginn durchgezählt, in der App sind nur Stunden je Tag erfasst.";
     doc.text(hinweis, rand, y);
     doc.setTextColor(30, 30, 30);
     y += 7;
@@ -385,6 +386,9 @@ export async function ladeZulagenZettel(opts: {
         .filter((z: any) => !/vorarbeiter/i.test(z.bezeichnung)),
     })),
   );
+
+  // nur Zulagen ohne Stunden bzw. nur Vorarbeiterzulage → kein (leerer) Zettel
+  if (blaetter.length === 0) return null;
 
   const p = profil as any;
   let polier: string | null = null;
