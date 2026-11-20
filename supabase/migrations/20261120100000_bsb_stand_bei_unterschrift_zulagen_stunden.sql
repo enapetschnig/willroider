@@ -42,7 +42,7 @@ AS $$
   ) s;
 $$;
 REVOKE ALL ON FUNCTION public.stunden_bericht_snapshot(UUID, DATE, DATE) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.stunden_bericht_snapshot(UUID, DATE, DATE) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.stunden_bericht_snapshot(UUID, DATE, DATE) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.stunden_bericht_erzeugen(p_jahr integer, p_monat integer, p_teil integer)
  RETURNS integer
