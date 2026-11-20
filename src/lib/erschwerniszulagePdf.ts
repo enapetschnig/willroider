@@ -15,6 +15,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { localIso } from "@/lib/dateFmt";
 import { fmtHNum } from "@/lib/zeiterfassung";
 import { getLogo } from "@/lib/baustellenstundenberichtPdf";
+import { zulageStunden } from "@/lib/zulagen";
 
 /** Tätigkeiten lt. Kollektivvertrag § 6, wie auf der Papiervorlage. */
 export const KV_PUNKTE: { punkt: string; text: string }[] = [
@@ -320,7 +321,7 @@ export async function ladeZulagenZettel(opts: {
   const { data: tageRaw, error } = await supabase
     .from("stunden_tage")
     .select(
-      "datum, arbeitsbeginn, zulagen:stunden_zulagen!inner(zulagen_typ_id, stunden), taetigkeiten:stunden_taetigkeiten(art, baustelle_id, ziel_baustelle_id)",
+      "datum, arbeitsbeginn, zulagen:stunden_zulagen!inner(zulagen_typ_id, stunden), taetigkeiten:stunden_taetigkeiten(art, baustelle_id, ziel_baustelle_id, stunden)",
     )
     .eq("mitarbeiter_id", opts.mitarbeiterId)
     .gte("datum", opts.von)
@@ -377,7 +378,8 @@ export async function ladeZulagenZettel(opts: {
         .map((z: any) => ({
           typId: z.zulagen_typ_id,
           bezeichnung: typById.get(z.zulagen_typ_id) ?? "Zulage",
-          stunden: z.stunden,
+          // ohne Angabe (Altdaten) = Arbeitsstunden des Tages (J. Maurer, 20.11.2026)
+          stunden: zulageStunden(z, t.taetigkeiten ?? []),
         }))
         // Die Vorarbeiterzulage ist keine Erschwerniszulage — kein eigenes Blatt.
         .filter((z: any) => !/vorarbeiter/i.test(z.bezeichnung)),

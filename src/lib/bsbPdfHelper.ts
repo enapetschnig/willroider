@@ -251,6 +251,7 @@ export async function buildBerichtPdf(
   const geaendert = geaenderteTage(
     bericht.snapshot as BerichtSnapshot | undefined,
     tage,
+    bericht.status,
   );
   const zulagenAgg = aggregiereZulagen(tage, (zt as any[]) ?? []);
   const fahrtgeldAgg = aggregiereFahrtgeld(tage);
@@ -334,8 +335,8 @@ export async function buildBerichtPdf(
       label: z.label,
       zellen: periodeTage.map((d) => {
         const v = z.perDay.get(d.iso);
-        // Zulage ohne Stunden: „x" (jsPDF-Standardschrift kennt kein ✓)
-        return v === undefined ? "" : v > 0 ? fmtHNum(v) : "x";
+        // Immer Stunden, kein „x“ (J. Maurer, 20.11.2026)
+        return v === undefined ? "" : fmtHNum(v);
       }),
       summe: z.summe > 0 ? fmtHNum(z.summe) : "",
     })),

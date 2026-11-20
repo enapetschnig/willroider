@@ -1,5 +1,14 @@
 # Journal
 
+## 2026-11-20 · BSB: Zulagen mit Stunden, letzter Tag nicht mehr „geändert“ (J. Maurer)
+- Tripolt Nov. I: Abbruchzulage 16.11. war `stunden = NULL` (Polier Hinteregger hat für die Partie gebucht, Feld leer = „alle“).
+  9 solche Zeilen gesamt (Maurer 20.05., 3× 21.10., Rüting 11.11., Tripolt 16.11.) → mit Arbeitsstunden gefüllt.
+  Rüting 11.11.: Hanschitz am selben Tag 2 h, Rüting „alle“ = 9,5 h — vom Büro zu prüfen.
+- Letzter Tag markiert: Bericht entsteht 16.11. 18:00 UTC, 13 von 27 hatten den 16. erst danach geschrieben. Seit Okt. Teil I
+  ähnlich (4), jetzt Snapshot beim Unterschreiben. 101 alte Snapshots nachgezogen (nur Tage, die vor der Unterschrift zuletzt
+  gespeichert wurden). Nov. I bleiben markiert: Pirker, Hanschitz, Hinteregger, Koplenig, Steinwender (nach Unterschrift gespeichert).
+- Archiv-PDFs (bericht_archiv/SharePoint) nicht neu erzeugt. Test: `tests/roboter/2026-11-20-bsb-zulagen-stunden-stand-unterschrift.spec.ts`.
+
 ## 2026-11-20 · Roboter-Tests: alle grün, jetzt parallel (Christoph)
 - Erstlauf `--workers=1`: alle 21 grün → `bekannt-rot.txt` nicht nötig.
 - Parallel-Umbau: E-Mails/`stamp`/KST mit Zufallsanteil (KST unique → 409 bei gleicher ms), Einteilungs-Test mit eigenen

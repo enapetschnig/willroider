@@ -112,3 +112,22 @@ export function zulagenGleicheGruppe(typId: string, typen: readonly unknown[]): 
   if (!g) return [];
   return t.filter((x) => x.id !== typId && x.ausschluss_gruppe === g).map((x) => x.id);
 }
+
+/** Arbeitsstunden (Baustelle + Firma) eines Tages — „alle“ bei Zulagen. */
+export function arbeitsStundenAusEintraegen(
+  eintraege: readonly { art: string; stunden: number | string | null }[],
+): number {
+  const h = eintraege
+    .filter((e) => e.art === "baustelle" || e.art === "firma")
+    .reduce((s, e) => s + (Number(e.stunden) || 0), 0);
+  return Math.round(h * 100) / 100;
+}
+
+/** Stunden einer gespeicherten Zulage; ohne Angabe (Altdaten) = Arbeitsstunden des Tages. */
+export function zulageStunden(
+  z: { stunden: number | string | null },
+  eintraege: readonly { art: string; stunden: number | string | null }[],
+): number {
+  if (z.stunden != null) return Number(z.stunden) || 0;
+  return arbeitsStundenAusEintraegen(eintraege);
+}

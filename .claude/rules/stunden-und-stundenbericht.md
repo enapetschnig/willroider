@@ -91,7 +91,7 @@ paths:
   „Bestätigte ans Büro senden (n)“ in einer Mail. Liste: Monat/Teil oben, Filter, 15 Zeilen eingeklappt,
   ZIP-Download (`lib/zipDownload.ts`).
 - **Fahrgeld/Zulagen als Zeilen je Tag** (J. Maurer, 23.10.): `zusatzZeilenJeTag` in
-  `stundenAggregation.ts`, unter der Summe, am Bildschirm (✓) und im PDF („x“, jsPDF hat kein ✓).
+  `stundenAggregation.ts`, unter der Summe — seit 20.11.2026 immer mit Stunden (kein ✓/„x“ mehr).
   Krankheit/Schlechtwetter weiter als Zeilen K/SW.
 - **BSB-Ausdruck** (J. Maurer, 02.11.): Holzbau-Logo `public/holzbau-willroider-logo.jpg` (nachgebaut aus dem
   Stadtbaumeister-Logo, ein echtes Holzbau-Logo gab es nirgends), Wochentag unter jeder Tagesnummer, Sonn-/Feiertage
@@ -104,6 +104,14 @@ paths:
   Nachgezogen 03.11. (Gegenprobe): auch Halle/Werk-Erfassung (`ArtSection` mit `kategorie="maschine"` zeigt für SW die
   echten Baustellen, nicht die Maschinen; Speichern ohne Baustelle gesperrt) und Handy-Karten im Stundenbericht.
   Neue Erfassungsmasken immer mit prüfen — SW hängt an `mitBaustelleArt`/`fehltKostenstelle`.
+- **Zulagen immer mit Stunden, Markierung ab Unterschrift** (J. Maurer, 20.11.2026: „Bei den Zulagen kein Hacken oder Kreuz
+  sondern … stunden … ist es ein Zufall das fast bei allen der letzte Tag eine Änderung aufweisst“). Ursache 1: leeres
+  Zulagen-Feld („alle“) wurde als `stunden = NULL` gespeichert → BSB zeigte ✓/„x“, Summen/Zettel zählten 0. Jetzt füllt
+  `useSaveStundenTag` (und als Netz Trigger `trg_stunden_zulagen_stunden_fuellen`) die Arbeitsstunden (Baustelle+Firma) ein;
+  Anzeige über `zulageStunden()` in `lib/zulagen.ts`. Ursache 2: der Snapshot stammte vom Cron (16./Monatsletzter 19:00),
+  der letzte Tag wird meist danach geschrieben → „geändert“. Jetzt zieht `stunden_bericht_unterschreiben` den Snapshot neu
+  (`stunden_bericht_snapshot()`), vor der Unterschrift zählen neu dazugekommene Tage nicht. Bestand: 9 NULL-Zulagen gefüllt,
+  101 Snapshots nachgezogen (Sicherungstabellen `sicherung_20261120_*`). Archivierte PDFs (SharePoint) blieben unverändert.
 - Erinnern an Unterschrift (Glocke, „Alle n erinnern“) → siehe `push-erinnerungen.md`.
 - Fehler 29.10. (L. Schuller): `useState` hinter frühem Return → React #310, Seite stürzte für alle ab.
   Hooks immer vor `if (isLoading) return`.

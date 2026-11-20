@@ -314,8 +314,8 @@ export default function StundenBericht() {
   );
 
   const geaendert = useMemo(
-    () => geaenderteTage(bericht?.snapshot as BerichtSnapshot | undefined, tage),
-    [bericht?.snapshot, tage],
+    () => geaenderteTage(bericht?.snapshot as BerichtSnapshot | undefined, tage, bericht?.status),
+    [bericht?.snapshot, tage, bericht?.status],
   );
 
   const tagByIso = useMemo(() => {
@@ -874,10 +874,11 @@ export default function StundenBericht() {
           ? "border-emerald-400 bg-emerald-50 text-emerald-900"
           : "border-amber-300 bg-amber-50 text-amber-900";
         const iconCls = geprueft ? "text-emerald-700" : "text-amber-700";
+        const nachWas = bericht.status === "offen" ? "nach Erstellung" : "nach der Unterschrift";
         const text =
           geaendert.size === 1
-            ? "1 Tag wurde nach Erstellung geändert"
-            : `${geaendert.size} Tage wurden nach Erstellung geändert`;
+            ? `1 Tag wurde ${nachWas} geändert`
+            : `${geaendert.size} Tage wurden ${nachWas} geändert`;
         return (
           <div className={`rounded-lg border p-3 flex items-center gap-2 ${cls}`}>
             <AlertTriangle className={`h-4 w-4 shrink-0 ${iconCls}`} />
@@ -1174,7 +1175,7 @@ export default function StundenBericht() {
                             editierbar ? "cursor-pointer hover:bg-primary/5" : ""
                           } ${d.frei ? "bg-muted-foreground/5" : ""}`}
                         >
-                          {v === undefined ? "" : v > 0 ? fmtHNum(v) : "✓"}
+                          {v === undefined ? "" : fmtHNum(v)}
                         </td>
                       );
                     })}

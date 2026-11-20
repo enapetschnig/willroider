@@ -69,6 +69,7 @@ import { FileText } from "lucide-react";
 import { AdminTagEditModal } from "@/components/admin/AdminTagEditModal";
 import { useQueryClient } from "@tanstack/react-query";
 import type { StundenTagFull } from "@/hooks/useStundenTag";
+import { zulageStunden } from "@/lib/zulagen";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Partie = Database["public"]["Tables"]["partien"]["Row"];
@@ -505,7 +506,7 @@ export default function Stundenauswertung() {
         const zulStr = t.zulagen
           .map((z) => {
             const bez = zulById.get(z.zulagen_typ_id) ?? "Zulage";
-            return z.stunden != null ? `${bez} ${Number(z.stunden)}h` : bez;
+            return `${bez} ${zulageStunden(z, t.taetigkeiten)}h`;
           })
           .join(", ");
         const tg = taggeldFuerTag(t, pausenDauer, maschinenIds);
@@ -1221,7 +1222,7 @@ function DetailMa({
                             className="text-[9px] px-1 rounded bg-amber-50 text-amber-900 border border-amber-200"
                           >
                             {typ?.bezeichnung ?? "Zulage"}
-                            {z.stunden !== null && ` ${z.stunden}h`}
+                            {` ${zulageStunden(z, t.taetigkeiten)}h`}
                           </span>
                         );
                       })}

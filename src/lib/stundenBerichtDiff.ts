@@ -1,6 +1,6 @@
 /**
- * Vergleicht den bei Erzeugung des Baustellenstundenberichts gespeicherten
- * Snapshot mit den aktuellen (Live-)Stunden-Tagen und liefert die Datumswerte,
+ * Vergleicht den gespeicherten Snapshot (bei Erzeugung; ab 20.11.2026 beim
+ * Unterschreiben neu gezogen) mit den aktuellen (Live-)Stunden-Tagen und liefert die Datumswerte,
  * deren Einträge sich seither geändert haben. Diese Tage werden in Raster und
  * PDF gelb markiert.
  */
@@ -50,8 +50,14 @@ function normTag(entries: SnapshotEintrag[]): string {
 export function geaenderteTage(
   snapshot: BerichtSnapshot | null | undefined,
   liveTage: StundenTagFull[],
+  status?: string | null,
 ): Set<string> {
   const snap = snapshot ?? {};
+  // Vor der Unterschrift ist der Snapshot der Stand vom Erzeugen (16./Monatsletzter,
+  // 19:00). Tage, die danach erst geschrieben werden (meist der letzte), sind keine
+  // Änderung — sonst war fast immer der letzte Tag markiert (J. Maurer, 20.11.2026).
+  // Ab der Unterschrift ist der Snapshot der unterschriebene Stand → alles zählt.
+  const nurBekannteTage = status === "offen";
   const liveByDate = new Map<string, StundenTagFull>();
   for (const t of liveTage) liveByDate.set(t.tag.datum, t);
 
@@ -62,6 +68,7 @@ export function geaenderteTage(
 
   const geaendert = new Set<string>();
   for (const datum of alleDaten) {
+    if (nurBekannteTage && !(datum in snap)) continue;
     const snapNorm = normTag(snap[datum] ?? []);
     const liveNorm = normTag(
       (liveByDate.get(datum)?.taetigkeiten ?? []) as SnapshotEintrag[],

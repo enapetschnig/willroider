@@ -11,6 +11,7 @@
 
 import type { StundenTagFull } from "@/hooks/useStundenTag";
 import { berechneTaggeld } from "@/lib/taggeld";
+import { zulageStunden } from "@/lib/zulagen";
 
 /** Standard-Bau-KV-Sätze (in €). Bei KV-Update hier ändern. */
 export const TAGGELD_SATZ_KURZ_EUR = 12.6;
@@ -90,7 +91,7 @@ export function aggregiereZulagen(
     for (const z of t.zulagen) {
       const bez = nameById.get(z.zulagen_typ_id) ?? "Unbekannt";
       const cur = map.get(bez) ?? { summe: 0, tage: new Set<string>() };
-      cur.summe += Number(z.stunden ?? 0);
+      cur.summe += zulageStunden(z, t.taetigkeiten);
       cur.tage.add(t.tag.datum);
       map.set(bez, cur);
     }
@@ -229,8 +230,8 @@ export function zusatzZeilenJeTag(
     for (const z of t.zulagen) {
       const bez = nameById.get(z.zulagen_typ_id) ?? "Zulage";
       const m = zul.get(bez) ?? new Map<string, number>();
-      // Zulage ohne Stundenangabe zählt als „ja" (1) — angezeigt als ✓.
-      m.set(t.tag.datum, (m.get(t.tag.datum) ?? 0) + (Number(z.stunden ?? 0) || 0));
+      // Immer Stunden (J. Maurer, 20.11.2026) — ohne Angabe = Arbeitsstunden des Tages.
+      m.set(t.tag.datum, (m.get(t.tag.datum) ?? 0) + zulageStunden(z, t.taetigkeiten));
       zul.set(bez, m);
     }
   }
@@ -271,7 +272,7 @@ export function fmtZulagenInline(
   return t.zulagen
     .map((z) => {
       const bez = nameById.get(z.zulagen_typ_id) ?? "—";
-      const h = z.stunden != null ? `${Number(z.stunden)}h` : "✓";
+      const h = `${zulageStunden(z, t.taetigkeiten)}h`;
       return `${bez} ${h}`;
     })
     .join(", ");
