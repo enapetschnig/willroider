@@ -1,5 +1,10 @@
 # Journal
 
+## 2026-11-21 – Ganztags-Zulage wandert beim Nachbearbeiten mit (Nachtschicht-Gegenprobe)
+Befund bestätigt: Tag bearbeiten / Büro-Korrektur / `/stunden` luden die gespeicherte Zahl (z. B. 8) und schrieben sie nach
+dem Kürzen auf 6 h unverändert zurück. Fix zentral in `useSaveStundenTag`: gleich alten Arbeitsstunden → neue, sonst
+höchstens Arbeitsstunden. Probefahrt in der Testumgebung (ohne Fix rot, mit grün), alle 24 Roboter-Tests grün. Keine Migration.
+
 ## 20.11.2026 – Erschwernis-Zettel ohne „x“ (J. Maurer)
 - Wunsch 09:18: Zettel Tripolt KW 47 zeigte „x“ / 0,00 Std. Daten waren um 09:14 schon gefüllt (9,5 h), der Screenshot stammte
   vom Stand davor. Rest-Lücken geschlossen: Zettel ohne „x“, Zulagen mit 0 h werden weder in der App noch in der DB gespeichert.

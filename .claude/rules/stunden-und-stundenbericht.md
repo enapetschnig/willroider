@@ -117,6 +117,10 @@ paths:
   0 h weiter „x“ (Gesamt 0,00), und eine Zulage auf einem Tag ohne Baustellen-/Firmenstunden blieb ohne Stunden. Jetzt:
   `useSaveStundenTag` lässt Zulagen mit 0 h weg, Trigger `trg_stunden_zulagen_0_stunden_fuellen` speichert sie nicht
   (RETURN NULL, läuft vor dem Schmutz/Abbruch-Ausschluss), der Zettel kennt kein „x“ mehr. Test `2026-11-20-zulagen-zettel-ohne-x`.
+- **Nachbearbeiten mit Zulage** (Gegenprobe 21.11.2026): seit „alle“ als Zahl gespeichert wird, blieb eine Ganztags-Zulage
+  beim Kürzen des Tages stehen (8 → 6 h, Zulage 8). `zulageStundenBeimSpeichern()` in `lib/zulagen.ts` (zentral in
+  `useSaveStundenTag`, gilt für alle Masken): Zulage = alte Arbeitsstunden → neue Arbeitsstunden; nie mehr als der Tag.
+  Test `2026-11-21-zulagen-stunden-nachbearbeiten`.
 - Erinnern an Unterschrift (Glocke, „Alle n erinnern“) → siehe `push-erinnerungen.md`.
 - Fehler 29.10. (L. Schuller): `useState` hinter frühem Return → React #310, Seite stürzte für alle ab.
   Hooks immer vor `if (isLoading) return`.

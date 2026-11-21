@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, TagStatus } from "@/integrations/supabase/types";
-import { arbeitsStundenAusEintraegen, zulagenUeberschneidung } from "@/lib/zulagen";
+import { arbeitsStundenAusEintraegen, zulageStundenBeimSpeichern, zulagenUeberschneidung } from "@/lib/zulagen";
 
 type StundenTag = Database["public"]["Tables"]["stunden_tage"]["Row"];
 type StundenTaetigkeit = Database["public"]["Tables"]["stunden_taetigkeiten"]["Row"];
@@ -248,7 +248,7 @@ export function useSaveStundenTag() {
       // zurück, und es gäbe plötzlich wieder Taggeld.
       const { data: vorher } = await supabase
         .from("stunden_taetigkeiten")
-        .select("art, baustelle_id, taetigkeit_id, ort")
+        .select("art, baustelle_id, taetigkeit_id, ort, stunden")
         .eq("stunden_tag_id", tagId);
       const ortVorher = (t: SaveEintrag): "baustelle" | "firma" => {
         const alt = ((vorher as any[]) ?? []).filter(
@@ -295,11 +295,15 @@ export function useSaveStundenTag() {
       // Firmenstunden, 0 h) wird keine Zulage gespeichert — sonst stünde im BSB und
       // am Erschwernis-Zettel ein „x“ (J. Maurer, 20.11.2026). Die DB sichert ab.
       const arbeitStd = arbeitsStundenAusEintraegen(input.taetigkeiten);
+      // Beim Nachbearbeiten (Gegenprobe 21.11.2026): eine gespeicherte Zulage
+      // über den ganzen Tag (= alte Arbeitsstunden, früher „alle“) wandert mit
+      // den Arbeitsstunden mit; mehr Zulagen- als Arbeitsstunden gibt es nie.
+      const arbeitStdVorher = arbeitsStundenAusEintraegen((vorher as any[]) ?? []);
       const zulagenMitStunden = input.zulagen
         .map((z) => ({
           stunden_tag_id: tagId!,
           zulagen_typ_id: z.zulagen_typ_id,
-          stunden: z.stunden != null ? Number(z.stunden) : arbeitStd,
+          stunden: zulageStundenBeimSpeichern(z.stunden, arbeitStd, arbeitStdVorher),
           notiz: z.notiz,
         }))
         .filter((z) => (Number(z.stunden) || 0) > 0);

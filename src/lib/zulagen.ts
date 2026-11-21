@@ -131,3 +131,23 @@ export function zulageStunden(
   if (z.stunden != null) return Number(z.stunden) || 0;
   return arbeitsStundenAusEintraegen(eintraege);
 }
+
+/**
+ * Stunden, mit denen eine Zulage gespeichert wird.
+ * - leer („alle“) = Arbeitsstunden des Tages
+ * - gleich den bisher gespeicherten Arbeitsstunden (also „ganzer Tag“, seit
+ *   20.11.2026 als Zahl gespeichert) = neue Arbeitsstunden — sonst bliebe beim
+ *   Kürzen 8 → 6 h die Zulage auf 8 stehen (Gegenprobe 21.11.2026)
+ * - nie mehr als die Arbeitsstunden
+ */
+export function zulageStundenBeimSpeichern(
+  stunden: number | string | null | undefined,
+  arbeitStd: number,
+  arbeitStdVorher: number,
+): number {
+  if (stunden == null || String(stunden).trim() === "") return arbeitStd;
+  const h = Number(stunden) || 0;
+  if (arbeitStdVorher > 0 && Math.abs(h - arbeitStdVorher) < 0.001) return arbeitStd;
+  if (arbeitStd > 0 && h > arbeitStd) return arbeitStd;
+  return h;
+}
