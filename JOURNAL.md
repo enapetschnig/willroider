@@ -1,5 +1,11 @@
 # Journal
 
+## 2026-11-23 – Tätigkeitsbericht übernimmt Kostenstellen der Vorperiode (N. Gwenger)
+Bisher fing jede Periode leer an (Zeilen nur mit Stunden oder per Hand). Jetzt lädt die Seite die Tage der Vorperiode
+derselben Person und blendet deren KST mit Stunden als leere Zeilen ein (nur noch wählbare: Baustelle aktiv/geplant,
+aktive interne). Entfernen per Mistkübel; leer gebliebene übernommene Zeilen nicht im PDF. Keine Migration.
+Neuer Test ohne Änderung rot, mit grün (3× parallel); alle 25 Roboter-Tests grün.
+
 ## 2026-11-21 – Ganztags-Zulage wandert beim Nachbearbeiten mit (Nachtschicht-Gegenprobe)
 Befund bestätigt: Tag bearbeiten / Büro-Korrektur / `/stunden` luden die gespeicherte Zahl (z. B. 8) und schrieben sie nach
 dem Kürzen auf 6 h unverändert zurück. Fix zentral in `useSaveStundenTag`: gleich alten Arbeitsstunden → neue, sonst

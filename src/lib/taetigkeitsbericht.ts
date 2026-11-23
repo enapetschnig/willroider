@@ -365,3 +365,24 @@ export function berechneSummen(
 export const UEBERSTUNDEN_WARNUNG =
   "Überstunden bitte nur im Rahmen der Überstundenpauschale bzw. auf ausdrückliche Anweisung leisten";
 export const UEBERSTUNDEN_GRENZE = 15;
+
+/**
+ * Zeilen-Schlüssel (`bs:<id>` / `int:<id>`) aus den Tagen der Vorperiode —
+ * die Kostenstellen, auf denen die Person dort Stunden hatte. Werden in der
+ * neuen Periode gleich als Zeilen angeboten (Wunsch N. Gwenger, 23.11.2026).
+ * Urlaub/Krank laufen über eigene Zeilen und zählen nicht.
+ */
+export function vorperiodeKeys(
+  tage: { stunden_taetigkeiten?: { baustelle_id: string | null; taetigkeit_id: string | null; art: string; stunden: number | string | null }[] | null }[],
+): string[] {
+  const out: string[] = [];
+  for (const t of tage) {
+    for (const e of t.stunden_taetigkeiten ?? []) {
+      if (e.art !== "baustelle" && e.art !== "firma") continue;
+      if (!(Number(e.stunden) > 0)) continue;
+      const key = e.baustelle_id ? `bs:${e.baustelle_id}` : e.taetigkeit_id ? `int:${e.taetigkeit_id}` : null;
+      if (key && !out.includes(key)) out.push(key);
+    }
+  }
+  return out;
+}

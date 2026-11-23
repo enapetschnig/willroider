@@ -46,6 +46,7 @@ import {
   periodeFuer,
   periodeTitel,
   periodeVerschieben,
+  vorperiodeKeys,
   periodeVonDatum,
   r2,
   tagSpaltenFarbe,
@@ -396,6 +397,48 @@ export default function Taetigkeitsbericht() {
   useEffect(() => {
     setSichtbar([]);
   }, [zielMa, periode.jahr, periode.monat]);
+
+  // Kostenstellen aus dem Bericht der VORIGEN Periode derselben Person
+  // übernehmen (Wunsch N. Gwenger, 23.11.2026: „Baustellen aus Tätigkeitsbericht
+  // von Vor Monat gehören mit übernommen“). Nur die eigenen Zeilen mit Stunden,
+  // nur noch wählbare (aktive/geplante Baustellen, aktive interne KST) — und nur
+  // am Bildschirm zum Eintragen; leer gebliebene kommen nicht ins PDF.
+  const [vorperiode, setVorperiode] = useState<{ fuer: string; keys: string[] } | null>(null);
+  const periodeSchluessel = `${zielMa}|${periode.jahr}|${periode.monat}`;
+  useEffect(() => {
+    if (!zielMa) return;
+    let aktiv = true;
+    const vor = periodeVerschieben(periode, -1);
+    void (supabase as any)
+      .from("stunden_tage")
+      .select("stunden_taetigkeiten(baustelle_id, taetigkeit_id, art, stunden)")
+      .eq("mitarbeiter_id", zielMa)
+      .gte("datum", vor.von)
+      .lte("datum", vor.bis)
+      .then(({ data }: { data: any[] | null }) => {
+        if (!aktiv) return;
+        setVorperiode({ fuer: periodeSchluessel, keys: vorperiodeKeys(data ?? []) });
+      });
+    return () => {
+      aktiv = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodeSchluessel]);
+
+  /** Aus der Vorperiode übernommene Zeilen (für PDF: leer → weglassen). */
+  const uebernommenRef = useRef<{ fuer: string; keys: Set<string> }>({ fuer: "", keys: new Set() });
+  useEffect(() => {
+    if (!vorperiode || vorperiode.fuer !== periodeSchluessel || zeilenStamm.length === 0) return;
+    if (uebernommenRef.current.fuer === periodeSchluessel) return;
+    const waehlbar = new Set(zeilenStamm.filter((s) => s.waehlbar).map((s) => s.key));
+    const keys = vorperiode.keys.filter((k) => waehlbar.has(k));
+    uebernommenRef.current = { fuer: periodeSchluessel, keys: new Set(keys) };
+    if (keys.length === 0) return;
+    setSichtbar((cur) => {
+      const neu = keys.filter((k) => !cur.includes(k));
+      return neu.length > 0 ? [...cur, ...neu] : cur;
+    });
+  }, [vorperiode, periodeSchluessel, zeilenStamm]);
 
   // Zeilen, die angezeigt werden: alles mit Stunden plus manuell zugeschaltete.
   useEffect(() => {
@@ -863,7 +906,13 @@ export default function Taetigkeitsbericht() {
       name: maName,
       titel: periodeTitel(periode),
       tage: periode.tage,
-      zeilen: zeilen.map((zz) => ({
+      zeilen: zeilen
+        .filter((zz) => !(
+          uebernommenRef.current.fuer === periodeSchluessel &&
+          uebernommenRef.current.keys.has(zz.key) &&
+          summeVon(zellen[zz.key] ?? {}) === 0
+        ))
+        .map((zz) => ({
         kst: zz.kst,
         bezeichnung: zz.bezeichnung,
         werte: zellen[zz.key] ?? {},
@@ -1337,6 +1386,7 @@ export default function Taetigkeitsbericht() {
                                     value={`${s.kst} ${s.bezeichnung}`}
                                     onSelect={() => {
                                       setSichtbar((c) => [...c, s.key]);
+                                      uebernommenRef.current.keys.delete(s.key);
                                       setPickerOffen(false);
                                     }}
                                   >

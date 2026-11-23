@@ -16,6 +16,11 @@ paths:
   über „Kostenstelle hinzufügen“ ergänzte; die Liste wird je Person und Periode neu aufgebaut
   (J. Maurer, 22.09. — fremde KST 4020/4504 standen vorher drin). Interne KST nur mit Stunden;
   „Zim Allgemein 4899“ steht schon unter „Kostenstelle hinzufügen“.
+- **Kostenstellen der Vorperiode werden übernommen** (N. Gwenger, 23.11.2026: „Baustellen aus Tätigkeitsbericht
+  von Vor Monat gehören mit übernommen“): alle eigenen KST mit Stunden in der Vorperiode (Baustellen und interne),
+  sofern noch wählbar (Baustelle aktiv/geplant) — als leere Zeilen, mit Mistkübel entfernbar. Leer gebliebene
+  übernommene Zeilen kommen **nicht ins PDF** (Freigabe/Archiv ohne Leerzeilen, vgl. J. Maurer 22.09.).
+  `vorperiodeKeys()` in `lib/taetigkeitsbericht.ts`; Test `tests/roboter/2026-11-23-taetigkeitsbericht-vormonat-baustellen.spec.ts`.
 - **Freigabe** wie Stundenberichte (J. Maurer, 21.09.): Menü „Tätigkeitsberichte“ (Recht
   `stunden.taetigkeitsbericht.freigeben`, Geschäftsführung bzw. Stellvertreter). Nach Freigabe ist die
   Periode gesperrt, „Wieder öffnen“ hebt das auf.
