@@ -6,7 +6,9 @@
 // Aufruf (Bearer-Token des angemeldeten Users):
 //   { archiv_ids: [...], empfaenger, cc?, betreff, text,
 //     extra_anhaenge?: [{ filename, content(base64) }],   // z. B. Fahrtenbücher
-//     mit_krankmeldungen?: boolean }
+//     mit_krankmeldungen?: boolean,
+//     ersetzt_ids?: [...] }   // Berichte, die schon samt Beilagen als eine PDF
+//                             // in extra_anhaenge stecken (J. Maurer, 23.11.2026)
 //
 // Mitschicken (Wunsch J. Maurer, 21.10.2026): Kilometerberichte
 // (Fahrtenbuch-PDFs, im Browser erzeugt wie beim Drucken) und die
@@ -64,6 +66,11 @@ Deno.serve(async (req) => {
     .slice(0, 100)
     .map((a) => ({ filename: a.filename.replace(/[\\/:*?"<>|]/g, "-").slice(0, 150), content: a.content }));
   const mitKrank = body.mit_krankmeldungen === true;
+  // Diese Berichte hat der Browser schon als eine PDF je Mitarbeiter gebaut
+  // (Bericht + Fahrtenbuch + Zettel + Krankenzettel) — nicht doppelt anhängen.
+  const ersetzt = new Set(
+    (Array.isArray(body.ersetzt_ids) ? (body.ersetzt_ids as unknown[]) : []).filter((x): x is string => typeof x === "string" && ids.includes(x)),
+  );
   if (ids.length === 0) return json({ ok: false, fehler: "Keine Berichte gewählt" }, 400);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(empfaenger)) return json({ ok: false, fehler: "Empfänger ungültig" }, 400);
 
@@ -108,6 +115,7 @@ Deno.serve(async (req) => {
   if (mitKrank) {
     const gesehen = new Set<string>();
     for (const z of liste) {
+      if (ersetzt.has(z.id)) continue;
       const { von, bis } = zeitraum(z);
       const { data: km } = await sb
         .from("krankmeldungen")
@@ -134,12 +142,13 @@ Deno.serve(async (req) => {
 
   const extraBytes = extra.reduce((s, a) => s + Math.floor((a.content.length * 3) / 4), 0);
   const gesamt =
-    liste.reduce((s, z) => s + (z.groesse ?? 0), 0) + krank.reduce((s, k) => s + k.groesse, 0) + extraBytes;
+    liste.reduce((s, z) => s + (ersetzt.has(z.id) ? 0 : z.groesse ?? 0), 0) + krank.reduce((s, k) => s + k.groesse, 0) + extraBytes;
   const alsLinks = gesamt > MAX_ANHANG_BYTES;
 
   const attachments: Array<{ filename: string; content: string }> = [];
   const links: string[] = [];
   for (const z of liste) {
+    if (ersetzt.has(z.id)) continue;
     if (alsLinks) {
       const { data: s } = await sb.storage.from("berichte-archiv").createSignedUrl(z.storage_pfad, 7 * 86400, { download: z.dateiname });
       if (s?.signedUrl) links.push(`${z.dateiname}: ${s.signedUrl}`);
@@ -159,7 +168,7 @@ Deno.serve(async (req) => {
       if (datei) attachments.push({ filename: k.name, content: b64(new Uint8Array(await datei.arrayBuffer())) });
     }
   }
-  // Fahrtenbücher: klein, immer als Anhang.
+  // Fahrtenbücher und Gesamt-PDFs: immer als Anhang (der Browser hält sie unter 20 MB).
   attachments.push(...extra);
 
   const textVoll = alsLinks

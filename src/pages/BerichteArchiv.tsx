@@ -29,7 +29,8 @@ import { archivZeitraum, beilagenUebersicht, ladeBeilagen, zettelDateiname, type
 import { ladeZulagenZettel } from "@/lib/erschwerniszulagePdf";
 import { useAuth } from "@/contexts/AuthContext";
 import { periodeFuer } from "@/lib/taetigkeitsbericht";
-import { makeFahrtenbuchPdf } from "@/lib/taetigkeitsberichtPdf";
+import type { BeilagenDatei } from "@/lib/berichtBeilagen";
+import { baueGesamtPdf, blobAlsBase64, fahrtenbuchDateiname, ladeFahrtenbuchPdf } from "@/lib/berichtGesamtPdf";
 import { useSearchParams } from "react-router-dom";
 import { Archive, Cloud, CloudOff, Download, Loader2, Mail, CheckCircle2, AlertTriangle } from "lucide-react";
 
@@ -95,6 +96,8 @@ export default function BerichteArchiv() {
   // Zulagen-Zettel und Krankenzettel je Zeile (J. Maurer, 04.11.2026).
   const [mitZettel, setMitZettel] = useState(true);
   const [beilagen, setBeilagen] = useState<Map<string, BeilagenStand>>(new Map());
+  /** Fahrten der Periode je Mitarbeiter (nur Tätigkeitsberichte). */
+  const [fahrtenJe, setFahrtenJe] = useState<Map<string, number>>(new Map());
 
   const load = useCallback(async () => {
     setLaden(true);
@@ -135,6 +138,23 @@ export default function BerichteArchiv() {
     )
       .then(setBeilagen)
       .catch(() => setBeilagen(new Map()));
+
+    setFahrtenJe(new Map());
+    if (art === "taetigkeitsbericht" && liste.length > 0) {
+      const periode = periodeFuer(jahr, monat);
+      (supabase as any)
+        .from("fahrtenbuch_eintraege")
+        .select("mitarbeiter_id")
+        .in("mitarbeiter_id", [...new Set(liste.map((z) => z.mitarbeiter_id))])
+        .gte("datum", periode.von)
+        .lte("datum", periode.bis)
+        .limit(5000)
+        .then(({ data }: { data: { mitarbeiter_id: string }[] | null }) => {
+          const m = new Map<string, number>();
+          for (const f of data ?? []) m.set(f.mitarbeiter_id, (m.get(f.mitarbeiter_id) ?? 0) + 1);
+          setFahrtenJe(m);
+        });
+    }
   }, [art, jahr, monat, teil, isAdmin]);
 
   useEffect(() => {
@@ -183,14 +203,40 @@ export default function BerichteArchiv() {
       berichtDatei: z.dateiname,
     });
 
+  /**
+   * Tätigkeitsbericht: eine PDF je Mitarbeiter mit Fahrtenbuch, Zulagen-Zettel und
+   * Krankenzetteln (J. Maurer, 23.11.2026). Stundenberichte und Berichte, die
+   * sich nicht zusammenführen lassen: Bericht + Beilagen als einzelne Dateien.
+   */
+  const dateienFuer = async (
+    z: Zeile,
+    mit?: { fahrtenbuch: boolean; zettel: boolean; krank: boolean },
+  ): Promise<{ dateien: BeilagenDatei[]; gesamt: boolean }> => {
+    const { data, error } = await supabase.storage.from("berichte-archiv").download(z.storage_pfad);
+    if (error || !data) throw error ?? new Error(`${z.dateiname} nicht gefunden`);
+    if (z.art === "taetigkeitsbericht") {
+      const g = await baueGesamtPdf({
+        bericht: data,
+        mitarbeiterId: z.mitarbeiter_id,
+        jahr: z.jahr,
+        monat: z.monat,
+        ...archivZeitraum(z),
+        mitFahrtenbuch: mit?.fahrtenbuch ?? true,
+        mitZettel: mit?.zettel ?? true,
+        mitKrank: mit?.krank ?? true,
+      });
+      if (g) return { dateien: [{ name: z.dateiname, inhalt: g.pdf }, ...g.extra], gesamt: true };
+    }
+    const dazu = mit ? [] : await beilagenFuer(z);
+    return { dateien: [{ name: z.dateiname, inhalt: data }, ...dazu], gesamt: false };
+  };
+
   const herunterladen = async (z: Zeile) => {
     setBusy(z.id);
     try {
-      const { data, error } = await supabase.storage.from("berichte-archiv").download(z.storage_pfad);
-      if (error || !data) throw error ?? new Error(`${z.dateiname} nicht gefunden`);
-      const dazu = await beilagenFuer(z);
-      if (dazu.length === 0) dateiHerunterladen(data, z.dateiname);
-      else await zipHerunterladen([{ name: z.dateiname, inhalt: data }, ...dazu], z.dateiname.replace(/\.pdf$/i, ""));
+      const { dateien } = await dateienFuer(z);
+      if (dateien.length === 1) dateiHerunterladen(dateien[0].inhalt, z.dateiname);
+      else await zipHerunterladen(dateien, z.dateiname.replace(/\.pdf$/i, ""));
     } catch (e) {
       toast({ variant: "destructive", title: "Download fehlgeschlagen", description: (e as Error).message });
     } finally {
@@ -211,11 +257,7 @@ export default function BerichteArchiv() {
     setZipBusy(true);
     try {
       const dateien = await Promise.all(
-        liste.map(async (z) => {
-          const { data, error } = await supabase.storage.from("berichte-archiv").download(z.storage_pfad);
-          if (error || !data) throw error ?? new Error(`${z.dateiname} nicht gefunden`);
-          return [{ name: z.dateiname, inhalt: data as Blob }, ...(await beilagenFuer(z))];
-        }),
+        liste.map(async (z) => (await dateienFuer(z)).dateien),
       );
       await zipHerunterladen(
         dateien.flat(),
@@ -239,47 +281,48 @@ export default function BerichteArchiv() {
 
   /** Fahrtenbuch-PDF je gewähltem Tätigkeitsbericht — wie beim Drucken
    *  im Tätigkeitsbericht, aus denselben Daten der Periode (21.–20.). */
-  const fahrtenbuchAnhaenge = async (): Promise<{ filename: string; content: string }[]> => {
+  const fahrtenbuchAnhaenge = async (ohne: Set<string>): Promise<{ filename: string; content: string }[]> => {
     const aus: { filename: string; content: string }[] = [];
-    for (const z of zeilen.filter((x) => ausgewaehlt.has(x.id) && x.art === "taetigkeitsbericht")) {
-      const periode = periodeFuer(z.jahr, z.monat);
-      const [{ data: fahrten }, { data: prof }] = await Promise.all([
-        (supabase as any)
-          .from("fahrtenbuch_eintraege")
-          .select("*")
-          .eq("mitarbeiter_id", z.mitarbeiter_id)
-          .gte("datum", periode.von)
-          .lte("datum", periode.bis)
-          .order("datum")
-          .order("abfahrt", { ascending: true, nullsFirst: false })
-          .order("created_at", { ascending: true }),
-        supabase
-          .from("profiles")
-          .select("vorname, nachname, fahrtenbuch_kennzeichen")
-          .eq("id", z.mitarbeiter_id)
-          .maybeSingle(),
-      ]);
-      if (!fahrten || (fahrten as any[]).length === 0) continue;
-      const p = prof as { vorname?: string; nachname?: string; fahrtenbuch_kennzeichen?: string | null } | null;
-      const name = `${p?.vorname ?? ""} ${p?.nachname ?? ""}`.trim();
-      const doc = makeFahrtenbuchPdf({
-        name,
-        kennzeichen: p?.fahrtenbuch_kennzeichen ?? "",
-        periode,
-        fahrten: fahrten as any,
-      });
+    for (const z of zeilen.filter((x) => ausgewaehlt.has(x.id) && x.art === "taetigkeitsbericht" && !ohne.has(x.id))) {
+      const fb = await ladeFahrtenbuchPdf(z.mitarbeiter_id, z.jahr, z.monat);
+      if (!fb) continue;
       aus.push({
-        filename: `Fahrtenbuch ${z.jahr}-${String(z.monat).padStart(2, "0")} ${name}.pdf`,
-        content: (doc.output("datauristring") as string).split(",")[1],
+        filename: fahrtenbuchDateiname(z.jahr, z.monat, fb.name),
+        content: (fb.doc.output("datauristring") as string).split(",")[1],
       });
     }
     return aus;
   };
 
+  /**
+   * Tätigkeitsberichte als eine PDF je Mitarbeiter für die Mail. Krankenzettel
+   * liest im Browser nur die Verwaltung — sonst bleibt es beim bisherigen Weg
+   * (die Function hängt sie an). Über 20 MB zusammen: ebenfalls bisheriger Weg,
+   * dort gehen große Mengen als Download-Links.
+   */
+  const gesamtAnhaenge = async (): Promise<{ ids: Set<string>; anhaenge: { filename: string; content: string }[] }> => {
+    const leer = { ids: new Set<string>(), anhaenge: [] };
+    if (!isAdmin) return leer;
+    const ids = new Set<string>();
+    const anhaenge: { filename: string; content: string }[] = [];
+    let bytes = 0;
+    for (const z of zeilen.filter((x) => ausgewaehlt.has(x.id) && x.art === "taetigkeitsbericht")) {
+      const r = await dateienFuer(z, { fahrtenbuch: mitFahrtenbuch, zettel: mitZettel, krank: mitKrank });
+      if (!r.gesamt) continue;
+      ids.add(z.id);
+      for (const d of r.dateien) {
+        bytes += d.inhalt.size;
+        anhaenge.push({ filename: d.name, content: await blobAlsBase64(d.inhalt) });
+      }
+    }
+    if (bytes > 20 * 1024 * 1024) return leer;
+    return { ids, anhaenge };
+  };
+
   /** Ausgefüllter Zulagen-Zettel je gewähltem Bericht — frisch aus den Stunden. */
-  const zettelAnhaenge = async (): Promise<{ filename: string; content: string }[]> => {
+  const zettelAnhaenge = async (ohne: Set<string>): Promise<{ filename: string; content: string }[]> => {
     const aus: { filename: string; content: string }[] = [];
-    for (const z of zeilen.filter((x) => ausgewaehlt.has(x.id))) {
+    for (const z of zeilen.filter((x) => ausgewaehlt.has(x.id) && !ohne.has(x.id))) {
       const doc = await ladeZulagenZettel({
         mitarbeiterId: z.mitarbeiter_id,
         ...archivZeitraum(z),
@@ -298,9 +341,10 @@ export default function BerichteArchiv() {
   const senden = async () => {
     setSende(true);
     try {
-      const fahrten = mitFahrtenbuch ? await fahrtenbuchAnhaenge() : [];
-      const zettel = mitZettel ? await zettelAnhaenge() : [];
-      const extra = [...fahrten, ...zettel];
+      const gesamt = await gesamtAnhaenge();
+      const fahrten = mitFahrtenbuch ? await fahrtenbuchAnhaenge(gesamt.ids) : [];
+      const zettel = mitZettel ? await zettelAnhaenge(gesamt.ids) : [];
+      const extra = [...gesamt.anhaenge, ...fahrten, ...zettel];
       const { data, error } = await supabase.functions.invoke("archiv-versenden", {
         body: {
           archiv_ids: Array.from(ausgewaehlt),
@@ -308,6 +352,8 @@ export default function BerichteArchiv() {
           betreff,
           text,
           extra_anhaenge: extra,
+          // Diese Berichte stecken schon samt Beilagen in extra_anhaenge.
+          ersetzt_ids: [...gesamt.ids],
           mit_krankmeldungen: mitKrank,
         },
       });
@@ -317,6 +363,7 @@ export default function BerichteArchiv() {
         title: `${data.anzahl} Bericht${data.anzahl === 1 ? "" : "e"} versendet`,
         description:
           `an ${data.empfaenger}` +
+          (gesamt.ids.size ? ` · ${gesamt.ids.size} als eine PDF je Mitarbeiter` : "") +
           (fahrten.length ? ` · ${fahrten.length} Fahrtenbuch` : "") +
           (zettel.length ? ` · ${zettel.length} Zulagen-Zettel` : "") +
           (data.krankmeldungen ? ` · ${data.krankmeldungen} Krankmeldung${data.krankmeldungen === 1 ? "" : "en"}` : "") +
@@ -464,24 +511,30 @@ export default function BerichteArchiv() {
                     </div>
                     {(() => {
                       const b = beilagen.get(z.id);
-                      if (!b || (!b.zulagen && !b.krankenzettel && !b.krankOhneZettel)) return null;
+                      const fahrten = z.art === "taetigkeitsbericht" ? fahrtenJe.get(z.mitarbeiter_id) ?? 0 : 0;
+                      if (!fahrten && (!b || (!b.zulagen && !b.krankenzettel && !b.krankOhneZettel))) return null;
                       return (
                         <div className="flex flex-wrap gap-1 mt-1">
-                          {b.zulagen && (
-                            <Badge variant="outline" className="text-[10px]">Zulagen-Zettel</Badge>
-                          )}
-                          {b.krankenzettel > 0 && (
+                          {fahrten > 0 && (
                             <Badge variant="outline" className="text-[10px]">
-                              {b.krankenzettel === 1 ? "Krankenzettel" : `${b.krankenzettel} Krankenzettel`}
+                              Fahrtenbuch ({fahrten} {fahrten === 1 ? "Fahrt" : "Fahrten"})
                             </Badge>
                           )}
-                          {b.krankOhneZettel > 0 && (
+                          {b?.zulagen && (
+                            <Badge variant="outline" className="text-[10px]">Zulagen-Zettel</Badge>
+                          )}
+                          {!!b?.krankenzettel && (
+                            <Badge variant="outline" className="text-[10px]">
+                              {b!.krankenzettel === 1 ? "Krankenzettel" : `${b!.krankenzettel} Krankenzettel`}
+                            </Badge>
+                          )}
+                          {!!b?.krankOhneZettel && (
                             <Badge
                               variant="outline"
                               className="bg-amber-100 text-amber-900 border-amber-300 text-[10px]"
                               title="Der Mitarbeiter lädt den Zettel unter Mein Tag → Krankmeldung hoch, dann geht er automatisch mit."
                             >
-                              {b.krankOhneZettel} Krank-Tag{b.krankOhneZettel === 1 ? "" : "e"} ohne Zettel
+                              {b!.krankOhneZettel} Krank-Tag{b!.krankOhneZettel === 1 ? "" : "e"} ohne Zettel
                             </Badge>
                           )}
                         </div>
@@ -506,7 +559,7 @@ export default function BerichteArchiv() {
                       nicht versendet
                     </Badge>
                   )}
-                  <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => herunterladen(z)} disabled={busy === z.id} title="Herunterladen (mit Zulagen-Zettel und Krankenzettel als ZIP)" aria-label={`${z.mitarbeiter?.nachname ?? ""} herunterladen`}>
+                  <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => herunterladen(z)} disabled={busy === z.id} title={z.art === "taetigkeitsbericht" ? "Herunterladen (eine PDF mit Fahrtenbuch, Zulagen-Zettel und Krankenzetteln)" : "Herunterladen (mit Zulagen-Zettel und Krankenzettel als ZIP)"} aria-label={`${z.mitarbeiter?.nachname ?? ""} herunterladen`}>
                     {busy === z.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                   </Button>
                 </div>
@@ -549,6 +602,11 @@ export default function BerichteArchiv() {
             </div>
             <div className="space-y-2 rounded-lg border p-2.5">
               <div className="text-xs font-medium">Mitschicken</div>
+              {isAdmin && zeilen.some((z) => ausgewaehlt.has(z.id) && z.art === "taetigkeitsbericht") && (
+                <div className="text-xs text-muted-foreground">
+                  Tätigkeitsberichte gehen als eine PDF je Mitarbeiter (Bericht, Fahrtenbuch, Zettel, Krankenzettel).
+                </div>
+              )}
               {zeilen.some((z) => ausgewaehlt.has(z.id) && z.art === "taetigkeitsbericht") && (
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <Checkbox checked={mitFahrtenbuch} onCheckedChange={(v) => setMitFahrtenbuch(v === true)} />

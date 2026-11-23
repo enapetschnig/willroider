@@ -67,6 +67,13 @@ paths:
   `extra_anhaenge`) und Krankmeldungen mit Datei aus `ma_dokumente`, die in die Periode fallen (TB 21.–20.,
   BSB Teil I/II). Bei Übergröße als Link.
 - „Herunterladen (ZIP)“ für markierte Einträge; URL-Parameter `?art&jahr&monat&teil`.
+- **Eine PDF je Mitarbeiter bei Tätigkeitsberichten** (J. Maurer, 23.11.2026: „Bei den Berichten fehlen die Kilometer optimal wäre eine PDF je
+  Mitarbeiter mit Tätigkeitsbericht Kilometerbuch und Krankscheine“). Ursache: das Fahrtenbuch hing nur an der Mail, nicht an Download/ZIP.
+  Jetzt `lib/berichtGesamtPdf.ts` (pdf-lib, im Browser, jedes Mal frisch): TB → Fahrtenbuch → Zulagen-Zettel → Krankenzettel (PDF-Seiten, Fotos auf A4,
+  HEIC umgewandelt). Gilt für Zeilen-Download, ZIP und Mail (`ersetzt_ids` an `archiv-versenden`, die dann Bericht/Krankmeldungen nicht doppelt anhängt).
+  Nicht Einfügbares geht als eigene Datei mit; nicht lesbares Archiv-PDF, Nicht-Verwaltung (Krankmeldungen per RLS) oder > 20 MB → alter Weg.
+  Archiv-PDF und SharePoint-Kopie bleiben nur der TB. Stundenberichte unverändert (Bericht + Beilagen einzeln). Zeile zeigt „Fahrtenbuch (n Fahrten)“.
+  Test `tests/roboter/2026-11-23-archiv-tb-eine-pdf-je-mitarbeiter.spec.ts`.
 - Bekannt (23.09.): zwei archivierte TB-PDFs mit leeren Zeilen (Maurer Juli–Aug, Gwenger Sep); neu freigeben
   würde eine zweite Datei erzeugen — nur auf Wunsch.
 - Einreichen (03.11.2026): `berichte_update` hatte kein WITH CHECK → Polier konnte eigenen Entwurf nie einreichen (RLS-Fehler).
