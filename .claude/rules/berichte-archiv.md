@@ -50,7 +50,7 @@ paths:
   braucht es die Möglichkeit das Datum zu ändern“). Neuer Wunsch ersetzt „ein Regiebericht je Tag“ vom 17.11. Ursache der Sperre:
   `UNIQUE (baustelle_id, datum, typ)` → jetzt nur noch Index `berichte_bautagesbericht_je_tag` (Bautagesbericht bleibt einmal je Tag, MeinTag sucht ihn so).
   „Neuer Regiebericht“ und „In Regiebericht übernehmen“ fragen, wenn es schon welche gibt (`ladeRegieberichteAmTag`); Liste/Kopf zeigen „Nr. 1/2“
-  (älteste = 1). PDF-Pfad `berichtPdfPfad`: eigener Pfad bleibt, sonst erster freier `<datum>_regiebericht_2.pdf` (vorher hätte upsert das PDF des
+  (älteste = 1; Liste zählt per `useRegieNummern` über alle Regieberichte des Tages, nicht nur die gefilterten — sonst wich die Nr. bei Status-Filter ab). PDF-Pfad `berichtPdfPfad`: eigener Pfad bleibt, sonst erster freier `<datum>_regiebericht_2.pdf` (vorher hätte upsert das PDF des
   ersten überschrieben); SharePoint-Name „… <Datum> (2).pdf“ aus `storage_path`. „Datum ändern“ im Kopf nur Entwurf/Eingereicht (Freigegebene erst zurück auf Entwurf). War der Bericht
   schon einmal freigegeben, bleibt das alte PDF mit altem Datum in Dokumente/SharePoint liegen (nie umbenennen/löschen), das neue kommt bei der
   nächsten Freigabe dazu. Trigger `bericht_audit` schreibt „Datum: alt → neu“. ZE-Übernahme nach Datumsänderung nur anbieten, wenn der neue Tag

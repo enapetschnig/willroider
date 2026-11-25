@@ -35,3 +35,49 @@ export function useBerichteList(filter: BerichteFilter = {}) {
     staleTime: 10_000,
   });
 }
+
+/** Mehrere Regieberichte am selben Tag und auf derselben Baustelle bekommen eine
+ *  laufende Nummer (älteste = 1, bei gleicher Zeit nach id) — dieselbe Regel wie
+ *  im Bericht (`ladeRegieberichteAmTag`). Seit 25.11.2026 (J. Maurer). */
+export function regieNummern(
+  liste: { id: string; typ: string; baustelle_id: string; datum: string; created_at: string }[],
+): Map<string, number> {
+  const gruppen = new Map<string, { id: string; created_at: string }[]>();
+  for (const b of liste) {
+    if (b.typ !== "regiebericht") continue;
+    const k = `${b.baustelle_id}|${b.datum}`;
+    gruppen.set(k, [...(gruppen.get(k) ?? []), b]);
+  }
+  const nr = new Map<string, number>();
+  for (const g of gruppen.values()) {
+    if (g.length < 2) continue;
+    g.sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    g.forEach((b, i) => nr.set(b.id, i + 1));
+  }
+  return nr;
+}
+
+/** Nr. der Regieberichte einer (gefilterten) Liste — gezählt über alle
+ *  Regieberichte derselben Baustellen und Tage, unabhängig von Status-,
+ *  Polier- oder sonstigem Filter. */
+export function useRegieNummern(berichte: Bericht[]): Map<string, number> {
+  const regie = berichte.filter((b) => b.typ === "regiebericht");
+  const baustellen = [...new Set(regie.map((b) => b.baustelle_id))].sort();
+  const tage = [...new Set(regie.map((b) => b.datum))].sort();
+  const { data } = useQuery({
+    queryKey: ["regie_nummern", baustellen, tage, regie.map((b) => b.id).sort()],
+    enabled: regie.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("berichte")
+        .select("id, typ, baustelle_id, datum, created_at")
+        .eq("typ", "regiebericht")
+        .in("baustelle_id", baustellen)
+        .in("datum", tage);
+      if (error) throw error;
+      return regieNummern((data ?? []) as Bericht[]);
+    },
+    staleTime: 10_000,
+  });
+  return data ?? new Map<string, number>();
+}

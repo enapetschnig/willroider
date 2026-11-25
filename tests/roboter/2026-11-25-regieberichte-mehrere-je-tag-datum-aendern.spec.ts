@@ -90,6 +90,13 @@ test("Mehrere Regieberichte am Tag, Datum ändern, Bautagesbericht bleibt einmal
   await page.goto(`${APP}/berichte?typ=regiebericht&baustelle=${bs.id}`);
   await expect(page.getByText("Regiebericht Nr. 1")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("Regiebericht Nr. 2")).toBeVisible();
+  // Mit Status-Filter steht nur Nr. 2 in der Liste — die Nr. bleibt dieselbe wie im Bericht (zählt alle des Tages)
+  await rest(`/rest/v1/berichte?id=eq.${r2}`, "PATCH", { status: "eingereicht" });
+  await page.goto(`${APP}/berichte?typ=regiebericht&baustelle=${bs.id}&status=eingereicht`);
+  await expect(page.getByText("Regiebericht Nr. 2")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Regiebericht Nr. 1")).toHaveCount(0);
+  await page.goto(`${APP}/berichte/${r2}`);
+  await expect(page.getByRole("heading", { name: /Regiebericht\s*Nr\. 2/ })).toBeVisible({ timeout: 30_000 });
 
   // b) Aus Bautagesbericht einen dritten übernehmen
   const [btb] = await rest("/rest/v1/berichte", "POST", { baustelle_id: bs.id, datum: tag, typ: "bautagesbericht", erfasst_von: polier.id, status: "entwurf", freitext_besonderheiten: "Probe Btb" });

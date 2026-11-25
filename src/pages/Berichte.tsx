@@ -31,7 +31,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { DocSendDialog, type DocSendItem } from "@/components/dokumente/DocSendDialog";
 import { zipHerunterladen } from "@/lib/zipDownload";
 import type { Database, BerichtStatus, BerichtTyp } from "@/integrations/supabase/types";
-import { useBerichteList } from "@/hooks/useBerichte";
+import { useBerichteList, useRegieNummern } from "@/hooks/useBerichte";
 import { getBaustellenForMaToday } from "@/lib/tagesplanung";
 import { findeOderErstelleBerichtMitVorausfuellung, ladeRegieberichteAmTag } from "@/hooks/useBericht";
 import { BaustelleCombobox } from "@/components/stunden/BaustelleCombobox";
@@ -82,26 +82,6 @@ const fmtDatum = (iso: string) => new Date(iso).toLocaleDateString("de-AT", { da
 /** Dateiname im Anhang/ZIP, z. B. „Bautagesbericht HMH Obersteiner 2026-11-18.pdf“. */
 function berichtDateiname(w: Pick<BerichtWahl, "typ" | "baustelle" | "datum" | "nr">): string {
   return `${dateiSicher(`${TYP_LABEL[w.typ]} ${w.baustelle}`)} ${w.datum}${w.nr ? ` (${w.nr})` : ""}.pdf`;
-}
-
-/** Mehrere Regieberichte am selben Tag und auf derselben Baustelle bekommen eine
- *  laufende Nummer (älteste = 1), damit man sie in Liste und Anhang unterscheidet. */
-function regieNummern(
-  liste: { id: string; typ: string; baustelle_id: string; datum: string; created_at: string }[],
-): Map<string, number> {
-  const gruppen = new Map<string, { id: string; created_at: string }[]>();
-  for (const b of liste) {
-    if (b.typ !== "regiebericht") continue;
-    const k = `${b.baustelle_id}|${b.datum}`;
-    gruppen.set(k, [...(gruppen.get(k) ?? []), b]);
-  }
-  const nr = new Map<string, number>();
-  for (const g of gruppen.values()) {
-    if (g.length < 2) continue;
-    g.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
-    g.forEach((b, i) => nr.set(b.id, i + 1));
-  }
-  return nr;
 }
 
 const fmtShortDate = (iso: string | null | undefined) => {
@@ -193,7 +173,9 @@ export default function Berichte() {
     baustelleId: params.get("baustelle") ?? undefined,
   };
   const { data: berichte = [], isLoading } = useBerichteList(filter);
-  const regieNr = useMemo(() => regieNummern(berichte), [berichte]);
+  // Nr. über ALLE Regieberichte des Tages, nicht nur die gefilterten — sonst
+  // weicht sie bei Status-/Polier-Filter von der Nr. im Bericht ab.
+  const regieNr = useRegieNummern(berichte);
 
   useEffect(() => {
     (async () => {
