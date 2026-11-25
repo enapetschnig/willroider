@@ -1,5 +1,9 @@
 # Journal
 
+## 2026-11-25 – Supabase-Protokoll: baustellen_kostenstelle_key
+
+2× 23505 am 24.11. beim Anlegen einer Baustelle (belegte KST eingetippt, rohe DB-Meldung). `BaustellenmeldungForm` prüft jetzt vorher und zeigt „Kostenstelle schon vergeben“ mit BVH + nächster freier; KST wird getrimmt gespeichert. Test `2026-11-25-baustelle-kostenstelle-vergeben.spec.ts`; ganze Reihe 27/27 grün (2 Tests brauchen den Dev-Server, nicht `vite preview`).
+
 ## 2026-11-23 – Tätigkeitsbericht übernimmt Kostenstellen der Vorperiode (N. Gwenger)
 Bisher fing jede Periode leer an (Zeilen nur mit Stunden oder per Hand). Jetzt lädt die Seite die Tage der Vorperiode
 derselben Person und blendet deren KST mit Stunden als leere Zeilen ein (nur noch wählbare: Baustelle aktiv/geplant,

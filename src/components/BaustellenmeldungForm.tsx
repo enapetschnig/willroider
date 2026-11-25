@@ -351,6 +351,18 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
     return f;
   };
 
+  const kstVergebenHinweis = (kst: string, bvh: string | null) => {
+    const vorschlag =
+      art === "ausfuehrung" && istNeu && naechsteEigeneKst && naechsteEigeneKst !== kst
+        ? ` Nächste freie eigene: ${naechsteEigeneKst}.`
+        : "";
+    toast({
+      variant: "destructive",
+      title: "Kostenstelle schon vergeben",
+      description: `${kst} gehört schon zu ${bvh ? `„${bvh}“` : "einer anderen Baustelle"}. Bitte eine andere Kostenstelle wählen.${vorschlag}`,
+    });
+  };
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const fehlt = fehlend();
@@ -373,6 +385,22 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
     }
     setSaving(true);
 
+    // Kostenstelle schon vergeben? Vorher prüfen statt die rohe
+    // Datenbankmeldung „duplicate key … baustellen_kostenstelle_key“ zu zeigen
+    // (Supabase-Protokoll 24.11.2026: zwei Versuche mit belegter KST).
+    if (kst) {
+      const eigeneId = uebernahme ? undefined : initial?.id;
+      let q = supabase.from("baustellen").select("id, bvh_name").eq("kostenstelle", kst).limit(1);
+      if (eigeneId) q = q.neq("id", eigeneId);
+      const { data: belegt } = await q;
+      const treffer = (belegt as { id: string; bvh_name: string | null }[] | null)?.[0];
+      if (treffer) {
+        kstVergebenHinweis(kst, treffer.bvh_name);
+        setSaving(false);
+        return;
+      }
+    }
+
     const payload: any = {
       bvh_name: bvhName.trim(),
       bauherr: bauherr || null,
@@ -387,7 +415,7 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
       start_datum: startDatum || null,
       end_datum: endDatum || null,
       bauleiter_id: bauleiterId || null,
-      kostenstelle: kostenstelle || null,
+      kostenstelle: kst || null,
       art_bauarbeiten: artBauarbeiten || null,
       auftragssumme: auftragssumme ? Number(auftragssumme) : null,
       anzahl_mitarbeiter: anzahlMitarbeiter ? Number(anzahlMitarbeiter) : null,
@@ -408,7 +436,8 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
         .select()
         .single();
       if (error) {
-        toast({ variant: "destructive", title: "Fehler", description: error.message });
+        if (error.code === "23505" && error.message.includes("kostenstelle")) kstVergebenHinweis(kst, null);
+        else toast({ variant: "destructive", title: "Fehler", description: error.message });
         setSaving(false);
         return;
       }
@@ -420,7 +449,8 @@ export function BaustellenmeldungForm({ initial, onSaved, onCancel, modus = "nor
         .select()
         .single();
       if (error) {
-        toast({ variant: "destructive", title: "Fehler", description: error.message });
+        if (error.code === "23505" && error.message.includes("kostenstelle")) kstVergebenHinweis(kst, null);
+        else toast({ variant: "destructive", title: "Fehler", description: error.message });
         setSaving(false);
         return;
       }

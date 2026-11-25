@@ -36,5 +36,6 @@ paths:
 - Baustellenanlage: bei neuer SharePoint-Struktur nur als PDF (`baustellenanlagePdf.ts`) abgelegt,
   Word (`baustellenanlageDocx.ts`) nur noch für die Mail (Christoph, 18.10.: „nur pdf selbst erzeugen“).
 - Neue Ausführung → SharePoint-Ordner automatisch → `sharepoint-onedrive.md`.
+- KST ist in `baustellen` eindeutig: das Formular prüft vor dem Speichern und nennt das belegende BVH (25.11.2026, aus dem Supabase-Protokoll).
 - Kostenstellenübersicht als Baustellen-Reiter (`KostenstellenListe`, 18.08.).
 - Baustellensuche bleibt nach Detail-Besuch erhalten (23.07.).

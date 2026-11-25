@@ -15,3 +15,6 @@ paths:
 - Baustellen-Suche (cmdk) ist **unscharf** (Buchstaben in Reihenfolge): Negativ-Prüfungen nicht mit Ziffern im Namen,
   die zufällig zur gesuchten KST passen.
 - Härtetest neuer Tests: `--repeat-each=3 --workers=4` (fand am 20.11. einen echten Ladefehler in `/stunden`).
+- App für die Tests mit dem **Dev-Server** starten, nicht `vite preview`: einige Tests laden `/src/lib/*.ts` per `import()`
+  (Bericht-PDF, Erschwernis-Zettel) → im Build rot. Bricht `vite` mit `ENOSPC … file watchers` ab:
+  `CHOKIDAR_USEPOLLING=1 CHOKIDAR_INTERVAL=5000 npx vite …` (25.11.2026).
