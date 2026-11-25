@@ -492,6 +492,7 @@ export default function Stunden() {
     if (!user) return ids;
     ids.add(user.id);
     if (!canCreateForOthers && !polierPartie) return ids;
+    const vergangen = date < todayIso();
     const eigenePartieIds = new Set(
       allMembers
         .filter((m) => polierPartie && (m as any).partie_id === polierPartie.id)
@@ -503,6 +504,11 @@ export default function Stunden() {
       const abwesendInEigenerPartie =
         p.abwesend && eigenePartieIds.has(p.mitarbeiter_id);
       if (!gleicheBaustelle && !abwesendInEigenerPartie) continue;
+      // Vergangene Tage: Poliereinsatz und „Abwesende der eigenen Partie“
+      // rechnen mit der HEUTIGEN Partie — wer erst seit Kurzem dabei ist, war
+      // damals nicht da. Dort zählt nur die echte Tagesplanung des Tages (und
+      // wen der Polier damals selbst gebucht hat, siehe unten).
+      if (vergangen && p.mitarbeiter_id !== user.id && p.quelle !== "tagesplanung") continue;
       const st = statusForDateMap.get(p.mitarbeiter_id);
       const schonFremdGeschrieben =
         !!st && !st.vonMir && !p.abwesend && p.quelle === "poliereinsatz";
@@ -513,7 +519,7 @@ export default function Stunden() {
       if (st.vonMir) ids.add(id);
     });
     return ids;
-  }, [plan, user, canCreateForOthers, polierPartie, allMembers, eigeneBaustelle, statusForDateMap]);
+  }, [plan, user, canCreateForOthers, polierPartie, allMembers, eigeneBaustelle, statusForDateMap, date]);
 
   // Für welches Datum die Auswahl gesetzt ist — Laden der Mitgebuchten und
   // Vorbelegung warten darauf, sonst greifen sie auf die Leute des vorigen Tages.

@@ -84,6 +84,8 @@ paths:
   schon fremd geschriebenem Tag kommen nicht mit. `plan_fuer_tag` unverändert (Mein Tag/Berichte). Test
   `2026-11-25-stunden-tageswechsel-mannschaft` (auch Vorbelegung: alter Stand trug die Tätigkeit von heute ein). Daten: Kronegger
   17.–20.11. nie überschrieben; Hallegger 23.11. Urlaub 8,5 h (angelegt 25.11., eingeteilt Obersteiner) evtl. so entstanden → ihn prüfen lassen.
+  Gegenprobe: an **vergangenen Tagen** zählen für Mitgebuchte nur Tagesplanungs-Zeilen (`quelle = 'tagesplanung'`) — Poliereinsatz
+  und „Abwesende der eigenen Partie“ rechnen mit der HEUTIGEN `profiles.partie_id` (keine Partie-Historie).
 
 ## Baustellenstundenbericht (BSB)
 - Nur für **Arbeiter**. Angestellte haben Tätigkeitsbericht (N. Gwenger, 01.10.):

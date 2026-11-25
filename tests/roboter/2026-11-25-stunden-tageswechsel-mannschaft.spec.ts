@@ -162,3 +162,44 @@ test("Tageswechsel: Mannschaft und Stunden des Tages, nicht die von heute", asyn
   expect(he.stunden_taetigkeiten.map((x: any) => [x.baustelle_id, Number(x.stunden)])).toEqual([[bstA.id, 7.5]]);
   expect(fehler).toEqual([]);
 });
+
+// Gegenprobe (Kollege, 25.11.2026): der Poliereinsatz rechnet mit der HEUTIGEN Partie. Wer erst jetzt in der Partie
+// ist und an einem vergangenen Tag noch nichts hat, darf dort nicht vorgeschlagen (und mit Soll vorbelegt) werden.
+// Heute (Werktag) bleibt er über den Poliereinsatz dabei.
+test("Vergangener Tag: Poliereinsatz schlägt keine erst jetzt Zugeteilten vor", async ({ page }) => {
+  const stamp = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+  const k = stamp % 100000;
+  const polier = await konto(`Einsatzpolier${k}`, "bauleiter");
+  const zugang = await konto(`Zugang${k}`, "mitarbeiter");
+  const [partie] = await rest("/rest/v1/partien", "POST", { name: `Partie Einsatz ${stamp}`, partieleiter_id: polier.id });
+  await rest(`/rest/v1/profiles?id=in.(${polier.id},${zugang.id})`, "PATCH", { partie_id: partie.id });
+  const [bstP] = await rest("/rest/v1/baustellen", "POST", {
+    bvh_name: `Einsatz P ${stamp}`, status: "aktiv", kostenstelle: `4${String(stamp).slice(-6)}`,
+  });
+  const frueher = vergangenerWerktag();
+  const bis = new Date();
+  bis.setDate(bis.getDate() + 7);
+  await rest("/rest/v1/poliereinsatz_zeitraeume", "POST", {
+    partie_id: partie.id, baustelle_id: bstP.id, von_datum: frueher, bis_datum: iso(bis),
+  });
+
+  const fehler: string[] = [];
+  page.on("pageerror", (e) => fehler.push(e.message));
+  const schluessel = `sb-${new URL(API).hostname.split(".")[0]}-auth-token`;
+  await page.addInitScript(([kk, v]) => localStorage.setItem(kk, v), [schluessel, JSON.stringify(polier.sitzung)]);
+  await page.addInitScript(() => localStorage.setItem("willroider:install-dismissed", "true"));
+
+  const knopf = (name: string) => page.getByRole("button", { name: new RegExp(name) });
+  const wt = new Date().getDay();
+  if (wt !== 0 && wt !== 6) {
+    await page.goto(`${APP}/stunden`);
+    await expect(knopf(`Zugang${k}`).first()).toBeVisible({ timeout: 20_000 });
+    await page.locator('input[type="date"]').fill(frueher);
+  } else {
+    await page.goto(`${APP}/stunden?datum=${frueher}`);
+  }
+  await expect(knopf(`Einsatzpolier${k}`).first()).toBeVisible({ timeout: 20_000 });
+  await page.waitForTimeout(4000);
+  await expect(knopf(`Zugang${k}`)).toHaveCount(0);
+  expect(fehler).toEqual([]);
+});
