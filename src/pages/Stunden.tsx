@@ -122,6 +122,8 @@ interface TagStatusInfo {
   hours: number;
   tagStatus?: string;
   verborgen?: boolean;
+  /** Tag wurde vom Erfassenden selbst angelegt (`erfasst_von`). */
+  vonMir?: boolean;
 }
 
 function emptyForm(): ErfassungForm {
@@ -172,6 +174,11 @@ export default function Stunden() {
   // „Mein Tag" und der Berichte-Dialog benutzen.
   const [plan, setPlan] = useState<PlanEintrag[]>([]);
   const [planGeladen, setPlanGeladen] = useState(false);
+  // Für welches Datum `plan` gilt. Beim Wechsel des Tages steht im ersten
+  // Render noch der Plan des vorigen Tages drin (planGeladen noch true) —
+  // daraus wurde früher die Mitarbeiter-Auswahl gebaut: wer heute beim Polier
+  // ist, tauchte so an jedem anderen Tag auf (J. A. Hallegger, 25.11.2026).
+  const [planDatum, setPlanDatum] = useState<string>("");
   const [planNonce, setPlanNonce] = useState(0);
   useEffect(() => {
     if (!date) return;
@@ -181,6 +188,7 @@ export default function Stunden() {
       const p = await getPlanFuerTag(date);
       if (cancelled) return;
       setPlan(p);
+      setPlanDatum(date);
       setPlanGeladen(true);
     })();
     return () => {
@@ -231,62 +239,6 @@ export default function Stunden() {
     );
     return eigen?.baustelle_id ?? null;
   }, [plan, baustelleParam, user]);
-
-  // Vorauswahl: die Mannschaft DERSELBEN Baustelle. Abwesende der eigenen
-  // Partie kommen mit — sie erscheinen dann mit Urlaub/Krank statt Stunden,
-  // damit der Tag vollständig ist und niemand schlicht fehlt.
-  // Läuft einmal pro (user, date, baustelle)-Kontext.
-  const geplanteMannschaft = useMemo(() => {
-    const ids = new Set<string>();
-    if (!user) return ids;
-    ids.add(user.id);
-    if (!canCreateForOthers && !polierPartie) return ids;
-    const eigenePartieIds = new Set(
-      allMembers
-        .filter((m) => polierPartie && (m as any).partie_id === polierPartie.id)
-        .map((m) => m.id),
-    );
-    for (const p of plan) {
-      const gleicheBaustelle =
-        !!eigeneBaustelle && p.baustelle_id === eigeneBaustelle;
-      const abwesendInEigenerPartie =
-        p.abwesend && eigenePartieIds.has(p.mitarbeiter_id);
-      if (gleicheBaustelle || abwesendInEigenerPartie) ids.add(p.mitarbeiter_id);
-    }
-    return ids;
-  }, [plan, user, canCreateForOthers, polierPartie, allMembers, eigeneBaustelle]);
-
-  const prefilledKeyRef = useRef<string>("");
-  useEffect(() => {
-    if (!user || !date || !rollenGeladen || !planGeladen) return;
-    const key = `${user.id}|${date}|${baustelleParam ?? ""}`;
-    if (prefilledKeyRef.current === key) {
-      // Planung hat sich geändert, während das Formular offen ist: neu
-      // Hinzugekommene ergänzen, aber NIE abwählen — sonst verliert der
-      // Polier eine Auswahl, die er gerade selbst getroffen hat.
-      setForUserIds((cur) => {
-        const next = new Set(cur);
-        let changed = false;
-        geplanteMannschaft.forEach((id) => {
-          if (!next.has(id)) {
-            next.add(id);
-            changed = true;
-          }
-        });
-        return changed ? next : cur;
-      });
-      return;
-    }
-    prefilledKeyRef.current = key;
-    setForUserIds(new Set(geplanteMannschaft));
-  }, [
-    user,
-    date,
-    baustelleParam,
-    rollenGeladen,
-    planGeladen,
-    geplanteMannschaft,
-  ]);
 
   // Polier-Partie / Members
   useEffect(() => {
@@ -485,13 +437,14 @@ export default function Stunden() {
       if (memberIds.length === 0) return new Map<string, TagStatusInfo>();
       const { data } = await supabase
         .from("stunden_tage")
-        .select("mitarbeiter_id, netto_stunden, tag_status")
+        .select("mitarbeiter_id, netto_stunden, tag_status, erfasst_von")
         .eq("datum", date)
         .in("mitarbeiter_id", memberIds);
       const map = new Map<string, TagStatusInfo>();
       (data ?? []).forEach((r: any) => {
         const cur = map.get(r.mitarbeiter_id) ?? { hours: 0 };
         cur.hours += Number(r.netto_stunden ?? 0);
+        if (user && r.erfasst_von === user.id) cur.vonMir = true;
         // Fehlzeit-Status merken (Urlaub/Krank/SW) — für 0h-Tage sonst unsichtbar
         if (r.tag_status && r.tag_status !== "baustelle" && r.tag_status !== "firma") {
           cur.tagStatus = r.tag_status;
@@ -524,6 +477,88 @@ export default function Stunden() {
     },
     enabled: !!date && memberIds.length > 0,
   });
+
+  // Vorauswahl je Datum. Grundlage ist der Plan GENAU dieses Tages (nie der
+  // des vorher offenen Tages) — die Mannschaft DERSELBEN Baustelle. Abwesende
+  // der eigenen Partie kommen mit (Urlaub/Krank statt Stunden). Dazu alle,
+  // deren Tag der Erfassende an diesem Datum selbst angelegt hat — so steht
+  // ein schon geschriebener Tag wieder genau so da, wie er ihn hinterlassen
+  // hat. Wer laut Poliereinsatz (nur Schätzung aus der HEUTIGEN Partie) dabei
+  // wäre, seinen Tag aber schon selbst/anderswo geschrieben hat, kommt nicht
+  // mit (Wunsch J. A. Hallegger, 25.11.2026).
+  const planBereit = planGeladen && planDatum === date;
+  const geplanteMannschaft = useMemo(() => {
+    const ids = new Set<string>();
+    if (!user) return ids;
+    ids.add(user.id);
+    if (!canCreateForOthers && !polierPartie) return ids;
+    const eigenePartieIds = new Set(
+      allMembers
+        .filter((m) => polierPartie && (m as any).partie_id === polierPartie.id)
+        .map((m) => m.id),
+    );
+    for (const p of plan) {
+      const gleicheBaustelle =
+        !!eigeneBaustelle && p.baustelle_id === eigeneBaustelle;
+      const abwesendInEigenerPartie =
+        p.abwesend && eigenePartieIds.has(p.mitarbeiter_id);
+      if (!gleicheBaustelle && !abwesendInEigenerPartie) continue;
+      const st = statusForDateMap.get(p.mitarbeiter_id);
+      const schonFremdGeschrieben =
+        !!st && !st.vonMir && !p.abwesend && p.quelle === "poliereinsatz";
+      if (schonFremdGeschrieben) continue;
+      ids.add(p.mitarbeiter_id);
+    }
+    statusForDateMap.forEach((st, id) => {
+      if (st.vonMir) ids.add(id);
+    });
+    return ids;
+  }, [plan, user, canCreateForOthers, polierPartie, allMembers, eigeneBaustelle, statusForDateMap]);
+
+  // Für welches Datum die Auswahl gesetzt ist — Laden der Mitgebuchten und
+  // Vorbelegung warten darauf, sonst greifen sie auf die Leute des vorigen Tages.
+  const [auswahlDatum, setAuswahlDatum] = useState<string>("");
+  const auswahlBereit = auswahlDatum === date && planBereit;
+  const prefilledKeyRef = useRef<string>("");
+  const auswahlPlanRef = useRef<PlanEintrag[] | null>(null);
+  useEffect(() => {
+    if (!user || !date || !rollenGeladen || !planBereit || !statusGeladen) return;
+    const key = `${user.id}|${date}|${baustelleParam ?? ""}`;
+    if (prefilledKeyRef.current === key) {
+      // Planung hat sich geändert, während das Formular offen ist: neu
+      // Hinzugekommene ergänzen, aber NIE abwählen — sonst verliert der
+      // Polier eine Auswahl, die er gerade selbst getroffen hat. Nur bei
+      // echter Planänderung (nicht nach dem Speichern), sonst kämen nach
+      // einem Teilfehler die schon Gespeicherten wieder in die Auswahl.
+      if (auswahlPlanRef.current === plan) return;
+      auswahlPlanRef.current = plan;
+      setForUserIds((cur) => {
+        const next = new Set(cur);
+        let changed = false;
+        geplanteMannschaft.forEach((id) => {
+          if (!next.has(id)) {
+            next.add(id);
+            changed = true;
+          }
+        });
+        return changed ? next : cur;
+      });
+      return;
+    }
+    prefilledKeyRef.current = key;
+    auswahlPlanRef.current = plan;
+    setForUserIds(new Set(geplanteMannschaft));
+    setAuswahlDatum(date);
+  }, [
+    user,
+    date,
+    baustelleParam,
+    rollenGeladen,
+    planBereit,
+    statusGeladen,
+    plan,
+    geplanteMannschaft,
+  ]);
 
   // Eigene Tage-Liste oben
   const fromDate = useMemo(() => {
@@ -661,7 +696,7 @@ export default function Stunden() {
   // so, wie sie gespeichert sind (Wunsch N. Gwenger 09.11.2026). Wer nicht
   // lesbar ist (andere Partie), bleibt leer und wird beim Speichern übersprungen.
   useEffect(() => {
-    if (!bestehendeGeladen || !maschinenGeladen) return;
+    if (!bestehendeGeladen || !maschinenGeladen || !auswahlBereit) return;
     const zuLaden: StundenTagFull[] = [];
     for (const uid of forUserIds) {
       if (uid === primaryUserId) continue;
@@ -722,7 +757,7 @@ export default function Stunden() {
       return { ...f, maEintraege, kmPerMa, zulagenSelected };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bestehendeMap, bestehendeGeladen, maschinenGeladen, forUserIds, primaryUserId, date, formNonce]);
+  }, [bestehendeMap, bestehendeGeladen, maschinenGeladen, auswahlBereit, forUserIds, primaryUserId, date, formNonce]);
 
   // forUserIds-Wechsel: für jeden selektierten MA ein Eintrags-Array sichern,
   // Zulagen-stundenPerMa abgleichen.
@@ -765,7 +800,9 @@ export default function Stunden() {
     // Erst vorbelegen, wenn feststeht, wer an dem Tag schon Stunden hat und
     // wie viel Soll gilt — sonst landen Planungs-Baustelle und 0 Stunden bei
     // Leuten, die längst gebucht haben (N. Gwenger 09.11.2026).
-    if (!bestehendeGeladen || !statusGeladen || sollLaedt) return;
+    // Und erst, wenn Plan und Personenauswahl zu DIESEM Datum gehören — sonst
+    // bekamen Leute des vorigen Tages Baustelle/Soll vorbelegt (25.11.2026).
+    if (!bestehendeGeladen || !statusGeladen || sollLaedt || !auswahlBereit) return;
     setForm((f) => {
       // Aktive Arten aus den bestehenden MA-Einträgen ableiten
       const aktive = new Set<TagStatus>();
@@ -849,6 +886,7 @@ export default function Stunden() {
     bestehendeGeladen,
     statusGeladen,
     sollLaedt,
+    auswahlBereit,
     // Nach jedem Neuaufbau des Formulars (Datum, eigener Tag, Maschinenliste)
     // neu vorbelegen — sonst bleibt ein neuer Tag leer.
     formNonce,

@@ -75,6 +75,14 @@ paths:
   Fallstrick (20.11.2026, Paralleltest): kam der gespeicherte Tag vor der Personenauswahl (Planung) an, hingen die
   Zulagen-Stunden an keiner Person → Anzeige „alle“ statt z. B. 5 h, Speichern hätte den ganzen Tag geschrieben. Das
   Lade-Effect nimmt jetzt `primaryUserId` immer mit in die Personenliste.
+- **Tageswechsel: Mannschaft des Tages, nicht die von heute** (J. A. Hallegger, 25.11.2026: „wenn ich … zwischen den Tagen
+  wechsle … Mitarbeiter bei mir, die an diesen Tagen nicht bei mir waren … nur, wenn ich aktuell diesen Mitarbeiter bei mir
+  habe“). Ursache: im ersten Render nach `setDate` stand noch der Plan des vorigen Tages (`planGeladen` noch true) → die
+  Auswahl wurde aus der HEUTIGEN Einteilung gebaut, danach nur ergänzt, und die Vorbelegung lief darauf. Jetzt `planDatum`/
+  `planBereit`, Auswahl erst mit Plan + Status DIESES Tages (`auswahlDatum`; Laden Mitgebuchter und Vorbelegung warten
+  darauf), dazu alle mit `erfasst_von = ich` an dem Tag; Poliereinsatz-Geplante (Schätzung aus der heutigen Partie) mit
+  schon fremd geschriebenem Tag kommen nicht mit. `plan_fuer_tag` unverändert (Mein Tag/Berichte). Test
+  `2026-11-25-stunden-tageswechsel-mannschaft`. Daten: Kronegger 17.–20.11. wurde nie überschrieben.
 
 ## Baustellenstundenbericht (BSB)
 - Nur für **Arbeiter**. Angestellte haben Tätigkeitsbericht (N. Gwenger, 01.10.):
