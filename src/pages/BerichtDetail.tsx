@@ -354,18 +354,20 @@ export default function BerichtDetail() {
         throw error;
       }
       setDatumOffen(false);
-      const hatZe =
-        bericht.mitarbeiter.some((m) => (m as any).aus_zeiterfassung) ||
-        bericht.taetigkeiten.some((t) => (t as any).aus_zeiterfassung);
+      // Nur anbieten, wenn der neue Tag auf der Baustelle Stunden hat —
+      // uebernehmeVorausfuellung löscht vorher alle ZE-Zeilen; ohne neue
+      // Daten stünde der Bericht sonst leer da (z. B. aus Bautagesbericht übernommen).
+      const neu = await ladeVorausfuellung(b.baustelle_id, neuesDatum).catch(() => null);
       if (
-        hatZe &&
+        neu &&
+        (neu.mitarbeiter.length > 0 || neu.taetigkeiten.length > 0) &&
         window.confirm(
-          "Datum geändert. Mitarbeiter und Stunden aus der Zeiterfassung vom neuen Tag übernehmen? " +
+          `Datum geändert. Am neuen Tag sind ${neu.mitarbeiter.length} Mitarbeiter auf der Baustelle erfasst. ` +
+            "Mitarbeiter und Stunden aus der Zeiterfassung vom neuen Tag übernehmen? " +
             "(Von Hand eingetragene Zeilen bleiben.)",
         )
       ) {
-        const r = await ladeVorausfuellung(b.baustelle_id, neuesDatum);
-        await uebernehmeVorausfuellung(b.id, r);
+        await uebernehmeVorausfuellung(b.id, neu);
       }
       toast({
         title: `Datum auf ${new Date(neuesDatum).toLocaleDateString("de-AT")} geändert`,

@@ -120,6 +120,10 @@ test("Mehrere Regieberichte am Tag, Datum ändern, Bautagesbericht bleibt einmal
 
   // d) Datum ändern als Polier im eigenen Entwurf
   const [eigen] = await rest("/rest/v1/berichte", "POST", { baustelle_id: bs.id, datum: tag, typ: "regiebericht", erfasst_von: polier.id, status: "entwurf", freitext_besonderheiten: "Probe Polier" });
+  // Zeilen wie aus „In Regiebericht übernehmen“ (aus_zeiterfassung) — am neuen Tag gibt es keine Stunden:
+  // sie müssen stehen bleiben, auch wenn jede Rückfrage bestätigt wird.
+  await rest("/rest/v1/bericht_mitarbeiter", "POST", { bericht_id: eigen.id, mitarbeiter_id: polier.id, position: 1, stunden_netto: 7, aus_zeiterfassung: true });
+  await rest("/rest/v1/bericht_taetigkeiten", "POST", { bericht_id: eigen.id, position: 1, bezeichnung: "Probe Regiearbeit", summe_stunden: 7, aus_zeiterfassung: true });
   const p2 = await page.context().browser()!.newPage();
   p2.on("dialog", (dl) => dl.accept());
   p2.on("pageerror", (e) => fehler.push(e.message));
@@ -132,6 +136,9 @@ test("Mehrere Regieberichte am Tag, Datum ändern, Bautagesbericht bleibt einmal
   const [nach] = await rest(`/rest/v1/berichte?id=eq.${eigen.id}&select=datum,bericht_aenderungen(details)`, "GET");
   expect(nach.datum).toBe(d(5));
   expect(nach.bericht_aenderungen.some((a: any) => /^Datum: /.test(a.details ?? ""))).toBe(true);
+  const behalten = await rest(`/rest/v1/berichte?id=eq.${eigen.id}&select=bericht_mitarbeiter(id),bericht_taetigkeiten(bezeichnung)`, "GET");
+  expect(behalten[0].bericht_mitarbeiter).toHaveLength(1);
+  expect(behalten[0].bericht_taetigkeiten.map((t: any) => t.bezeichnung)).toEqual(["Probe Regiearbeit"]);
 
   // e) Bautagesbericht auf einen Tag, an dem es schon einen gibt → Meldung, Datum bleibt
   const [btb2] = await rest("/rest/v1/berichte", "POST", { baustelle_id: bs.id, datum: d(6), typ: "bautagesbericht", erfasst_von: polier.id, status: "entwurf" });
