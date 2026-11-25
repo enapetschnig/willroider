@@ -82,7 +82,8 @@ paths:
   `planBereit`, Auswahl erst mit Plan + Status DIESES Tages (`auswahlDatum`; Laden Mitgebuchter und Vorbelegung warten
   darauf), dazu alle mit `erfasst_von = ich` an dem Tag; Poliereinsatz-Geplante (Schätzung aus der heutigen Partie) mit
   schon fremd geschriebenem Tag kommen nicht mit. `plan_fuer_tag` unverändert (Mein Tag/Berichte). Test
-  `2026-11-25-stunden-tageswechsel-mannschaft`. Daten: Kronegger 17.–20.11. wurde nie überschrieben.
+  `2026-11-25-stunden-tageswechsel-mannschaft` (auch Vorbelegung: alter Stand trug die Tätigkeit von heute ein). Daten: Kronegger
+  17.–20.11. nie überschrieben; Hallegger 23.11. Urlaub 8,5 h (angelegt 25.11., eingeteilt Obersteiner) evtl. so entstanden → ihn prüfen lassen.
 
 ## Baustellenstundenbericht (BSB)
 - Nur für **Arbeiter**. Angestellte haben Tätigkeitsbericht (N. Gwenger, 01.10.):

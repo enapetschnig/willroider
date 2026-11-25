@@ -73,8 +73,10 @@ test("Tageswechsel: Mannschaft und Stunden des Tages, nicht die von heute", asyn
   const polier = await konto(`Polier${k}`, "bauleiter");
   const helfer = await konto(`Helfer${k}`, "mitarbeiter");
   const springer = await konto(`Springer${k}`, "mitarbeiter");
+  // Neuling: an beiden Tagen auf A, aber noch KEIN Tag geschrieben → wird vorbelegt (Tätigkeit je Tag anders)
+  const neuling = await konto(`Neuling${k}`, "mitarbeiter");
   const [partie] = await rest("/rest/v1/partien", "POST", { name: `Partie Wechsel ${stamp}`, partieleiter_id: polier.id });
-  await rest(`/rest/v1/profiles?id=in.(${polier.id},${helfer.id},${springer.id})`, "PATCH", { partie_id: partie.id });
+  await rest(`/rest/v1/profiles?id=in.(${polier.id},${helfer.id},${springer.id},${neuling.id})`, "PATCH", { partie_id: partie.id });
 
   const [bstA] = await rest("/rest/v1/baustellen", "POST", {
     bvh_name: `Wechsel A ${stamp}`, status: "aktiv", kostenstelle: `6${String(stamp).slice(-6)}`,
@@ -86,11 +88,11 @@ test("Tageswechsel: Mannschaft und Stunden des Tages, nicht die von heute", asyn
   const heute = iso(new Date());
   const frueher = vergangenerWerktag();
   // Heute: alle drei auf A
-  const [einH] = await rest("/rest/v1/einteilungen", "POST", { datum: heute, baustelle_id: bstA.id });
-  await rest("/rest/v1/einteilung_mitarbeiter", "POST", [polier, helfer, springer].map((p) => ({ einteilung_id: einH.id, mitarbeiter_id: p.id })));
+  const [einH] = await rest("/rest/v1/einteilungen", "POST", { datum: heute, baustelle_id: bstA.id, taetigkeit: `Dach heute ${k}` });
+  await rest("/rest/v1/einteilung_mitarbeiter", "POST", [polier, helfer, springer, neuling].map((p) => ({ einteilung_id: einH.id, mitarbeiter_id: p.id })));
   // Früher: Polier + Helfer auf A, Springer auf R
-  const [einF] = await rest("/rest/v1/einteilungen", "POST", { datum: frueher, baustelle_id: bstA.id });
-  await rest("/rest/v1/einteilung_mitarbeiter", "POST", [polier, helfer].map((p) => ({ einteilung_id: einF.id, mitarbeiter_id: p.id })));
+  const [einF] = await rest("/rest/v1/einteilungen", "POST", { datum: frueher, baustelle_id: bstA.id, taetigkeit: `Fassade frueher ${k}` });
+  await rest("/rest/v1/einteilung_mitarbeiter", "POST", [polier, helfer, neuling].map((p) => ({ einteilung_id: einF.id, mitarbeiter_id: p.id })));
   const [einR] = await rest("/rest/v1/einteilungen", "POST", { datum: frueher, baustelle_id: bstR.id });
   await rest("/rest/v1/einteilung_mitarbeiter", "POST", { einteilung_id: einR.id, mitarbeiter_id: springer.id });
   // Geschrieben: Polier für sich und den Helfer, Springer selbst in der Firma
@@ -121,6 +123,11 @@ test("Tageswechsel: Mannschaft und Stunden des Tages, nicht die von heute", asyn
   await page.locator('input[type="date"]').fill(frueher);
   await expect(block(`Helfer${k}`)).toBeVisible({ timeout: 20_000 });
   await page.waitForTimeout(4000);
+  // Vorbelegung des Neulings aus dem Plan DIESES Tages, nicht aus dem von heute
+  const texte = async (b: ReturnType<typeof block>) =>
+    b.locator("input").evaluateAll((es) => es.map((e) => (e as HTMLInputElement).value));
+  expect.soft(await texte(block(`Neuling${k}`))).toContain(`Fassade frueher ${k}`);
+  expect.soft(await texte(block(`Neuling${k}`))).not.toContain(`Dach heute ${k}`);
   await expect(page.getByRole("button", { name: new RegExp(`Springer${k}`) })).toHaveCount(0);
   const werte = async (b: ReturnType<typeof block>) =>
     b.locator('input[inputmode="decimal"]').evaluateAll((es) => es.map((e) => (e as HTMLInputElement).value));
@@ -139,12 +146,15 @@ test("Tageswechsel: Mannschaft und Stunden des Tages, nicht die von heute", asyn
   // Unverändert speichern: Springer bleibt unberührt, nichts Neues
   page.on("dialog", (d) => d.accept());
   await page.getByRole("button", { name: /speichern/i }).last().click();
-  await expect(page.getByText(/gespeichert/).first()).toBeVisible();
+  // (nicht auf „gespeichert“ allein warten — das steht auch im gelben Hinweis)
+  await expect(page.getByText(/^\d+ (gespeichert|Einträge? gespeichert)/).first()).toBeVisible({ timeout: 20_000 });
   const tage = await rest(
-    `/rest/v1/stunden_tage?datum=eq.${frueher}&mitarbeiter_id=in.(${polier.id},${helfer.id},${springer.id})&select=mitarbeiter_id,tag_status,stunden_taetigkeiten(art,baustelle_id,stunden)`,
+    `/rest/v1/stunden_tage?datum=eq.${frueher}&mitarbeiter_id=in.(${polier.id},${helfer.id},${springer.id},${neuling.id})&select=mitarbeiter_id,tag_status,stunden_taetigkeiten(art,baustelle_id,stunden,taetigkeit_freitext)`,
     "GET",
   );
-  expect(tage).toHaveLength(3);
+  expect(tage).toHaveLength(4);
+  const ne = tage.find((t: any) => t.mitarbeiter_id === neuling.id);
+  expect(ne.stunden_taetigkeiten.map((x: any) => [x.baustelle_id, x.taetigkeit_freitext])).toEqual([[bstA.id, `Fassade frueher ${k}`]]);
   const sp = tage.find((t: any) => t.mitarbeiter_id === springer.id);
   expect(sp.tag_status).toBe("firma");
   expect(sp.stunden_taetigkeiten.map((x: any) => [x.art, x.baustelle_id, Number(x.stunden)])).toEqual([["firma", bstR.id, 9.5]]);
