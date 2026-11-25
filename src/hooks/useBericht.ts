@@ -218,22 +218,50 @@ export function useSetBerichtStatus() {
   });
 }
 
+/** Regieberichte einer Baustelle an einem Tag, älteste zuerst. Seit
+ *  25.11.2026 darf es davon mehrere geben (J. Maurer). */
+export async function ladeRegieberichteAmTag(
+  baustelleId: string,
+  datum: string,
+): Promise<{ id: string; status: BerichtStatus; created_at: string }[]> {
+  const { data, error } = await supabase
+    .from("berichte")
+    .select("id, status, created_at")
+    .eq("baustelle_id", baustelleId)
+    .eq("datum", datum)
+    .eq("typ", "regiebericht")
+    .order("created_at")
+    .order("id");
+  if (error) throw error;
+  return (data ?? []) as { id: string; status: BerichtStatus; created_at: string }[];
+}
+
 /** Erstellt oder findet einen Bericht für (baustelle, datum, typ).
- *  Race-sicher: bei UNIQUE-Konflikt (zwei User gleichzeitig) wird der bestehende
- *  Eintrag nachträglich gelesen. */
+ *  Bautagesbericht: einmal je Baustelle und Tag — race-sicher, bei
+ *  UNIQUE-Konflikt wird der bestehende gelesen.
+ *  Regiebericht: mehrere je Tag erlaubt — mit `neu: true` wird immer ein
+ *  weiterer angelegt, sonst der älteste vorhandene geöffnet. */
 export async function findeOderErstelleBericht(
   baustelleId: string,
   datum: string,
   typ: BerichtTyp,
+  opts: { neu?: boolean } = {},
 ): Promise<{ id: string; created: boolean }> {
-  const { data: existing } = await supabase
-    .from("berichte")
-    .select("id")
-    .eq("baustelle_id", baustelleId)
-    .eq("datum", datum)
-    .eq("typ", typ)
-    .maybeSingle();
-  if (existing) return { id: existing.id, created: false };
+  const suche = async () => {
+    const { data } = await supabase
+      .from("berichte")
+      .select("id")
+      .eq("baustelle_id", baustelleId)
+      .eq("datum", datum)
+      .eq("typ", typ)
+      .order("created_at")
+      .limit(1);
+    return ((data ?? [])[0] as { id: string } | undefined) ?? null;
+  };
+  if (!(opts.neu && typ === "regiebericht")) {
+    const existing = await suche();
+    if (existing) return { id: existing.id, created: false };
+  }
 
   const { data: { user } } = await supabase.auth.getUser();
   const { data, error } = await supabase
@@ -250,13 +278,7 @@ export async function findeOderErstelleBericht(
 
   // 23505 = unique_violation — anderer User war schneller. Bestehenden lesen.
   if ((error as any).code === "23505") {
-    const { data: again } = await supabase
-      .from("berichte")
-      .select("id")
-      .eq("baustelle_id", baustelleId)
-      .eq("datum", datum)
-      .eq("typ", typ)
-      .maybeSingle();
+    const again = await suche();
     if (again) return { id: again.id, created: false };
   }
   throw error;
@@ -270,8 +292,9 @@ export async function findeOderErstelleBerichtMitVorausfuellung(
   baustelleId: string,
   datum: string,
   typ: BerichtTyp,
+  opts: { neu?: boolean } = {},
 ): Promise<{ id: string; created: boolean; importiert: number; ausPlan: number }> {
-  const r = await findeOderErstelleBericht(baustelleId, datum, typ);
+  const r = await findeOderErstelleBericht(baustelleId, datum, typ, opts);
   let importiert = 0;
   let ausPlan = 0;
   if (r.created) {
@@ -296,8 +319,9 @@ export async function findeOderErstelleBerichtMitVorausfuellung(
 /** Legt aus einem Bautagesbericht einen Regiebericht für denselben Tag und
  *  dieselbe Baustelle an und übernimmt Wetter, Besonderheiten, Mitarbeiter,
  *  Tätigkeiten, Aufmaß und Fotos (Fotos verweisen auf dieselben Dateien).
- *  Unterschriften werden nicht übernommen. Gibt es den Regiebericht schon,
- *  wird nichts kopiert, sondern nur seine id geliefert (J. Maurer, 17.11.2026). */
+ *  Unterschriften werden nicht übernommen (J. Maurer, 17.11.2026). Legt immer
+ *  einen neuen an — ob schon Regieberichte für den Tag da sind, fragt die
+ *  Oberfläche vorher (`ladeRegieberichteAmTag`, mehrere je Tag seit 25.11.2026). */
 export async function uebernehmeInRegiebericht(
   quelleId: string,
   opts: { alsAdmin: boolean },
@@ -309,15 +333,6 @@ export async function uebernehmeInRegiebericht(
     .single();
   if (qErr) throw qErr;
   const quelle = q as any;
-
-  const { data: vorhanden } = await supabase
-    .from("berichte")
-    .select("id")
-    .eq("baustelle_id", quelle.baustelle_id)
-    .eq("datum", quelle.datum)
-    .eq("typ", "regiebericht")
-    .maybeSingle();
-  if (vorhanden) return { id: vorhanden.id, created: false };
 
   const { data: { user } } = await supabase.auth.getUser();
   // Admin übernimmt für den Polier: der Regiebericht gehört dann ihm, damit
@@ -341,19 +356,7 @@ export async function uebernehmeInRegiebericht(
     } as any)
     .select("id")
     .single();
-  if (insErr) {
-    if ((insErr as any).code === "23505") {
-      const { data: again } = await supabase
-        .from("berichte")
-        .select("id")
-        .eq("baustelle_id", quelle.baustelle_id)
-        .eq("datum", quelle.datum)
-        .eq("typ", "regiebericht")
-        .maybeSingle();
-      if (again) return { id: again.id, created: false };
-    }
-    throw insErr;
-  }
+  if (insErr) throw insErr;
   const zielId = neu.id as string;
 
   const ohne = (row: any, ...keys: string[]) => {

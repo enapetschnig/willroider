@@ -56,6 +56,7 @@ import {
   History,
   RefreshCw,
   ClipboardList,
+  CalendarDays,
 } from "lucide-react";
 import type {
   Database,
@@ -69,7 +70,16 @@ import {
   useUpdateBerichtFelder,
   useDeleteBericht,
   uebernehmeInRegiebericht,
+  ladeRegieberichteAmTag,
 } from "@/hooks/useBericht";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { berichteListePfad } from "@/lib/berichteAuswahl";
 import {
   ladeVorausfuellung,
@@ -129,6 +139,30 @@ export default function BerichtDetail() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [zeiterfassungNeuer, setZeiterfassungNeuer] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Mehrere Regieberichte je Tag + Datum ändern (J. Maurer, 25.11.2026)
+  const [regieWahl, setRegieWahl] = useState<{ id: string; created_at: string }[] | null>(null);
+  const [datumOffen, setDatumOffen] = useState(false);
+  const [neuesDatum, setNeuesDatum] = useState("");
+  const [regieNr, setRegieNr] = useState<{ nr: number; von: number } | null>(null);
+
+  useEffect(() => {
+    const b0 = bericht?.bericht;
+    if (!b0 || b0.typ !== "regiebericht") {
+      setRegieNr(null);
+      return;
+    }
+    let weg = false;
+    ladeRegieberichteAmTag(b0.baustelle_id, b0.datum)
+      .then((liste) => {
+        if (weg) return;
+        const i = liste.findIndex((x) => x.id === b0.id);
+        setRegieNr(liste.length > 1 && i >= 0 ? { nr: i + 1, von: liste.length } : null);
+      })
+      .catch(() => {});
+    return () => {
+      weg = true;
+    };
+  }, [bericht?.bericht.id, bericht?.bericht.datum, bericht?.bericht.typ, bericht?.bericht.baustelle_id]);
 
   useEffect(() => {
     if (!bericht) return;
@@ -150,7 +184,7 @@ export default function BerichtDetail() {
       bericht.bericht.datum,
       bericht.bericht.zeiterfassung_quelle_am,
     ).then(setZeiterfassungNeuer);
-  }, [bericht?.bericht.id, bericht?.bericht.zeiterfassung_quelle_am]);
+  }, [bericht?.bericht.id, bericht?.bericht.zeiterfassung_quelle_am, bericht?.bericht.datum]);
 
   // Auto-Vorausfüllung beim ersten Öffnen — Hook MUSS vor Early-Returns stehen
   // (Rules of Hooks); Null-Check + Bedingungen im Effect-Body.
@@ -255,29 +289,93 @@ export default function BerichtDetail() {
     }
   };
 
-  // Bautagesbericht → Regiebericht (J. Maurer, 17.11.2026)
-  const inRegieUebernehmen = async () => {
-    if (
-      !window.confirm(
-        "Regiebericht für diesen Tag und diese Baustelle anlegen? Mitarbeiter, Tätigkeiten, " +
-          "Aufmaß, Wetter und Fotos werden übernommen und können dort angepasst werden. " +
-          "Gibt es schon einen Regiebericht, wird dieser geöffnet.",
-      )
-    )
-      return;
+  // Bautagesbericht → Regiebericht (J. Maurer, 17.11.2026). Seit 25.11.2026
+  // darf es mehrere Regieberichte am Tag geben: gibt es schon welche, fragt
+  // ein Dialog, ob einer davon geöffnet oder ein weiterer angelegt wird.
+  const regieAnlegen = async () => {
     setBusy(true);
     try {
       const r = await uebernehmeInRegiebericht(b.id, { alsAdmin: isAdmin });
-      toast({
-        title: r.created
-          ? "Regiebericht angelegt — Inhalte übernommen"
-          : "Regiebericht für diesen Tag gibt es schon — geöffnet",
-      });
+      setRegieWahl(null);
+      toast({ title: "Regiebericht angelegt — Inhalte übernommen" });
       navigate(`/berichte/${r.id}`);
     } catch (e) {
       toast({
         variant: "destructive",
         title: "Übernehmen hat nicht geklappt",
+        description: (e as Error).message,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const inRegieUebernehmen = async () => {
+    setBusy(true);
+    let da: { id: string; created_at: string }[] = [];
+    try {
+      da = await ladeRegieberichteAmTag(b.baustelle_id, b.datum);
+    } catch {
+      /* dann wie bisher fragen */
+    } finally {
+      setBusy(false);
+    }
+    if (da.length > 0) {
+      setRegieWahl(da);
+      return;
+    }
+    if (
+      !window.confirm(
+        "Regiebericht für diesen Tag und diese Baustelle anlegen? Mitarbeiter, Tätigkeiten, " +
+          "Aufmaß, Wetter und Fotos werden übernommen und können dort angepasst werden.",
+      )
+    )
+      return;
+    await regieAnlegen();
+  };
+
+  // Datum ändern — wie die übrigen Felder nur, solange bearbeitbar und noch
+  // nicht freigegeben (das PDF und die Ablage in SharePoint tragen das Datum
+  // im Namen; dort wird nie umbenannt). Freigegebene: zurück auf Entwurf.
+  const kannDatumAendern = kannEditieren && (istEntwurf || istEingereicht);
+  const datumSpeichern = async () => {
+    if (!neuesDatum || neuesDatum === b.datum) {
+      setDatumOffen(false);
+      return;
+    }
+    setBusy(true);
+    try {
+      const { error } = await supabase.from("berichte").update({ datum: neuesDatum }).eq("id", b.id);
+      if (error) {
+        if ((error as any).code === "23505") {
+          throw new Error(
+            `Für ${new Date(neuesDatum).toLocaleDateString("de-AT")} gibt es auf dieser Baustelle schon einen Bautagesbericht.`,
+          );
+        }
+        throw error;
+      }
+      setDatumOffen(false);
+      const hatZe =
+        bericht.mitarbeiter.some((m) => (m as any).aus_zeiterfassung) ||
+        bericht.taetigkeiten.some((t) => (t as any).aus_zeiterfassung);
+      if (
+        hatZe &&
+        window.confirm(
+          "Datum geändert. Mitarbeiter und Stunden aus der Zeiterfassung vom neuen Tag übernehmen? " +
+            "(Von Hand eingetragene Zeilen bleiben.)",
+        )
+      ) {
+        const r = await ladeVorausfuellung(b.baustelle_id, neuesDatum);
+        await uebernehmeVorausfuellung(b.id, r);
+      }
+      toast({
+        title: `Datum auf ${new Date(neuesDatum).toLocaleDateString("de-AT")} geändert`,
+        description: b.wetter_beschreibung ? "Wetter bitte für den neuen Tag prüfen." : undefined,
+      });
+      refetch();
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Datum nicht geändert",
         description: (e as Error).message,
       });
     } finally {
@@ -311,18 +409,102 @@ export default function BerichtDetail() {
               <ArrowLeft className="h-5 w-5" />
             </Link>
             {TYP_LABEL[b.typ]}
+            {regieNr && <span className="text-muted-foreground font-normal">Nr. {regieNr.nr}</span>}
             <Badge variant="outline" className={`text-xs ${sb.cls}`}>
               {sb.label}
             </Badge>
           </div>
         }
-        description={`${new Date(b.datum).toLocaleDateString("de-AT", {
-          weekday: "long",
-          day: "2-digit",
-          month: "long",
-          year: "numeric",
-        })} · ${baustelle?.bvh_name ?? ""}`}
+        description={
+          <span className="inline-flex items-center gap-2 flex-wrap">
+            <span>
+              {`${new Date(b.datum).toLocaleDateString("de-AT", {
+                weekday: "long",
+                day: "2-digit",
+                month: "long",
+                year: "numeric",
+              })} · ${baustelle?.bvh_name ?? ""}`}
+              {regieNr ? ` · ${regieNr.von} Regieberichte an diesem Tag` : ""}
+            </span>
+            {kannDatumAendern && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => {
+                  setNeuesDatum(b.datum);
+                  setDatumOffen(true);
+                }}
+              >
+                <CalendarDays className="h-3.5 w-3.5 mr-1" />
+                Datum ändern
+              </Button>
+            )}
+          </span>
+        }
       />
+
+      <Dialog open={datumOffen} onOpenChange={(v) => !busy && setDatumOffen(v)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Datum ändern</DialogTitle>
+            <DialogDescription>
+              Der {TYP_LABEL[b.typ]} wird auf den neuen Tag verschoben. Wetter und Stunden bitte danach prüfen.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1">
+            <Label htmlFor="bericht-neues-datum">Neues Datum</Label>
+            <Input
+              id="bericht-neues-datum"
+              type="date"
+              value={neuesDatum}
+              onChange={(e) => setNeuesDatum(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDatumOffen(false)} disabled={busy}>
+              Abbrechen
+            </Button>
+            <Button onClick={datumSpeichern} disabled={busy || !neuesDatum}>
+              {busy && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+              Datum speichern
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!regieWahl} onOpenChange={(v) => !v && !busy && setRegieWahl(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Regiebericht für diesen Tag</DialogTitle>
+            <DialogDescription>
+              Für diesen Tag gibt es auf der Baustelle schon{" "}
+              {regieWahl?.length === 1 ? "einen Regiebericht" : `${regieWahl?.length ?? 0} Regieberichte`}.
+              Einen davon öffnen oder einen weiteren anlegen (Mitarbeiter, Tätigkeiten, Aufmaß, Wetter
+              und Fotos werden übernommen)?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-2">
+            {(regieWahl ?? []).map((v, i) => (
+              <Button
+                key={v.id}
+                variant="outline"
+                onClick={() => {
+                  setRegieWahl(null);
+                  navigate(`/berichte/${v.id}`);
+                }}
+                disabled={busy}
+              >
+                {regieWahl!.length === 1 ? "Vorhandenen öffnen" : `Nr. ${i + 1} öffnen`}
+              </Button>
+            ))}
+            <Button onClick={regieAnlegen} disabled={busy}>
+              {busy && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+              Weiteren Regiebericht anlegen
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Besonderes Augenmerk */}
       {baustelle?.besonderes_augenmerk && (

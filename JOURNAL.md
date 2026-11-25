@@ -1,5 +1,11 @@
 # Journal
 
+## 2026-11-25 — Regieberichte: mehrere je Tag, Datum ändern (J. Maurer)
+- Migration `20261125100000_regieberichte_mehrere_je_tag.sql` (live): UNIQUE nur noch für Bautagesbericht (Teilindex), Audit loggt Datumsänderung.
+- `useBericht.ts` (`ladeRegieberichteAmTag`, `findeOderErstelleBericht(…, {neu})`, Übernehmen legt immer neu an), `Berichte.tsx` (Auswahl im Dialog,
+  Nr. in Liste/Anhang), `BerichtDetail.tsx` (Auswahl-Dialog, „Datum ändern“), `berichtPdf.ts` (`berichtPdfPfad`, _2), `sharepoint-schreiben` (deployt).
+- Test 17.11. angepasst (zweiter Klick → „Vorhandenen öffnen“). Roboter-Reihe 28/28 grün.
+
 ## 2026-11-25 – Baustellenmeldung auf einer A4-Seite (J. Maurer)
 „Baustellenmeldungen bitte auf einer A4 Seite darstellen ohne Datenverlust“. Word-Vorlage (Mail an Teams/Schneider/Maurer)
 lief bis an den Seitenrand (LibreOffice gerade noch 1 Seite, Word/Teams kippt die Bauträger-Zeile), „Vorraussichtl. Ende“

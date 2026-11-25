@@ -613,11 +613,46 @@ export async function makeBerichtPdf(input: BerichtPdfInput): Promise<jsPDF> {
   return doc;
 }
 
+/** Ablagepfad des Bericht-PDFs. Grundname `{datum}_{typ}.pdf`; hat der
+ *  Bericht schon ein PDF unter diesem Datum, bleibt es bei dessen Pfad. Sonst
+ *  der erste freie Name — `{datum}_{typ}_2.pdf` usw., damit zwei Regieberichte
+ *  am selben Tag sich nicht gegenseitig das PDF überschreiben (J. Maurer,
+ *  25.11.2026: „Regieberichte müssen auch mehrere am Tag möglich sein“). */
+export async function berichtPdfPfad(
+  bericht: { datum: string; typ: string; pdf_dokument_id: string | null },
+  baustelleId: string,
+  subOrdner: string,
+): Promise<{ filename: string; storagePath: string }> {
+  const basis = `${bericht.datum}_${bericht.typ}`;
+  const ordner = `${baustelleId}/2-schriftverkehr/${subOrdner}/`;
+  const name = (n: number) => (n === 1 ? `${basis}.pdf` : `${basis}_${n}.pdf`);
+  if (bericht.pdf_dokument_id) {
+    const { data: eigen } = await supabase
+      .from("dokumente")
+      .select("storage_path")
+      .eq("id", bericht.pdf_dokument_id)
+      .maybeSingle();
+    const pfad = (eigen as { storage_path: string } | null)?.storage_path ?? "";
+    const datei = pfad.startsWith(ordner) ? pfad.slice(ordner.length) : "";
+    if (new RegExp(`^${basis}(_\\d+)?\\.pdf$`).test(datei)) return { filename: datei, storagePath: pfad };
+  }
+  const { data: belegt } = await supabase
+    .from("dokumente")
+    .select("storage_path")
+    .eq("baustelle_id", baustelleId)
+    .like("storage_path", `${ordner}${basis}%`);
+  const vergeben = new Set(((belegt ?? []) as { storage_path: string }[]).map((d) => d.storage_path));
+  let n = 1;
+  while (vergeben.has(ordner + name(n))) n++;
+  return { filename: name(n), storagePath: ordner + name(n) };
+}
+
 /**
  * Generiert das PDF und lädt es in den Schriftverkehr-Ordner der Baustelle hoch.
  * Pfad: {baustelle_id}/2-schriftverkehr/{tagesberichte|regieberichte}/{datum}_{typ}.pdf
  * Bei Re-Freigabe wird die Datei überschrieben (upsert: true). Es entsteht
- * pro Bericht genau eine PDF-Datei + ein dokumente-Eintrag.
+ * pro Bericht genau eine PDF-Datei + ein dokumente-Eintrag. Mehrere
+ * Regieberichte am selben Tag (seit 25.11.2026) bekommen _2, _3 … angehängt.
  */
 export async function generateAndUploadBerichtPdf(
   input: BerichtPdfInput,
@@ -627,8 +662,7 @@ export async function generateAndUploadBerichtPdf(
 
   const subOrdner =
     input.bericht.typ === "bautagesbericht" ? "tagesberichte" : "regieberichte";
-  const filename = `${input.bericht.datum}_${input.bericht.typ}.pdf`;
-  const storagePath = `${input.baustelle.id}/2-schriftverkehr/${subOrdner}/${filename}`;
+  const { filename, storagePath } = await berichtPdfPfad(input.bericht, input.baustelle.id, subOrdner);
 
   const { error: upErr } = await supabase.storage
     .from("baustellen")

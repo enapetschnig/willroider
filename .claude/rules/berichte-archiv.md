@@ -44,8 +44,16 @@ paths:
 - **Bautagesbericht → Regiebericht** (J. Maurer, 17.11.2026: „Übernehmen in Regiebericht“): Knopf „In Regiebericht übernehmen“ im Kopf des
   Bautagesberichts (`uebernehmeInRegiebericht` in `useBericht.ts`). Legt den Regiebericht für denselben Tag/dieselbe Baustelle an (UNIQUE baustelle+datum+typ),
   kopiert Wetter, Besonderheiten, MA, Tätigkeiten, Aufmaß, Fotos (gleiche `dokument_id`, keine Kopie der Datei), keine Unterschriften. Gibt es den
-  Regiebericht schon → nur öffnen. Übernimmt die Verwaltung, gehört er dem Polier des Bautagesberichts (`erfasst_von`). Weil Fotos geteilt sein
+  Regiebericht schon → seit 25.11. Auswahl „Vorhandenen öffnen“ / „Weiteren Regiebericht anlegen“. Übernimmt die Verwaltung, gehört er dem Polier des Bautagesberichts (`erfasst_von`). Weil Fotos geteilt sein
   können, löscht `useDeleteBericht` Foto-Dokumente nur, wenn kein anderer Bericht sie noch nutzt.
+- **Mehrere Regieberichte je Tag + Datum ändern** (J. Maurer, 25.11.2026: „Regieberichte müssen auch mehrere am Tag möglich sein weiters
+  braucht es die Möglichkeit das Datum zu ändern“). Neuer Wunsch ersetzt „ein Regiebericht je Tag“ vom 17.11. Ursache der Sperre:
+  `UNIQUE (baustelle_id, datum, typ)` → jetzt nur noch Index `berichte_bautagesbericht_je_tag` (Bautagesbericht bleibt einmal je Tag, MeinTag sucht ihn so).
+  „Neuer Regiebericht“ und „In Regiebericht übernehmen“ fragen, wenn es schon welche gibt (`ladeRegieberichteAmTag`); Liste/Kopf zeigen „Nr. 1/2“
+  (älteste = 1). PDF-Pfad `berichtPdfPfad`: eigener Pfad bleibt, sonst erster freier `<datum>_regiebericht_2.pdf` (vorher hätte upsert das PDF des
+  ersten überschrieben); SharePoint-Name „… <Datum> (2).pdf“ aus `storage_path`. „Datum ändern“ im Kopf nur Entwurf/Eingereicht (danach würde
+  das PDF/SharePoint-Datei mit altem Datum stehen bleiben, dort wird nie umbenannt); Trigger `bericht_audit` schreibt „Datum: alt → neu“.
+  Test `tests/roboter/2026-11-25-regieberichte-mehrere-je-tag-datum-aendern.spec.ts`. `.maybeSingle()` auf (baustelle, datum, typ) nie wieder für Regie.
 - **Zurück mit letzter Auswahl** (J. Maurer, 17.11.2026): `/berichte` merkt Typ/Zeitraum/Status/Baustelle in `sessionStorage` (`lib/berichteAuswahl.ts`);
   Zurück-Pfeil im Bericht und der Menüpunkt holen sie zurück. Baustellen-Auswahl (Filter + „Neuer Bericht“) ist jetzt `BaustelleCombobox` mit Suche nach Name/KST.
 - **„ZE“** = Zeile aus der Zeiterfassung: beim MA dessen Stunden auf der Baustelle an dem Tag, bei der Tätigkeit die Summe aller MA. Entfernt man MA von Hand,

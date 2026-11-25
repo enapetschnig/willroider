@@ -33,7 +33,7 @@ import { zipHerunterladen } from "@/lib/zipDownload";
 import type { Database, BerichtStatus, BerichtTyp } from "@/integrations/supabase/types";
 import { useBerichteList } from "@/hooks/useBerichte";
 import { getBaustellenForMaToday } from "@/lib/tagesplanung";
-import { findeOderErstelleBerichtMitVorausfuellung } from "@/hooks/useBericht";
+import { findeOderErstelleBerichtMitVorausfuellung, ladeRegieberichteAmTag } from "@/hooks/useBericht";
 import { BaustelleCombobox } from "@/components/stunden/BaustelleCombobox";
 import { BERICHTE_AUSWAHL_KEY } from "@/lib/berichteAuswahl";
 
@@ -72,14 +72,36 @@ interface BerichtWahl {
   typ: BerichtTyp;
   baustelle: string;
   kst: string | null;
+  /** Nr. des Regieberichts am Tag, nur wenn es mehrere gibt (seit 25.11.2026). */
+  nr?: number | null;
 }
 
 const dateiSicher = (s: string) => s.replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim();
 const fmtDatum = (iso: string) => new Date(iso).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric" });
 
 /** Dateiname im Anhang/ZIP, z. B. „Bautagesbericht HMH Obersteiner 2026-11-18.pdf“. */
-function berichtDateiname(w: Pick<BerichtWahl, "typ" | "baustelle" | "datum">): string {
-  return `${dateiSicher(`${TYP_LABEL[w.typ]} ${w.baustelle}`)} ${w.datum}.pdf`;
+function berichtDateiname(w: Pick<BerichtWahl, "typ" | "baustelle" | "datum" | "nr">): string {
+  return `${dateiSicher(`${TYP_LABEL[w.typ]} ${w.baustelle}`)} ${w.datum}${w.nr ? ` (${w.nr})` : ""}.pdf`;
+}
+
+/** Mehrere Regieberichte am selben Tag und auf derselben Baustelle bekommen eine
+ *  laufende Nummer (älteste = 1), damit man sie in Liste und Anhang unterscheidet. */
+function regieNummern(
+  liste: { id: string; typ: string; baustelle_id: string; datum: string; created_at: string }[],
+): Map<string, number> {
+  const gruppen = new Map<string, { id: string; created_at: string }[]>();
+  for (const b of liste) {
+    if (b.typ !== "regiebericht") continue;
+    const k = `${b.baustelle_id}|${b.datum}`;
+    gruppen.set(k, [...(gruppen.get(k) ?? []), b]);
+  }
+  const nr = new Map<string, number>();
+  for (const g of gruppen.values()) {
+    if (g.length < 2) continue;
+    g.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+    g.forEach((b, i) => nr.set(b.id, i + 1));
+  }
+  return nr;
 }
 
 const fmtShortDate = (iso: string | null | undefined) => {
@@ -171,6 +193,7 @@ export default function Berichte() {
     baustelleId: params.get("baustelle") ?? undefined,
   };
   const { data: berichte = [], isLoading } = useBerichteList(filter);
+  const regieNr = useMemo(() => regieNummern(berichte), [berichte]);
 
   useEffect(() => {
     (async () => {
@@ -212,6 +235,7 @@ export default function Berichte() {
       typ: b.typ,
       baustelle: bs?.bvh_name ?? "Baustelle",
       kst: bs?.kostenstelle ?? null,
+      nr: regieNr.get(b.id) ?? null,
     };
   };
   const umschalten = (b: (typeof berichte)[number]) => {
@@ -295,7 +319,7 @@ export default function Berichte() {
     const liste = [...auswahl.values()].sort(
       (a, b) => a.baustelle.localeCompare(b.baustelle, "de") || a.datum.localeCompare(b.datum),
     );
-    const zeilen = liste.map((w) => `- ${TYP_LABEL[w.typ]} ${w.baustelle} vom ${fmtDatum(w.datum)}`);
+    const zeilen = liste.map((w) => `- ${TYP_LABEL[w.typ]}${w.nr ? ` Nr. ${w.nr}` : ""} ${w.baustelle} vom ${fmtDatum(w.datum)}`);
     return `Hallo,\n\nim Anhang ${liste.length === 1 ? "der Bericht" : `${liste.length} Berichte`}:\n${zeilen.join("\n")}\n\nMit freundlichen Grüßen`;
   }, [auswahl]);
 
@@ -570,6 +594,7 @@ export default function Berichte() {
                       </span>
                       <Badge variant="outline" className="text-[10px]">
                         {TYP_LABEL[b.typ]}
+                        {regieNr.get(b.id) ? ` Nr. ${regieNr.get(b.id)}` : ""}
                       </Badge>
                       <Badge variant="outline" className={`text-[10px] ${sb.cls}`}>
                         {sb.label}
@@ -688,13 +713,21 @@ function NeuerBerichtDialog({
   const [datum, setDatum] = useState(todayIso());
   const [baustelleId, setBaustelleId] = useState("");
   const [loading, setLoading] = useState(false);
+  // Regiebericht: schon vorhandene am gewählten Tag → fragen, ob öffnen oder
+  // weiteren anlegen (mehrere je Tag seit 25.11.2026, J. Maurer).
+  const [vorhandene, setVorhandene] = useState<{ id: string; created_at: string }[] | null>(null);
 
   useEffect(() => {
     if (open) {
       setDatum(todayIso());
       setBaustelleId("");
     }
+    setVorhandene(null);
   }, [open]);
+
+  useEffect(() => {
+    setVorhandene(null);
+  }, [datum, baustelleId]);
 
   // Vorauswahl der Baustelle aus der Tagesplanung des Polier/Admin für das gewählte Datum
   useEffect(() => {
@@ -713,15 +746,27 @@ function NeuerBerichtDialog({
     };
   }, [open, datum]);
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const anlegen = async (opts: { neu?: boolean; oeffnen?: string } = {}) => {
     if (!baustelleId) return;
+    if (opts.oeffnen) {
+      onClose();
+      navigate(`/berichte/${opts.oeffnen}`);
+      return;
+    }
     setLoading(true);
     try {
+      if (typ === "regiebericht" && !opts.neu) {
+        const da = await ladeRegieberichteAmTag(baustelleId, datum);
+        if (da.length > 0) {
+          setVorhandene(da);
+          return;
+        }
+      }
       const { id, created, importiert, ausPlan } = await findeOderErstelleBerichtMitVorausfuellung(
         baustelleId,
         datum,
         typ,
+        { neu: typ === "regiebericht" },
       );
       toast({
         title: created
@@ -745,6 +790,11 @@ function NeuerBerichtDialog({
     }
   };
 
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void anlegen();
+  };
+
   return (
     <Dialog open={open} onOpenChange={(v) => !v && !loading && onClose()}>
       <DialogContent className="max-w-md">
@@ -754,8 +804,9 @@ function NeuerBerichtDialog({
             Neuer {typ === "bautagesbericht" ? "Bautagesbericht" : "Regiebericht"}
           </DialogTitle>
           <DialogDescription>
-            Datum + Baustelle wählen. Wenn für diese Kombination schon ein Bericht existiert,
-            wird der vorhandene geöffnet — kein Duplikat.
+            {typ === "bautagesbericht"
+              ? "Datum + Baustelle wählen. Wenn für diese Kombination schon ein Bautagesbericht existiert, wird der vorhandene geöffnet — kein Duplikat."
+              : "Datum + Baustelle wählen. Gibt es für den Tag schon einen Regiebericht, kannst du ihn öffnen oder einen weiteren anlegen."}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-3">
@@ -783,14 +834,41 @@ function NeuerBerichtDialog({
               </div>
             )}
           </div>
+          {vorhandene && vorhandene.length > 0 ? (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 space-y-2" data-testid="regie-vorhanden">
+              <div className="text-sm text-amber-900">
+                Für diesen Tag gibt es auf der Baustelle schon{" "}
+                {vorhandene.length === 1 ? "einen Regiebericht" : `${vorhandene.length} Regieberichte`}.
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {vorhandene.map((v, i) => (
+                  <Button
+                    key={v.id}
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => anlegen({ oeffnen: v.id })}
+                  >
+                    {vorhandene.length === 1 ? "Vorhandenen öffnen" : `Nr. ${i + 1} öffnen`}
+                  </Button>
+                ))}
+                <Button type="button" size="sm" onClick={() => anlegen({ neu: true })} disabled={loading}>
+                  {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Weiteren Regiebericht anlegen
+                </Button>
+              </div>
+            </div>
+          ) : null}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
               Abbrechen
             </Button>
-            <Button type="submit" disabled={!baustelleId || loading}>
-              {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Öffnen / Anlegen
-            </Button>
+            {!vorhandene?.length && (
+              <Button type="submit" disabled={!baustelleId || loading}>
+                {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Öffnen / Anlegen
+              </Button>
+            )}
           </DialogFooter>
         </form>
       </DialogContent>

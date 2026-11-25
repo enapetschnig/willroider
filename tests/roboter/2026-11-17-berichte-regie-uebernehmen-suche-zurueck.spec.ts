@@ -1,7 +1,7 @@
 // Probefahrt 17.11.2026 (J. Maurer, Berichte):
 //  a) „aus einem Bautagesbericht einen Regiebericht erstellen zb. Übernehmen in Regiebericht“
 //     → Knopf im Bautagesbericht legt den Regiebericht an, übernimmt MA/Tätigkeiten/Aufmaß/Fotos/Wetter,
-//       gehört dem Polier; zweiter Klick öffnet den vorhandenen. Löschen des Regieberichts löscht die
+//       gehört dem Polier; zweiter Klick fragt und öffnet den vorhandenen (seit 25.11. Auswahl). Löschen des Regieberichts löscht die
 //       gemeinsamen Fotos NICHT (Bautagesbericht behält sie). Polier kann es selbst (RLS).
 //  b) „bei Baustelle eine suchfunktion Kst und Bst name“ → Baustellen-Filter mit Suche nach KST.
 //  c) „wenn ich hier zurück gehe sollte die letzte auswahl da sein“ → Zurück-Pfeil landet mit Typ + Baustelle.
@@ -104,9 +104,11 @@ test("Bautagesbericht → Regiebericht übernehmen, Baustellen-Suche, Zurück mi
   expect(quelle.bericht_mitarbeiter).toHaveLength(1);
   expect(quelle.bericht_fotos).toHaveLength(1);
 
-  // zweiter Klick öffnet den vorhandenen statt einen neuen
+  // zweiter Klick: es gibt schon einen → Auswahl, „Vorhandenen öffnen“ legt keinen neuen an
+  // (seit 25.11.2026 sind mehrere Regieberichte je Tag erlaubt, darum wird gefragt)
   await page.goto(`${APP}/berichte/${a.berId}`);
   await page.getByRole("button", { name: "In Regiebericht übernehmen" }).click();
+  await page.getByRole("button", { name: "Vorhandenen öffnen" }).click();
   await expect(page).toHaveURL(new RegExp(`/berichte/${regieId}$`), { timeout: 30_000 });
   const alle = await rest(`/rest/v1/berichte?baustelle_id=eq.${bs.id}&typ=eq.regiebericht&select=id`, "GET");
   expect(alle).toHaveLength(1);
