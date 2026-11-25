@@ -1,5 +1,12 @@
 # Journal
 
+## 2026-11-25 – Baustellenmeldung auf einer A4-Seite (J. Maurer)
+„Baustellenmeldungen bitte auf einer A4 Seite darstellen ohne Datenverlust“. Word-Vorlage (Mail an Teams/Schneider/Maurer)
+lief bis an den Seitenrand (LibreOffice gerade noch 1 Seite, Word/Teams kippt die Bauträger-Zeile), „Vorraussichtl. Ende“
+brach unter „Baubeginn“ um. `aufEineSeite()` (Leerzeilen 14→8 pt, Ende eigene Zeile) → ~4 cm Luft; abgelegtes PDF verkleinert
+bei langen Texten die Schrift statt neue Seite. Mit LibreOffice an Hofer-Vordachsanierung-DOCX geprüft. Test
+`2026-11-25-baustellenmeldung-eine-seite.spec.ts`, ganze Reihe 28/28 grün. Bereits abgelegte Dateien unverändert.
+
 ## 2026-11-25 – Supabase-Protokoll: baustellen_kostenstelle_key
 
 2× 23505 am 24.11. beim Anlegen einer Baustelle (belegte KST eingetippt, rohe DB-Meldung). `BaustellenmeldungForm` prüft jetzt vorher und zeigt „Kostenstelle schon vergeben“ mit BVH + nächster freier; KST wird getrimmt gespeichert. Test `2026-11-25-baustelle-kostenstelle-vergeben.spec.ts`; ganze Reihe 27/27 grün (2 Tests brauchen den Dev-Server, nicht `vite preview`).

@@ -112,10 +112,55 @@ export async function generateBaustellenanlageDocx(
     }
   );
 
+  xml = aufEineSeite(xml);
+
   zip.file(docXmlPath, xml);
 
   const out = zip.generate({ type: "blob", mimeType: DOCX_MIME, compression: "DEFLATE" });
   return out;
+}
+
+/**
+ * Die Vorlage füllt eine A4-Seite fast bis zum Rand — in Word/Teams rutschte
+ * die letzte Zeile (Bauträger) auf eine zweite Seite, und das Ende-Datum brach
+ * unter „Baubeginn“ um. J. Maurer, 25.11.2026: „Baustellenmeldungen bitte auf
+ * einer A4 Seite darstellen ohne Datenverlust“. Deshalb:
+ *  - Leerzeilen zwischen den Feldern (14 pt) werden auf 8 pt verkleinert,
+ *  - „Vorraussichtl. Ende“ bekommt eine eigene Zeile mit eigenem Tabstopp.
+ * Alle Felder und Texte bleiben vollständig erhalten.
+ */
+export function aufEineSeite(xml: string): string {
+  // erst nach dem Titel (im XML in Stücke geteilt) — Kopf mit Logo und Titel bleibt unverändert
+  const titel = xml.indexOf("Zimmerei Willroider</w:t>");
+  if (titel < 0) return xml;
+  const absatz = xml.indexOf("</w:p>", titel) + "</w:p>".length;
+  const kopf = xml.slice(0, absatz);
+  let rumpf = xml.slice(absatz);
+
+  // Leere Absätze (kein Text, kein Feld, kein Bild) → kleine Schrift für die Absatzmarke
+  rumpf = rumpf.replace(/<w:p [^>]*>(?:(?!<\/w:p>)[\s\S])*?<\/w:p>/g, (p) => {
+    if (/<w:t[ >]|<w:fldChar|<w:drawing|<w:pict|<w:sdt/.test(p)) return p;
+    return p.replace(/<w:sz w:val="\d+"\/>/g, '<w:sz w:val="16"/>').replace(/<w:szCs w:val="\d+"\/>/g, '<w:szCs w:val="16"/>');
+  });
+
+  // Baubeginn und Ende in zwei Zeilen: der Tab-Lauf vor „Vorraussichtl. Ende:“
+  // wird zum Absatzende + neuem Absatz (gleiche Formatierung, Tabstopp wie die anderen Felder).
+  const TAB_LAUF = '<w:r><w:rPr><w:sz w:val="28"/></w:rPr><w:tab/></w:r>';
+  const ende = rumpf.indexOf("<w:t>Vorraussichtl. Ende:</w:t>");
+  if (ende > 0) {
+    const pStart = rumpf.lastIndexOf("<w:p ", ende);
+    const tabVorEnde = rumpf.lastIndexOf(TAB_LAUF, ende);
+    const pPr = /<w:pPr>[\s\S]*?<\/w:pPr>/.exec(rumpf.slice(pStart, ende))?.[0];
+    if (pPr && tabVorEnde > pStart) {
+      const neuerPPr = pPr.replace(/<w:tabs>[\s\S]*?<\/w:tabs>/, '<w:tabs><w:tab w:val="left" w:pos="3240"/></w:tabs>');
+      const rest = rumpf
+        .slice(tabVorEnde + TAB_LAUF.length)
+        // „Ende:“ + zwei Leerzeichen → Tabstopp, damit das Datum unter den anderen Werten steht
+        .replace('<w:t xml:space="preserve">  </w:t>', "<w:tab/>");
+      rumpf = rumpf.slice(0, tabVorEnde) + `</w:p><w:p>${neuerPPr}` + rest;
+    }
+  }
+  return kopf + rumpf;
 }
 
 export const DOCX_MIME =

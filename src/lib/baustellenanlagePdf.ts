@@ -107,32 +107,48 @@ export async function makeBaustellenanlagePdf(
     ["Wird das Bauvorhaben als Bauträger ausgeführt", bautraeger],
   ];
 
+  // Immer genau eine A4-Seite, ohne etwas abzuschneiden (J. Maurer, 25.11.2026:
+  // „Baustellenmeldungen bitte auf einer A4 Seite darstellen ohne Datenverlust“).
+  // Lange Texte werden umgebrochen; reicht die Seite nicht, wird die Schrift
+  // schrittweise kleiner statt eine zweite Seite anzufangen.
   const labelBreite = 62;
-  for (const [label, wert] of zeilen) {
+  const unten = 284; // Fußzeile steht bei 290
+  const messen = (f: number) => {
+    let h = 0;
+    const zeilenTexte = zeilen.map(([label, wert]) => {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9 * f);
+      const l = doc.splitTextToSize(pdfText(label + ":"), labelBreite - 3) as string[];
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11 * f);
+      const w = doc.splitTextToSize(pdfText(wert || "—"), breite - labelBreite) as string[];
+      const hoehe = Math.max(l.length * 4.2 * f, w.length * 5.2 * f) + 3 * f;
+      h += hoehe + 2 * f;
+      return { l, w, hoehe };
+    });
+    return { h, zeilenTexte };
+  };
+  // Zeilenabstand beim Zeichnen = beim Messen (5,2 mm bei 11 pt, 4,2 mm bei 9 pt)
+  doc.setLineHeightFactor(1.33);
+  let f = 1;
+  let gemessen = messen(f);
+  while (y + gemessen.h > unten && f > 0.35) {
+    f = Math.round((f - 0.05) * 100) / 100;
+    gemessen = messen(f);
+  }
+  for (const { l, w, hoehe } of gemessen.zeilenTexte) {
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor(...GRAU);
-    const l = doc.splitTextToSize(pdfText(label + ":"), labelBreite - 3) as string[];
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    const w = doc.splitTextToSize(pdfText(wert || "—"), breite - labelBreite) as string[];
-    const hoehe = Math.max(l.length * 4.2, w.length * 5.2) + 3;
-    if (y + hoehe > 280) {
-      doc.addPage();
-      y = 20;
-    }
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
+    doc.setFontSize(9 * f);
     doc.setTextColor(...GRAU);
     doc.text(l, links, y);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
+    doc.setFontSize(11 * f);
     doc.setTextColor(...SCHWARZ);
     doc.text(w, links + labelBreite, y);
     y += hoehe;
     doc.setDrawColor(...LINIE);
-    doc.line(links, y - 2.5, links + breite, y - 2.5);
-    y += 2;
+    doc.line(links, y - 2.5 * f, links + breite, y - 2.5 * f);
+    y += 2 * f;
   }
 
   doc.setFont("helvetica", "normal");

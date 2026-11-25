@@ -39,3 +39,7 @@ paths:
 - KST ist in `baustellen` eindeutig: das Formular prüft vor dem Speichern und nennt das belegende BVH (25.11.2026, aus dem Supabase-Protokoll).
 - Kostenstellenübersicht als Baustellen-Reiter (`KostenstellenListe`, 18.08.).
 - Baustellensuche bleibt nach Detail-Besuch erhalten (23.07.).
+- **Baustellenmeldung immer auf einer A4-Seite** (J. Maurer, 25.11.2026: „auf einer A4 Seite darstellen ohne Datenverlust“):
+  die Word-Vorlage füllte die Seite bis zum Rand (Word/Teams → Bauträger-Zeile auf Seite 2, Ende-Datum brach um).
+  `aufEineSeite()` in `baustellenanlageDocx.ts` verkleinert die Leerzeilen auf 8 pt und gibt „Vorraussichtl. Ende“ eine
+  eigene Zeile; das PDF verkleinert bei langen Texten die Schrift statt `addPage`. Test `2026-11-25-baustellenmeldung-eine-seite`.
